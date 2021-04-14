@@ -15,10 +15,10 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-ftrace", "0"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-ftrace", "0", "-freplicable", "0"],
 --   ["-ll:cpu", "4", "-dm:memoize", "-ffuture", "0"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-dm:memoize"],
---   ["-ll:cpu", "5", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "5", "-p", "5"]
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2", "-dm:memoize", "-freplicable", "0"],
+--   ["-ll:cpu", "5", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "5", "-p", "5", "-freplicable", "0"]
 -- ]
 
 import "regent"
@@ -142,6 +142,11 @@ fspace wire(rpn : region(node),
   wire_cap : float,
   current : currents,
   voltage : voltages,
+}
+
+fspace timestamp {
+  start : int64,
+  stop : int64,
 }
 
 if not use_python_main then
@@ -395,15 +400,18 @@ task calculate_new_currents(print_ts : bool,
                             rpn : region(node),
                             rsn : region(node),
                             rgn : region(node),
-                            rw : region(wire(rpn, rsn, rgn)))
+                            rw : region(wire(rpn, rsn, rgn)),
+                            rt : region(timestamp))
 where
   reads(rpn.node_voltage, rsn.node_voltage, rgn.node_voltage,
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
-  reads writes(rw.{current, voltage})
+  reads writes(rw.{current, voltage}, rt)
 do
   if print_ts then
-    format.println("t: {}", c.legion_get_current_time_in_micros())
+    var t = c.legion_get_current_time_in_micros()
+    for x in rt do x.start = t end
   end
+
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
   --__demand(__vectorize)
@@ -505,10 +513,11 @@ end
 
 task update_voltages(print_ts : bool,
                      rpn : region(node),
-                     rsn : region(node))
+                     rsn : region(node),
+                     rt : region(timestamp))
 where
   reads(rpn.{node_cap, leakage}, rsn.{node_cap, leakage}),
-  reads writes(rpn.{node_voltage, charge}, rsn.{node_voltage, charge})
+  reads writes(rpn.{node_voltage, charge}, rsn.{node_voltage, charge}, rt)
 do
   for node in rpn do
     var voltage : float = node.node_voltage + node.charge / node.node_cap
@@ -522,8 +531,10 @@ do
     node.node_voltage = voltage
     node.charge = 0.0
   end
+
   if print_ts then
-    format.println("t: {}", c.legion_get_current_time_in_micros())
+    var t = c.legion_get_current_time_in_micros()
+    for x in rt do x.stop = t end
   end
 end
 
@@ -562,7 +573,8 @@ do
   end
 end
 
-terra create_colorings(conf : Config)
+__demand(__inline)
+task create_colorings(conf : Config)
   var coloring : Colorings
   coloring.privacy_map = c.legion_point_coloring_create()
   coloring.private_node_map = c.legion_point_coloring_create()
@@ -616,6 +628,71 @@ do
   return partition(aliased, all_shared, ghost_node_map, ghost_ranges.ispace)
 end
 
+task parse_input(conf : Config)
+  conf = parse_input_args(conf)
+
+  regentlib.assert(conf.num_pieces % conf.pieces_per_superpiece == 0,
+      "pieces should be evenly distributed to superpieces")
+  conf.shared_nodes_per_piece =
+    [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
+  format.println("circuit settings: loops={} prune={} pieces={} (pieces/superpiece={}) nodes/piece={} (nodes/piece={}) wires/piece={} pct_in_piece={} seed={}",
+    conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
+    conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
+
+  var num_pieces = conf.num_pieces
+  var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
+  var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
+
+  -- report mesh size in bytes
+  do
+    var node_size = [ terralib.sizeof(node) ]
+    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
+    format.println("Circuit memory usage:")
+    format.println("  Nodes : {10} * {4} bytes = {12} bytes", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+    format.println("  Wires : {10} * {4} bytes = {12} bytes", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
+    format.println("  Total                             {12} bytes", total)
+  end
+
+  return conf
+end
+
+task get_elapsed(all_times : region(timestamp))
+where reads(all_times) do
+  var start = [int64:max()]
+  var stop = [int64:min()]
+
+  for t in all_times do
+    start min= t.start
+    stop max= t.stop
+  end
+
+  return 1e-6 * (stop - start)
+end
+
+task print_summary(color : int, sim_time : double, conf : Config)
+  if color == 0 then
+    format.println("ELAPSED TIME = {7.3} s", sim_time)
+
+    -- Compute the floating point operations per second
+    var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
+    var num_circuit_wires : uint64 = conf.num_pieces * conf.wires_per_piece
+    -- calculate currents
+    var operations : uint64 = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * conf.steps
+    -- distribute charge
+    operations = operations + (num_circuit_wires * 4)
+    -- update voltages
+    operations = operations + (num_circuit_nodes * 4)
+    -- multiply by the number of loops
+    operations = operations * conf.num_loops
+
+    -- Compute the number of gflops
+    var gflops = (1e-9*operations)/sim_time
+    format.println("GFLOPS = {7.3} GFLOPS", gflops)
+  end
+end
+
+__demand(__inner, __replicable)
 task toplevel()
   var conf : Config
   conf.num_loops = 5
@@ -635,14 +712,7 @@ task toplevel()
   conf.num_neighbors = 5 -- set 0 if density parameter is to be picked
   conf.window = 3 -- find neighbors among [piece_id - window, piece_id + window]
 
-  conf = parse_input_args(conf)
-  regentlib.assert(conf.num_pieces % conf.pieces_per_superpiece == 0,
-      "pieces should be evenly distributed to superpieces")
-  conf.shared_nodes_per_piece =
-    [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-  format.println("circuit settings: loops={} prune={} pieces={} (pieces/superpiece={}) nodes/piece={} (nodes/piece={}) wires/piece={} pct_in_piece={} seed={}",
-    conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
-    conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
+  conf = parse_input(conf)
 
   var num_pieces = conf.num_pieces
   var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
@@ -651,17 +721,7 @@ task toplevel()
 
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
-
-  -- report mesh size in bytes
-  do
-    var node_size = [ terralib.sizeof(node) ]
-    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
-    format.println("Circuit memory usage:")
-    format.println("  Nodes : {10} * {4} bytes = {12} bytes", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
-    format.println("  Wires : {10} * {4} bytes = {12} bytes", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
-    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
-    format.println("  Total                             {12} bytes", total)
-  end
+  var all_times = region(ispace(ptr, num_superpieces), timestamp)
 
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
@@ -675,6 +735,8 @@ task toplevel()
 
   var ghost_ranges = region(ispace(ptr, num_superpieces), ghost_range)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
+
+  var rp_times = partition(equal, all_times, launch_domain)
 
   for j = 0, 1 do
     __demand(__index_launch)
@@ -693,55 +755,27 @@ task toplevel()
     end
   end
 
-  format.println("Starting main simulation loop")
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
 
   __fence(__execution, __block)
-  var ts_start = c.legion_get_current_time_in_micros()
   __demand(__spmd, __trace)
   for j = 0, num_loops do
     for i = 0, num_superpieces do
-      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i], rp_times[i])
     end
     for i = 0, num_superpieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     for i = 0, num_superpieces do
-      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i])
+      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i], rp_times[i])
     end
   end
-  __fence(__execution, __block)
-  var ts_end = c.legion_get_current_time_in_micros()
 
-  if simulation_success then
-    format.println("SUCCESS!")
-  else
-    format.println("FAILURE!")
-  end
-  do
-    var sim_time = 1e-6 * (ts_end - ts_start)
-    format.println("ELAPSED TIME = {7.3} s", sim_time)
-
-    -- Compute the floating point operations per second
-    var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
-    var num_circuit_wires : uint64 = conf.num_pieces * conf.wires_per_piece
-    -- calculate currents
-    var operations : uint64 = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * conf.steps
-    -- distribute charge
-    operations = operations + (num_circuit_wires * 4)
-    -- update voltages
-    operations = operations + (num_circuit_nodes * 4)
-    -- multiply by the number of loops
-    operations = operations * conf.num_loops
-
-    -- Compute the number of gflops
-    var gflops = (1e-9*operations)/sim_time
-    format.println("GFLOPS = {7.3} GFLOPS", gflops)
-  end
-  format.println("simulation complete - destroying regions")
+  var sim_time = get_elapsed(all_times)
+  for i = 0, num_superpieces do print_summary(i, sim_time, conf) end
 end
 
 else -- not use_python_main

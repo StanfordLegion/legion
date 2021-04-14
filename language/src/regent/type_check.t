@@ -143,6 +143,9 @@ end
 
 function type_check.region_bare(cx, node)
   local region = node.symbol
+  if not std.is_symbol(region) then
+    report.error(node, "privilege target is not a region")
+  end
   local region_type = region:gettype()
   if not (std.type_supports_privileges(region_type)) then
     report.error(node, "type mismatch: expected a region but got " .. tostring(region_type))

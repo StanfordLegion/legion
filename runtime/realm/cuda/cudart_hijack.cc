@@ -118,7 +118,32 @@ extern "C" {
 								  ext != 0,
 								  size,
 								  constant != 0,
-								  global != 0));
+								  global != 0,
+                                                                  false /*unmanaged*/));
+  }
+
+  REALM_PUBLIC_API
+  void __cudaRegisterManagedVar(void **handle,
+                                const void *host_var,
+                                char *device_addr,
+                                const char *device_name,
+                                int ext, int size, int constant, int global)
+  {
+    // mark that the hijack code is active
+    cudart_hijack_active = true;
+
+#ifdef DEBUG_CUDART_REGISTRATION
+    std::cout << "registering managed variable " << device_name << std::endl;
+#endif
+    const FatBin *fat_bin = *(const FatBin **)handle;
+    GlobalRegistrations::register_variable(new RegisteredVariable(fat_bin,
+								  host_var,
+								  device_name,
+								  ext != 0,
+								  size,
+								  constant != 0,
+								  global != 0,
+                                                                  true /*managed*/));
   }
       
   REALM_PUBLIC_API
@@ -581,6 +606,21 @@ extern "C" {
 				 dst_device, stream) );
     return cudaSuccess;
   }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaMemAdvise(const void *dev_ptr,
+                            size_t count,
+                            cudaMemoryAdvise advice,
+                            int device)
+  {
+    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMemAdvise");
+
+    // NOTE: we assume the enums for cudaMeoryAdvise match the ones for
+    //  CUmem_advise
+    CHECK_CU( cuMemAdvise((CUdeviceptr)dev_ptr, count,
+                          (CUmem_advise)advice, (CUdevice)device) );
+    return cudaSuccess;
+  }
 #endif
 
   REALM_PUBLIC_API
@@ -890,6 +930,17 @@ extern "C" {
     return cudaSuccess;
   }
 
+#if CUDA_VERSION >= 11000
+  REALM_PUBLIC_API
+  cudaError_t cudaGetFuncBySymbol(cudaFunction_t *funcPtr, const void *symbolPtr)
+  {
+    GPUProcessor *p = get_gpu_or_die("cudaGetFuncBySymbol");
+    CUfunction handle = p->gpu->lookup_function(symbolPtr);
+    *funcPtr = handle;
+    return cudaSuccess;
+  }
+#endif
+
   REALM_PUBLIC_API
   cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks,
 							    const void *func,
@@ -938,7 +989,6 @@ extern "C" {
   REALM_PUBLIC_API
   const char* cudaGetErrorName(cudaError_t error)
   {
-    get_gpu_or_die("cudaGetErrorName");
     const char *result = NULL;
     // It wasn't always the case the cuda runtime errors
     // and cuda driver errors had the same enum scheme
@@ -950,7 +1000,6 @@ extern "C" {
   REALM_PUBLIC_API
   const char* cudaGetErrorString(cudaError_t error)
   {
-    get_gpu_or_die("cudaGetErrorString");
     const char *result = NULL;
     // It wasn't always the case the cuda runtime errors
     // and cuda driver errors had the same enum scheme

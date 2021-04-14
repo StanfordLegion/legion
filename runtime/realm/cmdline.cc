@@ -105,6 +105,13 @@ namespace Realm {
     return true;
   }
 
+  bool CommandLineParser::parse_command_line(int argc, char *argv[])
+  {
+    // add the const ourselves - we're not going to modify the data (or add
+    //  any strings to the array)
+    return parse_command_line(argc, const_cast<const char **>(argv));
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

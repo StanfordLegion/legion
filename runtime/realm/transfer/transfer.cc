@@ -1829,6 +1829,7 @@ namespace Realm {
     Point<N,T> points[MAX_POINTS];
     int output_space_id;
     unsigned output_count;
+    ControlPort::Encoder ctrl_encoder;
   };
 
   template <int N, typename T>
@@ -1959,7 +1960,9 @@ namespace Realm {
     , element_size(_element_size)
     , point_index(0), point_count(0)
     , output_space_id(-1), output_count(0)
-  {}
+  {
+    ctrl_encoder.set_port_count(spaces.size());
+  }
 
   template <int N, typename T>
   AddressSplitXferDes<N,T>::~AddressSplitXferDes()
@@ -2051,10 +2054,6 @@ namespace Realm {
 	  if(new_space_id != output_space_id)
 	    break;
 
-	// can't let our count overflow a 24-bit value
-	if((((output_count + 1) * element_size) >> 24) > 0)
-	  break;
-
 	// if it matched a space, we have to emit the point to that space's
 	//  output address stream before we can accept the point
 	if(output_space_id != -1) {
@@ -2088,36 +2087,55 @@ namespace Realm {
 
       // now try to write the control information
       if((output_count > 0) || input_done) {
-	unsigned cword = (((output_count * element_size) << 8) +
-			  (input_done ? 128 : 0) + // bit 7
-			  (output_space_id + 1));
-	assert(cword != 0);
-      
 	XferPort &cp = output_ports[spaces.size()];
-	if(cp.seq_remote.span_exists(cp.local_bytes_total,
-				     sizeof(unsigned)) < sizeof(unsigned))
-	  break;  // no room to write control work
 
-	TransferIterator::AddressInfo c_info;
-	size_t bytes = cp.iter->step(sizeof(unsigned), c_info,
-				     0, false /*!tentative*/);
-	assert(bytes == sizeof(unsigned));
-	void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset, sizeof(unsigned));
-	assert(dstptr != 0);
-	memcpy(dstptr, &cword, sizeof(unsigned));
+        // may take us a few tries to send the control word
+        bool ctrl_sent = false;
+	size_t old_lbt = cp.local_bytes_total;
+        do {
+          if(cp.seq_remote.span_exists(cp.local_bytes_total,
+                                       sizeof(unsigned)) < sizeof(unsigned))
+            break;  // no room to write control work
 
-	if(input_done) {
+          TransferIterator::AddressInfo c_info;
+          size_t bytes = cp.iter->step(sizeof(unsigned), c_info,
+                                       0, false /*!tentative*/);
+          assert(bytes == sizeof(unsigned));
+          void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset,
+                                                sizeof(unsigned));
+          assert(dstptr != 0);
+
+          unsigned cword;
+          ctrl_sent = ctrl_encoder.encode(cword,
+                                          output_count * element_size,
+                                          output_space_id,
+                                          input_done);
+          memcpy(dstptr, &cword, sizeof(unsigned));
+
+          cp.local_bytes_total += sizeof(unsigned);
+        } while(!ctrl_sent);
+
+	if(input_done && ctrl_sent) {
 	  iteration_completed.store_release(true);
 	  // mark all address streams as done (dummy write update)
 	  for(size_t i = 0; i < spaces.size(); i++)
 	    wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
 	}
-	size_t old_lbt = cp.local_bytes_total;
-	cp.local_bytes_total += sizeof(unsigned);
-	wseqcache.add_span(spaces.size(), old_lbt, sizeof(unsigned));
+
+        // push out the partial write even if we're not done
+        if(cp.local_bytes_total > old_lbt) {
+          wseqcache.add_span(spaces.size(), old_lbt,
+                             cp.local_bytes_total - old_lbt);
+          did_work = true;
+        }
+
+        // but only actually clear the output_count if we sent the whole
+        //  control packet
+        if(!ctrl_sent)
+          break;
+
 	output_space_id = -1;
 	output_count = 0;
-	did_work = true;
       } else
 	break;
 
@@ -2438,13 +2456,16 @@ namespace Realm {
       //  (i.e. the merging should not be done via rdma)
       Channel *last_channel = path_infos[0].xd_channels[path_infos[0].xd_channels.size() - 1];
       bool same_last_channel = true;
-      for(size_t i = 0; i < path_infos.size(); i++) {
-	if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
-	   last_channel) {
-	  same_last_channel = false;
-	  break;
-	}
-      }
+      if(last_channel->node == dst_node) {
+        for(size_t i = 1; i < path_infos.size(); i++) {
+          if(path_infos[i].xd_channels[path_infos[i].xd_channels.size() - 1] !=
+             last_channel) {
+            same_last_channel = false;
+            break;
+          }
+        }
+      } else
+        same_last_channel = false;
       if(!same_last_channel) {
 	// figure out what the final kind will be (might not be the same as
 	//  any of the current paths)

@@ -74,6 +74,8 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_inline_launcher_t);
   NEW_OPAQUE_TYPE(legion_copy_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_copy_launcher_t);
+  NEW_OPAQUE_TYPE(legion_fill_launcher_t);
+  NEW_OPAQUE_TYPE(legion_index_fill_launcher_t);
   NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_attach_launcher_t);
@@ -464,6 +466,12 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Domain Operations
   // -----------------------------------------------------------------------
+  
+  /**
+   * @see Legion::Domain::Domain()
+   */
+  legion_domain_t
+  legion_domain_empty(unsigned dim);
 
   /**
    * @see Legion::Domain::from_rect()
@@ -517,12 +525,18 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Domain Transform Operations
   // -----------------------------------------------------------------------
+  
+  legion_domain_transform_t
+  legion_domain_transform_identity(unsigned m, unsigned n);
 
 #define FROM_TRANSFORM(D1,D2) \
   legion_domain_transform_t \
   legion_domain_transform_from_##D1##x##D2(legion_transform_##D1##x##D2##_t t);
   LEGION_FOREACH_NN(FROM_TRANSFORM)
 #undef FROM_TRANSFORM
+
+  legion_domain_affine_transform_t
+  legion_domain_affine_transform_identity(unsigned m, unsigned n);
 
 #define FROM_AFFINE(D1,D2) \
   legion_domain_affine_transform_t \
@@ -551,6 +565,9 @@ extern "C" {
   legion_domain_point_get_point_##DIM##d(legion_domain_point_t p);
   LEGION_FOREACH_N(GET_POINT)
 #undef GET_POINT
+
+  legion_domain_point_t
+  legion_domain_point_origin(unsigned dim);
 
   /**
    * @see Legion::DomainPoint::nil()
@@ -1025,6 +1042,14 @@ extern "C" {
   legion_index_space_retrieve_name(legion_runtime_t runtime,
                                    legion_index_space_t handle,
                                    const char **result);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::IndexSpace::get_dim()
+   */
+  int
+  legion_index_space_get_dim(legion_index_space_t handle);
 
   // -----------------------------------------------------------------------
   // Index Partition Operations
@@ -1538,6 +1563,18 @@ extern "C" {
                                  legion_index_partition_t handle);
 
   /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Runtime::destroy_index_space()
+   */
+  void
+  legion_index_partition_destroy_unordered(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_index_partition_t handle,
+                                           bool unordered /* = false */,
+                                           bool recurse /* = true */);
+
+  /**
    * @see Legion::Runtime::attach_semantic_information()
    */
   void
@@ -2037,13 +2074,26 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Region Requirement Operations
   // -----------------------------------------------------------------------
-
+  
   /**
    * @see Legion::RegionRequirement::RegionRequirement()
    */
   legion_region_requirement_t
   legion_region_requirement_create_logical_region(
     legion_logical_region_t handle,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::RegionRequirement::RegionRequirement()
+   */
+  legion_region_requirement_t
+  legion_region_requirement_create_logical_region_projection(
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
     legion_coherence_property_t prop,
     legion_logical_region_t parent,
@@ -2068,6 +2118,14 @@ extern "C" {
    */
   void
   legion_region_requirement_destroy(legion_region_requirement_t handle);
+
+  /**
+   * @see Legion::RegionRequirement::add_field()
+   */
+  void
+  legion_region_requirement_add_field(legion_region_requirement_t handle,
+                                      legion_field_id_t field,
+                                      bool instance_field);
 
   /**
    * @see Legion::RegionRequirement::add_flags
@@ -2615,6 +2673,12 @@ extern "C" {
   size_t
   legion_future_get_untyped_size(legion_future_t handle);
 
+  /**
+   * @see Legion::Future::get_metadata(size_t *size)
+   */
+  const void *
+  legion_future_get_metadata(legion_future_t handle, size_t *size/*=NULL*/);
+
   // -----------------------------------------------------------------------
   // Future Map Operations
   // -----------------------------------------------------------------------
@@ -2666,7 +2730,9 @@ extern "C" {
                            legion_context_t ctx,
                            legion_future_map_t handle,
                            legion_reduction_op_id_t redop,
-                           bool deterministic);
+                           bool deterministic,
+                           legion_mapper_id_t map_id,
+                           legion_mapping_tag_id_t tag);
 
   /**
    * @return Caller takes ownership of return value
@@ -2748,6 +2814,20 @@ extern "C" {
   legion_task_launcher_create(
     legion_task_id_t tid,
     legion_task_argument_t arg,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::TaskLauncher::TaskLauncher()
+   */
+  legion_task_launcher_t
+  legion_task_launcher_create_from_buffer(
+    legion_task_id_t tid,
+    const void *buffer,
+    size_t buffer_size,
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
@@ -2899,6 +2979,13 @@ extern "C" {
                                            legion_phase_barrier_t bar);
 
   /**
+   * @see Legion::TaskLauncher::argument
+   */
+  void
+  legion_task_launcher_set_argument(legion_task_launcher_t launcher,
+                                    legion_task_argument_t arg);
+
+  /**
    * @see Legion::TaskLauncher::point
    */
   void
@@ -2964,6 +3051,23 @@ extern "C" {
     legion_task_id_t tid,
     legion_domain_t domain,
     legion_task_argument_t global_arg,
+    legion_argument_map_t map,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    bool must /* = false */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
+   */
+  legion_index_launcher_t
+  legion_index_launcher_create_from_buffer(
+    legion_task_id_t tid,
+    legion_domain_t domain,
+    const void *buffer,
+    size_t buffer_size,
     legion_argument_map_t map,
     legion_predicate_t pred /* = legion_predicate_true() */,
     bool must /* = false */,
@@ -3218,6 +3322,13 @@ extern "C" {
                                          legion_argument_map_t map);
 
   /**
+   * @see Legion::IndexTaskLauncher::global_arg
+   */
+  void
+  legion_index_launcher_set_global_arg(legion_index_launcher_t launcher,
+                                       legion_task_argument_t global_arg);
+
+  /**
    * @see Legion::IndexTaskLauncher::sharding_space
    */
   void
@@ -3339,6 +3450,77 @@ extern "C" {
     legion_predicate_t pred /* = legion_predicate_true() */);
 
   /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::FillLauncher::FillLauncher()
+   */
+  legion_fill_launcher_t
+  legion_fill_launcher_create(
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::FillLauncher::FillLauncher()
+   */
+  legion_fill_launcher_t
+  legion_fill_launcher_create_from_future(
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_future_t f,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::FillLauncher::~FillLauncher()
+   */
+  void
+  legion_fill_launcher_destroy(legion_fill_launcher_t handle);
+
+  /**
+   * @see Legion::FillLauncher::add_field()
+   */
+  void
+  legion_fill_launcher_add_field(legion_fill_launcher_t handle,
+                                 legion_field_id_t fid);
+
+  /**
+   * @see Legion::Runtime::fill_fields()
+   */
+  void
+  legion_fill_launcher_execute(legion_runtime_t runtime,
+                               legion_context_t ctx,
+                               legion_fill_launcher_t launcher);
+
+  /**
+   * @see Legion::FillLauncher::point
+   */
+  void
+  legion_fill_launcher_set_point(legion_fill_launcher_t launcher,
+                                 legion_domain_point_t point);
+
+  /**
+   * @see Legion::FillLauncher::sharding_space
+   */
+  void legion_fill_launcher_set_sharding_space(legion_fill_launcher_t launcher,
+                                               legion_index_space_t space);
+
+  // -----------------------------------------------------------------------
+  // Index Fill Field Operations
+  // -----------------------------------------------------------------------
+  
+  /**
    * @see Legion::Runtime::fill_field()
    * Same as above except using index fills
    */
@@ -3446,6 +3628,105 @@ extern "C" {
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::IndexFillLauncher()
+   */
+  legion_index_fill_launcher_t
+  legion_index_fill_launcher_create_with_space(
+    legion_index_space_t space,
+    legion_logical_partition_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::IndexFillLauncher()
+   */
+  legion_index_fill_launcher_t
+  legion_index_fill_launcher_create_with_domain(
+    legion_domain_t domain,
+    legion_logical_partition_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::IndexFillLauncher()
+   */
+  legion_index_fill_launcher_t
+  legion_index_fill_launcher_create_from_future_with_space(
+    legion_index_space_t space,
+    legion_logical_partition_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_future_t future,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::IndexFillLauncher()
+   */
+  legion_index_fill_launcher_t
+  legion_index_fill_launcher_create_from_future_with_domain(
+    legion_domain_t domain,
+    legion_logical_partition_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_future_t future,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+  
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::IndexFillLauncher::~IndexFillLauncher()
+   */
+  void
+  legion_index_fill_launcher_destroy(legion_index_fill_launcher_t handle);
+
+  /**
+   * @see Legion::IndexFillLauncher::add_field()
+   */
+  void
+  legion_index_fill_launcher_add_field(legion_fill_launcher_t handle,
+                                       legion_field_id_t fid);
+
+  /**
+   * @see Legion::Runtime::fill_fields()
+   */
+  void
+  legion_index_fill_launcher_execute(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_fill_launcher_t launcher);
+
+  /**
+   * @see Legion::FillLauncher::sharding_space
+   */
+  void legion_index_fill_launcher_set_sharding_space(legion_index_fill_launcher_t launcher,
+                                                     legion_index_space_t space);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -3645,6 +3926,19 @@ extern "C" {
   void
   legion_copy_launcher_set_possible_dst_indirect_out_of_range(
       legion_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::CopyLauncher::point
+   */
+  void
+  legion_copy_launcher_set_point(legion_copy_launcher_t launcher,
+                                 legion_domain_point_t point);
+
+  /**
+   * @see Legion::CopyLauncher::sharding_space
+   */
+  void legion_copy_launcher_set_sharding_space(legion_copy_launcher_t launcher,
+                                               legion_index_space_t space);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -3880,6 +4174,13 @@ extern "C" {
   void
   legion_index_copy_launcher_set_possible_dst_indirect_out_of_range(
       legion_index_copy_launcher_t launcher, bool flag);
+
+  /**
+   * @see Legion::IndexCopyLauncher::sharding_space
+   */
+  void
+  legion_index_copy_launcher_set_sharding_space(legion_index_copy_launcher_t launcher,
+                                                legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Acquire Operations

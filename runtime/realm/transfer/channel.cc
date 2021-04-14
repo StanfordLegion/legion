@@ -667,6 +667,178 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ControlPort::Encoder
+  //
+
+  ControlPort::Encoder::Encoder()
+    : port_shift(0)
+    , state(STATE_INIT)
+  {}
+
+  ControlPort::Encoder::~Encoder()
+  {
+    assert(state == STATE_DONE);
+  }
+
+  void ControlPort::Encoder::set_port_count(size_t ports)
+  {
+    assert(state == STATE_INIT);
+    // we add one to valid port indices, so we need to encode values in [0,ports]
+    port_shift = 1;
+    while((ports >> port_shift) > 0) {
+      port_shift++;
+      assert(port_shift <= 30); // 1B ports will be bad for other reasons too...
+    }
+    state = STATE_HAVE_PORT_COUNT;
+  }
+
+  // encodes some/all of the { count, port, last } packet into the next
+  //  32b - returns true if encoding is complete or false if it should
+  //  be called again with the same arguments for another 32b packet
+  bool ControlPort::Encoder::encode(unsigned& data,
+                                    size_t count, int port, bool last)
+  {
+    unsigned port_p1 = port + 1;
+    assert((port_p1 >> port_shift) == 0);
+
+    switch(state) {
+    case STATE_INIT:
+      assert(0 && "encoding control word without known port count");
+
+    case STATE_HAVE_PORT_COUNT:
+      {
+        // special case - if we're sending a single packet with count=0,last=1,
+        //  we don't need to send the port shift first
+        if((count == 0) && last) {
+          data = 0;
+          state = STATE_DONE;
+          log_xd.print() << "encode: " << count << " " << port << " " << last;
+          return true;
+        } else {
+          data = port_shift;
+          state = STATE_IDLE;
+          return false;
+        }
+      }
+
+    case STATE_IDLE:
+      {
+        // figure out if we need 1, 2, or 3 chunks for this
+        unsigned mid = (count >> (30 - port_shift));
+        unsigned hi = ((sizeof(size_t) > 4) ? (count >> (60 - port_shift)) : 0);
+
+        if(hi != 0) {
+          // will take three words - send HIGH first
+          data = (hi << 2) | CTRL_HIGH;
+          state = STATE_SENT_HIGH;
+          return false;
+        } else if(mid != 0) {
+          // will take two words - send MID first
+          data = (mid << 2) | CTRL_MID;
+          state = STATE_SENT_MID;
+          return false;
+        } else {
+          // fits in a single word
+          data = ((count << (port_shift + 2)) |
+                  (port_p1 << 2) |
+                  (last ? CTRL_LO_LAST : CTRL_LO_MORE));
+          state = (last ? STATE_DONE : STATE_IDLE);
+          //log_xd.print() << "encode: " << count << " " << port << " " << last;
+          return true;
+        }
+      }
+
+    case STATE_SENT_HIGH:
+      {
+        // since we just sent HIGH, must send MID next
+        unsigned mid = (count >> (30 - port_shift));
+        data = (mid << 2) | CTRL_MID;
+        state = STATE_SENT_MID;
+        return false;
+      }
+
+    case STATE_SENT_MID:
+      {
+        // since we just sent MID, send LO to finish
+        data = ((count << (port_shift + 2)) |
+                (port_p1 << 2) |
+                (last ? CTRL_LO_LAST : CTRL_LO_MORE));
+        state = (last ? STATE_DONE : STATE_IDLE);
+        //log_xd.print() << "encode: " << count << " " << port << " " << last;
+        return true;
+      }
+
+    case STATE_DONE:
+      assert(0 && "sending after last?");
+    }
+
+    return false;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ControlPort::Decoder
+  //
+
+  ControlPort::Decoder::Decoder()
+    : temp_count(0)
+    , port_shift(0)
+  {}
+
+  ControlPort::Decoder::~Decoder()
+  {
+    // shouldn't end with a partial count
+    assert(temp_count == 0);
+  }
+
+  // decodes the next 32b of packed data, returning true if a complete
+  //  { count, port, last } has been received
+  bool ControlPort::Decoder::decode(unsigned data,
+                                    size_t& count, int& port, bool& last)
+  {
+    if(port_shift == 0) {
+      // we haven't received the port shift yet, so it's either this or a 0
+      //  meaning there's no data at all
+      if(data != 0) {
+        port_shift = data;
+        return false;
+      } else {
+        count = 0;
+        port = -1;
+        last = true;
+        //log_xd.print() << "decode: " << count << " " << port << " " << last;
+        return true;
+      }
+    } else {
+      // bottom 2 bits tell us the chunk type
+      unsigned ctrl = data & 3;
+
+      if(ctrl == CTRL_HIGH) {
+        assert(temp_count == 0);  // should not be clobbering an existing count
+        temp_count = size_t(data >> 2) << (60 - port_shift);
+        assert(temp_count != 0);  // should not have gotten HIGH with 0 value
+        return false;
+      } else if(ctrl == CTRL_MID) {
+        temp_count |= size_t(data >> 2) << (30 - port_shift);
+        assert(temp_count != 0);  // must have gotten HIGH or nonzero here
+        return false;
+      } else {
+        // LO means we have a full control packet
+        count = temp_count | (data >> (port_shift + 2));
+        unsigned port_p1 = (data >> 2) & ((1U << port_shift) - 1);
+        port = port_p1 - 1;
+        last = (ctrl == CTRL_LO_LAST);
+        temp_count = 0;
+        //log_xd.print() << "decode: " << count << " " << port << " " << last;
+        return true;
+      }
+    }
+  }
+
+
       XferDes::XferDes(uintptr_t _dma_op, Channel *_channel,
 		       NodeID _launch_node, XferDesID _guid,
 		       const std::vector<XferDesPortInfo>& inputs_info,
@@ -900,27 +1072,41 @@ namespace Realm {
     if(input_control.remaining_count == 0) {
       XferPort& icp = input_ports[input_control.control_port_idx];
       size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
-						sizeof(unsigned));
-      if(avail < sizeof(unsigned))
-	return 0;  // no data right now
+						4 * sizeof(unsigned));
+      size_t old_lbt = icp.local_bytes_total;
 
-      TransferIterator::AddressInfo c_info;
-      size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
-      assert(amt == sizeof(unsigned));
-      const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
-      assert(srcptr != 0);
-      unsigned cword;
-      memcpy(&cword, srcptr, sizeof(unsigned));
+      // may take a few chunks of data to get a control packet
+      while(true) {
+        if(avail < sizeof(unsigned))
+          return 0;  // no data right now
+
+        TransferIterator::AddressInfo c_info;
+        size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
+                                    false /*!tentative*/);
+        assert(amt == sizeof(unsigned));
+        const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
+        assert(srcptr != 0);
+        unsigned cword;
+        memcpy(&cword, srcptr, sizeof(unsigned));
+
+        icp.local_bytes_total += sizeof(unsigned);
+        avail -= sizeof(unsigned);
+
+        if(input_control.decoder.decode(cword,
+                                        input_control.remaining_count,
+                                        input_control.current_io_port,
+                                        input_control.eos_received))
+          break;
+      }
+
+      // can't get here unless we read something, so ack it
       if(rseqcache != 0)
 	rseqcache->add_span(input_control.control_port_idx,
-			    icp.local_bytes_total, sizeof(unsigned));
+                            old_lbt, icp.local_bytes_total - old_lbt);
       else
 	update_bytes_read(input_control.control_port_idx,
-			  icp.local_bytes_total, sizeof(unsigned));
-      icp.local_bytes_total += sizeof(unsigned);
-      input_control.remaining_count = cword >> 8;
-      input_control.current_io_port = (cword & 0x7f) - 1;
-      input_control.eos_received = (cword & 128) != 0;
+                          old_lbt, icp.local_bytes_total - old_lbt);
+
       log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
 		    << " port=" << input_control.current_io_port
 		    << " count=" << input_control.remaining_count
@@ -938,28 +1124,41 @@ namespace Realm {
       //  an input port! vvv
       XferPort& ocp = input_ports[output_control.control_port_idx];
       size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
-						sizeof(unsigned));
-      if(avail < sizeof(unsigned))
-	return 0;  // no data right now
-      TransferIterator::AddressInfo c_info;
-      size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
-      assert(amt == sizeof(unsigned));
-      const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
-      assert(srcptr != 0);
+						4 * sizeof(unsigned));
+      size_t old_lbt = ocp.local_bytes_total;
 
-      unsigned cword;
-      memcpy(&cword, srcptr, sizeof(unsigned));
+      // may take a few chunks of data to get a control packet
+      while(true) {
+        if(avail < sizeof(unsigned))
+          return 0;  // no data right now
+
+        TransferIterator::AddressInfo c_info;
+        size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0,
+                                    false /*!tentative*/);
+        assert(amt == sizeof(unsigned));
+        const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
+        assert(srcptr != 0);
+        unsigned cword;
+        memcpy(&cword, srcptr, sizeof(unsigned));
+
+        ocp.local_bytes_total += sizeof(unsigned);
+        avail -= sizeof(unsigned);
+
+        if(output_control.decoder.decode(cword,
+                                         output_control.remaining_count,
+                                         output_control.current_io_port,
+                                         output_control.eos_received))
+          break;
+      }
+
+      // can't get here unless we read something, so ack it
       if(rseqcache != 0)
 	rseqcache->add_span(output_control.control_port_idx,
-			    ocp.local_bytes_total, sizeof(unsigned));
+                            old_lbt, ocp.local_bytes_total - old_lbt);
       else
 	update_bytes_read(output_control.control_port_idx,
-			  ocp.local_bytes_total, sizeof(unsigned));
-      ocp.local_bytes_total += sizeof(unsigned);
-      assert(cword != 0);
-      output_control.remaining_count = cword >> 8;
-      output_control.current_io_port = (cword & 0x7f) - 1;
-      output_control.eos_received = (cword & 128) != 0;
+                          old_lbt, ocp.local_bytes_total - old_lbt);
+
       log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
 		    << " port=" << output_control.current_io_port
 		    << " count=" << output_control.remaining_count
@@ -1156,22 +1355,40 @@ namespace Realm {
 	  if(input_control.remaining_count == 0) {
 	    XferPort& icp = input_ports[input_control.control_port_idx];
 	    size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
-						      sizeof(unsigned));
-	    if(avail < sizeof(unsigned))
-	      break;  // no data right now
-	    TransferIterator::AddressInfo c_info;
-	    size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
-	    assert(amt == sizeof(unsigned));
-	    const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
-	    assert(srcptr != 0);
-	    unsigned cword;
-	    memcpy(&cword, srcptr, sizeof(unsigned));
-	    update_bytes_read(input_control.control_port_idx,
-                              icp.local_bytes_total, sizeof(unsigned));
-	    icp.local_bytes_total += sizeof(unsigned);
-	    input_control.remaining_count = cword >> 8;
-	    input_control.current_io_port = (cword & 0x7f) - 1;
-	    input_control.eos_received = (cword & 128) != 0;
+						      4 * sizeof(unsigned));
+            size_t old_lbt = icp.local_bytes_total;
+
+            // may take a few chunks of data to get a control packet
+            bool got_packet = false;
+            do {
+              if(avail < sizeof(unsigned))
+                break;  // no data right now
+
+              TransferIterator::AddressInfo c_info;
+              size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
+                                          false /*!tentative*/);
+              assert(amt == sizeof(unsigned));
+              const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
+              assert(srcptr != 0);
+              unsigned cword;
+              memcpy(&cword, srcptr, sizeof(unsigned));
+
+              icp.local_bytes_total += sizeof(unsigned);
+              avail -= sizeof(unsigned);
+
+              got_packet = input_control.decoder.decode(cword,
+                                                        input_control.remaining_count,
+                                                        input_control.current_io_port,
+                                                        input_control.eos_received);
+            } while(!got_packet);
+
+            // can't make further progress if we didn't get a full packet
+            if(!got_packet)
+              break;
+
+            update_bytes_read(input_control.control_port_idx,
+                              old_lbt, icp.local_bytes_total - old_lbt);
+
 	    log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
 			  << " port=" << input_control.current_io_port
 			  << " count=" << input_control.remaining_count
@@ -1188,24 +1405,39 @@ namespace Realm {
 	    //  an input port! vvv
 	    XferPort& ocp = input_ports[output_control.control_port_idx];
 	    size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
-						      sizeof(unsigned));
-	    if(avail < sizeof(unsigned))
-	      break;  // no data right now
-	    TransferIterator::AddressInfo c_info;
-	    size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
-	    assert(amt == sizeof(unsigned));
-	    const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
-	    assert(srcptr != 0);
+						      4 * sizeof(unsigned));
+            size_t old_lbt = ocp.local_bytes_total;
 
-	    unsigned cword;
-	    memcpy(&cword, srcptr, sizeof(unsigned));
+            // may take a few chunks of data to get a control packet
+            bool got_packet = false;
+            do {
+              if(avail < sizeof(unsigned))
+                break;  // no data right now
+
+              TransferIterator::AddressInfo c_info;
+              size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
+              assert(amt == sizeof(unsigned));
+              const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
+              assert(srcptr != 0);
+              unsigned cword;
+              memcpy(&cword, srcptr, sizeof(unsigned));
+
+              ocp.local_bytes_total += sizeof(unsigned);
+              avail -= sizeof(unsigned);
+
+              got_packet = output_control.decoder.decode(cword,
+                                                         output_control.remaining_count,
+                                                         output_control.current_io_port,
+                                                         output_control.eos_received);
+            } while(!got_packet);
+
+            // can't make further progress if we didn't get a full packet
+            if(!got_packet)
+              break;
+
 	    update_bytes_read(output_control.control_port_idx,
-                              ocp.local_bytes_total, sizeof(unsigned));
-	    ocp.local_bytes_total += sizeof(unsigned);
-	    assert(cword != 0);
-	    output_control.remaining_count = cword >> 8;
-	    output_control.current_io_port = (cword & 0x7f) - 1;
-	    output_control.eos_received = (cword & 128) != 0;
+                              old_lbt, ocp.local_bytes_total - old_lbt);
+
 	    log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
 			  << " port=" << output_control.current_io_port
 			  << " count=" << output_control.remaining_count
@@ -3035,13 +3267,13 @@ namespace Realm {
                 void *out_ptr = reinterpret_cast<void *>(out_base + out_offset);
                 const void *in_ptr = reinterpret_cast<const void *>(in_base + in_offset);
                 if(redop_info.is_fold)
-                  redop->fold_strided(out_ptr, in_ptr,
-                                      ostride, istride,
-                                      elems, false /*!exclusive*/);
+                  (redop->cpu_fold_nonexcl_fn)(out_ptr, ostride,
+                                               in_ptr, istride,
+                                               elems, redop->userdata);
                 else
-                  redop->apply_strided(out_ptr, in_ptr,
-                                       ostride, istride,
-                                       elems, false /*!exclusive*/);
+                  (redop->cpu_apply_nonexcl_fn)(out_ptr, ostride,
+                                                in_ptr, istride,
+                                                elems, redop->userdata);
 
                 in_alc.advance(in_dim-1,
                                elems * ((in_dim == 1) ? in_elem_size : 1));
@@ -3714,6 +3946,13 @@ namespace Realm {
 	return os;
       }
 	  
+      RemoteChannelInfo *Channel::construct_remote_info() const
+      {
+        return new SimpleRemoteChannelInfo(node, kind,
+                                           reinterpret_cast<uintptr_t>(this),
+                                           paths);
+      }
+
       void Channel::print(std::ostream& os) const
       {
 	os << "channel{ node=" << node << " kind=" << kind << " paths=[";
@@ -4114,6 +4353,37 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class SimpleRemoteChannelInfo
+  //
+
+  SimpleRemoteChannelInfo::SimpleRemoteChannelInfo()
+  {}
+
+  SimpleRemoteChannelInfo::SimpleRemoteChannelInfo(NodeID _owner,
+                                                   XferDesKind _kind,
+                                                   uintptr_t _remote_ptr,
+                                                   const std::vector<Channel::SupportedPath>& _paths)
+    : owner(_owner)
+    , kind(_kind)
+    , remote_ptr(_remote_ptr)
+    , paths(_paths)
+  {}
+
+  RemoteChannel *SimpleRemoteChannelInfo::create_remote_channel()
+  {
+    RemoteChannel *rc = new RemoteChannel(remote_ptr);
+    rc->node = owner;
+    rc->kind = kind;
+    rc->paths.swap(paths);
+    return rc;
+  }
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      SimpleRemoteChannelInfo> SimpleRemoteChannelInfo::serdez_subclass;
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class RemoteChannel
   //
 
@@ -4170,7 +4440,8 @@ namespace Realm {
       static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
 						    Memory::REGDMA_MEM,
 						    Memory::Z_COPY_MEM,
-                                                    Memory::SOCKET_MEM };
+                                                    Memory::SOCKET_MEM,
+                                                    Memory::GPU_MANAGED_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
 

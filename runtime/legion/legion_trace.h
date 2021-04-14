@@ -725,22 +725,33 @@ namespace Legion {
     public:
       struct ReplaySliceArgs : public LgTaskArgs<ReplaySliceArgs> {
       public:
-        static const LgTaskID TASK_ID = LG_REPLAY_SLICE_ID;
+        static const LgTaskID TASK_ID = LG_REPLAY_SLICE_TASK_ID;
       public:
         ReplaySliceArgs(PhysicalTemplate *t, unsigned si)
-          : LgTaskArgs<ReplaySliceArgs>(0), tpl(t), slice_index(si) { }
+          : LgTaskArgs<ReplaySliceArgs>(implicit_provenance),
+            tpl(t), slice_index(si) { }
       public:
-        PhysicalTemplate *tpl;
+        PhysicalTemplate *const tpl;
         unsigned slice_index;
+      };
+      struct TransitiveReductionArgs :
+        public LgTaskArgs<TransitiveReductionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRANSITIVE_REDUCTION_TASK_ID;
+      public:
+        TransitiveReductionArgs(PhysicalTemplate *t)
+          : LgTaskArgs<TransitiveReductionArgs>(implicit_provenance), tpl(t) { }
+      public:
+        PhysicalTemplate *const tpl;
       };
       struct DeleteTemplateArgs : public LgTaskArgs<DeleteTemplateArgs> {
       public:
-        static const LgTaskID TASK_ID = LG_DELETE_TEMPLATE_ID;
+        static const LgTaskID TASK_ID = LG_DELETE_TEMPLATE_TASK_ID;
       public:
         DeleteTemplateArgs(PhysicalTemplate *t)
-          : LgTaskArgs<DeleteTemplateArgs>(0), tpl(t) { }
+          : LgTaskArgs<DeleteTemplateArgs>(implicit_provenance), tpl(t) { }
       public:
-        PhysicalTemplate *tpl;
+        PhysicalTemplate *const tpl;
       };
     protected:
       struct ViewUser {
@@ -754,12 +765,18 @@ namespace Legion {
         const ShardID shard;
       };
     private:
+      struct CachedPremapping
+      {
+        std::vector<Memory>     future_locations;
+      };
+      typedef std::map<TraceLocalID,CachedPremapping> CachedPremappings;
       struct CachedMapping
       {
         VariantID               chosen_variant;
         TaskPriority            task_priority;
         bool                    postmap_task;
         std::vector<Processor>  target_procs;
+        std::vector<Memory>     future_locations;
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping>::aligned CachedMappings;
@@ -806,12 +823,15 @@ namespace Legion {
       virtual Replayable check_replayable(ReplTraceOp *op, 
           InnerContext *context, UniqueID opid, bool has_blocking_call);
     public:
-      void optimize(ReplTraceOp *op);
+      void optimize(ReplTraceOp *op, bool do_transitive_reduction);
     private:
       void elide_fences(std::vector<unsigned> &gen, ReplTraceOp *op);
       void propagate_merges(std::vector<unsigned> &gen);
-      void transitive_reduction(void);
-      void propagate_copies(std::vector<unsigned> &gen);
+      void transitive_reduction(bool deferred);
+      void finalize_transitive_reduction(
+          const std::vector<unsigned> &inv_topo_order,
+          const std::vector<std::vector<unsigned> > &incoming_reduced);
+      void propagate_copies(std::vector<unsigned> *gen);
       void eliminate_dead_code(std::vector<unsigned> &gen);
       void prepare_parallel_replay(const std::vector<unsigned> &gen);
       void push_complete_replays(void);
@@ -863,6 +883,11 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
+      void record_premap_output(Memoizable *memo,
+                                const Mapper::PremapTaskOutput &output,
+                                std::set<RtEvent> &applied_events);
+      void get_premap_output(IndexTask *task,
+                             std::vector<Memory> &future_locations);     
       virtual void record_mapper_output(Memoizable *memo,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
@@ -872,6 +897,7 @@ namespace Legion {
                              TaskPriority &task_priority,
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
+                             std::vector<Memory> &future_locations,
                              std::deque<InstanceSet> &physical_instances) const;
     public:
       virtual void record_get_term_event(Memoizable *memo);
@@ -978,6 +1004,7 @@ namespace Legion {
                                    std::set<RtEvent> &applied_events);
     public:
       static void handle_replay_slice(const void *args);
+      static void handle_transitive_reduction(const void *args);
       static void handle_delete_template(const void *args);
     public:
       RtEvent get_recording_done(void) const
@@ -1038,6 +1065,7 @@ namespace Legion {
       // Remote memoizable objects that we have ownership for
       std::vector<Memoizable*> remote_memos;
     private:
+      CachedPremappings cached_premappings;
       CachedMappings cached_mappings;
       bool has_virtual_mapping;
     protected:
@@ -1053,7 +1081,7 @@ namespace Legion {
       std::vector<std::vector<Instruction*> > slices;
       std::vector<std::vector<TraceLocalID> > slice_tasks;
     protected:
-      std::map<unsigned,unsigned> crossing_events;
+      std::map<unsigned/*event*/,unsigned/*consumers*/> crossing_events;
       // Frontiers of a template are a set of users whose events must
       // be carried over to the next replay for eliding the fence at the
       // beginning. For each user i in frontiers, frontiers[i] points to the
@@ -1066,6 +1094,9 @@ namespace Legion {
       std::map<unsigned,unsigned> frontiers;
     protected:
       RtUserEvent recording_done;
+      RtEvent transitive_reduction_done;
+      std::vector<unsigned> *volatile pending_inv_topo_order;
+      std::vector<std::vector<unsigned> >*volatile pending_transitive_reduction;
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;

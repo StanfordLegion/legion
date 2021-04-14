@@ -245,7 +245,7 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
             try:
                 nvcc_version = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
             except (FileNotFoundError,subprocess.CalledProcessError):
-                print('Error: Unabled to verify CUDA version is not blacklisted for Regent')
+                print('Error: Unable to verify CUDA version is not blacklisted for Regent')
                 sys.exit(1)
         pattern = re.compile(' V(?P<major>[0-9]+)\.(?P<minor>[0-9]+)')
         major_version = None
@@ -409,7 +409,12 @@ def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hd
         raise Exception('Cannot clean a pre-existing build directory')
 
     if thread_count is None:
-        thread_count = multiprocessing.cpu_count()
+        try:
+            # this correctly considers the current affinity mask
+            thread_count = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # this works on macos
+            thread_count = multiprocessing.cpu_count()
 
     # Grab LG_RT_DIR from the environment if available, otherwise
     # assume we're running relative to our own location.

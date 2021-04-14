@@ -317,11 +317,10 @@ namespace Legion {
       LG_MUST_MAP_ID,
       LG_MUST_DIST_ID,
       LG_MUST_LAUNCH_ID,
-      LG_DEFERRED_FUTURE_SET_ID,
-      LG_DEFERRED_FUTURE_MAP_SET_ID,
-      LG_RESOLVE_FUTURE_PRED_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
       LG_FUTURE_CALLBACK_TASK_ID,
+      LG_CALLBACK_RELEASE_TASK_ID,
+      LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID,
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
@@ -364,13 +363,15 @@ namespace Legion {
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
-      LG_REPLAY_SLICE_ID,
-      LG_DELETE_TEMPLATE_ID,
+      LG_REPLAY_SLICE_TASK_ID,
+      LG_TRANSITIVE_REDUCTION_TASK_ID,
+      LG_DELETE_TEMPLATE_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
       LG_DEFER_RELEASE_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
+      LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
@@ -404,6 +405,7 @@ namespace Legion {
       LG_DEFER_TRACE_FINALIZE_SETS_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
+      LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
@@ -441,11 +443,10 @@ namespace Legion {
         "Must Task Physical Dependence Analysis",                 \
         "Must Task Distribution",                                 \
         "Must Task Launch",                                       \
-        "Deferred Future Set",                                    \
-        "Deferred Future Map Set",                                \
-        "Resolve Future Predicate",                               \
         "Contribute Collective",                                  \
         "Future Callback",                                        \
+        "Future Callback Release",                                \
+        "Defer Delete Future Instance",                           \
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
@@ -489,12 +490,14 @@ namespace Legion {
         "Remote Physical Context Request",                        \
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
+        "Template Transitive Reduction",                          \
         "Delete Physical Template",                               \
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \
         "Defer Equivalence Set Apply State",                      \
         "Defer Equivalence Set Remove References",                \
         "Defer Remote Reference Update",                          \
+        "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
@@ -528,6 +531,7 @@ namespace Legion {
         "Defer Trace Finalize Condition Set Updates",             \
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
+        "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
@@ -574,6 +578,7 @@ namespace Legion {
       PARTITION_REPORT_PROFILING_CALL,
       PARTITION_SELECT_SHARDING_FUNCTOR_CALL,
       FILL_SELECT_SHARDING_FUNCTOR_CALL,
+      MAP_FUTURE_MAP_REDUCTION_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
       MUST_EPOCH_SELECT_SHARDING_FUNCTOR_CALL,
@@ -630,6 +635,7 @@ namespace Legion {
       "report_profiling (for partition)",           \
       "select sharding functor (for partition)",    \
       "select sharding functor (for fill)",         \
+      "map future map reduction",                   \
       "configure_context",                          \
       "select_tunable_value",                       \
       "select sharding functor (for must epoch)",   \
@@ -809,6 +815,8 @@ namespace Legion {
       SEND_FUTURE_SUBSCRIPTION,
       SEND_FUTURE_NOTIFICATION,
       SEND_FUTURE_BROADCAST,
+      SEND_FUTURE_CREATE_INSTANCE_REQUEST,
+      SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
       SEND_REPL_FUTURE_MAP_REQUEST,
@@ -912,6 +920,10 @@ namespace Legion {
       SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
+      SEND_FREE_EXTERNAL_ALLOCATION,
+      SEND_CREATE_FUTURE_INSTANCE_REQUEST,
+      SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
+      SEND_FREE_FUTURE_INSTANCE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1021,6 +1033,8 @@ namespace Legion {
         "Send Future Subscription",                                   \
         "Send Future Notification",                                   \
         "Send Future Broadcast",                                      \
+        "Send Future Create Instance Request",                        \
+        "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
         "Send Replicate Future Map Request",                          \
@@ -1124,6 +1138,10 @@ namespace Legion {
         "Remote Op Profiling Count Update",                           \
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
+        "Send Free External Allocation",                              \
+        "Send Create Future Instance Request",                        \
+        "Send Create Future Instance Response",                       \
+        "Send Free Future Instance",                                  \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1584,6 +1602,7 @@ namespace Legion {
     class FieldAllocatorImpl;
     class ArgumentMapImpl;
     class FutureImpl;
+    class FutureInstance;
     class FutureMapImpl;
     class ReplFutureMapImpl;
     class PhysicalRegionImpl;
@@ -1982,6 +2001,8 @@ namespace Legion {
     friend class Internal::ReplDetachOp;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
+    template<int, typename>                                 \
+    friend class Internal::IndexSpaceNodeT;                 \
     friend class Internal::IndexPartNode;                   \
     friend class Internal::FieldSpaceNode;                  \
     friend class Internal::RegionTreeNode;                  \

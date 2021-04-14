@@ -13,10 +13,13 @@
  * limitations under the License.
  */
 
+#include"realm_defines.h"
+
+#ifdef REALM_USE_HIP
+#include "realm/hip/hiphijack_api.h"
+#endif
 
 #include "circuit.h"
-
-#include "cuda_runtime.h"
 
 template<typename AT, int SEGMENTS>
 struct SegmentAccessors {
@@ -162,7 +165,11 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
+#ifdef LEGION_USE_HIP
+  calc_new_currents_kernel<<<num_blocks,threads_per_block, 0, hipGetTaskStream()>>>(piece.first_wire,
+#else
   calc_new_currents_kernel<<<num_blocks,threads_per_block>>>(piece.first_wire,
+#endif
                                                              piece.num_wires,
                                                              piece.dt,
                                                              piece.steps,
@@ -259,7 +266,11 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
+#ifdef LEGION_USE_HIP
+  distribute_charge_kernel<<<num_blocks,threads_per_block, 0, hipGetTaskStream()>>>(piece.first_wire,
+#else
   distribute_charge_kernel<<<num_blocks,threads_per_block>>>(piece.first_wire,
+#endif
                                                              piece.num_wires,
                                                              piece.dt,
                                                              fa_in_ptr,
@@ -341,7 +352,11 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_nodes + (threads_per_block-1)) / threads_per_block;
 
+#ifdef LEGION_USE_HIP
+  update_voltages_kernel<<<num_blocks,threads_per_block, 0, hipGetTaskStream()>>>(piece.first_node,
+#else
   update_voltages_kernel<<<num_blocks,threads_per_block>>>(piece.first_node,
+#endif
                                                            piece.num_nodes,
                                                            fa_pvt_voltage,
                                                            fa_shr_voltage,

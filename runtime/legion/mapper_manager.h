@@ -35,6 +35,8 @@ namespace Legion {
       unsigned long long                start_time;
       unsigned long long                stop_time;
       unsigned                          collective_count;
+      bool                              reentrant_disabled;
+      bool                              supports_collectives;
     };
 
     /**
@@ -236,6 +238,11 @@ namespace Legion {
                               Mapper::SelectShardingFunctorInput *input,
                               Mapper::SelectShardingFunctorOutput *output,
                               MappingCallInfo *info = NULL);
+    public: // All reduce 
+      void invoke_map_future_map_reduction(AllReduceOp *op,
+                              Mapper::FutureMapReductionInput *input,
+                              Mapper::FutureMapReductionOutput *output,
+                              MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,
@@ -424,11 +431,13 @@ namespace Legion {
       bool acquire_instances(       MappingCallInfo *ctx,
                                     const std::vector<MappingInstance> &insts);
       bool acquire_and_filter_instances(MappingCallInfo *ctx,
-                                    std::vector<MappingInstance> &instances);
+                                    std::vector<MappingInstance> &instances,
+                                    const bool filter_acquired_instances);
       bool acquire_instances(       MappingCallInfo *ctx, const std::vector<
                                     std::vector<MappingInstance> > &instances);
       bool acquire_and_filter_instances(MappingCallInfo *ctx, std::vector<
-                                    std::vector<MappingInstance> > &instances);
+                                    std::vector<MappingInstance> > &instances,
+                                    const bool filter_acquired_instances);
       void release_instance(        MappingCallInfo *ctx, 
                                     const MappingInstance &instance);
       void release_instances(       MappingCallInfo *ctx,
@@ -445,7 +454,8 @@ namespace Legion {
       bool perform_local_acquires(MappingCallInfo *info,
                                   const std::vector<MappingInstance> &instances,
                        std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                                  std::vector<unsigned> *to_erase); 
+                                  std::vector<unsigned> *to_erase,
+                                  const bool filter_acquired_instances = false);
       bool perform_remote_acquires(MappingCallInfo *info,
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests);
     public:

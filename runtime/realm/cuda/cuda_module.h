@@ -71,6 +71,7 @@ namespace Realm {
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
       size_t cfg_fb_mem_size;
+      size_t cfg_uvm_mem_size;
       unsigned cfg_num_gpus, cfg_gpu_streams;
       bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
@@ -87,6 +88,8 @@ namespace Realm {
       std::vector<GPU *> gpus;
       void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
+      void *uvm_base; // guaranteed to be same for CPU and GPU
+      GPUZCMemory *uvmmem;
       std::vector<void *> registered_host_ptrs;
     };
 

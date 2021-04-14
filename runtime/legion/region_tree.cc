@@ -3829,10 +3829,7 @@ namespace Legion {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        if (shard_mapping != NULL)
-          result->register_with_runtime(&mutator, false/*notify remote*/);
-        else
-          result->register_with_runtime(&mutator);
+        result->register_with_runtime(&mutator, false/*notify remote*/);
         parent->add_child(result);
       }
       if (local_initialized.exists())
@@ -3909,10 +3906,7 @@ namespace Legion {
           result->add_base_valid_ref(APPLICATION_REF, &mutator);
         else
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        if (shard_mapping != NULL)
-          result->register_with_runtime(&mutator, false/*notify remote*/);
-        else
-          result->register_with_runtime(&mutator);
+        result->register_with_runtime(&mutator, false/*notify remote*/);
         parent->add_child(result);
       }
       if (local_initialized.exists())
@@ -4387,7 +4381,8 @@ namespace Legion {
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part,
                                               RtEvent *defer/* = NULL*/,
                                               const bool can_fail /* = false*/,
-                                              const bool first/* = true*/)
+                                              const bool first/* = true*/,
+                                              const bool local_only/* = false*/)
     //--------------------------------------------------------------------------
     {
       if (!part.exists())
@@ -4422,7 +4417,8 @@ namespace Legion {
       }
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexPartNode::get_owner_space(part, runtime);
-      if (owner == runtime->address_space)
+      // If we only want to do the test locally then return the result too
+      if ((owner == runtime->address_space) || local_only)
       {
         // See if it is in the set of pending partitions in which case we
         // can wait for it to be recorded
@@ -7721,8 +7717,11 @@ namespace Legion {
       if (!tight_index_space_set.has_triggered())
         Runtime::trigger_event(tight_index_space_set);
       // make sure all our gc updates are on the wire before sending unregisters
-      if (send_effects.exists() && !send_effects.has_triggered())
-        send_effects.wait();
+      // we do this in a hacky way by setting the reentrant_event, see the
+      // comment on the reentrant_event member of DistributedCollectable to
+      // see why we do it this way
+      if (send_effects.exists())
+        reentrant_event = send_effects;
     }
 
     //--------------------------------------------------------------------------
@@ -8636,10 +8635,11 @@ namespace Legion {
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
-        parent_node = context->get_node(parent, NULL, true/*can fail*/);
+        parent_node = context->get_node(parent, NULL/*defer*/,
+            true/*can fail*/, true/*first*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized, ready_event,
-          expr_id, true/*notify remote*/, NULL/*applied*/, is_remote_valid);
+          expr_id, false/*notify remote*/, NULL/*applied*/, is_remote_valid);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -9267,8 +9267,11 @@ namespace Legion {
       if (collective_mapping != NULL)
         delete collective_mapping;
       // make sure all our gc updates are on the wire before sending unregisters
-      if (send_effects.exists() && !send_effects.has_triggered())
-        send_effects.wait();
+      // we do this in a hacky way by setting the reentrant_event, see the
+      // comment on the reentrant_event member of DistributedCollectable to
+      // see why we do it this way
+      if (send_effects.exists())
+        reentrant_event = send_effects;
     }
 
     //--------------------------------------------------------------------------

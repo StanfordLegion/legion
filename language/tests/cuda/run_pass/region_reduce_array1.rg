@@ -41,14 +41,26 @@ do
   for e in r do e.a += inc end
 end
 
+-- task on device with read/write privileges forces the reductions to happen
+--   in GPU memory
+__demand(__cuda)
+task update(r : region(ispace(int2d), fs))
+where reads writes(r)
+do
+  for e in r do
+    e.a += array(1, 1, 1, 1, 1)
+    e.b += 2
+  end
+end
+
 task check(r : region(ispace(int2d), fs))
 where reads(r)
 do
   for e in r do
     for i = 0, 5 do
-      regentlib.assert(e.a[i] == 1 + (i + 2) * 2, "test failed")
+      regentlib.assert(e.a[i] == 2 + (i + 2) * 2, "test failed")
     end
-    regentlib.assert(e.b == 2, "test failed")
+    regentlib.assert(e.b == 4, "test failed")
   end
 end
 
@@ -58,6 +70,7 @@ task main()
   for c in p.colors do init(p[c]) end
   for c in p.colors do reduce(p[c]) end
   for c in p.colors do reduce(p[c]) end
+  for c in p.colors do update(p[c]) end
   for c in p.colors do check(p[c]) end
 end
 

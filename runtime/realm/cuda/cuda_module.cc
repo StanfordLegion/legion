@@ -637,25 +637,28 @@ namespace Realm {
       switch(fill_data_size) {
       case 1:
 	{
-	  CHECK_CU( cuMemsetD8Async(CUdeviceptr(dst), 
-				    *reinterpret_cast<const unsigned char *>(fill_data.direct),
-				    bytes,
+          unsigned char fill_u8;
+          memcpy(&fill_u8, fill_data.direct, 1);
+	  CHECK_CU( cuMemsetD8Async(CUdeviceptr(dst),
+                                    fill_u8, bytes,
 				    raw_stream) );
 	  break;
 	}
       case 2:
 	{
+          unsigned short fill_u16;
+          memcpy(&fill_u16, fill_data.direct, 2);
 	  CHECK_CU( cuMemsetD16Async(CUdeviceptr(dst), 
-				     *reinterpret_cast<const unsigned short *>(fill_data.direct),
-				     bytes >> 1,
+				     fill_u16, bytes >> 1,
 				     raw_stream) );
 	  break;
 	}
       case 4:
 	{
+          unsigned int fill_u32;
+          memcpy(&fill_u32, fill_data.direct, 4);
 	  CHECK_CU( cuMemsetD32Async(CUdeviceptr(dst), 
-				     *reinterpret_cast<const unsigned int *>(fill_data.direct),
-				     bytes >> 2,
+				     fill_u32, bytes >> 2,
 				     raw_stream) );
 	  break;
 	}
@@ -669,28 +672,31 @@ namespace Realm {
 	  // 16- and 32-bit fills must be aligned on every piece
 	  if((fill_data_size & 3) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
-	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+              unsigned int fill_u32;
+              memcpy(&fill_u32, srcdata + offset, 4);
 	      CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset,
 					   fill_data_size /*pitch*/,
-					   val,
+					   fill_u32,
 					   1 /*width*/, elements /*height*/,
 					   raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
-	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+              unsigned short fill_u16;
+              memcpy(&fill_u16, srcdata + offset, 2);
 	      CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset,
 					   fill_data_size /*pitch*/,
-					   val,
+					   fill_u16,
 					   1 /*width*/, elements /*height*/,
 					   raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned char val = *(srcdata + offset);
+              unsigned char fill_u8;
+              memcpy(&fill_u8, srcdata + offset, 1);
 	      CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset,
 					  fill_data_size /*pitch*/,
-					  val,
+					  fill_u8,
 					  1 /*width*/, elements /*height*/,
 					  raw_stream) );
 	    }
@@ -746,25 +752,28 @@ namespace Realm {
       switch(fill_data_size) {
       case 1:
 	{
+          unsigned char fill_u8;
+          memcpy(&fill_u8, fill_data.direct, 1);
 	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      *reinterpret_cast<const unsigned char *>(fill_data.direct),
-				      bytes, lines,
+				      fill_u8, bytes, lines,
 				      raw_stream) );
 	  break;
 	}
       case 2:
 	{
+          unsigned short fill_u16;
+          memcpy(&fill_u16, fill_data.direct, 2);
 	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned short *>(fill_data.direct),
-				       bytes >> 1, lines,
+				       fill_u16, bytes >> 1, lines,
 				       raw_stream) );
 	  break;
 	}
       case 4:
 	{
+          unsigned int fill_u32;
+          memcpy(&fill_u32, fill_data.direct, 4);
 	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned int *>(fill_data.direct),
-				       bytes >> 2, lines,
+				       fill_u32, bytes >> 2, lines,
 				       raw_stream) );
 	  break;
 	}
@@ -778,31 +787,34 @@ namespace Realm {
 	  // 16- and 32-bit fills must be aligned on every piece
 	  if((fill_data_size & 3) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
-	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+              unsigned int fill_u32;
+              memcpy(&fill_u32, srcdata + offset, 4);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u32,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
-	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+              unsigned short fill_u16;
+              memcpy(&fill_u16, srcdata + offset, 2);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u16,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned char val = *(srcdata + offset);
+              unsigned char fill_u8;
+              memcpy(&fill_u8, srcdata + offset, 1);
 	      for(size_t l = 0; l < lines; l++)
 		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					    fill_data_size /*pitch*/,
-					    val,
+					    fill_u8,
 					    1 /*width*/, elements /*height*/,
 					    raw_stream) );
 	    }
@@ -861,25 +873,28 @@ namespace Realm {
       switch(fill_data_size) {
       case 1:
 	{
+          unsigned char fill_u8;
+          memcpy(&fill_u8, fill_data.direct, 1);
 	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      *reinterpret_cast<const unsigned char *>(fill_data.direct),
-				      bytes, height,
+				      fill_u8, bytes, height,
 				      raw_stream) );
 	  break;
 	}
       case 2:
 	{
+          unsigned short fill_u16;
+          memcpy(&fill_u16, fill_data.direct, 2);
 	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned short *>(fill_data.direct),
-				       bytes >> 1, height,
+				       fill_u16, bytes >> 1, height,
 				       raw_stream) );
 	  break;
 	}
       case 4:
 	{
+          unsigned int fill_u32;
+          memcpy(&fill_u32, fill_data.direct, 4);
 	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       *reinterpret_cast<const unsigned int *>(fill_data.direct),
-				       bytes >> 2, height,
+				       fill_u32, bytes >> 2, height,
 				       raw_stream) );
 	  break;
 	}
@@ -893,31 +908,34 @@ namespace Realm {
 	  // 16- and 32-bit fills must be aligned on every piece
 	  if((fill_data_size & 3) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
-	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
+              unsigned int fill_u32;
+              memcpy(&fill_u32, srcdata + offset, 4);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u32,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
-	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
+              unsigned short fill_u16;
+              memcpy(&fill_u16, srcdata + offset, 2);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					     fill_data_size /*pitch*/,
-					     val,
+					     fill_u16,
 					     1 /*width*/, elements /*height*/,
 					     raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
-	      unsigned char val = *(srcdata + offset);
+              unsigned char fill_u8;
+              memcpy(&fill_u8, srcdata + offset, 1);
 	      for(size_t l = 0; l < height; l++)
 		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
 					    fill_data_size /*pitch*/,
-					    val,
+					    fill_u8,
 					    1 /*width*/, elements /*height*/,
 					    raw_stream) );
 	    }
@@ -974,8 +992,11 @@ namespace Realm {
 
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
+      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
 
-      if(!pinned_sysmems.empty()) {
+      // treat managed mem like pinned sysmem on the assumption that most data
+      //  is usually in system memory
+      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
 	r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
 	r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
 
@@ -993,8 +1014,19 @@ namespace Realm {
 	  mma.latency = 200;  // "bad"
 	  r->add_mem_mem_affinity(mma);
 	}
+
+	for(std::set<Memory>::const_iterator it = managed_mems.begin();
+	    it != managed_mems.end();
+	    ++it) {
+	  Machine::MemoryMemoryAffinity mma;
+	  mma.m1 = fbmem->me;
+	  mma.m2 = *it;
+	  mma.bandwidth = 20; // "medium"
+	  mma.latency = 300;  // "worse" (pessimistically assume faults)
+	  r->add_mem_mem_affinity(mma);
+	}
       } else {
-	log_gpu.warning() << "GPU " << proc->me << " has no pinned system memories!?";
+	log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
 
       // only create a p2p channel if we have peers (and an fb)
@@ -1746,18 +1778,17 @@ namespace Realm {
 
     static size_t reduce_fill_size(const void *fill_data, size_t fill_data_size)
     {
-      const char *as_char = reinterpret_cast<const char *>(fill_data);
+      const char *as_char = static_cast<const char *>(fill_data);
       // try powers of 2 up to 128 bytes
       for(size_t step = 1; step <= 128; step <<= 1) {
-	bool ok = (fill_data_size % step) == 0;  // must divide evenly
-	for(size_t pos = step; ok && (pos < fill_data_size); pos += step)
-	  for(size_t i = 0; i < step; i++)
-	    if(as_char[pos + i] != as_char[pos + i - step]) {
-	      ok = false;
-	      break;
-	    }
-	if(ok)
-	  return step;
+        // must divide evenly
+        if((fill_data_size % step) != 0)
+          continue;
+
+        // compare to ourselves shifted by the step size - it if matches then
+        //  the first few bytes repeat through the rest
+        if(!memcmp(as_char, as_char + step, fill_data_size - step))
+          return step;
       }
       // no attempt to optimize non-power-of-2 repeat patterns right now
       return fill_data_size;
@@ -2191,8 +2222,9 @@ namespace Realm {
     // class GPUZCMemory
 
     GPUZCMemory::GPUZCMemory(Memory _me,
-			     CUdeviceptr _gpu_base, void *_cpu_base, size_t _size)
-      : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
+			     CUdeviceptr _gpu_base, void *_cpu_base, size_t _size,
+                             MemoryKind _kind, Memory::Kind _lowlevel_kind)
+      : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
       // advertise ourselves as a host memory
@@ -2637,7 +2669,7 @@ namespace Realm {
 	     CUcontext _context,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), context(_context), next_stream(0)
+      , proc(0), fbmem(0), context(_context), fbmem_base(0), next_stream(0)
     {
       push_context();
 
@@ -2690,7 +2722,8 @@ namespace Realm {
       }
 
       // free memory
-      CHECK_CU( cuMemFree(fbmem_base) );
+      if(fbmem_base)
+        CHECK_CU( cuMemFree(fbmem_base) );
 
       CHECK_CU( cuDevicePrimaryCtxRelease(info->device) );
     }
@@ -2726,12 +2759,31 @@ namespace Realm {
 	runtime->add_proc_mem_affinity(pma);
       }
 
-      if(module->zcmem) {
+      for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
+          it != pinned_sysmems.end();
+          ++it) {
+        // no processor affinity to IB memories
+        if(!ID(*it).is_memory()) continue;
+
 	Machine::ProcessorMemoryAffinity pma;
 	pma.p = p;
-	pma.m = module->zcmem->me;
+	pma.m = *it;
 	pma.bandwidth = 20; // "medium"
 	pma.latency = 200;  // "bad"
+	runtime->add_proc_mem_affinity(pma);
+      }
+
+      for(std::set<Memory>::const_iterator it = managed_mems.begin();
+          it != managed_mems.end();
+          ++it) {
+        // no processor affinity to IB memories
+        if(!ID(*it).is_memory()) continue;
+
+	Machine::ProcessorMemoryAffinity pma;
+	pma.p = p;
+	pma.m = *it;
+	pma.bandwidth = 20; // "medium"
+        pma.latency = 300;  // "worse" (pessimistically assume faults)
 	runtime->add_proc_mem_affinity(pma);
       }
 
@@ -2845,6 +2897,21 @@ namespace Realm {
       size_t size;
       CHECK_CU( cuModuleGetGlobal(&ptr, &size, module, var->device_name) );
       device_variables[var->host_var] = ptr;
+
+      // if this is a managed variable, the "host_var" is actually a pointer
+      //  we need to fill in, so do that now
+      if(var->managed) {
+        CUdeviceptr *indirect = const_cast<CUdeviceptr *>(static_cast<const CUdeviceptr *>(var->host_var));
+        if(*indirect) {
+          // it's already set - make sure we're consistent (we're probably not)
+          if(*indirect != ptr) {
+            log_gpu.fatal() << "__managed__ variables are not supported when using multiple devices with CUDART hijack enabled";
+            abort();
+          }
+        } else {
+          *indirect = ptr;
+        }
+      }
     }
     
     void GPU::register_function(const RegisteredFunction *func)
@@ -2865,8 +2932,36 @@ namespace Realm {
       CUmodule module = it->second;
 
       CUfunction f;
-      CHECK_CU( cuModuleGetFunction(&f, module, func->device_fun) );
-      device_functions[func->host_fun] = f;
+      // the cuda runtime apparently permits calls to __cudaRegisterFunction
+      //  that name a symbol that does not actually exist in the module - since
+      //  we are doing eager lookup, we need to tolerate CUDA_ERROR_NOT_FOUND
+      //  results here
+      CUresult res = cuModuleGetFunction(&f, module, func->device_fun);
+      switch(res) {
+      case CUDA_SUCCESS:
+        {
+          device_functions[func->host_fun] = f;
+          break;
+        }
+      case CUDA_ERROR_NOT_FOUND:
+        {
+          // just an informational message here - an actual attempt to invoke
+          //  this kernel will be a fatal error at the call site
+          log_gpu.info() << "symbol '" << func->device_fun
+                         << "' not found in module " << module;
+          break;
+        }
+      default:
+        {
+          const char *name, *str;
+          cuGetErrorName(res, &name);
+          cuGetErrorString(res, &str);
+          log_gpu.fatal() << "unexpected error when looking up device function '"
+                          << func->device_fun << "' in module " << module
+                          << ": " << str << " (" << name << ")";
+          abort();
+        }
+      }
     }
 
     CUfunction GPU::lookup_function(const void *func)
@@ -2972,6 +3067,7 @@ namespace Realm {
       , cfg_zc_mem_size(64 << 20)
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
+      , cfg_uvm_mem_size(0)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(1)
       , cfg_use_worker_threads(false)
@@ -2985,6 +3081,7 @@ namespace Realm {
       , cfg_max_ctxsync_threads(4)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
+      , uvm_base(0), uvmmem(0)
     {}
       
     CudaModule::~CudaModule(void)
@@ -3068,6 +3165,7 @@ namespace Realm {
 	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
 	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
 	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+          .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
@@ -3231,7 +3329,8 @@ namespace Realm {
 
 	Memory m = runtime->next_local_memory_id();
 	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-				cfg_zc_mem_size);
+				cfg_zc_mem_size,
+                                MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
 	runtime->add_memory(zcmem);
 
 	// add the ZC memory as a pinned memory to all GPUs
@@ -3286,6 +3385,57 @@ namespace Realm {
           }
         }
       }
+
+      // a single unified (managed) memory for everybody
+      if((cfg_uvm_mem_size > 0) && !gpus.empty()) {
+	CUdeviceptr uvm_gpu_base;
+	// borrow GPU 0's context for the allocation call
+	{
+	  AutoGPUContext agc(gpus[0]);
+
+          CUresult ret = cuMemAllocManaged(&uvm_gpu_base, cfg_uvm_mem_size,
+                                           CU_MEM_ATTACH_GLOBAL);
+	  if(ret != CUDA_SUCCESS) {
+	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+	      log_gpu.fatal() << "unable to allocate managed memory: "
+			      << cfg_uvm_mem_size << " bytes needed (from -ll:msize)";
+	    } else {
+	      const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+	      cuGetErrorName(ret, &errstring);
+#endif
+	      log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
+			      << " (" << errstring << ")";
+	    }
+	    abort();
+	  }
+        }
+
+        uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
+	Memory m = runtime->next_local_memory_id();
+	uvmmem = new GPUZCMemory(m, uvm_gpu_base, uvm_base,
+                                 cfg_uvm_mem_size,
+                                 MemoryImpl::MKIND_MANAGED,
+                                 Memory::Kind::GPU_MANAGED_MEM);
+	runtime->add_memory(uvmmem);
+
+        // add the managed memory to any GPU capable of coherent access
+	for(unsigned i = 0; i < gpus.size(); i++) {
+          int concurrent_access;
+	  {
+	    AutoGPUContext agc(gpus[i]);
+            CHECK_CU( cuDeviceGetAttribute(&concurrent_access,
+                                           CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+                                           gpus[i]->info->device) );
+          }
+
+          if(concurrent_access) {
+            gpus[i]->managed_mems.insert(uvmmem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i << " is not capable of concurrent access to managed memory!";
+	  }
+	}
+      }
     }
 
     // create any processors provided by the module (default == do nothing)
@@ -3319,9 +3469,11 @@ namespace Realm {
 	for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
 	    it != all_local_mems.end();
 	    it++) {
-	  // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
+	  // ignore FB/ZC/managed memories or anything that doesn't have a
+          //   "direct" pointer
 	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
-	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
+	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY) ||
+             ((*it)->kind == MemoryImpl::MKIND_MANAGED))
 	    continue;
 
 	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
@@ -3421,6 +3573,12 @@ namespace Realm {
 	CHECK_CU( cuMemFreeHost(zcib_cpu_base) );
       }
 
+      if(uvm_base) {
+	assert(!gpus.empty());
+	AutoGPUContext agc(gpus[0]);
+	CHECK_CU( cuMemFree(reinterpret_cast<CUdeviceptr>(uvm_base)) );
+      }
+
       // also unregister any host memory at this time
       if(!registered_host_ptrs.empty()) {
 	AutoGPUContext agc(gpus[0]);
@@ -3457,9 +3615,11 @@ namespace Realm {
 
     RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
 					   const char *_device_name, bool _external,
-					   int _size, bool _constant, bool _global)
+					   int _size, bool _constant, bool _global,
+                                           bool _managed)
       : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
-	external(_external), size(_size), constant(_constant), global(_global)
+	external(_external), size(_size), constant(_constant), global(_global),
+        managed(_managed)
     {}
 
 

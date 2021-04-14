@@ -254,7 +254,7 @@ if(Legion_USE_CUDA)
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
 
-  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" OFF)
+  option(Legion_GPU_REDUCTIONS "Use tasks to perform reductions on GPU" OFF)
   if(Legion_GPU_REDUCTIONS)
     set(LEGION_GPU_REDUCTIONS ON)
   endif()
@@ -275,6 +275,68 @@ if(Legion_USE_CUDA)
   # runtime.cc uses cuda.h
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CUDA_INCLUDE_DIRS}")
 endif()
+
+#------------------------------------------------------------------------------#
+# HIP configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_HIP "Enable support for the HIP runtime on AMD/NVIDIA GPU" OFF)
+set(Legion_HIP_TARGETS ROCM CUDA)
+set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
+set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
+if(Legion_USE_HIP)
+  if (Legion_HIP_TARGET STREQUAL "CUDA")
+    set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
+
+    if(NOT BUILD_SHARED_LIBS)
+      set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
+    else()
+      set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
+    endif()
+    find_package(CUDA REQUIRED)
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+    )
+    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
+    )
+    set(HIPCC_FLAGS "-D__HIP_PLATFORM_NVCC__")    
+  endif()
+  
+  if (Legion_HIP_TARGET STREQUAL "ROCM")
+    set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
+
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+    )
+    set(HIPCC_FLAGS "-D__CUDACC__ -D__CUDA_ARCH__=800")
+    if("${Legion_HIP_ARCH}" STREQUAL "")
+      set(HIP_GENCODE "")
+    else()
+      set(HIP_GENCODE "--amdgpu-target=${Legion_HIP_ARCH}")
+    endif()
+  endif()
+  
+  # find the hip library
+  find_package(HIP REQUIRED)
+
+  # define variable for legion_defines.h
+  set(LEGION_USE_HIP ON)
+
+  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" ON)
+  if(Legion_GPU_REDUCTIONS)
+    set(LEGION_GPU_REDUCTIONS ON)
+  endif()
+
+  # define variable for realm_defines.h
+  set(REALM_USE_HIP ON)
+
+  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
+  if(Legion_HIJACK_HIP)
+    set(REALM_USE_HIP_HIJACK ON)
+  endif()
+
+endif()
+
 
 #------------------------------------------------------------------------------#
 # network interface configuration
@@ -587,6 +649,20 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
     set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
+  endif()
+  
+  if(Legion_HIP_TARGET STREQUAL "CUDA")
+    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
+    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
+    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${HIPCC_FLAGS}")
+  endif()
+
+  if(Legion_HIP_TARGET STREQUAL "ROCM")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} ${HIPCC_FLAGS} ${HIP_GENCODE}")
   endif()
 
   if(Legion_BUILD_ALL OR Legion_BUILD_APPS)

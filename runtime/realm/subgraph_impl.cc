@@ -281,10 +281,12 @@ namespace Realm {
       } else {
 	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(it.redop_id, 0);
 	assert((it.target_offset + redop->sizeof_lhs) <= dstlen);
-	redop->apply(reinterpret_cast<char *>(scratch_buffer) + it.target_offset,
-		     reinterpret_cast<const char *>(srcdata) + it.offset,
-		     1 /*count*/,
-		     true /*exclusive*/);
+	(redop->cpu_apply_excl_fn)(reinterpret_cast<char *>(scratch_buffer) + it.target_offset,
+                                   0,
+                                   reinterpret_cast<const char *>(srcdata) + it.offset,
+                                   0,
+                                   1 /*count*/,
+                                   redop->userdata);
       }
     }
 
@@ -317,10 +319,12 @@ namespace Realm {
       } else {
 	const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(it.redop_id, 0);
 	assert((it.target_offset + redop->sizeof_lhs) <= sizeof(T));
-	redop->apply(reinterpret_cast<char *>(&val) + it.target_offset,
-		     reinterpret_cast<const char *>(srcdata) + it.offset,
-		     1 /*count*/,
-		     true /*exclusive*/);
+	(redop->cpu_apply_excl_fn)(reinterpret_cast<char *>(&val) + it.target_offset,
+                                   0,
+                                   reinterpret_cast<const char *>(srcdata) + it.offset,
+                                   0,
+                                   1 /*count*/,
+                                   redop->userdata);
       }
     }
 

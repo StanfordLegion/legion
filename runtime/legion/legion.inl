@@ -53,9 +53,11 @@ namespace Legion {
         Runtime::legion_task_postamble(rt, ctx, result, result_size, owned);
       }
       static inline Future from_value_helper(Runtime *rt, 
-          const void *value, size_t value_size, bool owned)
+          const void *value, size_t value_size, bool owned,
+          Memory::Kind memkind = Memory::SYSTEM_MEM,
+          void (*freefunc)(void*,size_t) = NULL)
       {
-        return rt->from_value(value, value_size, owned);
+        return rt->from_value(value, value_size, owned, memkind, freefunc);
       }
 
       // WARNING: There are two levels of SFINAE (substitution failure is 
@@ -91,8 +93,9 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          const void *result = 
-            f.get_untyped_pointer(silence_warnings, warning_string);
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                false/*check size*/, silence_warnings, warning_string);
           T derez;
           derez.legion_deserialize(result);
           return derez;
@@ -105,6 +108,9 @@ namespace Legion {
         static inline void end_task(Runtime *rt, Context ctx,
                                     DeferredReduction<REDOP,EXCLUSIVE> *result)
         {
+          static_assert(!IsSerdezType<typename REDOP::RHS>::value, 
+              "Legion does not currently support serialize/deserialize "
+              "methods on types in DefrredReductions");
           result->finalize(rt, ctx);
         }
         static inline Future from_value(Runtime *rt, 
@@ -120,7 +126,9 @@ namespace Legion {
         {
           // Should never be called
           assert(false);
-          const void *result = f.get_untyped_pointer(silence_warnings, warning);
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                      false/*check size*/, silence_warnings, warning);
           return (*((const DeferredReduction<REDOP,EXCLUSIVE>*)result));
         }
       };
@@ -131,6 +139,9 @@ namespace Legion {
         static inline void end_task(Runtime *rt, Context ctx,
                                     DeferredValue<T> *result)
         {
+          static_assert(!IsSerdezType<T>::value,
+              "Legion does not currently support serialize/deserialize "
+              "methods on types in DeferredValues");
           result->finalize(rt, ctx);
         }
         static inline Future from_value(Runtime *rt, const DeferredValue<T> *value)
@@ -145,8 +156,9 @@ namespace Legion {
         {
           // Should never be called
           assert(false);
-          const void *result = 
-            f.get_untyped_pointer(silence_warnings, warning_string);
+          size_t size = 0;
+          const void *result = f.get_buffer(Memory::SYSTEM_MEM, &size,
+                false/*check size*/, silence_warnings, warning_string);
           return (*((const DeferredValue<T>*)result));
         }
       }; 
@@ -165,7 +177,11 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return f.get_reference<T>(silence_warnings, warning_string);
+          size_t size = sizeof(T);
+          const T *result = static_cast<const T*>(f.get_buffer(
+                Memory::SYSTEM_MEM, &size, true/*check size*/,
+                silence_warnings, warning_string));
+          return *result;
         }
       };
 
@@ -217,7 +233,11 @@ namespace Legion {
         static inline T unpack(const Future &f, bool silence_warnings,
                                const char *warning_string)
         {
-          return f.get_reference<T>(silence_warnings, warning_string);
+          size_t size = sizeof(T);
+          const T* result = static_cast<const T*>(f.get_buffer(
+                Memory::SYSTEM_MEM, &size, true/*check size*/,
+                silence_warnings, warning_string));
+          return *result;
         }
       };
 
@@ -251,7 +271,7 @@ namespace Legion {
                               void *&ptr, size_t &size)
       {
         REDOP_RHS init_serdez;
-        reduction_op->init(&init_serdez, 1);
+        memcpy(&init_serdez, reduction_op->identity, reduction_op->sizeof_rhs);
         size_t new_size = init_serdez.legion_buffer_size();
         if (new_size > size)
         {
@@ -269,7 +289,8 @@ namespace Legion {
         REDOP_RHS lhs_serdez, rhs_serdez;
         lhs_serdez.legion_deserialize(lhs_ptr);
         rhs_serdez.legion_deserialize(rhs_ptr);
-        reduction_op->fold(&lhs_serdez, &rhs_serdez, 1, true/*exclusive*/);
+        (reduction_op->cpu_fold_excl_fn)(&lhs_serdez, 0, &rhs_serdez, 0,
+                                         1, reduction_op->userdata);
         size_t new_size = lhs_serdez.legion_buffer_size();
         // Reallocate the buffer if it has grown
         if (new_size > lhs_size)
@@ -2086,15 +2107,15 @@ namespace Legion {
         Tester(void) : M(0) { }
         Tester(const DomainT<N,T> b) 
           : bounds(b), M(N), has_source(false), 
-            has_transform(false), gpu_warning(true) { }
+            has_transform(false) { }
         Tester(const DomainT<N,T> b, const Rect<N,T> s)
           : bounds(b), source(s), M(N), has_source(true), 
-            has_transform(false), gpu_warning(true) { }
+            has_transform(false) { }
         template<int M2>
         Tester(const DomainT<M2,T> b,
                const AffineTransform<M2,N,T> t) 
           : bounds(b), transform(t), M(M2), has_source(false), 
-            has_transform(!t.is_identity()), gpu_warning(true)
+            has_transform(!t.is_identity())
         { 
           LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
@@ -2103,7 +2124,7 @@ namespace Legion {
         Tester(const DomainT<M2,T> b, const Rect<N,T> s,
                const AffineTransform<M2,N,T> t) 
           : bounds(b), transform(t), source(s), M(M2), has_source(true), 
-            has_transform(!t.is_identity()), gpu_warning(true)
+            has_transform(!t.is_identity())
         { 
           LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM,
               "Accessor DIM larger than LEGION_MAX_DIM");
@@ -2115,8 +2136,7 @@ namespace Legion {
           if (has_source && !source.contains(p))
             return false;
 #ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
+          check_gpu_warning();
           // Note that in CUDA this function is likely being inlined
           // everywhere and we can't afford to instantiate templates
           // for every single dimension so do things untyped
@@ -2158,8 +2178,7 @@ namespace Legion {
           if (has_source && !source.contains(r))
             return false;
 #ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
+          check_gpu_warning();
           // Note that in CUDA this function is likely being inlined
           // everywhere and we can't afford to instantiate templates
           // for every single dimension so do things untyped
@@ -2212,7 +2231,6 @@ namespace Legion {
           bool need_warning = !bounds.dense();
           if (need_warning)
             printf("WARNING: GPU bounds check is imprecise!\n");
-          gpu_warning = false;
 #endif
         }
       private:
@@ -2222,7 +2240,6 @@ namespace Legion {
         int M;
         bool has_source;
         bool has_transform;
-        mutable bool gpu_warning;
       };
     };
 
@@ -2234,14 +2251,34 @@ namespace Legion {
       {
         ptrdiff_t exp_offset = field_size;
         int used_mask = 0; // keep track of the dimensions we've already matched
+        static_assert((N <= (8*sizeof(used_mask))), "Mask dim exceeded");
         for (int i = 0; i < N; i++) {
           bool found = false;
           for (int j = 0; j < N; j++) {
             if ((used_mask >> j) & 1) continue;
             if (strides[j] != exp_offset) continue;
             found = true;
+            // It's possible other dimensions can have the same strides if
+            // there are multiple dimensions with extents of size 1. At most
+            // one dimension can have an extent >1 though
+            int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
+            for (int k = j+1; k < N; k++) {
+              if ((used_mask >> k) & 1) continue;
+              if (strides[k] == exp_offset) {
+                if (bounds.lo[k] < bounds.hi[k]) {
+                  // if we already saw a non-trivial dimension this is bad
+                  if (nontrivial >= 0)
+                    return false;
+                  else
+                    nontrivial = k;
+                }
+                used_mask |= (1 << k);
+                i++;
+              }
+            }
             used_mask |= (1 << j);
-            exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+            if (nontrivial >= 0)
+              exp_offset *= (bounds.hi[nontrivial] - bounds.lo[nontrivial] + 1);
             break;
           }
           if (!found)
@@ -2257,14 +2294,34 @@ namespace Legion {
       {
         size_t exp_offset = field_size;
         int used_mask = 0; // keep track of the dimensions we've already matched
+        static_assert((N <= (8*sizeof(used_mask))), "Mask dim exceeded");
         for (int i = 0; i < N; i++) {
           bool found = false;
           for (int j = 0; j < N; j++) {
             if ((used_mask >> j) & 1) continue;
             if (strides[j] != exp_offset) continue;
             found = true;
+            // It's possible other dimensions can have the same strides if
+            // there are multiple dimensions with extents of size 1. At most
+            // one dimension can have an extent >1 though
+            int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
+            for (int k = j+1; k < N; k++) {
+              if ((used_mask >> k) & 1) continue;
+              if (strides[k] == exp_offset) {
+                if (bounds.lo[k] < bounds.hi[k]) {
+                  // if we already saw a non-trivial dimension this is bad
+                  if (nontrivial >= 0)
+                    return false;
+                  else
+                    nontrivial = k;
+                }
+                used_mask |= (1 << k);
+                i++;
+              }
+            }
             used_mask |= (1 << j);
-            exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+            if (nontrivial >= 0)
+              exp_offset *= (bounds.hi[nontrivial] - bounds.lo[nontrivial] + 1);
             break;
           }
           if (!found)
@@ -10623,7 +10680,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -11124,7 +11181,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -11601,7 +11658,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -12068,7 +12125,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -12438,7 +12495,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,N,T> accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -12795,7 +12852,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::AffineAccessor<FT,1,T> accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -13127,7 +13184,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -13446,7 +13503,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -13743,7 +13800,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -14026,7 +14083,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -14240,7 +14297,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
+      Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -14437,7 +14494,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
+      Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -15343,7 +15400,7 @@ namespace Legion {
     {
       Runtime::legion_task_postamble(runtime, ctx,
                     accessor.ptr(Point<1,coord_t>(0)), sizeof(T),
-                    false/*owner*/, instance);
+                    true/*owner*/, instance);
     }
 
     //--------------------------------------------------------------------------
@@ -15360,7 +15417,8 @@ namespace Legion {
                                                 typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
-      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+      REDOP::template fold<EXCLUSIVE>(
+          this->accessor[Point<1,coord_t>(0)], value);
     }
 
     //--------------------------------------------------------------------------
@@ -15369,7 +15427,8 @@ namespace Legion {
                                                 typename REDOP::RHS value) const
     //--------------------------------------------------------------------------
     {
-      REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
+      REDOP::template fold<EXCLUSIVE>(
+          this->accessor[Point<1,coord_t>(0)], value);
     }
 
 #ifdef LEGION_BOUNDS_CHECKS
@@ -18771,13 +18830,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, PrivilegeMode PM>
+    inline Span<T,PM> Future::get_span(Memory::Kind memory,
+                        bool silence_warnings, const char *warning_string) const
+    //--------------------------------------------------------------------------
+    {
+      // This has to be true for now
+      static_assert(PM == LEGION_READ_ONLY, 
+      "PrivilegeMode for Future:get_span must be 'LEGION_READ_ONLY' currently");
+      size_t size = 0;
+      const void *ptr = get_buffer(memory, &size, false/*check size*/, 
+                                   silence_warnings, warning_string);
+      assert((size % sizeof(T)) == 0);
+      return Span<T,PM>(ptr, size / sizeof(T));
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline const T& Future::get_reference(bool silence_warnings,
                                           const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      return *((const T*)get_untyped_result(silence_warnings, warning_string,
-                                            true/*check size*/, sizeof(T)));
+      size_t size = sizeof(T);
+      const void *ptr = get_buffer(Memory::SYSTEM_MEM, &size, 
+          true/*check size*/, silence_warnings, warning_string);
+      assert(size == sizeof(T));
+      return *static_cast<const T*>(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -18785,7 +18863,9 @@ namespace Legion {
                                                const char *warning_string) const
     //--------------------------------------------------------------------------
     {
-      return get_untyped_result(silence_warnings, warning_string, false);
+      size_t size = 0;
+      return get_buffer(Memory::SYSTEM_MEM, &size, false/*check size*/,
+                        silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -18820,12 +18900,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline Future Future::from_untyped_pointer(Runtime *rt,
-							  const void *buffer,
-							  size_t bytes)
+                           const void *buffer, size_t bytes, bool owned,
+                           Memory::Kind memkind, void (*freefunc)(void*,size_t))
     //--------------------------------------------------------------------------
     {
-      return LegionSerialization::from_value_helper(rt, buffer, bytes,
-						    false /*!owned*/);
+      return LegionSerialization::from_value_helper(rt, buffer, bytes, owned,
+                                                    memkind, freefunc);
     }
 
     //--------------------------------------------------------------------------
@@ -20481,12 +20561,31 @@ namespace Legion {
               create_temporary_buffer<Rect<N,T> >(memory, bounds);
             Realm::AffineAccessor<size_t,1,coord_t> device_scan_volumes =
               create_temporary_buffer<size_t>(memory, scan_bounds);
+#ifdef LEGION_USE_CUDA            
             cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
                 &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
                 cudaMemcpyHostToDevice);
             cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo), 
                 &scan_volumes.front(), scan_volumes.size() * sizeof(size_t), 
                 cudaMemcpyHostToDevice);
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+            hipMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                hipMemcpyHostToDevice, hipGetTaskStream());
+            hipMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                hipMemcpyHostToDevice, hipGetTaskStream());
+#else
+            cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                cudaMemcpyHostToDevice, hipGetTaskStream());
+            cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                cudaMemcpyHostToDevice, hipGetTaskStream());
+#endif
+#endif
             const size_t blocks = (sum_volume + LEGION_THREADS_PER_BLOCK - 1) / 
               LEGION_THREADS_PER_BLOCK;
             // Iterate over all the fields we should handle
@@ -20520,35 +20619,112 @@ namespace Legion {
                 const Realm::AffineAccessor<typename REDOP::RHS,N,T> 
                   dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
                 // Now launch the kernel
-                if (exclusive)
+                if (exclusive) {
+#ifdef LEGION_USE_CUDA
                   fold_kernel<REDOP,N,T,true>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
-                else
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(fold_kernel<REDOP,N,T,true>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  fold_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif
+                } else {
+#ifdef LEGION_USE_CUDA
                   fold_kernel<REDOP,N,T,false>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(fold_kernel<REDOP,N,T,false>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  fold_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif
+                } 
               }
               else
               {
                 const Realm::AffineAccessor<typename REDOP::LHS,N,T> 
                   dst_accessor(dst_insts[fidx], dst_fields[fidx], piece_rect);
                 // Now launch the kernel
-                if (exclusive)
+                if (exclusive) {
+#ifdef LEGION_USE_CUDA
                   apply_kernel<REDOP,N,T,true>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
-                else
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(apply_kernel<REDOP,N,T,true>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 
+                    0, hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  apply_kernel<REDOP,N,T,true>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif 
+                } else {
+#ifdef LEGION_USE_CUDA
                   apply_kernel<REDOP,N,T,false>
                     <<<blocks,LEGION_THREADS_PER_BLOCK>>>(
                     dst_accessor, src_accessor, device_piece_rects,
                     device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+                  hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(apply_kernel<REDOP,N,T,false>), 
+                    dim3(blocks), dim3(LEGION_THREADS_PER_BLOCK), 0, 
+                    hipGetTaskStream(),
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#else
+                  apply_kernel<REDOP,N,T,false>
+                    <<<blocks,LEGION_THREADS_PER_BLOCK, 0, hipGetTaskStream()>>>(
+                    dst_accessor, src_accessor, device_piece_rects,
+                    device_scan_volumes, order, sum_volume, piece_rects.size());
+#endif
+#endif 
+                }
               }
             }
           }
+#ifdef LEGION_USE_HIP
+#ifdef __HIP_PLATFORM_HCC__
+          hipStreamSynchronize(hipGetTaskStream());
+#else
+          cudaStreamSynchronize(hipGetTaskStream());
+#endif
+#endif
         }
 
         template<typename N, typename T>
@@ -20751,10 +20927,6 @@ namespace Legion {
           "Future types are not permitted as return types for Legion tasks");
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
           "FutureMap types are not permitted as return types for Legion tasks");
-      // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE,
-          "Task return values must be less than or equal to "
-          "LEGION_MAX_RETURN_SIZE bytes");
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
@@ -20802,12 +20974,6 @@ namespace Legion {
           "Future types are not permitted as return types for Legion tasks");
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value),
           "FutureMap types are not permitted as return types for Legion tasks");
-      // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT((sizeof(T) <= LEGION_MAX_RETURN_SIZE) ||
-         (std::is_class<T>::value && 
-          LegionSerialization::IsSerdezType<T>::value),
-         "Task return values must be less than or equal to "
-          "LEGION_MAX_RETURN_SIZE bytes");
 
       const Task *task; Context ctx; Runtime *rt;
       const std::vector<PhysicalRegion> *regions;

@@ -100,6 +100,8 @@ namespace Legion {
       virtual void handle_registration_callback_effects(RtEvent effects) = 0;
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
+      virtual Future from_value(const void *value, size_t value_size,
+          bool owned, Memory::Kind memkind, void (*freefunc)(void*,size_t));
       virtual ShardID get_shard_id(void) const;
       virtual size_t get_num_shards(void) const;
       virtual Future consensus_match(const void *input, void *output,
@@ -371,7 +373,8 @@ namespace Legion {
                                    ReductionOpID redop, bool deterministic,
                                    std::vector<OutputRequirement> *outputs) = 0;
       virtual Future reduce_future_map(const FutureMap &future_map,
-                                   ReductionOpID redop, bool deterministic) = 0;
+                                   ReductionOpID redop, bool deterministic,
+                                   MapperID map_id, MappingTagID tag) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                              bool collective = false,
@@ -445,12 +448,6 @@ namespace Legion {
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true) = 0;
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance = 
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false) = 0;
       virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -529,12 +526,20 @@ namespace Legion {
                                         Realm::InstanceLayoutGeneric *layout);
       virtual void destroy_task_local_instance(PhysicalInstance instance);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                    PhysicalInstance inst, FutureFunctor *callback_functor) = 0;
-      virtual void post_end_task(const void *res, size_t res_size, 
-                               bool owned, FutureFunctor *callback_functor) = 0;
+                    PhysicalInstance inst, FutureFunctor *callback_functor,
+                    Memory::Kind memory, void (*freefunc)(void*,size_t),
+                    const void *metadataptr, size_t metadatasize);
+      virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
+                                 FutureFunctor *callback_functor,
+                                 bool own_callback_functor) = 0;
       uintptr_t escape_task_local_instance(PhysicalInstance instance);
+      FutureInstance* copy_to_future_inst(const void *value, size_t size,
+                                          Memory memory, RtEvent &done);
+      FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
       void begin_misspeculation(void);
-      void end_misspeculation(const void *res, size_t res_size);
+      void end_misspeculation(FutureInstance *instance,
+                              const void *metadata, size_t metasize);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f) = 0;
@@ -640,8 +645,7 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
-      void release_task_local_instances(PhysicalInstance return_inst);
-      void release_future_local_instance(PhysicalInstance return_inst);
+      void release_task_local_instances(void);
     protected:
       Future predicate_task_false(const TaskLauncher &launcher);
       FutureMap predicate_index_task_false(size_t context_index,
@@ -662,6 +666,7 @@ namespace Legion {
       mutable LocalLock                         privilege_lock;
       int                                       depth;
       unsigned                                  next_created_index;
+      RtEvent                                   last_registration; 
       // Application tasks can manipulate these next two data
       // structure by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
@@ -762,22 +767,22 @@ namespace Legion {
       };
       struct PostTaskArgs {
       public:
-        PostTaskArgs(TaskContext *ctx, size_t idx, const void *r, size_t s,
-                     PhysicalInstance i, RtEvent w, FutureFunctor *f, bool o)
-          : context(ctx), index(idx), result(r), size(s), 
-            instance(i), wait_on(w), functor(f), owned(o) { }
+        PostTaskArgs(TaskContext *ctx, size_t x, RtEvent w,
+            FutureInstance *i, void *m, size_t s, FutureFunctor *f, bool o)
+          : context(ctx), index(x), wait_on(w), instance(i), 
+            metadata(m), metasize(s), functor(f), own_functor(o) { }
       public:
         inline bool operator<(const PostTaskArgs &rhs) const
           { return index < rhs.index; }
       public:
         TaskContext *context;
         size_t index;
-        const void *result;
-        size_t size;
-        PhysicalInstance instance;
         RtEvent wait_on;
+        FutureInstance *instance;
+        void *metadata;
+        size_t metasize;
         FutureFunctor *functor;
-        bool owned;
+        bool own_functor;
       };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
@@ -863,6 +868,7 @@ namespace Legion {
                                 std::vector<IndexSpace> &&spaces);
         virtual ~AttachProjectionFunctor(void) { }
       public:
+        using ProjectionFunctor::project;
         virtual LogicalRegion project(LogicalRegion upper_bound,
                                       const DomainPoint &point,
                                       const Domain &launch_domain);
@@ -1226,7 +1232,8 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
-                                       ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(const Domain &domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                              bool collective = false,
@@ -1310,12 +1317,12 @@ namespace Legion {
                                               bool unordered = false,
                                               bool outermost = true);
       void process_dependence_stage(void);
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false);
+      void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
+                                  FutureInstance *instance,
+                                  FutureFunctor *callback_functor,
+                                  bool own_callback_functor,
+                                  const void *metadataptr,
+                                  size_t metadatasize);
       bool process_post_end_tasks(void);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
@@ -1405,9 +1412,13 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                        PhysicalInstance inst, FutureFunctor *callback_functor);
-      virtual void post_end_task(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *callback_functor);
+                        PhysicalInstance inst, FutureFunctor *callback_functor,
+                        Memory::Kind memory, void (*freefunc)(void*,size_t),
+                        const void *metadataptr, size_t metadatasize);
+      virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
+                                 FutureFunctor *callback_functor,
+                                 bool own_callback_functor);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -1527,7 +1538,6 @@ namespace Legion {
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
-      RtEvent last_registration; 
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
@@ -1785,6 +1795,7 @@ namespace Legion {
         REPLICATE_ADVANCE_PHASE_BARRIER,
         REPLICATE_ADVANCE_DYNAMIC_COLLECTIVE,
         REPLICATE_END_TASK,
+        REPLICATE_FUTURE_FROM_VALUE,
       };
     public:
       class AttachDetachShardingFunctor : public ShardingFunctor {
@@ -1898,6 +1909,8 @@ namespace Legion {
       virtual void handle_registration_callback_effects(RtEvent effects);
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
+      virtual Future from_value(const void *value, size_t value_size,
+          bool owned, Memory::Kind memkind, void (*freefunc)(void*,size_t));
       virtual ShardID get_shard_id(void) const;
       virtual size_t get_num_shards(void) const;
       virtual Future consensus_match(const void *input, void *output,
@@ -2171,7 +2184,8 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
-                                       ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(const Domain &domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                              bool collective = false,
@@ -2210,9 +2224,13 @@ namespace Legion {
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep);
       virtual void end_trace(TraceID tid, bool deprecated);
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                      PhysicalInstance inst, FutureFunctor *callback_future);
-      virtual void post_end_task(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *callback_functor);
+                      PhysicalInstance inst, FutureFunctor *callback_future,
+                      Memory::Kind memory, void (*freefunc)(void*,size_t),
+                      const void *metadataptr, size_t metadatasize);
+      virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
+                                 FutureFunctor *callback_functor,
+                                 bool own_callback_functor);
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true);
@@ -2370,8 +2388,8 @@ namespace Legion {
       IndexSpaceNode* compute_index_attach_launch_spaces(
                                             std::vector<size_t> &shard_sizes);
     public:
-      static void hash_future(Murmur3Hasher &hasher, 
-                              const unsigned safe_level, const Future &future);
+      void hash_future(Murmur3Hasher &hasher, 
+                       const unsigned safe_level, const Future &future) const;
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
       static void hash_index_space_requirements(Murmur3Hasher &hasher,
           const std::vector<IndexSpaceRequirement> &index_requirements);
@@ -2386,8 +2404,8 @@ namespace Legion {
       static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred);
       static void hash_static_dependences(Murmur3Hasher &hasher,
           const std::vector<StaticDependence> *dependences);
-      static void hash_task_launcher(Murmur3Hasher &hasher, 
-          const unsigned safe_level, const TaskLauncher &launcher);
+      void hash_task_launcher(Murmur3Hasher &hasher, 
+          const unsigned safe_level, const TaskLauncher &launcher) const;
       void hash_index_launcher(Murmur3Hasher &hasher,
           const unsigned safe_level, const IndexTaskLauncher &launcher);
       void verify_replicable(Murmur3Hasher &hasher, const char *func_name);
@@ -2929,7 +2947,8 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        std::vector<OutputRequirement> *outputs);
       virtual Future reduce_future_map(const FutureMap &future_map,
-                                       ReductionOpID redop, bool deterministic);
+                                       ReductionOpID redop, bool deterministic,
+                                       MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(const Domain &domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                              bool collective = false,
@@ -3000,12 +3019,6 @@ namespace Legion {
       virtual ApEvent add_to_dependence_queue(Operation *op, 
                                               bool unordered = false,
                                               bool outermost = true);
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                                          const void *result, size_t size, 
-                                          PhysicalInstance instance =
-                                            PhysicalInstance::NO_INST,
-                                          FutureFunctor *callback_functor=NULL,
-                                          bool own_functor = false);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -3072,9 +3085,13 @@ namespace Legion {
                                                      AddressSpaceID source);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
-                        PhysicalInstance inst, FutureFunctor *callback_functor);
-      virtual void post_end_task(const void *res, size_t res_size, 
-                                 bool owned, FutureFunctor *callback_functor);
+                        PhysicalInstance inst, FutureFunctor *callback_functor,
+                        Memory::Kind memory, void (*freefunc)(void*,size_t),
+                        const void *metadataptr, size_t metadatasize);
+      virtual void post_end_task(FutureInstance *instance,
+                                 void *metadata, size_t metasize,
+                                 FutureFunctor *callback_functor,
+                                 bool own_callback_functor);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);

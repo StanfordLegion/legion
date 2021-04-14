@@ -229,9 +229,28 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 
-  TaskHelper::register_hybrid_variants<CalcNewCurrentsTask>();
-  TaskHelper::register_hybrid_variants<DistributeChargeTask>();
-  TaskHelper::register_hybrid_variants<UpdateVoltagesTask>();
+  // Create an aligned layout constraint for any vector architectures
+#if defined(__AVX512F__)
+  LayoutConstraintRegistrar layout_constraints;
+  layout_constraints.add_constraint(
+      AlignmentConstraint(0/*all fields*/, LEGION_EQ_EK, 64/*bytes*/));
+  const LayoutConstraintID id = Runtime::preregister_layout(layout_constraints);
+#elif defined(__AVX__)
+  LayoutConstraintRegistrar layout_constraints;
+  layout_constraints.add_constraint(
+      AlignmentConstraint(0/*all fields*/, LEGION_EQ_EK, 32/*bytes*/));
+  const LayoutConstraintID id = Runtime::preregister_layout(layout_constraints);
+#elif defined(__SSE__)
+  LayoutConstraintRegistrar layout_constraints;
+  layout_constraints.add_constraint(
+      AlignmentConstraint(0/*all fields*/, LEGION_EQ_EK, 16/*bytes*/));
+  const LayoutConstraintID id = Runtime::preregister_layout(layout_constraints);
+#else
+  const LayoutConstraintID id = 0;
+#endif
+  TaskHelper::register_hybrid_variants<CalcNewCurrentsTask>(id);
+  TaskHelper::register_hybrid_variants<DistributeChargeTask>(0/*no need for alignments on this task*/);
+  TaskHelper::register_hybrid_variants<UpdateVoltagesTask>(0/*no need for alignments on this task*/);
   CheckTask::register_task();
 #ifndef SEQUENTIAL_LOAD_CIRCUIT
   InitNodesTask::register_task();

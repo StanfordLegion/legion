@@ -751,6 +751,264 @@ namespace Realm {
 			 thunk->argv[16], thunk->argv[17],
 			 thunk->argv[18], thunk->argv[19]);
     }
+
+    static void invoke_21(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20]);
+    }
+
+    static void invoke_22(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21]);
+    }
+
+    static void invoke_23(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22]);
+    }
+
+    static void invoke_24(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23]);
+    }
+
+    static void invoke_25(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24]);
+    }
+
+    static void invoke_26(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25]);
+    }
+
+    static void invoke_27(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25],
+			 thunk->argv[26]);
+    }
+
+    static void invoke_28(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25],
+			 thunk->argv[26], thunk->argv[27]);
+    }
+
+    static void invoke_29(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25],
+			 thunk->argv[26], thunk->argv[27],
+			 thunk->argv[28]);
+    }
+
+    static void invoke_30(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25],
+			 thunk->argv[26], thunk->argv[27],
+			 thunk->argv[28], thunk->argv[29]);
+    }
+
+    static void invoke_31(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25],
+			 thunk->argv[26], thunk->argv[27],
+			 thunk->argv[28], thunk->argv[29],
+			 thunk->argv[30]);
+    }
+
+    static void invoke_32(void *data)
+    {
+      const kmp_thunk *thunk = (const kmp_thunk *)data;
+      kmp_int32 global_tid = 44; // what does this do?
+      kmp_int32 local_tid = omp_get_thread_num(); // CHECK
+      (thunk->microtask)(&global_tid, &local_tid,
+			 thunk->argv[0], thunk->argv[1],
+			 thunk->argv[2], thunk->argv[3],
+			 thunk->argv[4], thunk->argv[5],
+			 thunk->argv[6], thunk->argv[7],
+			 thunk->argv[8], thunk->argv[9],
+			 thunk->argv[10], thunk->argv[11],
+			 thunk->argv[12], thunk->argv[13],
+			 thunk->argv[14], thunk->argv[15],
+			 thunk->argv[16], thunk->argv[17],
+			 thunk->argv[18], thunk->argv[19],
+			 thunk->argv[20], thunk->argv[21],
+			 thunk->argv[22], thunk->argv[23],
+			 thunk->argv[24], thunk->argv[25],
+			 thunk->argv[26], thunk->argv[27],
+			 thunk->argv[28], thunk->argv[29],
+			 thunk->argv[30], thunk->argv[31]);
+    }
   };
 
 };
@@ -850,6 +1108,18 @@ extern "C" {
     case 18: invoker = &kmp_thunk::invoke_18; break;
     case 19: invoker = &kmp_thunk::invoke_19; break;
     case 20: invoker = &kmp_thunk::invoke_20; break;
+    case 21: invoker = &kmp_thunk::invoke_21; break;
+    case 22: invoker = &kmp_thunk::invoke_22; break;
+    case 23: invoker = &kmp_thunk::invoke_23; break;
+    case 24: invoker = &kmp_thunk::invoke_24; break;
+    case 25: invoker = &kmp_thunk::invoke_25; break;
+    case 26: invoker = &kmp_thunk::invoke_26; break;
+    case 27: invoker = &kmp_thunk::invoke_27; break;
+    case 28: invoker = &kmp_thunk::invoke_28; break;
+    case 29: invoker = &kmp_thunk::invoke_29; break;
+    case 30: invoker = &kmp_thunk::invoke_30; break;
+    case 31: invoker = &kmp_thunk::invoke_31; break;
+    case 32: invoker = &kmp_thunk::invoke_32; break;
     default:
       {
 	fprintf(stderr, "HELP!  __kmpc_fork_call called with argc == %d\n", argc);

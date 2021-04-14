@@ -22,7 +22,6 @@ import os
 import sys
 import code
 import types
-import atexit
 import struct
 import readline
 import threading
@@ -97,6 +96,7 @@ class LegionConsole(code.InteractiveConsole):
                  histfile = os.path.expanduser('~/.python-history')):
         code.InteractiveConsole.__init__(self, locals, filename)
         self.init_history(histfile)
+        self.histfile = histfile
 
     def init_history(self, histfile):
         readline.parse_and_bind('tab: complete')
@@ -105,19 +105,29 @@ class LegionConsole(code.InteractiveConsole):
                 readline.read_history_file(histfile)
             except FileNotFoundError:
                 pass
-            atexit.register(self.save_history, histfile)
 
-    def save_history(self, histfile):
+    def save_history(self):
         readline.set_history_length(10000)
-        readline.write_history_file(histfile)
+        readline.write_history_file(self.histfile)
 
 
 def run_repl():
     try:
         shell = LegionConsole()
         shell.interact(banner='Welcome to Legion Python interactive console')
-    except SystemExit:
+    except (SystemExit, KeyboardInterrupt):
         pass
+    finally:
+        # Save the history
+        shell.save_history()
+        # Wait for execution to finish here before removing the module
+        # because executing tasks might still need to refer to it
+        future = c.legion_runtime_issue_execution_fence(
+                top_level.runtime[0], top_level.context[0])
+        # block waiting on the future
+        c.legion_future_wait(future, True, ffi.NULL)
+        c.legion_future_destroy(future)
+        del shell
 
 
 def remove_all_aliases(to_delete):
@@ -385,7 +395,8 @@ def legion_python_main(raw_args, user_data, proc):
 
     if local_cleanup:
         # If we were control replicated then we just need to do our cleanup
-        for cleanup in cleanup_items:
+        # Do it in reverse order so modules get FILO properties
+        for cleanup in reversed(cleanup_items):
             cleanup()
     else:
         # Otherwise, run a task on every node to perform the cleanup
@@ -450,7 +461,8 @@ def legion_python_cleanup(raw_args, user_data, proc):
 
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
 
-    for cleanup in cleanup_items:
+    # Do it in reverse order so modules get FILO properties
+    for cleanup in reversed(cleanup_items):
         cleanup()
 
     del top_level.runtime

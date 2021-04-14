@@ -36,7 +36,8 @@ namespace Legion {
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), 
-        start_time(0), collective_count(0)
+        start_time(0), collective_count(0), reentrant_disabled(false),
+        supports_collectives(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -115,6 +116,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(PREMAP_TASK_CALL,
                                  task, continuation_precondition);
+        info->supports_collectives = true;
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
@@ -167,6 +169,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_TASK_CALL,
                                  task, continuation_precondition);
+        info->supports_collectives = true;
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
@@ -248,6 +251,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(POSTMAP_TASK_CALL,
                                  task, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<TaskOp,Mapper::PostMapInput,Mapper::PostMapOutput,
@@ -399,6 +403,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_INLINE_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MapOp, 
@@ -501,6 +506,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_COPY_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CopyOp,Mapper::MapCopyInput,Mapper::MapCopyOutput,
@@ -754,6 +760,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_ACQUIRE_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<AcquireOp, Mapper::MapAcquireInput,
@@ -853,6 +860,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_RELEASE_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<ReleaseOp, Mapper::MapReleaseInput,
@@ -1032,6 +1040,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_PARTITION_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<DependentPartitionOp, 
@@ -1184,6 +1193,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_future_map_reduction(AllReduceOp *op,
+                                       Mapper::FutureMapReductionInput *input,
+                                       Mapper::FutureMapReductionOutput *output,
+                                       MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_FUTURE_MAP_REDUCTION_CALL, op, 
+                                 continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<AllReduceOp, 
+            Mapper::FutureMapReductionInput,
+            Mapper::FutureMapReductionOutput,
+            &MapperManager::invoke_map_future_map_reduction>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->map_future_map_reduction(info, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
                                          Mapper::ContextConfigOutput *output,
                                          MappingCallInfo *info)
@@ -1273,6 +1309,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_MUST_EPOCH_CALL,
                                  op, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation3<MustEpochOp, Mapper::MapMustEpochInput, 
@@ -1299,6 +1336,7 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL,
                                  NULL, continuation_precondition);
+        info->supports_collectives = true;
         if (continuation_precondition.exists())
         {
           MapperContinuation2<Mapper::MapDataflowGraphInput, 
@@ -2030,11 +2068,23 @@ namespace Legion {
       DomainPoint point;
       if (constraints.specialized_constraint.is_collective())
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         if (ctx->operation == NULL)
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
                 "st/nd/rd/th call to create instance in mapper call %s in "
-                "mapper %s because the mapper call does not have an assoicated "
+                "mapper %s because the mapper call does not have an associated "
                 "mappable. Legion will still attempt to make an instance.",
                 ctx->collective_count++, get_mapper_call_name(ctx->kind),
                 get_mapper_name())
@@ -2127,6 +2177,18 @@ namespace Legion {
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       if (cons->specialized_constraint.is_collective())
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         if (ctx->operation == NULL)
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
@@ -2225,6 +2287,18 @@ namespace Legion {
       if (constraints.specialized_constraint.is_collective() &&
           (ctx->operation != NULL))
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
               "Ignoring request to find a collective instance for the %d-"
               "st/nd/rd/th  call to find-or-create-instance in mapper call %s "
@@ -2290,6 +2364,19 @@ namespace Legion {
       else
       {
         if (constraints.specialized_constraint.is_collective())
+        {
+          if (!ctx->supports_collectives)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+            resume_mapper_call(ctx);
+            return false;
+          }
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
                 "st/nd/rd/th call to create instance in mapper call %s in "
@@ -2297,6 +2384,7 @@ namespace Legion {
                 "mappable. Legion will still attempt to make an instance.",
                 ctx->collective_count++, get_mapper_call_name(ctx->kind),
                 get_mapper_name())
+        }
         success = runtime->find_or_create_physical_instance(target_memory,
                   constraints, regions, result, created, mapper_id, processor, 
                   acquire, priority, tight_region_bounds, unsat, footprint,
@@ -2342,6 +2430,18 @@ namespace Legion {
       if (cons->specialized_constraint.is_collective() && 
           (ctx->operation != NULL))
       {
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
         REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
               "Ignoring request to find a collective instance for the %d-"
               "st/nd/rd/th call to find-or-create-instance in mapper call %s "
@@ -2407,6 +2507,19 @@ namespace Legion {
       else
       {
         if (cons->specialized_constraint.is_collective())
+        {
+          if (!ctx->supports_collectives)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to create a collective instance for the %d-"
+                "st/nd/rd/th call to create instance in mapper call %s in "
+                "mapper %s because the mapper call does not support the "
+                "creation of collective instances in this kind of mapper call.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+            resume_mapper_call(ctx);
+            return false;
+          }
           REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
                 "Ignoring call to create a collective instance for the %d-"
                 "st/nd/rd/th call to create instance in mapper call %s in "
@@ -2414,6 +2527,7 @@ namespace Legion {
                 "mappable. Legion will still attempt to make an instance.",
                 ctx->collective_count++, get_mapper_call_name(ctx->kind),
                 get_mapper_name())
+        }
         success = runtime->find_or_create_physical_instance(target_memory,
                    cons, regions, result, created, mapper_id, processor,
                    acquire, priority, tight_region_bounds, unsat, footprint,
@@ -2658,7 +2772,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
-                                        std::vector<MappingInstance> &instances)
+                                        std::vector<MappingInstance> &instances,
+                                        const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -2673,8 +2788,16 @@ namespace Legion {
       if (instances.size() == 1)
       {
         bool result = acquire_instance(ctx, instances[0]);
-        if (!result)
-          instances.clear();
+        if (result)
+        {
+          if (filter_acquired_instances)
+            instances.clear();
+        }
+        else
+        {
+          if (!filter_acquired_instances)
+            instances.clear();
+        }
         return result;
       }
       pause_mapper_call(ctx); 
@@ -2682,7 +2805,7 @@ namespace Legion {
       std::map<MemoryManager*,AcquireStatus> acquire_requests;
       std::vector<unsigned> to_erase;
       bool local_acquired = perform_local_acquires(ctx, instances,
-                                                  acquire_requests, &to_erase);
+          acquire_requests, &to_erase, filter_acquired_instances);
       // Filter any invalid local instances
       if (!to_erase.empty())
       {
@@ -2710,7 +2833,15 @@ namespace Legion {
             continue;
           if (already_acquired.find(manager->as_instance_manager()) ==
               already_acquired.end())
-            to_erase.push_back(idx);
+          {
+            if (!filter_acquired_instances)
+              to_erase.push_back(idx);
+          }
+          else
+          {
+            if (filter_acquired_instances)
+              to_erase.push_back(idx);
+          }
         }
         if (!to_erase.empty())
         {
@@ -2759,7 +2890,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
-                          std::vector<std::vector<MappingInstance> > &instances)
+                          std::vector<std::vector<MappingInstance> > &instances,
+                          const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -2778,7 +2910,8 @@ namespace Legion {
       for (std::vector<std::vector<MappingInstance> >::iterator it = 
             instances.begin(); it != instances.end(); it++)
       {
-        if (!perform_local_acquires(ctx, *it, acquire_requests, &to_erase))
+        if (!perform_local_acquires(ctx, *it, acquire_requests, 
+                          &to_erase, filter_acquired_instances))
         {
           local_acquired = false;
           // Erase from the back
@@ -2810,7 +2943,15 @@ namespace Legion {
               continue;
             if (already_acquired.find(manager->as_instance_manager()) ==
                 already_acquired.end())
-              to_erase.push_back(idx);
+            {
+              if (!filter_acquired_instances)
+                to_erase.push_back(idx);
+            }
+            else
+            {
+              if (filter_acquired_instances)
+                to_erase.push_back(idx);
+            }
           }
           if (!to_erase.empty())
           {
@@ -2830,7 +2971,8 @@ namespace Legion {
     bool MapperManager::perform_local_acquires(MappingCallInfo *info,
                       const std::vector<MappingInstance> &instances,
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                      std::vector<unsigned> *to_erase)
+                      std::vector<unsigned> *to_erase,
+                      const bool filter_acquired_instances)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalManager*,unsigned> &already_acquired = 
@@ -2846,7 +2988,11 @@ namespace Legion {
           continue;
         PhysicalManager *manager = man->as_instance_manager();
         if (already_acquired.find(manager) != already_acquired.end())
+        {
+          if ((to_erase != NULL) && filter_acquired_instances)
+            to_erase->push_back(idx);
           continue;
+        }
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
@@ -2854,12 +3000,14 @@ namespace Legion {
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
+          if ((to_erase != NULL) && filter_acquired_instances)
+            to_erase->push_back(idx);
           continue;
         }
         // if we failed on the owner node, it will never work
         else if (manager->is_collective_manager() || manager->is_owner()) 
         {
-          if (to_erase != NULL)
+          if ((to_erase != NULL) && !filter_acquired_instances)
             to_erase->push_back(idx);
           local_acquired = false;
           continue; 
@@ -3901,7 +4049,7 @@ namespace Legion {
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, info->stop_time); 
-      if ((info->operation != NULL) && !runtime->unsafe_mapper)
+      if (info->supports_collectives && !runtime->unsafe_mapper)
         info->operation->report_total_collective_instance_calls(
                               info->kind, info->collective_count);
       info->resume = RtUserEvent::NO_RT_USER_EVENT;
@@ -3910,6 +4058,8 @@ namespace Legion {
       info->start_time = 0;
       info->stop_time = 0;
       info->collective_count = 0;
+      info->reentrant_disabled = false;
+      info->supports_collectives = false;
       available_infos.push_back(info);
     }
 
@@ -4107,13 +4257,14 @@ namespace Legion {
                         "%s with the SERIALIZED_NON_REENTRANT_MAPPER_MODEL. "
                         "Reentrant calls are never allowed with this model.", 
                         get_mapper_name())
-      else if (permit_reentrant)
+      else if (!info->reentrant_disabled)
         REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
                         "Illegal 'disable_reentrant' call performed in mapper "
                         "%s. Reentrant calls were already enabled and we do "
                         "not support nested calls to enable them.",
                         get_mapper_name())
-      // No need to hold the lock since we know we are exclusive 
+      info->reentrant_disabled = false;
+      AutoLock m_lock(mapper_lock);
       permit_reentrant = true;
     }
 
@@ -4130,13 +4281,14 @@ namespace Legion {
                         "%s with the SERIALIZED_NON_REENTRANT_MAPPER_MODEL. "
                         "Reentrant calls are already disallowed with this "
                         "model.", get_mapper_name())
-      else if (!permit_reentrant)
+      else if (info->reentrant_disabled)
         REPORT_LEGION_ERROR(ERROR_MAPPER_SYNCHRONIZATION,
                         "Illegal 'disable_reentrant' call performed in mapper "
                         "%s. Reentrant calls were already disabled and we do "
                         "not support nested calls to disable them.",
                         get_mapper_name())
-      // No need to hold the lock since we know we are exclusive
+      info->reentrant_disabled = true;
+      AutoLock m_lock(mapper_lock);
       permit_reentrant = false;
     }
 
@@ -4297,16 +4449,16 @@ namespace Legion {
       paused_calls++;
       if (permit_reentrant)
       {
-        if (!ready_calls.empty())
-        {
-          executing_call = ready_calls.front();
-          ready_calls.pop_front();
-          return executing_call->resume;
-        }
-        else if (!pending_calls.empty())
+        if (!pending_calls.empty())
         {
           executing_call = pending_calls.front();
           pending_calls.pop_front();
+          return executing_call->resume;
+        }
+        else if (!ready_calls.empty())
+        {
+          executing_call = ready_calls.front();
+          ready_calls.pop_front();
           return executing_call->resume;
         }
         // If we are allowing reentrant calls then clear the executing
@@ -4324,22 +4476,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!pending_pause_call);
       assert(pending_finish_call);
+      assert(executing_call != NULL);
 #endif
       pending_finish_call = false;
       // If we allow reentrant calls then reset whether we are permitting
       // reentrant calls in case the user forgot to do it at the end of call
-      if (allow_reentrant && !permit_reentrant)
-        permit_reentrant = true;
-      if (!ready_calls.empty())
+      if (allow_reentrant && executing_call->reentrant_disabled)
       {
-        executing_call = ready_calls.front();
-        ready_calls.pop_front();
-        return executing_call->resume;
+#ifdef DEBUG_LEGION
+        assert(!permit_reentrant);
+#endif
+        permit_reentrant = true;
       }
-      else if (!pending_calls.empty())
+      if (!pending_calls.empty())
       {
         executing_call = pending_calls.front();
         pending_calls.pop_front();
+        return executing_call->resume;
+      }
+      else if (!ready_calls.empty())
+      {
+        executing_call = ready_calls.front();
+        ready_calls.pop_front();
         return executing_call->resume;
       }
       else

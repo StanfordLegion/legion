@@ -69,7 +69,8 @@ def parse_args(argv):
 
 _constant_time_launches = True
 if _constant_time_launches:
-    extern_task = pygion.extern_task_wrapper
+    extern_task = pygion.extern_task
+    # extern_task = pygion.extern_task_wrapper
 else:
     extern_task = pygion.extern_task
 
@@ -89,14 +90,15 @@ init_pointers = extern_task(
 
 calculate_new_currents = extern_task(
     task_id=10004,
-    argument_types=[pygion.bool_, pygion.uint32, Region, Region, Region, Region],
+    argument_types=[pygion.bool_, pygion.uint32, Region, Region, Region, Region, Region],
     privileges=[
         None,
         None,
         R('node_voltage'),
         R('node_voltage'),
         R('node_voltage'),
-        R('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r', 'inductance', 'resistance', 'wire_cap') + RW(*['current_%d' % i for i in range(10)]) + RW(*['voltage_%d' % i for i in range(9)])],
+        R('in_ptr', 'in_ptr_r', 'out_ptr', 'out_ptr_r', 'inductance', 'resistance', 'wire_cap') + RW(*['current_%d' % i for i in range(10)]) + RW(*['voltage_%d' % i for i in range(9)]),
+        RW],
     return_type=pygion.void,
     calling_convention='regent')
 
@@ -113,11 +115,12 @@ distribute_charge = extern_task(
 
 update_voltages = extern_task(
     task_id=10006,
-    argument_types=[pygion.bool_, Region, Region],
+    argument_types=[pygion.bool_, Region, Region, Region],
     privileges=[
         None,
         R('node_cap', 'leakage') + RW('node_voltage', 'charge'),
-        R('node_cap', 'leakage') + RW('node_voltage', 'charge')],
+        R('node_cap', 'leakage') + RW('node_voltage', 'charge'),
+        RW],
     return_type=pygion.void,
     calling_convention='regent')
 
@@ -157,9 +160,14 @@ def main():
     ] + [
         ('voltage_%d' % i, pygion.float32) for i in range(WIRE_SEGMENTS - 1)
     ]))
+    timestamp = Fspace(OrderedDict([
+        ('start', pygion.int64),
+        ('stop', pygion.int64),
+    ]))
 
     all_nodes = Region([num_circuit_nodes], node)
     all_wires = Region([num_circuit_wires], wire)
+    all_times = Region([num_superpieces], timestamp)
 
     node_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), node.field_types.items())), align=True).itemsize
     wire_size = np.dtype(list(map(lambda x: (x[0], x[1].numpy_type), wire.field_types.items())), align=True).itemsize
@@ -199,7 +207,9 @@ def main():
     ghost_ranges = Region([num_superpieces], OrderedDict([('rect', pygion.rect1d)]))
     ghost_ranges_part = Partition.equal(ghost_ranges, launch_domain)
 
-    if _constant_time_launches:
+    times_part = Partition.equal(all_times, launch_domain)
+
+    if False: # _constant_time_launches:
         c = Future(conf[0], value_type=Config)
         index_launch(launch_domain, init_piece, ID, c, ghost_ranges_part[ID], private_part[ID], shared_part[ID], all_shared, wires_part[ID])
     else:
@@ -226,20 +236,20 @@ def main():
         with trace:
             if _constant_time_launches:
                 index_launch(
-                    launch_domain, calculate_new_currents, False, steps, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])
+                    launch_domain, calculate_new_currents, False, steps, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID], times_part[ID])
                 index_launch(
                     launch_domain, distribute_charge, private_part[ID], shared_part[ID], ghost_part[ID], wires_part[ID])
                 index_launch(
-                    launch_domain, update_voltages, False, private_part[ID], shared_part[ID])
+                    launch_domain, update_voltages, False, private_part[ID], shared_part[ID], times_part[ID])
             else:
                 for i in IndexLaunch(launch_domain):
                     calculate_new_currents(
-                        False, steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i])
+                        False, steps, private_part[i], shared_part[i], ghost_part[i], wires_part[i], times_part[i])
                 for i in IndexLaunch(launch_domain):
                     distribute_charge(private_part[i], shared_part[i], ghost_part[i], wires_part[i])
                 for i in IndexLaunch(launch_domain):
                     update_voltages(
-                        False, private_part[i], shared_part[i])
+                        False, private_part[i], shared_part[i], times_part[i])
         if j == num_loops - prune - 1:
             pygion.execution_fence(block=True)
             stop_time = pygion.c.legion_get_current_time_in_nanos()

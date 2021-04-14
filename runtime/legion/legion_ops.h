@@ -2465,17 +2465,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
-      struct ResolveFuturePredArgs : public LgTaskArgs<ResolveFuturePredArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_RESOLVE_FUTURE_PRED_ID;
-      public:
-        ResolveFuturePredArgs(FuturePredOp *op)
-          : LgTaskArgs<ResolveFuturePredArgs>(op->get_unique_op_id()),
-            future_pred_op(op) { }
-      public:
-        FuturePredOp *const future_pred_op;
-      };
-    public:
       FuturePredOp(Runtime *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
@@ -2483,7 +2472,6 @@ namespace Legion {
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
       void initialize(InnerContext *ctx, Future f);
-      void resolve_future_predicate(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2492,6 +2480,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
     protected:
       Future future;
     };
@@ -2746,8 +2735,6 @@ namespace Legion {
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
-      void set_future(const DomainPoint &point,
-                      const void *result, size_t result_size, bool owned);
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);
@@ -3174,6 +3161,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+    protected:
+      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
@@ -4041,7 +4030,8 @@ namespace Legion {
       AllReduceOp& operator=(const AllReduceOp &rhs);
     public:
       Future initialize(InnerContext *ctx, const FutureMap &future_map,
-                        ReductionOpID redop, bool deterministic);
+                        ReductionOpID redop, bool deterministic,
+                        MapperID mapper_id, MappingTagID tag);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4049,17 +4039,37 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { return false; }
+      // AllReduceOps should never actually need this but it might get
+      // called in the process of doing a mapping call
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void) { return NULL; }
     protected:
       void activate_all_reduce(void);
       void deactivate_all_reduce(void);
+      void invoke_mapper(std::vector<Memory> &targets);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_complete(void);
+    protected:
+      // These are virtual methods to override for control replication
+      virtual void populate_sources(void);
+      virtual void create_future_instances(std::vector<Memory> &target_mems);
+      virtual void all_reduce_serdez(void);
+      virtual RtEvent all_reduce_redop(void);
     protected:
       FutureMap future_map;
+      ReductionOpID redop_id;
       const ReductionOp *redop; 
+      const SerdezRedopFns *serdez_redop_fns;
       Future result;
+      std::map<DomainPoint,Future> sources;
+      std::vector<FutureInstance*> targets;
+      size_t future_result_size;
+      void *serdez_redop_buffer;
+      MapperID mapper_id;
+      MappingTagID tag;
       bool deterministic;
     };
 

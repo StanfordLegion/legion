@@ -74,10 +74,11 @@ function base.load_all_libraries()
 end
 
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
-  base.linklibrary("libregent.dylib")
+  base.binding_library = "libregent.dylib"
 else
-  base.linklibrary("libregent.so")
+  base.binding_library = "libregent.so"
 end
+base.linklibrary(base.binding_library)
 
 end
 

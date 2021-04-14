@@ -28,23 +28,14 @@ end
 
 task k() : int
   var r = region(ispace(ptr, 1), int)
-  var x = dynamic_cast(ptr(int, r), 0)
   var s = region(ispace(ptr, 3), int)
-  var y0 = dynamic_cast(ptr(int, s), 0)
-  var y1 = dynamic_cast(ptr(int, s), 1)
-  var y2 = dynamic_cast(ptr(int, s), 2)
 
-  var rc = c.legion_coloring_create()
-  c.legion_coloring_add_point(rc, 0, __raw(y0))
-  c.legion_coloring_add_point(rc, 1, __raw(y1))
-  c.legion_coloring_add_point(rc, 2, __raw(y2))
-  var p = partition(disjoint, s, rc)
-  c.legion_coloring_destroy(rc)
+  var p = partition(equal, s, ispace(int1d, 3))
 
-  @x = 1
-  @y0 = 200
-  @y1 = 30000
-  @y2 = 4000000
+  r[0] = 1
+  s[0] = 200
+  s[1] = 30000
+  s[2] = 4000000
 
   must_epoch
     __demand(__index_launch)
@@ -53,7 +44,7 @@ task k() : int
     end
     g(r, 10)
   end
-  return @x + @y0 + @y1 + @y2
+  return r[0] + s[0] + s[1] + s[2]
 end
 
 task main()

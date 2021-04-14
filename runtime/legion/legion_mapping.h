@@ -61,6 +61,7 @@ namespace Legion {
       void get_fields(std::set<FieldID> &fields) const;
     public:
       FieldSpace get_field_space(void) const;
+      RegionTreeID get_tree_id(void) const;
       LayoutConstraintID get_layout_id(void) const;
     public:
       // See if our instance still exists or if it has been
@@ -375,10 +376,15 @@ namespace Legion {
        * ----------------------------------------------------------------------
        *  Premap Task 
        * ----------------------------------------------------------------------
-       * This mapper call is only invoked for tasks having a region requirement
-       * which needs to be premapped (e.g. an in index space task launch with 
-       * an individual region requirement with READ_WRITE EXCLUSIVE privileges 
-       * that all tasks must share). The mapper is told the indicies of which 
+       * This mapper call is only invoked for index space task launches. It
+       * will invoked if at least one of the following two conditions occur:
+       * 1. The task is performing a reduction of its point task futures down
+       *    to a single future value as an output, in which case the mapper
+       *    needs to select one or more locations for the futures to go.
+       * 2. The task a region requirement that needs to be mapped once and
+       *    have the same mapping be used by all the point tasks, such as
+       *    with a READ-WRITE SIMULTANEOUS on a single region.
+       * In the case of (2), the mapper is told the indicies of which 
        * region requirements need to be premapped in the 'must_premap' set.
        * All other regions can be optionally mapped. The mapper is given
        * a vector containing sets of valid PhysicalInstances (if any) for
@@ -395,6 +401,15 @@ namespace Legion {
        * on existing physical instances by enabling the WAR optimization.
        * All vector data structures are size appropriately for the number of
        * region requirements in the task.
+       *
+       * In the case of (1), the mapper can optionally choose to fill in 
+       * the 'reduction_futures' vector with one or more memories in which 
+       * to create a copy of the reduced future output. If multiple such
+       * destinations are specified, the runtime will construct a broadcast
+       * tree to make the copies efficiently. We allo the 'reduction_instances'
+       * data structure to be left empty for backwards compatibility. In this
+       * case the runtime will create a single copy of the future in the 
+       * local system memory.
        */
       struct PremapTaskInput {
         std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
@@ -405,6 +420,7 @@ namespace Legion {
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_sources;
         ProfilingRequest                                   copy_prof_requests;
         TaskPriority                                       profiling_priority;
+        std::vector<Memory>                                reduction_futures;
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
@@ -497,6 +513,11 @@ namespace Legion {
        * for garbage collection after the task is done mapping. Only the
        * indexes of read-only region requirements should be specified.
        *
+       * In addition to mapping regions for the task, the mapper can also
+       * specify a memory to use for each of the futures of the task. The
+       * entries in this vector will be zipped with the vector of futures
+       * in the 'Task' object to determine which memory to map each future.
+       *
        * The mapper must also select a set of 'target_procs'
        * that specifies the target processor(s) on which the task can run.
        * If a single processor is chosen then the task is guaranteed to 
@@ -542,6 +563,7 @@ namespace Legion {
         std::vector<Memory>                         output_targets;
         std::vector<LayoutConstraintSet>            output_constraints;
         std::set<unsigned>                          untracked_valid_regions;
+        std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
@@ -1519,6 +1541,34 @@ namespace Legion {
                                  const SelectShardingFunctorInput&  input,
                                        SelectShardingFunctorOutput& output) = 0;
       //------------------------------------------------------------------------
+    public: // Future Map Reductions
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Future Map Reduction
+       * This mapper call is invoked to map the output futures of a request
+       * to reduce a future map down to a single future value. The runtime
+       * provides the mapping tag that was passed into the runtime at the
+       * dispatch site. The mapper should return a set of memories for where
+       * to place instances of the future as output. If there are multiple
+       * copies the runtime will broadcast out the results in the order in
+       * which they are specified. Note that this mapper call is not a pure
+       * virtual function because we allow the output to be empty for
+       * backwards compatibility. If the destination memories are empty
+       * then the runtime will map one copy in the local system memory.
+       * ----------------------------------------------------------------------
+       */
+      struct FutureMapReductionInput {
+        MappingTagID                            tag;
+      };
+      struct FutureMapReductionOutput {
+        std::vector<Memory>                     destination_memories;
+      };
+      //------------------------------------------------------------------------
+      virtual void map_future_map_reduction(const MapperContext      ctx,
+                                     const FutureMapReductionInput&  input,
+                                           FutureMapReductionOutput& output) { }
+      //------------------------------------------------------------------------
+
     public: // Single Task Context 
       /**
        * ----------------------------------------------------------------------
@@ -2141,17 +2191,23 @@ namespace Legion {
       bool acquire_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
       bool acquire_and_filter_instances(MapperContext ctx,
-                                std::vector<PhysicalInstance> &instances) const;
+                                std::vector<PhysicalInstance> &instances,
+                                bool filter_acquired_instance = false) const;
       bool acquire_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
       bool acquire_and_filter_instances(MapperContext ctx,
-                  std::vector<std::vector<PhysicalInstance> > &instances) const;
+                  std::vector<std::vector<PhysicalInstance> > &instances,
+                  bool filter_acquired_instances = false) const;
       void release_instance(MapperContext ctx, 
                                         const PhysicalInstance &instance) const;
       void release_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
       void release_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
+    public:
+      // Futures can also be acquired to ensure that they are available in
+      // particular memories prior to running a task.
+      bool acquire_future(MapperContext ctx, const Future &f, Memory mem) const;
     public:
       //------------------------------------------------------------------------
       // Methods for creating index spaces which mappers need to do

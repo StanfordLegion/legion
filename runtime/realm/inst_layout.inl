@@ -1335,8 +1335,26 @@ namespace Realm {
         if ((used_mask >> j) & 1) continue;
         if (strides[j] != exp_offset) continue;
         found = true;
+        // It's possible other dimensions can have the same strides if
+        // there are multiple dimensions with extents of size 1. At most
+        // one dimension can have an extent >1 though
+        int nontrivial = (bounds.lo[j] < bounds.hi[j]) ? j : -1;
+        for (int k = j+1; k < N; k++) {
+          if ((used_mask >> k) & 1) continue;
+          if (strides[k] == exp_offset) {
+            if (bounds.lo[k] < bounds.hi[k]) {
+              if (nontrivial >= 0) // if we already saw a non-trivial dimension this is bad
+                return false;
+              else
+                nontrivial = k;
+            }
+            used_mask |= (1 << k);
+            i++;
+          }
+        }
         used_mask |= (1 << j);
-        exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+        if (nontrivial >= 0)
+          exp_offset *= (bounds.hi[nontrivial] - bounds.lo[nontrivial] + 1);
         break;
       }
       if (!found)

@@ -912,6 +912,9 @@ namespace Legion {
           rez.serialize<size_t>(output.target_procs.size());
           for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
             rez.serialize(output.target_procs[idx]);
+          rez.serialize<size_t>(output.future_locations.size());
+          for (unsigned idx = 0; idx < output.future_locations.size(); idx++)
+            rez.serialize(output.future_locations[idx]);
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
           rez.serialize<bool>(output.postmap_task);
@@ -1553,6 +1556,14 @@ namespace Legion {
             output.target_procs.resize(num_target_processors);
             for (unsigned idx = 0; idx < num_target_processors; idx++)
               derez.deserialize(output.target_procs[idx]);
+            size_t num_future_locations;
+            derez.deserialize(num_future_locations);
+            if (num_future_locations > 0)
+            {
+              output.future_locations.resize(num_future_locations);
+              for (unsigned idx = 0; idx < num_future_locations; idx++)
+                derez.deserialize(output.future_locations[idx]);
+            }
             derez.deserialize(output.chosen_variant);
             derez.deserialize(output.task_priority);
             derez.deserialize<bool>(output.postmap_task);
@@ -4811,27 +4822,25 @@ namespace Legion {
           // Always use the source index for selecting sources
           op->select_sources(src_index, dst, sources, ranking);
           // Check to make sure that the ranking has sound output
-          std::set<unsigned> unique_indexes;
+          unsigned count = 0;
+          std::vector<bool> unique_indexes(instances.size(), false);
           for (std::vector<unsigned>::iterator it =
                 ranking.begin(); it != ranking.end(); /*nothing*/)
           {
-            if ((unique_indexes.find(*it) == unique_indexes.end()) &&
-                ((*it) < instances.size()))
+            if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
             {
-              unique_indexes.insert(*it);
+              unique_indexes[*it] = true;
+              count++;
               it++;
             }
-            else // remove duplicates
+            else // remove duplicates and out of bound entries
               it = ranking.erase(it);
           }
-          if (unique_indexes.size() < ranking.size()) 
+          if (count < unique_indexes.size())
           {
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-              if (unique_indexes.find(idx) == unique_indexes.end())
+            for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
+              if (!unique_indexes[idx])
                 ranking.push_back(idx);
-#ifdef DEBUG_LEGION
-            assert(ranking.size() == unique_indexes.size());
-#endif
           }
         }
         else
@@ -9338,7 +9347,8 @@ namespace Legion {
       if (!is_owner())
         add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      log_garbage.info("GC Equivalence Set %lld %d", id, local_space);
+      log_garbage.info("GC Equivalence Set %lld %d",
+          LEGION_DISTRIBUTED_ID_FILTER(id), local_space);
 #endif
     }
 
@@ -11775,14 +11785,67 @@ namespace Legion {
                                           ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
+      bool rebuild_partial = false;
       if (expr_covers)
       {
         if (!(target_insts.get_valid_mask() - record_mask))
         {
           for (typename FieldMaskSet<T>::const_iterator it =
                 target_insts.begin(); it != target_insts.end(); it++)
+          {
             if (total_valid_instances.insert(it->first, it->second))
               it->first->add_nested_valid_ref(did, &mutator);
+            // Check to see if there are any copies of this to filter
+            // from the partially valid instances
+            LegionMap<LogicalView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::iterator
+                finder = partial_valid_instances.find(it->first);
+            if ((finder != partial_valid_instances.end()) &&
+                !(finder->second.get_valid_mask() * it->second))
+            {
+              rebuild_partial = true;
+              if (!(finder->second.get_valid_mask() - it->second))
+              {
+                // Filter out the ones we now subsume
+                std::vector<IndexSpaceExpression*> to_delete;    
+                for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                {
+                  eit.filter(it->second);
+                  if (!eit->second)
+                    to_delete.push_back(eit->first);
+                }
+                for (std::vector<IndexSpaceExpression*>::const_iterator eit =
+                      to_delete.begin(); eit != to_delete.end(); eit++)
+                {
+                  finder->second.erase(*eit);
+                  if ((*eit)->remove_expression_reference())
+                    delete (*eit);
+                }
+                if (finder->second.empty())
+                {
+                  // Remove the reference, no need to check for deletion
+                  // since we know we added the same reference above
+                  finder->first->remove_nested_valid_ref(did);
+                  partial_valid_instances.erase(finder);
+                }
+                else
+                  finder->second.tighten_valid_mask();
+              }
+              else
+              {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_expression_reference())
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+            }
+          } 
         }
         else
         {
@@ -11795,19 +11858,68 @@ namespace Legion {
             // Add it to the set
             if (total_valid_instances.insert(it->first, valid_mask))
               it->first->add_nested_valid_ref(did, &mutator);
+            // Check to see if there are any copies of this to filter
+            // from the partially valid instances
+            LegionMap<LogicalView*,
+              FieldMaskSet<IndexSpaceExpression> >::aligned::iterator
+                finder = partial_valid_instances.find(it->first);
+            if ((finder != partial_valid_instances.end()) &&
+                !(finder->second.get_valid_mask() * valid_mask))
+            {
+              rebuild_partial = true;
+              if (!(finder->second.get_valid_mask() - valid_mask))
+              {
+                // Filter out the ones we now subsume
+                std::vector<IndexSpaceExpression*> to_delete;    
+                for (FieldMaskSet<IndexSpaceExpression>::iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                {
+                  eit.filter(valid_mask);
+                  if (!eit->second)
+                    to_delete.push_back(eit->first);
+                }
+                for (std::vector<IndexSpaceExpression*>::const_iterator eit =
+                      to_delete.begin(); eit != to_delete.end(); eit++)
+                {
+                  finder->second.erase(*eit);
+                  if ((*eit)->remove_expression_reference())
+                    delete (*eit);
+                }
+                if (finder->second.empty())
+                {
+                  // Remove the reference, no need to check for deletion
+                  // since we know we added the same reference above
+                  finder->first->remove_nested_valid_ref(did);
+                  partial_valid_instances.erase(finder);
+                }
+                else
+                  finder->second.tighten_valid_mask();
+              }
+              else
+              {
+                // We're pruning everything so remove them all now
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                     finder->second.begin(); eit != finder->second.end(); eit++)
+                  if (eit->first->remove_expression_reference())
+                    delete eit->first;
+                // Remove the reference, no need to check for deletion
+                // since we know we added the same reference above
+                finder->first->remove_nested_valid_ref(did);
+                partial_valid_instances.erase(finder);
+              }
+            }
           }
         }
       }
       else
       {
-        bool need_rebuild = false;
         if (!(target_insts.get_valid_mask() - record_mask))
         {
           for (typename FieldMaskSet<T>::const_iterator it =
                 target_insts.begin(); it != target_insts.end(); it++)
             if (record_partial_valid_instance(it->first, expr,
                                               it->second, mutator))
-              need_rebuild = true;
+              rebuild_partial = true;
         }
         else
         {
@@ -11819,18 +11931,17 @@ namespace Legion {
               continue;
             if (record_partial_valid_instance(it->first, expr,
                                               valid_mask, mutator))
-              need_rebuild = true;
+              rebuild_partial = true;
           }
         }
-        if (need_rebuild)
-        {
-          partial_valid_fields.clear();
-          for (LegionMap<LogicalView*,
-                FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator 
-                it = partial_valid_instances.begin(); 
-                it != partial_valid_instances.end(); it++)
-            partial_valid_fields |= it->second.get_valid_mask();
-        }
+      }
+      if (rebuild_partial)
+      {
+        partial_valid_fields.clear();
+        for (LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
+              aligned::const_iterator it = partial_valid_instances.begin();
+              it != partial_valid_instances.end(); it++)
+          partial_valid_fields |= it->second.get_valid_mask();
       }
     }
 
@@ -11929,10 +12040,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::record_partial_valid_instance(LogicalView *target,
-    IndexSpaceExpression *expr, FieldMask valid_mask, ReferenceMutator &mutator)
+                              IndexSpaceExpression *expr, FieldMask valid_mask, 
+                              ReferenceMutator &mutator, bool check_total_valid)
     //--------------------------------------------------------------------------
     {
       bool need_rebuild = false;
+      if (check_total_valid)
+      {
+        FieldMaskSet<LogicalView>::const_iterator finder = 
+          total_valid_instances.find(target);
+        if (finder != total_valid_instances.end())
+        {
+          valid_mask -= finder->second;
+          if (!valid_mask)
+            return need_rebuild;
+        }
+      }
       partial_valid_fields |= valid_mask;
       LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::aligned
         ::iterator finder = partial_valid_instances.find(target);
@@ -12224,6 +12347,9 @@ namespace Legion {
             for (std::vector<IndexSpaceExpression*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
             {
+              // Don't delete if we just added it
+              if (to_add.find(*it) != to_add.end())
+                continue;
               FieldMaskSet<IndexSpaceExpression>::iterator finder =
                 pit->second.find(*it);
 #ifdef DEBUG_LEGION
@@ -12292,7 +12418,7 @@ namespace Legion {
 #endif
             }
             if (record_partial_valid_instance(it->first, diff_expr, 
-                                              overlap, mutator)) 
+                      overlap, mutator, false/*check total valid*/)) 
               need_partial_rebuild = true;
             it.filter(overlap);
             if (!it->second)
@@ -15156,7 +15282,7 @@ namespace Legion {
             assert(!diff_expr->is_empty());
 #endif
             if (record_partial_valid_instance(analysis.inst_view, diff_expr,
-                                              total_overlap, mutator))
+                        total_overlap, mutator, false/*check total valid*/))
             {
               // Need to rebuild the partial valid fields
               partial_valid_fields.clear();
@@ -18271,120 +18397,140 @@ namespace Legion {
       // If we have deferral events then save this traversal for another time
       if (!deferral_events.empty())
         return;
-      // Do the local analysis on our owned equivalence sets
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-      if (!downward_only)
+      FieldMaskSet<EquivalenceSet> to_record;
       {
-        if (!disjoint_complete)
+        // Do the local analysis on our owned equivalence sets
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        if (!downward_only)
         {
-          parent_traversal = mask;
-          return;
-        }
-        parent_traversal = mask - disjoint_complete;
-        if (!!parent_traversal)
-        {
-          mask -= parent_traversal;
-          if (!mask)
+          if (!disjoint_complete)
+          {
+            parent_traversal = mask;
             return;
+          }
+          parent_traversal = mask - disjoint_complete;
+          if (!!parent_traversal)
+          {
+            mask -= parent_traversal;
+            if (!mask)
+              return;
+          }
         }
-      }
-      if (!disjoint_complete_children.empty())
-      {
-        const FieldMask children_overlap = mask & 
-          disjoint_complete_children.get_valid_mask();
-        if (!!children_overlap)
+        if (!disjoint_complete_children.empty())
         {
-          for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-                disjoint_complete_children.begin(); it !=
-                disjoint_complete_children.end(); it++)
+          const FieldMask children_overlap = mask & 
+            disjoint_complete_children.get_valid_mask();
+          if (!!children_overlap)
+          {
+            for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+                  disjoint_complete_children.begin(); it !=
+                  disjoint_complete_children.end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+#ifdef DEBUG_LEGION
+              assert(!it->first->is_region());
+#endif
+              children.insert(it->first->as_partition_node(), overlap);
+              mask -= overlap;
+              if (!mask)
+                return;
+            }
+          }
+        }
+        // At this point we're done with the symbolic analysis so we
+        // can actually test the expression for emptiness
+        if ((expr != node->as_region_node()->row_source) && expr->is_empty())
+          return;
+        // If we make it here then we should have equivalence sets for
+        // all these remaining fields
+#ifdef DEBUG_LEGION
+        assert(!equivalence_sets.empty() ||
+                region_node->row_source->is_empty());
+        assert(!(mask - equivalence_sets.get_valid_mask()) ||
+                region_node->row_source->is_empty());
+#endif
+        // If we have any pending disjoint complete ready events then 
+        // we need to record dependences on them as well
+        if (!disjoint_complete_ready.empty())
+        {
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
+                disjoint_complete_ready.begin(); it !=
+                disjoint_complete_ready.end(); it++)
+            if (!(mask * it->second))
+              ready_events.insert(it->first); 
+        }
+        if (target_space != runtime->address_space)
+        {
+          FieldMaskSet<EquivalenceSet> to_send;
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
           {
             const FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
 #ifdef DEBUG_LEGION
-            assert(!it->first->is_region());
+            // We should only be sending equivalence sets that we
+            // know we are the owners of
+            assert(it->first->region_node == node);
 #endif
-            children.insert(it->first->as_partition_node(), overlap);
+            to_send.insert(it->first, overlap);
             mask -= overlap;
             if (!mask)
-              return;
+              break;
           }
-        }
-      }
-      // At this point we're done with the symbolic analysis so we
-      // can actually test the expression for emptiness
-      if ((expr != node->as_region_node()->row_source) && expr->is_empty())
-        return;
-      // If we make it here then we should have equivalence sets for
-      // all these remaining fields
-#ifdef DEBUG_LEGION
-      assert(!equivalence_sets.empty() || region_node->row_source->is_empty());
-      assert(!(mask - equivalence_sets.get_valid_mask()) ||
-              region_node->row_source->is_empty());
-#endif
-      // If we have any pending disjoint complete ready events then 
-      // we need to record dependences on them as well
-      if (!disjoint_complete_ready.empty())
-      {
-        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-              disjoint_complete_ready.begin(); it !=
-              disjoint_complete_ready.end(); it++)
-          if (!(mask * it->second))
-            ready_events.insert(it->first); 
-      }
-      if (target_space != runtime->address_space)
-      {
-        FieldMaskSet<EquivalenceSet> to_send;
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          to_send.insert(it->first, overlap);
-          mask -= overlap;
-          if (!mask)
-            break;
-        }
-        if (!to_send.empty())
-        {
-          const RtUserEvent done = Runtime::create_rt_user_event();
-          Serializer rez;
+          if (!to_send.empty())
           {
-            RezCheck z(rez);
-            rez.serialize(target);
-            rez.serialize<size_t>(to_send.size());
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  to_send.begin(); it != to_send.end(); it++)
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
             {
-              rez.serialize(it->first->did);
-              rez.serialize(it->second);
+              RezCheck z(rez);
+              rez.serialize(target);
+              rez.serialize<size_t>(to_send.size());
+              for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                    to_send.begin(); it != to_send.end(); it++)
+              {
+                rez.serialize(it->first->did);
+                rez.serialize(it->second);
+              }
+              rez.serialize(done);
             }
-            rez.serialize(done);
+            runtime->send_compute_equivalence_sets_response(target_space, rez);
+            ready_events.insert(done);
           }
-          runtime->send_compute_equivalence_sets_response(target_space, rez);
-          ready_events.insert(done);
         }
+        else if (target != this)
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            // We should only be sending equivalence sets that we
+            // know we are the owners of
+            assert(it->first->region_node == node);
+#endif
+            to_record.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        else
+          mask.clear();
+        assert(!mask);
+#endif
       }
-      else if (target != this)
+      if (!to_record.empty())
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          target->record_equivalence_set(it->first, overlap);
-          mask -= overlap;
-          if (!mask)
-            break;
-        }
+              to_record.begin(); it != to_record.end(); it++)
+          target->record_equivalence_set(it->first, it->second);
       }
-#ifdef DEBUG_LEGION
-      else
-        mask.clear();
-      assert(!mask);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18582,6 +18728,9 @@ namespace Legion {
 #endif
         disjoint_complete -= mask;
       }
+      FieldMask children_overlap;
+      if (!disjoint_complete_children.empty())
+        children_overlap = mask & disjoint_complete_children.get_valid_mask();
       // Always invalidate any equivalence sets that we might have
       if (!equivalence_sets.empty() && 
           !(mask * equivalence_sets.get_valid_mask()))
@@ -18627,9 +18776,18 @@ namespace Legion {
             if ((it->first->region_node != node) && 
                 !nonexclusive_virtual_mapping_root)
               continue;
-            const FieldMask overlap = it->second & mask;
+            FieldMask overlap = it->second & mask;
             if (!overlap)
               continue;
+            // If we have disjoint complete children then we do not actually
+            // own these equivalence sets (we're just another observer) so
+            // we can't actually remove them, just ignore them
+            if (!!children_overlap)
+            {
+              overlap -= children_overlap;
+              if (!overlap)
+                continue;
+            }
             to_untrack.insert(it->first, overlap);
             it.filter(overlap);
             if (!it->second)
@@ -18651,7 +18809,7 @@ namespace Legion {
         }
         equivalence_sets.tighten_valid_mask();
       }
-      if (!(mask * disjoint_complete_children.get_valid_mask()))
+      if (!!children_overlap)
       {
         std::vector<RegionTreeNode*> to_delete;
         for (FieldMaskSet<RegionTreeNode>::iterator it = 

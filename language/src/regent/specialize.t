@@ -1885,6 +1885,21 @@ function specialize.stat_escape(cx, node)
   end
 end
 
+local rescape_remit_key = std.newsymbol()
+function specialize.stat_rescape(cx, node)
+  local result = terralib.newlist()
+
+  -- We're going to use a special symbol to track the rescape/remit context.
+  local cx = cx:new_local_scope()
+  cx.env:insert(node, rescape_remit_key, result)
+
+  -- Now run the escape code. It will populate the result by looking
+  -- up the escape key.
+  node.stats(cx.env:env())
+
+  return data.flatmap(function(x) return get_quote_contents(cx, x) end, result)
+end
+
 function specialize.stat_raw_delete(cx, node)
   return ast.specialized.stat.RawDelete {
     value = specialize.expr(cx, node.value),
@@ -1995,6 +2010,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.Escape) then
     return specialize.stat_escape(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.Rescape) then
+    return specialize.stat_rescape(cx, node)
 
   elseif node:is(ast.unspecialized.stat.RawDelete) then
     return specialize.stat_raw_delete(cx, node)
@@ -2208,6 +2226,27 @@ function specialize.top_fspace(cx, node)
   }
 end
 
+function specialize.top_remit(cx, node)
+  local result = cx.env:safe_lookup(rescape_remit_key)
+  if not result then
+    report.error(node, "remit must be used inside of rescape")
+  end
+
+  local expr = node.expr(cx.env:env())
+  if std.is_rquote(expr) then
+    result:insert(expr)
+  elseif terralib.islist(expr) then
+    if not data.all(expr:map(function(v) return std.is_rquote(v) end)) then
+      report.error(node, "unable to specialize value of type " .. tostring(type(expr)))
+    end
+    result:insertall(expr)
+  else
+    report.error(node, "unable to specialize value of type " .. tostring(type(expr)))
+  end
+
+  return false -- nothing to do at this point, statement has been executed
+end
+
 function specialize.top_quote_expr(cx, node)
   local cx = cx:new_local_scope(true)
   return std.newrquote(ast.specialized.top.QuoteExpr {
@@ -2233,6 +2272,9 @@ function specialize.top(cx, node)
 
   elseif node:is(ast.unspecialized.top.Fspace) then
     return specialize.top_fspace(cx, node)
+
+  elseif node:is(ast.unspecialized.top.Remit) then
+    return specialize.top_remit(cx, node)
 
   elseif node:is(ast.unspecialized.top.QuoteExpr) then
     return specialize.top_quote_expr(cx, node)
