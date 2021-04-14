@@ -24173,6 +24173,11 @@ namespace Legion {
         if (redop_id == 0)
           REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
                               "ERROR: ReductionOpID zero is reserved.")
+        if (redop->identity == NULL)
+          REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID,
+              "ERROR: Legion does not support reduction operators "
+              "without identity values. All reduction operators must "
+              "have an identity value to support fold operations.")
         ReductionOpTable &red_table = 
           Runtime::get_reduction_table(true/*safe*/);
         // Check to make sure we're not overwriting a prior reduction op 
