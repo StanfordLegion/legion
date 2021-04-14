@@ -16,9 +16,9 @@
 -- [["-findex-launch-dynamic", "0"]]
 
 -- fails-with:
--- optimize_index_launch_num7.rg:71: loop optimization failed: argument 1 interferes with itself
+-- optimize_index_launch_num7.rg:77: loop optimization failed: argument 1 interferes with itself
 --       g(p_disjoint[(j + 1) % n])
---       ^
+--        ^
 
 import "regent"
 

@@ -16,7 +16,7 @@
 -- [["-findex-launch-dynamic", "0"]]
 
 -- fails-with:
--- optimize_index_launch_num_vars2.rg:33: loop optimization failed: argument 1 interferes with itself
+-- optimize_index_launch_num_vars2.rg:36: loop optimization failed: argument 1 interferes with itself
 --     f(p[j])
 --      ^
 

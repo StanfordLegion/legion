@@ -16,7 +16,7 @@
 -- [["-findex-launch-dynamic", "0"]]
 
 -- fails-with:
--- optimize_index_launch_num_affine.rg:39: loop optimization failed: argument 1 interferes with itself
+-- optimize_index_launch_num_affine.rg:42: loop optimization failed: argument 1 interferes with itself
 --     g(p[i * 2 - i - i])
 --      ^
 
