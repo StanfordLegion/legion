@@ -14370,7 +14370,7 @@ namespace Legion {
               for (std::vector<InstanceView*>::const_iterator it =
                     to_erase.begin(); it != to_erase.end(); it++)
               {
-                if (expr_refs_to_remove != NULL)
+                if (view_refs_to_remove != NULL)
                 {
                   std::map<LogicalView*,unsigned>::iterator finder =
                     view_refs_to_remove->find(*it);
@@ -14652,7 +14652,7 @@ namespace Legion {
             for (std::vector<InstanceView*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
             {
-              if (expr_refs_to_remove != NULL)
+              if (view_refs_to_remove != NULL)
               {
                 std::map<LogicalView*,unsigned>::iterator finder =
                   view_refs_to_remove->find(*it);
