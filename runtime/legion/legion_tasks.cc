@@ -2203,16 +2203,14 @@ namespace Legion {
       }
       untracked_valid_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
-        delete execution_context;
-      if ((remote_trace_recorder != NULL) &&
-          remote_trace_recorder->remove_recorder_reference())
-        delete remote_trace_recorder;
+        delete execution_context; 
       if ((shard_manager != NULL) && shard_manager->remove_reference())
         delete shard_manager;
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
       assert(!deferred_complete_mapping.exists());
       assert(!single_task_termination.exists());
+      assert(remote_trace_recorder == NULL);
 #endif
     }
 
@@ -4142,6 +4140,12 @@ namespace Legion {
                                          ready_event, single_task_termination);
         }
         trace_info.record_complete_replay(this, ready_event);
+      }
+      if (remote_trace_recorder != NULL)
+      {
+        if (remote_trace_recorder->remove_recorder_reference())
+          delete remote_trace_recorder;
+        remote_trace_recorder = NULL;
       }
       return RtEvent::NO_RT_EVENT;
     }
