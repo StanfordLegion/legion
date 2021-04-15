@@ -1054,8 +1054,8 @@ namespace Legion {
       enum MemoizableState {
         NO_MEMO,   // The operation is not subject to memoization
         MEMO_REQ,  // The mapper requested memoization on this operation
-        RECORD,    // The runtime is recording analysis for this operation
-        REPLAY,    // The runtime is replaying analysis for this opeartion
+        MEMO_RECORD,    // The runtime is recording analysis for this operation
+        MEMO_REPLAY,    // The runtime is replaying analysis for this opeartion
       };
     public:
       MemoizableOp(Runtime *rt);
@@ -1063,9 +1063,6 @@ namespace Legion {
       virtual Operation* get_operation(void) const 
         { return const_cast<MemoizableOp<OP>*>(this); }
       virtual Memoizable* get_memoizable(void) { return this; }
-    protected:
-      void pack_memoizable(Serializer &rez);
-      void unpack_memoizable(Deserializer &derez);
     protected:
       void activate_memoizable(void);
     public:
@@ -1091,8 +1088,8 @@ namespace Legion {
       void invoke_memoize_operation(MapperID mapper_id);
     public:
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
-      virtual bool is_recording(void) const { return memo_state == RECORD; }
-      inline bool is_replaying(void) const { return memo_state == REPLAY; }
+      virtual bool is_recording(void) const { return memo_state == MEMO_RECORD;}
+      inline bool is_replaying(void) const { return memo_state == MEMO_REPLAY; }
       virtual bool is_memoizable_task(void) const { return false; }
       virtual AddressSpaceID get_origin_space(void) const 
         { return this->runtime->address_space; }

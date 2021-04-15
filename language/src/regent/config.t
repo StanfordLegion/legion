@@ -100,7 +100,6 @@ local default_options = {
   ["override-demand-index-launch"] = false,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
-  ["allow-loop-demand-parallel"] = false,
   ["pretty"] = false,
   ["pretty-verbose"] = false,
   ["layout-constraints"] = true,

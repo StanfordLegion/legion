@@ -1593,33 +1593,20 @@ local function make_symbol(cx, node, var_name, var_type)
 end
 
 local function convert_index_launch_annotations(node)
-  local fail = report.error
-  if std.config["allow-loop-demand-parallel"] then
-    fail = report.warn
-  end
-
   if node.annotations.parallel:is(ast.annotation.Demand) then
     if not (node.annotations.index_launch:is(ast.annotation.Allow) or
               node.annotations.index_launch:is(ast.annotation.Demand))
     then
       report.error(node, "conflicting annotations for __parallel and __index_launch")
     end
-    fail(node, "__demand(__parallel) is deprecated, please use __demand(__index_launch)\n\nThis error can be temporarily downgraded to a warning with the flag:\n    -fallow-loop-demand-parallel 1\nBut please upgrade as soon as possible, as this flag will be removed in a future release.\nFor more information see: https://github.com/StanfordLegion/legion/issues/520\n")
-    return node.annotations {
-      parallel = ast.annotation.Allow { value = false },
-      index_launch = ast.annotation.Demand { value = false },
-    }
+    report.error(node, "__demand(__parallel) is no longer supported on loops, please use __demand(__index_launch)")
   elseif node.annotations.parallel:is(ast.annotation.Forbid) then
     if not (node.annotations.index_launch:is(ast.annotation.Allow) or
               node.annotations.index_launch:is(ast.annotation.Forbid))
     then
       report.error(node, "conflicting annotations for __parallel and __index_launch")
     end
-    fail(node, "__forbid(__parallel) is deprecated, please use __forbid(__index_launch)\n\nThis error can be temporarily downgraded to a warning with the flag:\n    -fallow-loop-demand-parallel 1\nBut please upgrade as soon as possible, as this flag will be removed in a future release.\nFor more information see: https://github.com/StanfordLegion/legion/issues/520\n")
-    return node.annotations {
-      parallel = ast.annotation.Allow { value = false },
-      index_launch = ast.annotation.Forbid { value = false },
-    }
+    report.error(node, "__forbid(__parallel) is no longer supported on loops, please use __forbid(__index_launch)")
   else
     return node.annotations
   end

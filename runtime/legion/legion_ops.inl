@@ -308,27 +308,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void MemoizableOp<OP>::pack_memoizable(Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(memo_state);
-      rez.serialize(need_prepipeline_stage);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void MemoizableOp<OP>::unpack_memoizable(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(memo_state);
-      derez.deserialize(need_prepipeline_stage);
-      tpl = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
     void MemoizableOp<OP>::activate_memoizable(void)
     //--------------------------------------------------------------------------
     {
@@ -369,7 +348,7 @@ namespace Legion {
           assert(OP::trace->is_replaying());
           assert(tpl->is_replaying());
 #endif
-          memo_state = REPLAY;
+          memo_state = MEMO_REPLAY;
           OP::trace->register_physical_only(this);
           trigger_replay();
           return;
@@ -380,7 +359,7 @@ namespace Legion {
           assert(OP::trace->is_recording());
           assert(tpl->is_recording());
 #endif
-          memo_state = RECORD;
+          memo_state = MEMO_RECORD;
         }
       }
       need_prepipeline_stage = true;

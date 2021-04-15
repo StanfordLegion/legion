@@ -12,15 +12,24 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- annotations_for_num_parallel.rg:24: __demand(__parallel) is no longer supported on loops, please use __demand(__index_launch)
---   for i = 0, 10 do end
---     ^
-
 import "regent"
 
-task f()
-  __demand(__parallel)
-  for i = 0, 10 do end
+local format = require("std/format")
+
+-- This tests a bug resulting from empty index launches and reductions
+-- on futures.
+
+local task foo()
+  return 1.0
 end
-f:compile()
+
+local task main()
+  var acc = 0.0
+  var empty = ispace(int1d, 0)
+  for t in empty do
+    acc += foo()
+  end
+  var res = acc/12
+  format.println("{}", res)
+end
+regentlib.start(main)

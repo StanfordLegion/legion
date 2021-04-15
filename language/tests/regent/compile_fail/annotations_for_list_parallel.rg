@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_for_list_parallel.rg:25: __demand(__parallel) is deprecated, please use __demand(__index_launch)
+-- annotations_for_list_parallel.rg:25: __demand(__parallel) is no longer supported on loops, please use __demand(__index_launch)
 --   for i in is do end
 --     ^
 

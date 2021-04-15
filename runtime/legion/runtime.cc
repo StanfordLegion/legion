@@ -30057,6 +30057,11 @@ namespace Legion {
                          "set in legion_config.h.", redop_id, 
                          LEGION_MAX_APPLICATION_REDOP_ID)
 #endif
+        if (redop->identity == NULL)
+          REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID,
+              "ERROR: Legion does not support reduction operators "
+              "without identity values. All reduction operators must "
+              "have an identity value to support fold operations.")
         ReductionOpTable &red_table = 
           Runtime::get_reduction_table(true/*safe*/);
         // Check to make sure we're not overwriting a prior reduction op 

@@ -12,15 +12,20 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- annotations_for_num_parallel.rg:24: __demand(__parallel) is no longer supported on loops, please use __demand(__index_launch)
---   for i = 0, 10 do end
---     ^
+-- runs-with:
+-- [["-lg:inorder", "-ll:force_kthreads", "-level", "3"]]
 
 import "regent"
 
-task f()
-  __demand(__parallel)
-  for i = 0, 10 do end
+-- This tests that we filter various Legion input arguments.
+
+local format = require("std/format")
+
+task main()
+  var {argv, argc} = regentlib.c.legion_runtime_get_input_args()
+  for i = 0, argc do
+    format.println("{}: {}", i, argv[i])
+  end
+  regentlib.assert(argc == 1, "test failed")
 end
-f:compile()
+regentlib.start(main)

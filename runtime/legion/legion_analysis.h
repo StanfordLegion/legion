@@ -139,7 +139,6 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
       virtual RtEvent get_collect_event(void) const = 0;
-      virtual PhysicalTraceRecorder* clone(Memoizable *memo) { return this; }
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
@@ -264,7 +263,6 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
       virtual RtEvent get_collect_event(void) const { return collect_event; }
-      virtual PhysicalTraceRecorder* clone(Memoizable *memo);
     public:
       virtual void record_get_term_event(Memoizable *memo);
       virtual void request_term_event(ApUserEvent &term_event);
@@ -371,18 +369,13 @@ namespace Legion {
     struct TraceInfo {
     public:
       explicit TraceInfo(Operation *op, bool initialize = false);
+      TraceInfo(SingleTask *task, RemoteTraceRecorder *rec, 
+                bool initialize = false); 
       TraceInfo(const TraceInfo &info);
-      TraceInfo(const TraceInfo &info, Operation *op);
       ~TraceInfo(void);
     protected:
       TraceInfo(Operation *op, Memoizable *memo, 
                 PhysicalTraceRecorder *rec, bool recording);
-    public:
-      void pack_remote_trace_info(Serializer &rez, AddressSpaceID target,
-                                  std::set<RtEvent> &applied) const;
-      static TraceInfo* unpack_remote_trace_info(Deserializer &derez,
-                                    Operation *op, Runtime *runtime);
-      TraceInfo* clone(Operation *op);
     public:
       inline void record_get_term_event(void) const
         {

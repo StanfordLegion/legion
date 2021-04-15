@@ -368,22 +368,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceRecorder* RemoteTraceRecorder::clone(Memoizable *newmemo)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent clone_applied = Runtime::create_rt_user_event();
-      PhysicalTraceRecorder* result = new RemoteTraceRecorder(runtime,
-          origin_space, local_space, newmemo, remote_tpl, clone_applied,
-          collect_event);
-      AutoLock a_lock(applied_lock);
-      applied_events.insert(clone_applied);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_get_term_event(Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -434,6 +424,9 @@ namespace Legion {
                                               ApUserEvent lhs, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -459,6 +452,9 @@ namespace Legion {
                                                    Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -485,6 +481,9 @@ namespace Legion {
                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
@@ -500,6 +499,9 @@ namespace Legion {
                                                   ApEvent e2, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
@@ -517,6 +519,9 @@ namespace Legion {
                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
@@ -535,6 +540,9 @@ namespace Legion {
                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -575,6 +583,9 @@ namespace Legion {
                                              bool reduction_fold)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -669,6 +680,9 @@ namespace Legion {
                              ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         // TODO
@@ -693,6 +707,9 @@ namespace Legion {
                                              PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -787,6 +804,9 @@ namespace Legion {
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -839,6 +859,9 @@ namespace Legion {
                                              std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -870,6 +893,9 @@ namespace Legion {
                                                        Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -898,6 +924,9 @@ namespace Legion {
                               std::set<RtEvent> &external_applied)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -937,6 +966,9 @@ namespace Legion {
                                                  ApEvent &rhs)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event();
@@ -962,6 +994,9 @@ namespace Legion {
                                                      ApEvent rhs)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event();
@@ -988,6 +1023,9 @@ namespace Legion {
                   ApEvent precondition, ApEvent postcondition)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -1756,6 +1794,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(SingleTask *task, RemoteTraceRecorder *r, bool init)
+      : op(task), memo(task), rec(r), recording(rec != NULL)
+    //--------------------------------------------------------------------------
+    {
+      if (recording)
+      {
+        rec->add_recorder_reference();
+        if (init)
+          record_get_term_event();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(const TraceInfo &rhs)
       : op(rhs.op), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
     //--------------------------------------------------------------------------
@@ -1764,27 +1815,7 @@ namespace Legion {
         rec->add_recorder_reference();
     }
 
-    //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(const TraceInfo &rhs, Operation *o)
-      : op(o), memo(o->get_memoizable()), rec(rhs.rec), recording(rhs.recording)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
-      if (rec != NULL)
-        rec->add_recorder_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    TraceInfo::~TraceInfo(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((rec != NULL) && rec->remove_recorder_reference())
-        delete rec;
-    }
-
-    //--------------------------------------------------------------------------
+   //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(Operation *o, Memoizable *m, 
                          PhysicalTraceRecorder *r, const bool record)
       : op(o), memo(m), rec(r), recording(record)
@@ -1795,51 +1826,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceInfo::pack_remote_trace_info(Serializer &rez, 
-                        AddressSpaceID target, std::set<RtEvent> &applied) const
+    TraceInfo::~TraceInfo(void)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<bool>(recording);
-      if (recording)
-      {
-        // Only need to pack these if we're recording
-        memo->pack_remote_memoizable(rez, target);
-        rec->pack_recorder(rez, applied, target);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ TraceInfo* TraceInfo::unpack_remote_trace_info(
-        Deserializer &derez, Operation *op, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      bool recording;
-      derez.deserialize<bool>(recording);
-      if (recording)
-      {
-        Memoizable *memo = 
-          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime); 
-        // PhysicalTraceRecord takes possible ownership of memoizable
-        PhysicalTraceRecorder *rec = 
-          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
-        return new TraceInfo(op, memo, rec, true/*recording*/);
-      }
-      else
-        return new TraceInfo(op, NULL, NULL, false/*recording*/);
-    }
-
-    //--------------------------------------------------------------------------
-    TraceInfo* TraceInfo::clone(Operation *newop)
-    //--------------------------------------------------------------------------
-    {
-      if (recording)
-      {
-        Memoizable *newmemo = memo->clone(newop);
-        PhysicalTraceRecorder *newrec = rec->clone(newmemo);
-        return new TraceInfo(newop, newmemo, newrec, true/*recording*/);
-      }
-      else
-        return new TraceInfo(newop, NULL, NULL, false/*recording*/);
+      if ((rec != NULL) && rec->remove_recorder_reference())
+        delete rec;
     }
 
     /////////////////////////////////////////////////////////////
