@@ -678,20 +678,32 @@ SKIP_MACHINES= titan% daint% excalibur% cori%
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
-    ifneq ($(strip $(shell $(CC) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
-      export OMPI_CC  	:= $(CC)
-      export MPICH_CC  	:= $(CC)
-      CC		:= mpicc
+    # OpenMPI check
+    ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CC) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
+      # MPICH check
+      ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CC) -show 2>&1 > /dev/null; echo $$?)),0)
+	export OMPI_CC  	:= $(CC)
+	export MPICH_CC  	:= $(CC)
+	CC			:= mpicc
+      endif
     endif
-    ifneq ($(strip $(shell $(CXX) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
-      export OMPI_CXX 	:= $(CXX)
-      export MPICH_CXX 	:= $(CXX)
-      CXX		:= mpicxx
+    # OpenMPI check
+    ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CXX) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
+      # MPICH check
+      ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CXX) -show 2>&1 > /dev/null; echo $$?)),0)
+	export OMPI_CXX 	:= $(CXX)
+	export MPICH_CXX 	:= $(CXX)
+	CXX			:= mpicxx
+      endif
     endif
-    ifneq ($(strip $(shell $(FC) -showme:compile 2>&1 > /dev/null; echo $$?)),0) 
-      export OMPI_FC  	:= $(FC)
-      export MPICH_FC  	:= $(FC)
-      FC		:= mpif90
+    # OpenMPI check
+    ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(FC) -showme:compile 2>&1 > /dev/null; echo $$?)),0) 
+      # MPICH check
+      ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(FC) -show 2>&1 > /dev/null; echo $$?)),0)
+	export OMPI_FC  	:= $(FC)
+	export MPICH_FC  	:= $(FC)
+	FC			:= mpif90
+      endif
     endif
     # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
     # FIXME: Unfortunately you can't match against the Summit hostname right now...
