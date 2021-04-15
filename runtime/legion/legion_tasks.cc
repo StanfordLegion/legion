@@ -3898,7 +3898,7 @@ namespace Legion {
         // We might also have made this event already if we have output regions
 #ifdef DEBUG_LEGION
         assert(!single_task_termination.exists() || !output_regions.empty() ||
-                (get_task_kind() == POINT_TASK_KIND));
+                is_remote());
 #endif
         if (!single_task_termination.exists())
           single_task_termination = Runtime::create_ap_user_event(NULL); 
