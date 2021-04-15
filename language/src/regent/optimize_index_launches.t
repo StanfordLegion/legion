@@ -479,9 +479,6 @@ local function analyze_noninterference_self(
     if analyze_index_noninterference_self(index, cx, loop_vars)
     then
       return true, false
-    else
-      local needs_dynamic_check = true
-      return false, needs_dynamic_check
     end
   end
 
@@ -500,10 +497,11 @@ local function analyze_noninterference_self(
         coherence == "simultaneous" or
         #field_paths == 0)
     then
-      return false
+       -- The only case where we emit the dynamic check
+       return false, true
     end
   end
-  return true
+  return true, false
 end
 
 local function always_true(cx, node)
