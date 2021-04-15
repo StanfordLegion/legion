@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list10.rg:78: loop optimization failed: argument 2 interferes with argument 1
+-- optimize_index_launch_list10.rg:85: loop optimization failed: argument 2 interferes with argument 1
 --     g2(p0_disjoint[i], p1_disjoint[i])
---      ^
+--       ^
 
 import "regent"
 

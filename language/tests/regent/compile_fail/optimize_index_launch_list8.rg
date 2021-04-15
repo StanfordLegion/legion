@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list8.rg:70: loop optimization failed: argument 1 interferes with itself
+-- optimize_index_launch_list8.rg:72: loop optimization failed: argument 1 interferes with itself
 --     g(p_aliased[i])
---     ^
+--      ^
 
 import "regent"
 

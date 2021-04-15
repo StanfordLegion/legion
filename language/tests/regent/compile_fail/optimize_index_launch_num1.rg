@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num1.rg:68: loop optimization failed: stride not equal to 1
+-- optimize_index_launch_num1.rg:71: loop optimization failed: stride not equal to 1
 --   for i = 0, n, 2 do
---                 ^
+--     ^
 
 import "regent"
 

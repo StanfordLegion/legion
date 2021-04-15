@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num4.rg:69: loop optimization failed: body is not a function call
+-- optimize_index_launch_num4.rg:72: loop optimization failed: body is not a function call
 --     var x = f(p_disjoint[i])
 --       ^
 

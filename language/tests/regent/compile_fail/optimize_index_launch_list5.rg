@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list5.rg:70: loop optimization failed: function is not a task
+-- optimize_index_launch_list5.rg:72: loop optimization failed: function is not a task
 --     e(i)
---     ^
+--      ^
 
 import "regent"
 

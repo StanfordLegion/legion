@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list3.rg:70: loop optimization failed: preamble statement is not a variable
+-- optimize_index_launch_list3.rg:73: loop optimization failed: preamble statement is not a variable
 --     f(p_disjoint[i])
---     ^
+--      ^
 
 import "regent"
 
