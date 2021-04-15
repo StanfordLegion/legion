@@ -941,7 +941,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
-# LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
+LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 ifeq ($(strip $(USE_GPU_REDUCTIONS)),1)
   ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
     LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
