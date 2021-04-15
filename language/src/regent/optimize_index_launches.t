@@ -473,7 +473,8 @@ end
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
   local region_type = std.as_read(arg.expr_type)
-  if partition_type and partition_type:is_disjoint() then
+  local is_disjoint = partition_type and partition_type:is_disjoint()
+  if is_disjoint then
     local index =
       (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
     if analyze_index_noninterference_self(index, cx, loop_vars)
@@ -497,8 +498,12 @@ local function analyze_noninterference_self(
         coherence == "simultaneous" or
         #field_paths == 0)
     then
-       -- The only case where we emit the dynamic check
-       return false, true
+       if not is_disjoint then
+         return false, false
+       else
+         -- The only case where we emit the dynamic check
+         return false, true
+       end
     end
   end
   return true, false
