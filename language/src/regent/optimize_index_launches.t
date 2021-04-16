@@ -1025,6 +1025,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
   local free_vars = terralib.newlist()
   local needs_dynamic_check = false
+  local args_need_dynamic_check = {}
 
   -- Perform a simpler analysis if the expression is not a task launch
   if not call:is(ast.typed.expr.Call) then
@@ -1164,6 +1165,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
               report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                 " interferes with itself")
               return
+            else
+              table.insert(args_need_dynamic_check, i)
             end
           end
         end
@@ -1200,7 +1203,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     is_constant_time = is_constant_time,
     free_variables = free_vars,
     loop_variables = loop_vars,
-    needs_dynamic_check = needs_dynamic_check
+    needs_dynamic_check = needs_dynamic_check,
+    args_need_dynamic_check = args_need_dynamic_check
   }
 end
 
@@ -1269,13 +1273,14 @@ local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflic
   return stats
 end
 
-local function insert_dynamic_check(index_launch_ast, unopt_loop_ast)
+local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local stats = terralib.newlist()
 
   local verdict = std.newsymbol(bool, "verdict")
   stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
 
-  for _, arg in pairs(index_launch_ast.call.args) do
+  for _, i in pairs(args_need_dynamic_check) do
+    local arg = index_launch_ast.call.args[i]
     -- Skip non-partition args
     if arg:is(ast.typed.expr.IndexAccess) and
        std.is_region(arg.expr_type) and
@@ -1393,7 +1398,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     if not body.needs_dynamic_check then
       return index_launch_ast
     else
-      return insert_dynamic_check(index_launch_ast, node {
+      return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
         block = optimize_index_launches.block(cx, node.block),
       })
     end
@@ -1454,7 +1459,7 @@ function optimize_index_launch.stat_for_list(cx, node)
     if not body.needs_dynamic_check then
       return index_launch_ast
     else
-      return insert_dynamic_check(index_launch_ast, node {
+      return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
         block = optimize_index_launches.block(cx, node.block),
       })
     end
