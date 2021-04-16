@@ -327,6 +327,12 @@ namespace Realm {
       void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
       void wait_on_streams(const std::set<GPUStream*> &other_streams);
+      
+      // atomically checks rate limit counters and returns true if 'bytes'
+      //  worth of copies can be submitted or false if not (in which case
+      //  the progress counter on the xd will be updated when it should try
+      //  again)
+      bool ok_to_submit_copy(size_t bytes, XferDes *xd);
 
       // to be called by a worker (that should already have the GPU context
       //   current) - returns true if any work remains
@@ -782,32 +788,17 @@ namespace Realm {
     class GPUXferDes : public XferDes {
     public:
       GPUXferDes(uintptr_t _dma_op, Channel *_channel,
-		 NodeID _launch_node, XferDesID _guid,
-		 const std::vector<XferDesPortInfo>& inputs_info,
-		 const std::vector<XferDesPortInfo>& outputs_info,
-		 int _priority);
-
-      ~GPUXferDes()
-      {
-        while (!available_reqs.empty()) {
-          GPURequest* gpu_req = (GPURequest*) available_reqs.front();
-          available_reqs.pop();
-          delete gpu_req;
-        }
-      }
+                 NodeID _launch_node, XferDesID _guid,
+                 const std::vector<XferDesPortInfo>& inputs_info,
+                 const std::vector<XferDesPortInfo>& outputs_info,
+                 int _priority);
 
       long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
 
       bool progress_xd(GPUChannel *channel, TimeLimit work_until);
 
     private:
-      //GPURequest* gpu_reqs;
-      //char *src_buf_base;
-      //char *dst_buf_base;
-      GPU *dst_gpu, *src_gpu;
+      std::vector<GPU *> src_gpus, dst_gpus;;
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
