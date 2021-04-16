@@ -1382,19 +1382,19 @@ function optimize_index_launch.stat_for_num(cx, node)
   -- If we reach here then either the self interference test failed,
   -- or the optimization was successful.
   local index_launch_ast = ast.typed.stat.IndexLaunchNum {
-      symbol = node.symbol,
-      values = node.values,
-      preamble = body.preamble,
-      call = body.call,
-      reduce_lhs = body.reduce_lhs,
-      reduce_op = body.reduce_op,
-      reduce_task = false,
-      args_provably = body.args_provably,
-      is_constant_time = body.is_constant_time,
-      free_vars = body.free_variables,
-      loop_vars = body.loop_variables,
-      annotations = node.annotations,
-      span = node.span,
+    symbol = node.symbol,
+    values = node.values,
+    preamble = body.preamble,
+    call = body.call,
+    reduce_lhs = body.reduce_lhs,
+    reduce_op = body.reduce_op,
+    reduce_task = false,
+    args_provably = body.args_provably,
+    is_constant_time = body.is_constant_time,
+    free_vars = body.free_variables,
+    loop_vars = body.loop_variables,
+    annotations = node.annotations,
+    span = node.span,
   }
 
   if #body.args_need_dynamic_check == 0 then
