@@ -13,7 +13,6 @@
 -- limitations under the License.
 
 -- fails-with:
--- Errors reported during runtime.
 -- optimize_index_launch_noninjective.rg:30: loop ineligible for index launch due to non-injective projection functor
 
 import "regent"
