@@ -9302,6 +9302,193 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Clone Analysis
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
+                              unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
+      : PhysicalAnalysis(rt, NULL, idx, expr, true/*on heap*/),
+        sources(std::move(srcs))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::CloneAnalysis(Runtime *rt, AddressSpaceID src,
+                              AddressSpaceID prev, IndexSpaceExpression *expr,
+                              unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
+      : PhysicalAnalysis(rt, src, prev, NULL, idx, expr, true/*on heap*/),
+        sources(std::move(srcs))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::CloneAnalysis(const CloneAnalysis &rhs)
+      : PhysicalAnalysis(rhs), sources(rhs.sources)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::~CloneAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis& CloneAnalysis::operator=(const CloneAnalysis &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CloneAnalysis::perform_traversal(EquivalenceSet *set,
+                                          IndexSpaceExpression *expr,
+                                          const bool expr_covers,
+                                          const FieldMask &mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->clone_set(*this, expr, expr_covers, mask, deferral_events,
+                     applied_events, already_deferred);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CloneAnalysis::perform_remote(RtEvent perform_precondition,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      if (perform_precondition.exists() && 
+          !perform_precondition.has_triggered())
+      {
+        // Defer this until the precondition is met
+        DeferPerformRemoteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
+        applied_events.insert(args.applied_event);
+        return args.done_event;
+      }
+      // If there are no sets we're done
+      if (remote_sets.empty())
+        return RtEvent::NO_RT_EVENT;
+      for (LegionMap<AddressSpaceID,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const AddressSpace target = rit->first;
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(original_source);
+          rez.serialize<size_t>(rit->second.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          analysis_expr->pack_expression(rez, target);
+          rez.serialize(index);
+          rez.serialize<size_t>(sources.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                sources.begin(); it != sources.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(applied);
+        }
+        runtime->send_equivalence_set_remote_clones(target, rez);
+        applied_events.insert(applied);
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CloneAnalysis::handle_remote_clones(Deserializer &derez,
+                                      Runtime *runtime, AddressSpaceID previous)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID original_source;
+      derez.deserialize(original_source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+        derez.deserialize(eq_masks[idx]);
+      }
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      unsigned index;
+      derez.deserialize(index);
+      size_t num_sources;
+      derez.deserialize(num_sources);
+      FieldMaskSet<EquivalenceSet> sources;
+      for (unsigned idx = 0; idx < num_sources; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        sources.insert(set, mask);
+      }
+      RtUserEvent applied;
+      derez.deserialize(applied);
+
+      CloneAnalysis *analysis = new CloneAnalysis(runtime, original_source,
+                                previous, expr, index, std::move(sources));
+      analysis->add_reference();
+      std::set<RtEvent> deferral_events, applied_events;
+      // Make sure that all our pointers are ready
+      RtEvent ready_event;
+      if (!ready_events.empty())
+        ready_event = Runtime::merge_events(ready_events);
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, ready_event);
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      if (traversal_done.exists() || analysis->has_remote_sets())
+        analysis->perform_remote(traversal_done, applied_events);
+      // Now we can trigger our applied event
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+      if (analysis->remove_reference())
+        delete analysis;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Equivalence Set
     /////////////////////////////////////////////////////////////
 
@@ -15385,6 +15572,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::clone_set(CloneAnalysis &analysis, 
+                                   IndexSpaceExpression *expr, 
+                                   const bool expr_covers, 
+                                   const FieldMask &clone_mask, 
+                                   std::set<RtEvent> &deferral_events,
+                                   std::set<RtEvent> &applied_events,
+                                   const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, clone_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      if (is_remote_analysis(analysis, clone_mask, deferral_events,
+                             applied_events, expr_covers))
+        return;
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner() || has_replicated_fields(clone_mask));
+#endif
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            analysis.sources.begin(); it != analysis.sources.end(); it++)
+      {
+        // Check that the fields overlap 
+        const FieldMask overlap = clone_mask & it->second;
+        if (!overlap)
+          continue;
+        // Check that the expressions overlap
+        IndexSpaceExpression *overlap_expr = 
+          runtime->forest->intersect_index_spaces(expr,
+              it->first->region_node->row_source);
+        if (overlap_expr->is_empty())
+          continue;
+        it->first->clone_to_local(this, overlap, applied_events,
+            false/*invalidate overlap*/, true/*forward to owner*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::update_tracing_valid_views(LogicalView *view,
                                                     IndexSpaceExpression *expr,
                                                     const RegionUsage &usage,
@@ -16105,22 +16334,6 @@ namespace Legion {
         if (replicated_states.insert(mapping, mask))
           mapping->add_reference();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::clone_owner(EquivalenceSet *src, const FieldMask &mask,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool invalidate_overlap)
-    //--------------------------------------------------------------------------
-    {
-      // Get a first guess at where the owner is
-      AddressSpaceID guess_target;
-      {
-        AutoLock eq(eq_lock,1,false/*exclusive*/);
-        guess_target = logical_owner_space;
-      }
-      clone_from(guess_target, src, mask, true/*forward to owner*/,
-                 applied_events, invalidate_overlap);
     }
 
     //--------------------------------------------------------------------------

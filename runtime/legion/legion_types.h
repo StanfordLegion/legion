@@ -877,6 +877,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
+      SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
@@ -1095,6 +1096,7 @@ namespace Legion {
         "Send Equivalence Set Remote Copies Across",                  \
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
+        "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \

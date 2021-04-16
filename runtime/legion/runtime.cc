@@ -12130,6 +12130,12 @@ namespace Legion {
                                               remote_address_space);
               break;
             }
+          case SEND_EQUIVALENCE_SET_REMOTE_CLONES:
+            {
+              runtime->handle_equivalence_set_remote_clones(derez,
+                                            remote_address_space);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
             {
               runtime->handle_equivalence_set_remote_instances(derez);
@@ -22305,6 +22311,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_clones(AddressSpaceID target,
+                                                     Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_CLONES,
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_instances(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24245,6 +24261,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FilterAnalysis::handle_remote_filters(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_clones(Deserializer &derez,
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CloneAnalysis::handle_remote_clones(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

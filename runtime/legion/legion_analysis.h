@@ -2153,6 +2153,41 @@ namespace Legion {
     };
 
     /**
+     * \class CloneAnalysis
+     * For cloning into an equivalence set from a set of other equivalence
+     * sets. This usually is done by VirtualCloseOps.
+     */
+    class CloneAnalysis : public PhysicalAnalysis,
+                          public LegionHeapify<CloneAnalysis> {
+    public:
+      CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
+                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
+      CloneAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                    IndexSpaceExpression *expr, unsigned index,
+                    FieldMaskSet<EquivalenceSet> &&sources);
+      CloneAnalysis(const CloneAnalysis &rhs);
+      virtual ~CloneAnalysis(void);
+    public:
+      CloneAnalysis& operator=(const CloneAnalysis &rhs);
+    public:
+      virtual void perform_traversal(EquivalenceSet *set,
+                                     IndexSpaceExpression *expr,
+                                     const bool expr_covers,
+                                     const FieldMask &mask,
+                                     std::set<RtEvent> &deferral_events,
+                                     std::set<RtEvent> &applied_events,
+                                     const bool already_deferred = false);
+      virtual RtEvent perform_remote(RtEvent precondition, 
+                                     std::set<RtEvent> &applied_events,
+                                     const bool already_deferred = false);
+    public:
+      static void handle_remote_clones(Deserializer &derez, Runtime *rt,
+                                       AddressSpaceID previous);
+    public:
+      const FieldMaskSet<EquivalenceSet> sources;
+    };
+
+    /**
      * \class EqSetTracker
      * This is an abstract class that provides an interface for
      * recording the equivalence sets that result from ray tracing
@@ -2393,6 +2428,12 @@ namespace Legion {
                       std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events,
                       const bool already_deferred = false);
+      void clone_set(CloneAnalysis &analysis,
+                     IndexSpaceExpression *expr, const bool expr_covers,
+                     const FieldMask &clone_mask,
+                     std::set<RtEvent> &deferral_events,
+                     std::set<RtEvent> &applied_events,
+                     const bool already_deferred = false);
     public:
       void initialize_collective_references(unsigned local_valid_refs);
       void remove_read_only_guard(CopyFillGuard *guard);
@@ -2403,9 +2444,6 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                const AddressSpaceID origin_space,
                                const CollectiveMapping *collective_mapping);
-      void clone_owner(EquivalenceSet *src, const FieldMask &clone_mask,
-                      std::set<RtEvent> &applied_events, 
-                      const bool invalidate_overlap = false);
       void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
                       const FieldMask &clone_mask,
                       const bool forward_to_owner,

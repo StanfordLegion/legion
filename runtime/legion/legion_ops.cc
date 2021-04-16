@@ -10272,33 +10272,29 @@ namespace Legion {
     {
       // Copy all the equivalence set information back out to the
       // enclosing context now that we are done with this task
-      const FieldMaskSet<EquivalenceSet> &src_equivalence_sets= 
-        source_version_info.get_equivalence_sets();
+      FieldMaskSet<EquivalenceSet> sources;
+      source_version_info.swap(sources);
+      IndexSpaceExpression *expr = 
+        runtime->forest->get_node(requirement.region.get_index_space()); 
+      CloneAnalysis *analysis =
+        new CloneAnalysis(runtime, expr, parent_idx, std::move(sources));
+      analysis->add_reference();
+      
+      std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &dst_equivalence_sets =
         target_version_info->get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator dst_it =  
-            dst_equivalence_sets.begin(); dst_it != 
-            dst_equivalence_sets.end(); dst_it++)
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator src_it = 
-              src_equivalence_sets.begin(); src_it !=
-              src_equivalence_sets.end(); src_it++)
-        {
-          // Check that the fields overlap 
-          const FieldMask overlap = dst_it->second & src_it->second;
-          if (!overlap)
-            continue;
-          // Check that the expressions overlap
-          IndexSpaceExpression *overlap_expr = 
-            runtime->forest->intersect_index_spaces(
-                dst_it->first->region_node->row_source,
-                src_it->first->region_node->row_source);
-          if (overlap_expr->is_empty())
-            continue;
-          dst_it->first->clone_owner(src_it->first, overlap, 
-                                     map_applied_conditions);
-        }
-      }
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =  
+            dst_equivalence_sets.begin(); it != 
+            dst_equivalence_sets.end(); it++)
+        analysis->traverse(it->first, it->second, deferral_events,
+                           map_applied_conditions);
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      if (traversal_done.exists() || analysis->has_remote_sets())
+        analysis->perform_remote(traversal_done, map_applied_conditions);
+      if (analysis->remove_reference())
+        delete analysis;
+
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
