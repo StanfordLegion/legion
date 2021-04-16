@@ -1264,7 +1264,9 @@ local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflic
   then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
 
   -- Bounds check
-  local cond = util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume))
+  local cond = util.mk_expr_binary("and",
+    util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int32)),
+    util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
   stats:insert(util.mk_stat_if(cond, then_block))
 
   return stats
