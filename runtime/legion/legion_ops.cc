@@ -10276,8 +10276,8 @@ namespace Legion {
       source_version_info.swap(sources);
       IndexSpaceExpression *expr = 
         runtime->forest->get_node(requirement.region.get_index_space()); 
-      CloneAnalysis *analysis =
-        new CloneAnalysis(runtime, expr, parent_idx, std::move(sources));
+      CloneAnalysis *analysis = new CloneAnalysis(runtime, expr, 
+          parent_ctx->owner_task, parent_idx, std::move(sources));
       analysis->add_reference();
       
       std::set<RtEvent> deferral_events;

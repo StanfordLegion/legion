@@ -2160,11 +2160,11 @@ namespace Legion {
     class CloneAnalysis : public PhysicalAnalysis,
                           public LegionHeapify<CloneAnalysis> {
     public:
-      CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
+      CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr, Operation *op,
                     unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
       CloneAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                    IndexSpaceExpression *expr, unsigned index,
-                    FieldMaskSet<EquivalenceSet> &&sources);
+                    IndexSpaceExpression *expr, Operation *op,
+                    unsigned index, FieldMaskSet<EquivalenceSet> &&sources);
       CloneAnalysis(const CloneAnalysis &rhs);
       virtual ~CloneAnalysis(void);
     public:

@@ -9307,8 +9307,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
-                              unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
-      : PhysicalAnalysis(rt, NULL, idx, expr, true/*on heap*/),
+               Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
+      : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/),
         sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
@@ -9316,9 +9316,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CloneAnalysis::CloneAnalysis(Runtime *rt, AddressSpaceID src,
-                              AddressSpaceID prev, IndexSpaceExpression *expr,
-                              unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
-      : PhysicalAnalysis(rt, src, prev, NULL, idx, expr, true/*on heap*/),
+                                 AddressSpaceID prev,IndexSpaceExpression *expr,
+                                 Operation *op, unsigned idx,
+                                 FieldMaskSet<EquivalenceSet> &&srcs)
+      : PhysicalAnalysis(rt, src, prev, op, idx, expr, true/*on heap*/),
         sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
@@ -9402,6 +9403,7 @@ namespace Legion {
             rez.serialize(it->second);
           }
           analysis_expr->pack_expression(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(sources.size());
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -9443,6 +9445,8 @@ namespace Legion {
       }
       IndexSpaceExpression *expr =
         IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       size_t num_sources;
@@ -9464,8 +9468,9 @@ namespace Legion {
       RtUserEvent applied;
       derez.deserialize(applied);
 
+      // This takes ownership of the operation
       CloneAnalysis *analysis = new CloneAnalysis(runtime, original_source,
-                                previous, expr, index, std::move(sources));
+                            previous, expr, op, index, std::move(sources));
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
