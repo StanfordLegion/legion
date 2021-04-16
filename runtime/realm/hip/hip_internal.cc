@@ -158,24 +158,22 @@ namespace Realm {
                   break;
 
                 // grr...  prototypes of these differ slightly...
+                hipMemcpyKind copy_type;
                 if(in_gpu) {
-                  if(out_gpu) {
-                    CHECK_CU( hipMemcpyAsync(reinterpret_cast<void *>(out_base + out_offset),
-                                             reinterpret_cast<const void *>(in_base + in_offset),
-                                             bytes, hipMemcpyDefault,
-                                             stream->get_stream()) );
-                  } else {
-                    CHECK_CU( hipMemcpyAsync(reinterpret_cast<void *>(out_base + out_offset),
-                                             reinterpret_cast<const void *>(in_base + in_offset),
-                                             bytes, hipMemcpyDeviceToHost,
-                                             stream->get_stream()) );
+                  if(out_gpu == in_gpu)
+                    copy_type = hipMemcpyDeviceToDevice;
+                  else if(!out_gpu)
+                    copy_type = hipMemcpyDeviceToHost;
+                  else {
+                    copy_type = hipMemcpyDefault;
                   }
                 } else {
-                  CHECK_CU( hipMemcpyAsync(reinterpret_cast<void *>(out_base + out_offset),
-                                           reinterpret_cast<const void *>(in_base + in_offset),
-                                           bytes, hipMemcpyHostToDevice,
-                                           stream->get_stream()) );
+                  copy_type = hipMemcpyHostToDevice;
                 }
+                CHECK_CU( hipMemcpyAsync(reinterpret_cast<void *>(out_base + out_offset),
+                                         reinterpret_cast<const void *>(in_base + in_offset),
+                                         bytes, copy_type,
+                                         stream->get_stream()) );
                 log_gpudma.info() << "gpu memcpy: dst="
                                   << std::hex << (out_base + out_offset)
                                   << " src=" << (in_base + in_offset) << std::dec
@@ -243,10 +241,12 @@ namespace Realm {
                   
                   hipMemcpyKind copy_type;
                   if(in_gpu) {
-                    if(out_gpu) {
-                      copy_type = hipMemcpyDefault;
-                    } else {
+                    if(out_gpu == in_gpu)
+                      copy_type = hipMemcpyDeviceToDevice;
+                    else if(!out_gpu)
                       copy_type = hipMemcpyDeviceToHost;
+                    else {
+                      copy_type = hipMemcpyDefault;
                     }
                   } else {
                     copy_type = hipMemcpyHostToDevice;
@@ -312,11 +312,13 @@ namespace Realm {
                   //  allowing us to stop early if we hit the rate limit or a
                   //  timeout
                   hipMemcpyKind copy_type;
-                  if(in_gpu) {
-                    if(out_gpu) {
-                      copy_type = hipMemcpyDefault;
-                    } else {
+                    if(in_gpu) {
+                    if(out_gpu == in_gpu)
+                      copy_type = hipMemcpyDeviceToDevice;
+                    else if(!out_gpu)
                       copy_type = hipMemcpyDeviceToHost;
+                    else {
+                      copy_type = hipMemcpyDefault;
                     }
                   } else {
                     copy_type = hipMemcpyHostToDevice;
