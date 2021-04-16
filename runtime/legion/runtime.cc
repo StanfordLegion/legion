@@ -909,6 +909,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool FutureImpl::find_or_create_application_instance(Memory target,
+                                                         UniqueID task_uid)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent ready = request_application_instance(target, NULL, task_uid,
+                                                        target.address_space());
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      AutoLock f_lock(future_lock,1,false/*exclusive*/);
+      if (canonical_instance == NULL)
+        return false;
+      if (canonical_instance->memory == target)
+        return true;
+      return (instances.find(target) != instances.end());
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent FutureImpl::request_application_instance(Memory target,
                                   SingleTask *task, UniqueID task_uid,
                                   AddressSpaceID source, ApUserEvent inst_ready)
@@ -9749,34 +9766,37 @@ namespace Legion {
         wait_on.wait();
         if (result == NULL)
         {
-          const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-            REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-          };
-          if (op->get_operation_kind() == Operation::TASK_OP_KIND)
+          if (op != NULL)
           {
-            TaskOp *task = static_cast<TaskOp*>(op);
-            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                "Failed to allocate eager future buffer for task %s "
-                "(UID %lld) because %s memory " IDFMT " is full. This is "
-                "an eager allocation so you must adjust the percentage of "
-                "this mememory dedicated for eager allocations with "
-                "'-lg:eager_alloc_percentage' flag on the command line.",
-                task->get_task_name(), op->get_unique_op_id(),
-                mem_names[memory.kind()], memory.id)
+            const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+              REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+            };
+            if (op->get_operation_kind() == Operation::TASK_OP_KIND)
+            {
+              TaskOp *task = static_cast<TaskOp*>(op);
+              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                  "Failed to allocate eager future buffer for task %s "
+                  "(UID %lld) because %s memory " IDFMT " is full. This is "
+                  "an eager allocation so you must adjust the percentage of "
+                  "this mememory dedicated for eager allocations with "
+                  "'-lg:eager_alloc_percentage' flag on the command line.",
+                  task->get_task_name(), op->get_unique_op_id(),
+                  mem_names[memory.kind()], memory.id)
+            }
+            else
+              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                  "Failed to allocate eager future buffer for %s (UID %lld) "
+                  "in parent task %s (UID %lld) because %s memory " IDFMT 
+                  " is full. This is an eager allocation so you must adjust "
+                  "the percentage of this mememory dedicated for eager "
+                  "jallocations with '-lg:eager_alloc_percentage' flag on the "
+                  "command line.", op->get_logging_name(),
+                  op->get_unique_op_id(), op->get_context()->get_task_name(),
+                  op->get_context()->get_unique_id(),
+                  mem_names[memory.kind()], memory.id)
           }
-          else
-            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                "Failed to allocate eager future buffer for %s (UID %lld) "
-                "in parent task %s (UID %lld) because %s memory " IDFMT 
-                " is full. This is an eager allocation so you must adjust "
-                "the percentage of this mememory dedicated for eager "
-                "jallocations with '-lg:eager_alloc_percentage' flag on the "
-                "command line.", op->get_logging_name(),
-                op->get_unique_op_id(), op->get_context()->get_task_name(),
-                op->get_context()->get_unique_id(),
-                mem_names[memory.kind()], memory.id)
         }
         return result;
       }

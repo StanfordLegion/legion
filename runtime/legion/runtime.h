@@ -264,6 +264,7 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
+      bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,
                        ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
