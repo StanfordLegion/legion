@@ -1218,7 +1218,7 @@ local function init_bitmask(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
--- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z) + pf.x * (bounds.hi.z - bounds.lo.z) * (bounds.hi.y - bounds.lo.y)
+-- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z + 1) + pf.x * (bounds.hi.z - bounds.lo.z + 1) * (bounds.hi.y - bounds.lo.y + 1)
 local function collapse_projection_functor(pf, dim, bounds)
   local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
 
@@ -1228,14 +1228,14 @@ local function collapse_projection_functor(pf, dim, bounds)
     local x = util.mk_expr_field_access(pf, "x", int32)
     local y = util.mk_expr_field_access(pf, "y", int32)
   
-    local y_extent = util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int32))
+    local y_extent = util.mk_expr_binary("+", util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int32)), util.mk_expr_constant(1, int32))
   
     if dim == 2 then
       return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
 
     elseif dim == 3 then
       local z = util.mk_expr_field_access(pf, "z", int32)
-      local z_extent = util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int32))
+      local z_extent = util.mk_expr_binary("+", util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int32)), util.mk_expr_constant(1, int32))
 
       return util.mk_expr_binary("+", util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)), util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
 
