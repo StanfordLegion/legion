@@ -1024,7 +1024,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local is_constant_time = not node.annotations.constant_time_launch:is(ast.annotation.Forbid)
 
   local free_vars = terralib.newlist()
-  local needs_dynamic_check = false
   local args_need_dynamic_check = {}
 
   -- Perform a simpler analysis if the expression is not a task launch
@@ -1157,8 +1156,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
-          local passed
-          passed, needs_dynamic_check = analyze_noninterference_self(
+          local passed, needs_dynamic_check = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
             if not (emit_dynamic_check and needs_dynamic_check) then
@@ -1188,7 +1186,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
   end
 
-  if needs_dynamic_check then
+  if #args_need_dynamic_check ~= 0 then
     report_pass("static loop optimization failed, emitting dynamic check")
   else
     report_pass("loop optimization succeeded")
@@ -1203,7 +1201,6 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     is_constant_time = is_constant_time,
     free_variables = free_vars,
     loop_variables = loop_vars,
-    needs_dynamic_check = needs_dynamic_check,
     args_need_dynamic_check = args_need_dynamic_check
   }
 end
@@ -1336,7 +1333,10 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
 
   -- Finally check verdict outside the loop to decide if it's safe to launch or not
   if unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand) then
-    local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist { util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) .. ": loop ineligible for index launch due to non-injective projection functor", rawstring) }))
+    local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
+      util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
+        ": loop ineligible for index launch due to non-injective projection functor", rawstring)
+      }))
     stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), util.mk_stat_block(util.mk_block(abort)), index_launch_ast))
   else
     stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
@@ -1375,33 +1375,32 @@ function optimize_index_launch.stat_for_num(cx, node)
     return node {
       block = optimize_index_launches.block(cx, node.block),
     }
-  else
-    -- If we reach here then either the self interference test failed, 
-    -- or the optimization was successful. body.needs_dynamic_check
-    -- will tell us which it is.
-    local index_launch_ast = ast.typed.stat.IndexLaunchNum {
-        symbol = node.symbol,
-        values = node.values,
-        preamble = body.preamble,
-        call = body.call,
-        reduce_lhs = body.reduce_lhs,
-        reduce_op = body.reduce_op,
-        reduce_task = false,
-        args_provably = body.args_provably,
-        is_constant_time = body.is_constant_time,
-        free_vars = body.free_variables,
-        loop_vars = body.loop_variables,
-        annotations = node.annotations,
-        span = node.span,
-    }
+  end
 
-    if not body.needs_dynamic_check then
-      return index_launch_ast
-    else
-      return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
-        block = optimize_index_launches.block(cx, node.block),
-      })
-    end
+  -- If we reach here then either the self interference test failed,
+  -- or the optimization was successful.
+  local index_launch_ast = ast.typed.stat.IndexLaunchNum {
+      symbol = node.symbol,
+      values = node.values,
+      preamble = body.preamble,
+      call = body.call,
+      reduce_lhs = body.reduce_lhs,
+      reduce_op = body.reduce_op,
+      reduce_task = false,
+      args_provably = body.args_provably,
+      is_constant_time = body.is_constant_time,
+      free_vars = body.free_variables,
+      loop_vars = body.loop_variables,
+      annotations = node.annotations,
+      span = node.span,
+  }
+
+  if #body.args_need_dynamic_check == 0 then
+    return index_launch_ast
+  else
+    return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
+      block = optimize_index_launches.block(cx, node.block),
+    })
   end
 end
 
@@ -1436,33 +1435,32 @@ function optimize_index_launch.stat_for_list(cx, node)
     return node {
       block = optimize_index_launches.block(cx, node.block),
     }
-  else
-    -- If we reach here then either the self interference test failed, 
-    -- or the optimization was successful. body.needs_dynamic_check
-    -- will tell us which it is.
-    local index_launch_ast = ast.typed.stat.IndexLaunchList {
-      symbol = node.symbol,
-      value = node.value,
-      preamble = body.preamble,
-      call = body.call,
-      reduce_lhs = body.reduce_lhs,
-      reduce_op = body.reduce_op,
-      reduce_task = false,
-      args_provably = body.args_provably,
-      is_constant_time = body.is_constant_time,
-      free_vars = body.free_variables,
-      loop_vars = body.loop_variables,
-      annotations = node.annotations,
-      span = node.span,
-    }
+  end
 
-    if not body.needs_dynamic_check then
-      return index_launch_ast
-    else
-      return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
-        block = optimize_index_launches.block(cx, node.block),
-      })
-    end
+  -- If we reach here then either the self interference test failed,
+  -- or the optimization was successful.
+  local index_launch_ast = ast.typed.stat.IndexLaunchList {
+    symbol = node.symbol,
+    value = node.value,
+    preamble = body.preamble,
+    call = body.call,
+    reduce_lhs = body.reduce_lhs,
+    reduce_op = body.reduce_op,
+    reduce_task = false,
+    args_provably = body.args_provably,
+    is_constant_time = body.is_constant_time,
+    free_vars = body.free_variables,
+    loop_vars = body.loop_variables,
+    annotations = node.annotations,
+    span = node.span,
+  }
+
+  if #body.args_need_dynamic_check == 0 then
+    return index_launch_ast
+  else
+    return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
+      block = optimize_index_launches.block(cx, node.block),
+    })
   end
 end
 
