@@ -1328,6 +1328,8 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
         bounds = index_launch_ast.value
         stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(duplicates_check)))
       end
+
+      stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
     end
   end
 
@@ -1337,7 +1339,7 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
         ": loop ineligible for index launch due to non-injective projection functor", rawstring)
       }))
-    stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), util.mk_stat_block(util.mk_block(abort)), index_launch_ast))
+    stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), abort, index_launch_ast))
   else
     stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
   end
