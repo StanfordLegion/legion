@@ -12655,6 +12655,11 @@ def main(temp_dir):
 
     if test_geometry:
         run_geometry_tests()
+    if dataflow_graphs or event_graphs or bad_graph_on_error:
+        try:
+            subprocess.Popen(['dot', '-V'], stderr=open(os.devnull, 'wb'))
+        except OSError:
+            print("WARNING: graphviz is not installed, graphs will not be generated")
 
     state = State(temp_dir, verbose, detailed_graphs, assert_on_error, 
                   assert_on_warning, bad_graph_on_error, eq_graph_on_error)
