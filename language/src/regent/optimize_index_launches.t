@@ -1256,32 +1256,6 @@ local function collapse_projection_functor(pf, dim, bounds)
   end
 end
 
-local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflict, verdict, bounds, dim, volume)
-  local stats = terralib.newlist()
-
-  -- Assign: value = collapse(index_expr)
-  preamble:map(function(stat) stats:insert(stat) end)
-  stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), collapse_projection_functor(index_expr, dim, bounds)))
-
-  local then_block = terralib.newlist()
-
-  local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
-  then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
-
-  then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
-
-  local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
-  then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
-
-  -- Bounds check
-  local cond = util.mk_expr_binary("and",
-    util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int32)),
-    util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
-  stats:insert(util.mk_stat_if(cond, then_block))
-
-  return stats
-end
-
 local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local stats = terralib.newlist()
 
@@ -1319,6 +1293,8 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       local conflict = std.newsymbol(bool, "conflict")
       stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
 
+      local duplicates_check = terralib.newlist()
+
       -- Figure out what type of loop we've got and get its index expr
       local index_expr
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
@@ -1327,18 +1303,34 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
         index_expr = arg.index
       end
   
-      local i = index_launch_ast.symbol
-      local duplicates_check =
-        mk_duplicates_check(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, p_bounds, dim, volume)
+      -- Assign: value = collapse(index_expr)
+      index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
+      duplicates_check:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), collapse_projection_functor(index_expr, dim, p_bounds)))
+
+      local then_block = terralib.newlist()
+
+      local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
+      then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
+
+      then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
+
+      local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
+      then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
+
+      -- Bounds check
+      local cond = util.mk_expr_binary("and",
+        util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int32)),
+        util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
+      duplicates_check:insert(util.mk_stat_if(cond, then_block))
   
       local bounds
       -- Generate the AST based on loop type
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
         bounds = index_launch_ast.values
-        stats:insert(util.mk_stat_for_num(i, bounds, util.mk_block(duplicates_check)))
+        stats:insert(util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
       else
         bounds = index_launch_ast.value
-        stats:insert(util.mk_stat_for_list(i, bounds, util.mk_block(duplicates_check)))
+        stats:insert(util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
       end
 
       stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
