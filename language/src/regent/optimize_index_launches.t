@@ -1314,8 +1314,17 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
 
       then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
 
-      local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
-      then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
+      -- Issue an error here if we have to
+      if unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand) then
+        local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
+          util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
+            ": loop optimization failed: argument " .. idx .. " interferes with itself", rawstring)
+          }))
+        then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { abort }))
+      else
+        local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
+        then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
+      end
 
       -- Bounds check
       local cond = util.mk_expr_binary("and",
@@ -1337,13 +1346,9 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
     end
   end
 
-  -- Finally check verdict outside the loop to decide if it's safe to launch or not
+  -- In the demand case we know it's safe to optimize here, otherwise we need to check verdict
   if unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand) then
-    local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
-      util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
-        ": loop ineligible for index launch due to non-injective projection functor", rawstring)
-      }))
-    stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), abort, index_launch_ast))
+    stats:insert(index_launch_ast)
   else
     stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
   end
