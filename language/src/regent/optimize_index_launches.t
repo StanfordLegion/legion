@@ -1257,21 +1257,26 @@ local function collapse_projection_functor(pf, dim, bounds)
 end
 
 local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
-  local stats = terralib.newlist()
+  local check = terralib.newlist()
+
+  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
+  local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
+
+  local is_demand = unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand)
 
   local verdict = std.newsymbol(bool, "verdict")
-  stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
+  check:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
 
   for _, idx in pairs(args_need_dynamic_check) do
     local arg = index_launch_ast.call.args[idx]
+    local stats = terralib.newlist()
+
     -- Skip non-partition args
     if arg:is(ast.typed.expr.IndexAccess) and
        std.is_region(arg.expr_type) and
        std.is_partition(std.as_read(arg.value.expr_type)) then
 
       local dim = arg.expr_type:ispace().dim
-      local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
-      local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
 
       -- Generate the AST for var volume = p.colors.bounds:volume()
       local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
@@ -1315,7 +1320,7 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
 
       -- Issue an error here if we have to
-      if unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand) then
+      if is_demand then
         local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
           util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
             ": loop optimization failed: argument " .. idx .. " interferes with itself", rawstring)
@@ -1343,17 +1348,24 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       end
 
       stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
+
+      if is_demand then
+        check:insert(util.mk_stat_block(util.mk_block(stats)))
+      else
+        -- Skip this check if a previous one failed
+        check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
+      end
     end
   end
 
   -- In the demand case we know it's safe to optimize here, otherwise we need to check verdict
-  if unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand) then
-    stats:insert(index_launch_ast)
+  if is_demand then
+    check:insert(index_launch_ast)
   else
-    stats:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
+    check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
   end
   
-  return util.mk_stat_block(util.mk_block(stats))
+  return util.mk_stat_block(util.mk_block(check))
 end
 
 function optimize_index_launch.stat_for_num(cx, node)
