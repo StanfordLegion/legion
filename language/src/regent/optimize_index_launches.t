@@ -1229,16 +1229,26 @@ local function collapse_projection_functor(pf, dim, bounds)
     local x = util.mk_expr_field_access(pf, "x", int32)
     local y = util.mk_expr_field_access(pf, "y", int32)
   
-    local y_extent = util.mk_expr_binary("+", util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int32)), util.mk_expr_constant(1, int32))
+    local y_extent = util.mk_expr_binary("+",
+      util.mk_expr_binary("-",
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int32),
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int32)),
+      util.mk_expr_constant(1, int32))
   
     if dim == 2 then
       return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
 
     elseif dim == 3 then
       local z = util.mk_expr_field_access(pf, "z", int32)
-      local z_extent = util.mk_expr_binary("+", util.mk_expr_binary("-", util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int32), util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int32)), util.mk_expr_constant(1, int32))
+      local z_extent = util.mk_expr_binary("+",
+        util.mk_expr_binary("-",
+          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int32),
+          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int32)),
+        util.mk_expr_constant(1, int32))
 
-      return util.mk_expr_binary("+", util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)), util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
+      return util.mk_expr_binary("+",
+        util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)),
+        util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
 
     else
       assert(false)
@@ -1246,10 +1256,10 @@ local function collapse_projection_functor(pf, dim, bounds)
   end
 end
 
-local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflict, verdict, loop_var, bounds, dim, volume)
+local function mk_duplicates_check(preamble, value, index_expr, bitmask, conflict, verdict, bounds, dim, volume)
   local stats = terralib.newlist()
 
-  -- Compute value = index_expr(i)
+  -- Assign: value = collapse(index_expr)
   preamble:map(function(stat) stats:insert(stat) end)
   stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), collapse_projection_functor(index_expr, dim, bounds)))
 
@@ -1278,8 +1288,8 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
   local verdict = std.newsymbol(bool, "verdict")
   stats:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
 
-  for _, i in pairs(args_need_dynamic_check) do
-    local arg = index_launch_ast.call.args[i]
+  for _, idx in pairs(args_need_dynamic_check) do
+    local arg = index_launch_ast.call.args[idx]
     -- Skip non-partition args
     if arg:is(ast.typed.expr.IndexAccess) and
        std.is_region(arg.expr_type) and
@@ -1292,9 +1302,8 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       -- Generate the AST for var volume = p.colors.bounds:volume()
       local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
       local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
-      local p_volume = util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())
       local volume = std.newsymbol(int32, "volume")
-      stats:insert(util.mk_stat_var(volume, int32, p_volume))
+      stats:insert(util.mk_stat_var(volume, int32, util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())))
   
       -- Malloc a bitmask of size volume and initialize it
       local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
@@ -1319,7 +1328,8 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       end
   
       local i = index_launch_ast.symbol
-      local duplicates_check = mk_duplicates_check(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, i, p_bounds, dim, volume)
+      local duplicates_check =
+        mk_duplicates_check(index_launch_ast.preamble, value, index_expr, bitmask, conflict, verdict, p_bounds, dim, volume)
   
       local bounds
       -- Generate the AST based on loop type
