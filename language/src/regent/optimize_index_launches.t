@@ -1208,12 +1208,12 @@ end
 local function init_bitmask(bitmask, volume)
   local stats = terralib.newlist()
 
-  local idx = std.newsymbol(int32, "i")
+  local idx = std.newsymbol(int64, "i")
   local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&bool))
   stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool)))
 
   local values = terralib.newlist()
-  values:insert(util.mk_expr_constant(0, int32))
+  values:insert(util.mk_expr_constant(0, int64))
   values:insert(util.mk_expr_id(volume))
 
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
@@ -1226,25 +1226,25 @@ local function collapse_projection_functor(pf, dim, bounds)
   if dim == 0 or dim == 1 then
     return pf
   else
-    local x = util.mk_expr_field_access(pf, "x", int32)
-    local y = util.mk_expr_field_access(pf, "y", int32)
+    local x = util.mk_expr_field_access(pf, "x", int64)
+    local y = util.mk_expr_field_access(pf, "y", int64)
   
     local y_extent = util.mk_expr_binary("+",
       util.mk_expr_binary("-",
-        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int32),
-        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int32)),
-      util.mk_expr_constant(1, int32))
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int64),
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int64)),
+      util.mk_expr_constant(1, int64))
   
     if dim == 2 then
       return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
 
     elseif dim == 3 then
-      local z = util.mk_expr_field_access(pf, "z", int32)
+      local z = util.mk_expr_field_access(pf, "z", int64)
       local z_extent = util.mk_expr_binary("+",
         util.mk_expr_binary("-",
-          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int32),
-          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int32)),
-        util.mk_expr_constant(1, int32))
+          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int64),
+          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int64)),
+        util.mk_expr_constant(1, int64))
 
       return util.mk_expr_binary("+",
         util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)),
@@ -1281,13 +1281,13 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
       -- Generate the AST for var volume = p.colors.bounds:volume()
       local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
       local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
-      local volume = std.newsymbol(int32, "volume")
-      stats:insert(util.mk_stat_var(volume, int32, util.mk_expr_method_call(p_bounds, int32, "volume", terralib.newlist())))
+      local volume = std.newsymbol(int64, "volume")
+      stats:insert(util.mk_stat_var(volume, int64, util.mk_expr_method_call(p_bounds, int64, "volume", terralib.newlist())))
   
       -- Malloc a bitmask of size volume and initialize it
       local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
       local bitmask = std.newsymbol(&bool, "bitmask")
-      local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(uint64, util.mk_expr_id(volume)))
+      local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(int64, util.mk_expr_id(volume)))
       stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
       stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
       stats:insert(init_bitmask(bitmask, volume))
@@ -1333,7 +1333,7 @@ local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, u
 
       -- Bounds check
       local cond = util.mk_expr_binary("and",
-        util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int32)),
+        util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int64)),
         util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
       duplicates_check:insert(util.mk_stat_if(cond, then_block))
   
