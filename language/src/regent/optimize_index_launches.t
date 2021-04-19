@@ -19,13 +19,20 @@
 
 local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
+local util = require("regent/ast_util")
 local data = require("common/data")
 local report = require("common/report")
 local std = require("regent/std")
 
 local skip_interference_check = std.config["override-demand-index-launch"]
+local emit_dynamic_check = std.config["index-launch-dynamic"]
 
 local context = {}
+
+local function get_source_location(node)
+  assert(node.span.source and node.span.start.line)
+  return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
+end
 
 function context:__index (field)
   local value = context [field]
@@ -466,12 +473,13 @@ end
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
   local region_type = std.as_read(arg.expr_type)
-  if partition_type and partition_type:is_disjoint() then
+  local is_disjoint = partition_type and partition_type:is_disjoint()
+  if is_disjoint then
     local index =
       (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
     if analyze_index_noninterference_self(index, cx, loop_vars)
     then
-      return true
+      return true, false
     end
   end
 
@@ -490,10 +498,15 @@ local function analyze_noninterference_self(
         coherence == "simultaneous" or
         #field_paths == 0)
     then
-      return false
+       if not is_disjoint then
+         return false, false
+       else
+         -- The only case where we emit the dynamic check
+         return false, true
+       end
     end
   end
-  return true
+  return true, false
 end
 
 local function always_true(cx, node)
@@ -1011,6 +1024,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   local is_constant_time = not node.annotations.constant_time_launch:is(ast.annotation.Forbid)
 
   local free_vars = terralib.newlist()
+  local args_need_dynamic_check = {}
 
   -- Perform a simpler analysis if the expression is not a task launch
   if not call:is(ast.typed.expr.Call) then
@@ -1142,12 +1156,16 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         end
 
         do
-          local passed = analyze_noninterference_self(
+          local passed, needs_dynamic_check = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
-            report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
+            if not (emit_dynamic_check and needs_dynamic_check) then
+              report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                 " interferes with itself")
-            return
+              return
+            else
+              table.insert(args_need_dynamic_check, i)
+            end
           end
         end
       end
@@ -1168,7 +1186,12 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     end
   end
 
-  report_pass("loop optimization succeeded")
+  if #args_need_dynamic_check ~= 0 then
+    report_pass("static loop optimization failed, emitting dynamic check")
+  else
+    report_pass("loop optimization succeeded")
+  end
+
   return {
     preamble = preamble,
     call = call,
@@ -1177,18 +1200,182 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     args_provably = args_provably,
     is_constant_time = is_constant_time,
     free_variables = free_vars,
-    loop_variables = loop_vars
+    loop_variables = loop_vars,
+    args_need_dynamic_check = args_need_dynamic_check
   }
+end
+
+local function init_bitmask(bitmask, volume)
+  local stats = terralib.newlist()
+
+  local idx = std.newsymbol(int64, "i")
+  local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&bool))
+  stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool)))
+
+  local values = terralib.newlist()
+  values:insert(util.mk_expr_constant(0, int64))
+  values:insert(util.mk_expr_id(volume))
+
+  return util.mk_stat_for_num(idx, values, util.mk_block(stats))
+end
+
+-- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z + 1) + pf.x * (bounds.hi.z - bounds.lo.z + 1) * (bounds.hi.y - bounds.lo.y + 1)
+local function collapse_projection_functor(pf, dim, bounds)
+  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
+
+  if dim == 0 or dim == 1 then
+    return pf
+  else
+    local x = util.mk_expr_field_access(pf, "x", int64)
+    local y = util.mk_expr_field_access(pf, "y", int64)
+
+    local y_extent = util.mk_expr_binary("+",
+      util.mk_expr_binary("-",
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int64),
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int64)),
+      util.mk_expr_constant(1, int64))
+
+    if dim == 2 then
+      return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
+
+    elseif dim == 3 then
+      local z = util.mk_expr_field_access(pf, "z", int64)
+      local z_extent = util.mk_expr_binary("+",
+        util.mk_expr_binary("-",
+          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int64),
+          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int64)),
+        util.mk_expr_constant(1, int64))
+
+      return util.mk_expr_binary("+",
+        util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)),
+        util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
+
+    else
+      assert(false)
+    end
+  end
+end
+
+local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
+  local check = terralib.newlist()
+
+  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
+  local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
+
+  local verdict = std.newsymbol(bool, "verdict")
+  check:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
+
+  for _, idx in pairs(args_need_dynamic_check) do
+    local arg = index_launch_ast.call.args[idx]
+    local stats = terralib.newlist()
+
+    -- Skip non-partition args
+    if arg:is(ast.typed.expr.IndexAccess) and
+       std.is_region(arg.expr_type) and
+       std.is_partition(std.as_read(arg.value.expr_type)) then
+
+      local dim = arg.expr_type:ispace().dim
+
+      -- Generate the AST for var volume = p.colors.bounds:volume()
+      local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
+      local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
+      local volume = std.newsymbol(int64, "volume")
+      stats:insert(util.mk_stat_var(volume, int64, util.mk_expr_method_call(p_bounds, int64, "volume", terralib.newlist())))
+
+      -- Malloc a bitmask of size volume and initialize it
+      local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
+      local bitmask = std.newsymbol(&bool, "bitmask")
+      local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(int64, util.mk_expr_id(volume)))
+      stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
+      stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
+      stats:insert(init_bitmask(bitmask, volume))
+
+      local value = std.newsymbol(int64, "value")
+      stats:insert(util.mk_stat_var(value, int64))
+
+      local conflict = std.newsymbol(bool, "conflict")
+      stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
+
+      local duplicates_check = terralib.newlist()
+
+      -- Figure out what type of loop we've got and get its index expr
+      local index_expr
+      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+        index_expr = arg.index.arg
+      else
+        index_expr = arg.index
+      end
+
+      -- Assign: value = collapse(index_expr)
+      index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
+      duplicates_check:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), collapse_projection_functor(index_expr, dim, p_bounds)))
+
+      local then_block = terralib.newlist()
+
+      local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
+      then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
+
+      then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
+
+      -- Issue an error here if we have to
+      if is_demand then
+        local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
+          util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
+            ": loop optimization failed: argument " .. idx .. " interferes with itself", rawstring)
+          }))
+        then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { abort }))
+      else
+        local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
+        then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
+      end
+
+      -- Bounds check
+      local cond = util.mk_expr_binary("and",
+        util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int64)),
+        util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
+      duplicates_check:insert(util.mk_stat_if(cond, then_block))
+
+      local bounds
+      -- Generate the AST based on loop type
+      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+        bounds = index_launch_ast.values
+        stats:insert(util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+      else
+        bounds = index_launch_ast.value
+        stats:insert(util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+      end
+
+      stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
+
+      if is_demand then
+        check:insert(util.mk_stat_block(util.mk_block(stats)))
+      else
+        -- Skip this check if a previous one failed
+        check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
+      end
+    end
+  end
+
+  -- In the demand case we know it's safe to optimize here, otherwise we need to check verdict
+  if is_demand then
+    check:insert(index_launch_ast)
+  else
+    check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), unopt_loop_ast, index_launch_ast))
+  end
+
+  return util.mk_stat_block(util.mk_block(check))
 end
 
 function optimize_index_launch.stat_for_num(cx, node)
   local report_pass = ignore
   local report_fail = report.info
+  local is_demand = false
   if node.annotations.index_launch:is(ast.annotation.Demand) or
     node.annotations.constant_time_launch:is(ast.annotation.Demand)
   then
     report_pass = ignore
     report_fail = report.error
+    is_demand = true
   end
 
   if node.annotations.index_launch:is(ast.annotation.Forbid) then
@@ -1213,7 +1400,9 @@ function optimize_index_launch.stat_for_num(cx, node)
     }
   end
 
-  return ast.typed.stat.IndexLaunchNum {
+  -- If we reach here then either the self interference test failed,
+  -- or the optimization was successful.
+  local index_launch_ast = ast.typed.stat.IndexLaunchNum {
     symbol = node.symbol,
     values = node.values,
     preamble = body.preamble,
@@ -1228,16 +1417,26 @@ function optimize_index_launch.stat_for_num(cx, node)
     annotations = node.annotations,
     span = node.span,
   }
+
+  if #body.args_need_dynamic_check == 0 then
+    return index_launch_ast
+  else
+    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+      block = optimize_index_launches.block(cx, node.block),
+    })
+  end
 end
 
 function optimize_index_launch.stat_for_list(cx, node)
   local report_pass = ignore
   local report_fail = report.info
+  local is_demand = false
   if node.annotations.index_launch:is(ast.annotation.Demand) or
     node.annotations.constant_time_launch:is(ast.annotation.Demand)
   then
     report_pass = ignore
     report_fail = report.error
+    is_demand = true
   end
 
   if node.annotations.index_launch:is(ast.annotation.Forbid) then
@@ -1263,7 +1462,9 @@ function optimize_index_launch.stat_for_list(cx, node)
     }
   end
 
-  return ast.typed.stat.IndexLaunchList {
+  -- If we reach here then either the self interference test failed,
+  -- or the optimization was successful.
+  local index_launch_ast = ast.typed.stat.IndexLaunchList {
     symbol = node.symbol,
     value = node.value,
     preamble = body.preamble,
@@ -1278,6 +1479,14 @@ function optimize_index_launch.stat_for_list(cx, node)
     annotations = node.annotations,
     span = node.span,
   }
+
+  if #body.args_need_dynamic_check == 0 then
+    return index_launch_ast
+  else
+    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+      block = optimize_index_launches.block(cx, node.block),
+    })
+  end
 end
 
 local function do_nothing(cx, node) return node end
