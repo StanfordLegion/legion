@@ -1256,13 +1256,11 @@ local function collapse_projection_functor(pf, dim, bounds)
   end
 end
 
-local function insert_dynamic_check(args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
+local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local check = terralib.newlist()
 
   local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
   local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
-
-  local is_demand = unopt_loop_ast.annotations.index_launch:is(ast.annotation.Demand)
 
   local verdict = std.newsymbol(bool, "verdict")
   check:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
@@ -1371,11 +1369,13 @@ end
 function optimize_index_launch.stat_for_num(cx, node)
   local report_pass = ignore
   local report_fail = report.info
+  local is_demand = false
   if node.annotations.index_launch:is(ast.annotation.Demand) or
     node.annotations.constant_time_launch:is(ast.annotation.Demand)
   then
     report_pass = ignore
     report_fail = report.error
+    is_demand = true
   end
 
   if node.annotations.index_launch:is(ast.annotation.Forbid) then
@@ -1421,7 +1421,7 @@ function optimize_index_launch.stat_for_num(cx, node)
   if #body.args_need_dynamic_check == 0 then
     return index_launch_ast
   else
-    return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
+    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
       block = optimize_index_launches.block(cx, node.block),
     })
   end
@@ -1430,11 +1430,13 @@ end
 function optimize_index_launch.stat_for_list(cx, node)
   local report_pass = ignore
   local report_fail = report.info
+  local is_demand = false
   if node.annotations.index_launch:is(ast.annotation.Demand) or
     node.annotations.constant_time_launch:is(ast.annotation.Demand)
   then
     report_pass = ignore
     report_fail = report.error
+    is_demand = true
   end
 
   if node.annotations.index_launch:is(ast.annotation.Forbid) then
@@ -1481,7 +1483,7 @@ function optimize_index_launch.stat_for_list(cx, node)
   if #body.args_need_dynamic_check == 0 then
     return index_launch_ast
   else
-    return insert_dynamic_check(body.args_need_dynamic_check, index_launch_ast, node {
+    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
       block = optimize_index_launches.block(cx, node.block),
     })
   end
