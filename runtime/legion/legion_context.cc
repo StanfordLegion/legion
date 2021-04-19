@@ -6765,10 +6765,15 @@ namespace Legion {
       size_t result = total_children_count++;
       const size_t outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
-      // Only need to check if we are not tracing by frames
+      // Need to check if we are not tracing by frames
+      // Also, do not perform window waits if we are in the middle of a 
+      // physical trace because we might deadlock if the trace is bigger
+      // than the size of our window.
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
-            (outstanding_count > context_configuration.max_window_size))
+            (outstanding_count > context_configuration.max_window_size) &&
+            ((current_trace == NULL) || !current_trace->is_fixed() ||
+             !current_trace->has_physical_trace()))
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
