@@ -1,5 +1,6 @@
 *.dSYM
 librealm.a
+version_check
 serializing
 test_profiling
 ctxswitch
