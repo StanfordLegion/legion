@@ -17943,7 +17943,8 @@ namespace Legion {
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered &&
-          ((current_trace == NULL) || !current_trace->is_fixed()))
+          ((current_trace == NULL) || !current_trace->is_fixed() ||
+           !current_trace->has_physical_trace()))
       {
 #ifdef DEBUG_LEGION
         assert(inorder_barrier.exists());
