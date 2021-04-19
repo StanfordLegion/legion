@@ -98,6 +98,7 @@ local default_options = {
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["override-demand-index-launch"] = false,
+  ["index-launch-dynamic"] = true,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
   ["pretty"] = false,

@@ -12,28 +12,22 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-findex-launch-dynamic", "0"]]
-
 -- fails-with:
--- optimize_index_launch_num_vars2.rg:36: loop optimization failed: argument 1 interferes with itself
---     f(p[j])
---      ^
+-- optimize_index_launch_noninjective.rg:29: loop optimization failed: argument 1 interferes with itself
 
 import "regent"
 
-task f(r : region(int)) where reads writes(r) do end
-
-terra g(x : int) return x end
+task foo(r : region(ispace(int1d), int))
+where reads writes(r) do
+end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var p = partition(equal, r, ispace(int1d, 4))
+  var r = region(ispace(int1d, 10), int)
+  var p = partition(equal, r, ispace(int1d, 5))
 
   __demand(__index_launch)
-  for i = 0, 4 do
-    var j = g(i)
-    f(p[j])
+  for i in ispace(int1d, 5) do
+    foo(p[i%2])
   end
 end
 regentlib.start(main)
