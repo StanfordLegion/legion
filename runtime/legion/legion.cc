@@ -6726,6 +6726,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const char* Runtime::get_legion_version(void)
+    //--------------------------------------------------------------------------
+    {
+      static const char *legion_runtime_version = LEGION_VERSION;
+      return legion_runtime_version;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background,
                                   bool default_mapper)
     //--------------------------------------------------------------------------

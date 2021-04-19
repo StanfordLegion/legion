@@ -7964,6 +7964,13 @@ namespace Legion {
       //------------------------------------------------------------------------
     public:
       /**
+       * Return a string representing the Legion version. This string
+       * can be compared in application code against the LEGION_VERSION 
+       * macro defined by legion.h to detect header/library mismatches. 
+       */
+      static const char* get_legion_version(void);
+
+      /**
        * After configuring the runtime object this method should be called
        * to start the runtime running.  The runtime will then launch
        * the specified top-level task on one of the processors in the
