@@ -11,6 +11,8 @@
  *
  ******************** IMPORTANT ****************************/
 
+#cmakedefine LEGION_VERSION "@LEGION_VERSION@"
+
 #cmakedefine DEBUG_LEGION
 
 #cmakedefine LEGION_PRIVILEGE_CHECKS

@@ -41,6 +41,51 @@ set(SOVERSION 1)
 set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
 
 #------------------------------------------------------------------------------#
+# Version information
+#------------------------------------------------------------------------------#
+
+# the Legion/Realm version string is set by the first of these that works:
+# 1) a defined value for the cmake Legion_VERSION variable
+# 2) the output of `git describe`, if successful
+# 3) the contents of 'VERSION' (at the root of the source tree), if available
+# 4) "unknown", if all else fails
+
+if(NOT DEFINED Legion_VERSION)
+  find_package(Git)
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
+      WORKING_DIRECTORY ${Legion_SOURCE_DIR}
+      RESULT_VARIABLE _git_result
+      OUTPUT_VARIABLE Legion_VERSION
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  else()
+    set(_git_result -1)
+  endif()
+  if(_git_result EQUAL 0)
+    message(STATUS "Version string from git: ${Legion_VERSION}")
+  else()
+    if(EXISTS ${Legion_SOURCE_DIR}/VERSION)
+      file(READ ${Legion_SOURCE_DIR}/VERSION _file_contents)
+      string(STRIP "${_file_contents}" Legion_VERSION)
+      unset(_file_contents)
+      message(STATUS "Version string from VERSION file: ${Legion_VERSION}")
+    else()
+      set(Legion_VERSION "unknown")
+      message(WARNING "Could not determine version string - using 'unknown'")
+    endif()
+  endif()
+  unset(_git_result)
+else()
+  # it's just a "cache variable" right now, so turn into a normal variable
+  set(Legion_VERSION "$CACHE{Legion_VERSION}")
+endif()
+set(Legion_VERSION "${Legion_VERSION}" CACHE STRING "string to use for Legion/Realm version")
+# these are the actual variables that are written into the headers
+set(LEGION_VERSION "${Legion_VERSION}")
+set(REALM_VERSION "${Legion_VERSION}")
+
+#------------------------------------------------------------------------------#
 # Build type and shared vs static library
 #------------------------------------------------------------------------------#
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
