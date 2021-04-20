@@ -23,6 +23,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
+  version_check
   serializing
   test_profiling
   ctxswitch

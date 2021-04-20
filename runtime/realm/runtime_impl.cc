@@ -364,6 +364,16 @@ namespace Realm {
       return r;
     }
 
+    // returns a valid (but possibly empty) string pointer describing the
+    //  version of the Realm library - this can be compared against
+    //  REALM_VERSION in application code to detect a header/library mismatch
+    const char *realm_library_version = REALM_VERSION;
+
+    /*static*/ const char *Runtime::get_library_version()
+    {
+      return realm_library_version;
+    }
+
     // performs any network initialization and, critically, makes sure
     //  *argc and *argv contain the application's real command line
     //  (instead of e.g. mpi spawner information)

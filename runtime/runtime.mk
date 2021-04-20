@@ -44,6 +44,28 @@ FC_FLAGS += $(FFLAGS)
 SO_FLAGS += $(LDLIBS)
 LD_FLAGS += $(LDFLAGS)
 
+# the Legion/Realm version string is set by the first of these that works:
+# 1) a defined value for the make REALM_VERSION variable
+# 2) the output of `git describe`, if successful
+# 3) the contents of 'VERSION' (at the root of the source tree), if available
+# 4) "unknown", if all else fails
+ifndef REALM_VERSION
+  REALM_VERSION := $(shell git -C $(LG_RT_DIR) describe --dirty --match legion\* 2> /dev/null)
+  ifneq ($(REALM_VERSION),)
+    $(info Version string from git: ${REALM_VERSION})
+  else
+    REALM_VERSION := $(shell cat $(LG_RT_DIR)/../VERSION 2> /dev/null)
+    ifneq ($(REALM_VERSION),)
+      $(info Version string from VERSION file: ${REALM_VERSION})
+    else
+      REALM_VERSION := unknown
+      $(warning Could not determine version string - using 'unknown')
+    endif
+  endif
+endif
+REALM_CC_FLAGS += -DREALM_VERSION='"${REALM_VERSION}"'
+LEGION_CC_FLAGS += -DLEGION_VERSION='"${REALM_VERSION}"'
+
 USE_OPENMP ?= 0
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
