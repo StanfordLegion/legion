@@ -31210,6 +31210,11 @@ namespace Legion {
             ConsensusMatchBase::handle_consensus_match(args);
             break;
           }
+        case LG_DEFER_COLLECTIVE_TASK_ID:
+          {
+            ShardCollective::handle_deferred_collective(args);
+            break;
+          }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
         case LG_RETRY_SHUTDOWN_TASK_ID:

@@ -10243,6 +10243,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardCollective::perform_collective_sync(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_async(precondition); 
+      perform_collective_wait(true/*block*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void ShardCollective::handle_deferred_collective(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCollectiveArgs *dargs = (const DeferCollectiveArgs*)args;
+      dargs->collective->perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardCollective::defer_collective_async(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(precondition.exists());
+#endif
+      DeferCollectiveArgs args(this);
+      if (precondition.has_triggered())
+        return false;
+      context->runtime->issue_runtime_meta_task(args,
+          LG_LATENCY_DEFERRED_PRIORITY, precondition);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     int ShardCollective::convert_to_index(ShardID id, ShardID origin) const
     //--------------------------------------------------------------------------
     {
@@ -10294,12 +10325,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BroadcastCollective::perform_collective_async(void)
+    void BroadcastCollective::perform_collective_async(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(local_shard == origin);
 #endif
+      if (precondition.exists() && defer_collective_async(precondition))
+        return;
       // Register this with the context
       context->register_collective(this);
       send_messages(); 
@@ -10399,9 +10432,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GatherCollective::perform_collective_async(void)
+    void GatherCollective::perform_collective_async(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
+      if (precondition.exists() && defer_collective_async(precondition))
+        return;
       // Register this with the context
       context->register_collective(this);
       bool done = false;
@@ -10600,22 +10635,15 @@ namespace Legion {
         assert(done_triggered);
       assert(done_event.has_triggered());
 #endif
-    }
+    } 
 
     //--------------------------------------------------------------------------
     template<bool INORDER>
-    void AllGatherCollective<INORDER>::perform_collective_sync(void)
+    void AllGatherCollective<INORDER>::perform_collective_async(RtEvent pre)
     //--------------------------------------------------------------------------
     {
-      perform_collective_async(); 
-      perform_collective_wait();
-    }
-
-    //--------------------------------------------------------------------------
-    template<bool INORDER>
-    void AllGatherCollective<INORDER>::perform_collective_async(void)
-    //--------------------------------------------------------------------------
-    {
+      if (pre.exists() && defer_collective_async(pre))
+        return;
       // Register this with the context
       context->register_collective(this);
       if (manager->total_shards <= 1)
@@ -11215,7 +11243,17 @@ namespace Legion {
       instance_ready = ready;
       // Record that this is the event that will trigger when finished
       ready = finished;
-      perform_collective_async();
+      // This is a small, but important optimization:
+      // For futures that are meta visible and less than the size of the
+      // maximum pass-by-value size that are not ready yet, delay starting
+      // the collective until they are ready so that we can do as much 
+      // as possible passing the data by value rather than having to defer
+      // to Realm too much.
+      if (inst->is_meta_visible && (inst->size <= LEGION_MAX_RETURN_SIZE) &&
+          ready.exists() && !ready.has_triggered_faultignorant())
+        perform_collective_async(Runtime::protect_event(ready));
+      else
+        perform_collective_async();
       return perform_collective_wait(false/*block*/);
     }
 
