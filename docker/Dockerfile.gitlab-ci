@@ -39,6 +39,8 @@ RUN dpkg --add-architecture i386 && \
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
 RUN wget https://cmake.org/files/v3.13/cmake-3.13.0-Linux-x86_64.tar.gz && \
     echo "1c6612f3c6dd62959ceaa96c4b64ba7785132de0b9cbc719eea6fe1365cc8d94  cmake-3.13.0-Linux-x86_64.tar.gz" | shasum --check && \
     tar xfzC cmake-3.13.0-Linux-x86_64.tar.gz /usr/local --strip-components=1 && \
