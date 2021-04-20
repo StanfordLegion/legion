@@ -15,6 +15,8 @@
 
 // GASNet-EX network module implementation for Realm
 
+#include "realm/realm_config.h"
+
 #include "realm/network.h"
 
 #include "realm/gasnetex/gasnetex_module.h"
@@ -23,6 +25,10 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/logging.h"
+
+#ifdef REALM_GASNETEX_MODULE_DYNAMIC
+REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::GASNetEXModule);
+#endif
 
 namespace Realm {
 
@@ -432,6 +438,16 @@ namespace Realm {
     //  change
 #if GASNETC_IBV_MAX_HCAS_CONFIGURE
     setenv("GASNET_USE_FENCED_PUTS", "1", 0 /*no overwrite*/);
+#endif
+
+#ifdef REALM_GASNETEX_MODULE_DYNAMIC
+    // if we're a dynamic module, we can't have GASNet trying to do stuff
+    //  in atexit handlers - we will have been unloaded at that point
+    setenv("GASNET_CATCH_EXIT", "0", 1 /*overwrite!*/);
+
+    // if enabled, IBV's ODP (on-demand pinning) registers an atexit handler
+    //  as well, so make sure it's not enabled (Realm doesn't really need ODP)
+    setenv("GASNET_USE_ODP", "0", 1 /*overwrite!*/);
 #endif
 
     // GASNetEX no longer modifies argc/argv, but we've got it here, so share
