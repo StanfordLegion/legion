@@ -11250,8 +11250,9 @@ namespace Legion {
       // as possible passing the data by value rather than having to defer
       // to Realm too much.
       if (inst->is_meta_visible && (inst->size <= LEGION_MAX_RETURN_SIZE) &&
-          ready.exists() && !ready.has_triggered_faultignorant())
-        perform_collective_async(Runtime::protect_event(ready));
+          instance_ready.exists() && 
+          !instance_ready.has_triggered_faultignorant())
+        perform_collective_async(Runtime::protect_event(instance_ready));
       else
         perform_collective_async();
       return perform_collective_wait(false/*block*/);
