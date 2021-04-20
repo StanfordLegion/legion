@@ -432,11 +432,13 @@ namespace Realm {
     //  (https://gasnet-bugs.lbl.gov/bugzilla/show_bug.cgi?id=3447), but
     //  we can't set the flag if gasnet does NOT have multiple-hca support
     //  because it'll print warnings
-    // there are no supported ways to detect this, and we can't even see the
-    //  internal GASNETC_HAVE_FENCED_PUTS define, so we use the same condition
-    //  that's used to set that in gasnet_core_internal.h and hope it doesn't
-    //  change
-#if GASNETC_IBV_MAX_HCAS_CONFIGURE
+    // in 2021.3.0 and earlier releases, there is no official way to detect
+    //  this, and we can't even see the internal GASNETC_HAVE_FENCED_PUTS
+    //  define, so we use the same condition that's used to set that in
+    //  gasnet_core_internal.h and hope it doesn't change
+    // releases after 2021.3.0 will define/expose GASNET_IBV_MULTIRAIL for us
+    //  to look at
+#if GASNET_IBV_MULTIRAIL || GASNETC_IBV_MAX_HCAS_CONFIGURE
     setenv("GASNET_USE_FENCED_PUTS", "1", 0 /*no overwrite*/);
 #endif
 
