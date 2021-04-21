@@ -2176,8 +2176,7 @@ namespace Legion {
      * us the framework necessary to handle roll backs on 
      * collectives so we can memoize their results.
      */
-    class DynamicCollectiveOp : public Mappable,
-                                public MemoizableOp<Operation>,
+    class DynamicCollectiveOp : public MemoizableOp<Operation>,
                                 public LegionHeapify<DynamicCollectiveOp> {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
@@ -2190,24 +2189,6 @@ namespace Legion {
     public:
       Future initialize(InnerContext *ctx, const DynamicCollective &dc);
     public:
-      // From Mappable
-      virtual UniqueID get_unique_id(void) const { return unique_op_id; }
-      virtual size_t get_context_index(void) const;
-      virtual int get_depth(void) const;
-      virtual const Task* get_parent_task(void) const;
-      virtual MappableType get_mappable_type(void) const
-        { return DYNAMIC_COLLECTIVE_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return &collective; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
       virtual const VersionInfo& get_version_info(unsigned idx) const
         { assert(false); return *(new VersionInfo()); }
       virtual const RegionRequirement& get_requirement(unsigned idx) const

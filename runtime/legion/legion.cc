@@ -3139,7 +3139,6 @@ namespace Legion {
           case LEGION_ACQUIRE_MAPPABLE:
           case LEGION_RELEASE_MAPPABLE:
           case LEGION_CLOSE_MAPPABLE:
-          case LEGION_DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
@@ -3215,7 +3214,6 @@ namespace Legion {
           case LEGION_ACQUIRE_MAPPABLE:
           case LEGION_RELEASE_MAPPABLE:
           case LEGION_CLOSE_MAPPABLE:
-          case LEGION_DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
