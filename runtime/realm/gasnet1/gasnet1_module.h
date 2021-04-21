@@ -134,8 +134,6 @@ namespace Realm {
     size_t gasnet_mem_size, amsg_stack_size;
   };
 
-  REGISTER_REALM_NETWORK_MODULE(GASNet1Module);
-  
 }; // namespace Realm
 
 #endif

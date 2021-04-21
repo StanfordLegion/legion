@@ -132,8 +132,6 @@ namespace Realm {
     size_t global_mem_size;
   };
 
-  REGISTER_REALM_NETWORK_MODULE(MPIModule);
-  
 }; // namespace Realm
 
 #endif

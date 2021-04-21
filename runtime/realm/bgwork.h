@@ -141,7 +141,7 @@ namespace Realm {
     std::vector<BackgroundWorkThread *> dedicated_workers;
   };
 
-  class BackgroundWorkItem {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE BackgroundWorkItem {
   public:
     BackgroundWorkItem(const std::string& _name);
     virtual ~BackgroundWorkItem(void);

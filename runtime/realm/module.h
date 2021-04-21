@@ -18,6 +18,8 @@
 #ifndef REALM_MODULE_H
 #define REALM_MODULE_H
 
+#include "realm/realm_config.h"
+
 // to provide Realm functionality via the module interface, you need to:
 //
 // 1) define a subclass of Realm::Module, implementing all the methods
@@ -33,7 +35,7 @@ namespace Realm {
   class RuntimeImpl;
   class NetworkModule;
 
-  class Module {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE Module {
   protected:
     // can only construct subclasses of Module
     Module(const std::string& _name);
@@ -130,6 +132,8 @@ namespace Realm {
     // called by the module registration helpers
     static void add_static_registration(StaticRegistrationBase *reg);
 
+    static bool check_symbol_visibility(void);
+
     // similar constructs for network modules
     class NetworkRegistrationBase {
     public:
@@ -163,17 +167,17 @@ namespace Realm {
     std::vector<void *> sofile_handles;
   };
 	
-#ifdef REALM_MODULE_REGISTRATION_STATIC
-#define REGISTER_REALM_MODULE(classname) ModuleRegistrar::StaticRegistration<classname> classname ## _registration
-#define REGISTER_REALM_NETWORK_MODULE(classname) ModuleRegistrar::NetworkRegistration<classname> classname ## _registration
-#else
-#ifdef REALM_MODULE_REGISTRATION_DYNAMIC
-#define REGISTER_REALM_MODULE(classname) extern "C" { Module *create_realm_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline) { return classname::create_module(runtime, cmdline); }
-#else
-#define REGISTER_REALM_MODULE(classname) /* nothing */
-#define REGISTER_REALM_NETWORK_MODULE(classname) /* nothing */
-#endif
-#endif
+  // macros used within a module when being built as a dynamic shared object
+#define REGISTER_REALM_MODULE_DYNAMIC(classname) \
+  extern "C" { \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE char realm_module_version[] = REALM_VERSION; \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE Realm::Module *create_realm_module(Realm::RuntimeImpl *runtime, std::vector<std::string>& cmdline) { return classname::create_module(runtime, cmdline); } \
+  }
+#define REGISTER_REALM_NETWORK_MODULE_DYNAMIC(classname) \
+  extern "C" { \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE char realm_module_version[] = REALM_VERSION; \
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE Realm::NetworkModule *create_realm_network_module(Realm::RuntimeImpl *runtime, int *argc, const char ***argv) { return classname::create_network_module(runtime, argc, argv); } \
+  }
 
 }; // namespace Realm
 

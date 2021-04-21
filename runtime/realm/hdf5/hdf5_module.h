@@ -67,8 +67,6 @@ namespace Realm {
       HDF5Memory *hdf5mem;
     };
 
-    REGISTER_REALM_MODULE(HDF5Module);
-
   }; // namespace HDF5
 
 }; // namespace Realm

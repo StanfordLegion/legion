@@ -43,7 +43,7 @@ namespace Realm {
   class NetworkSegment;
   class ByteArray;
 
-  class MemoryImpl {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE MemoryImpl {
   public:
     enum MemoryKind {
       MKIND_SYSMEM,  // directly accessible from CPU
@@ -156,7 +156,7 @@ namespace Realm {
   };
 
   // a simple memory used for intermediate buffers in dma system
-  class IBMemory : public MemoryImpl {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE IBMemory : public MemoryImpl {
   public:
     IBMemory(Memory _me, size_t _size,
 	     MemoryKind _kind, Memory::Kind _lowlevel_kind,
@@ -380,7 +380,7 @@ namespace Realm {
       };
     };
 
-    class RemoteMemory : public MemoryImpl {
+    class REALM_INTERNAL_API_EXTERNAL_LINKAGE RemoteMemory : public MemoryImpl {
     public:
       RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
 		   MemoryKind mk = MKIND_REMOTE);

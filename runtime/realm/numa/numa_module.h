@@ -71,8 +71,6 @@ namespace Realm {
       std::map<int, MemoryImpl *> memories;
     };
 
-    REGISTER_REALM_MODULE(NumaModule);
-
   }; // namespace Numa
 
 }; // namespace Realm

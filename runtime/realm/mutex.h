@@ -54,7 +54,7 @@ namespace Realm {
     };
   };
 
-  class CondVar {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE CondVar {
   public:
     CondVar(Mutex &_mutex);
     ~CondVar(void);

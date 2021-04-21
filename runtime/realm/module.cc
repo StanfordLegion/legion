@@ -17,7 +17,6 @@
 
 #include "realm/realm_config.h"
 
-#define REALM_MODULE_REGISTRATION_STATIC
 #include "realm/module.h"
 
 #include "realm/logging.h"
@@ -32,35 +31,66 @@
 
 // TODO: replace this with Makefile (or maybe cmake) magic that adapts automatically
 //  to the build-system-controlled list of statically-linked Realm modules
+
+#define CONCAT2(a, b) a ## b
+#define CONCAT(a, b) CONCAT2(a, b)
+#define REGISTER_REALM_MODULE_STATIC(classname) \
+  static Realm::ModuleRegistrar::StaticRegistration<classname> CONCAT(registration_, __LINE__)
+#define REGISTER_REALM_NETWORK_MODULE_STATIC(classname) \
+  static Realm::ModuleRegistrar::NetworkRegistration<classname> CONCAT(registration_, __LINE__)
+
 #include "realm/runtime_impl.h"
+REGISTER_REALM_MODULE_STATIC(Realm::CoreModule);
+
 #include "realm/numa/numa_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::Numa::NumaModule);
+
 #ifdef REALM_USE_OPENMP
 #include "realm/openmp/openmp_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::OpenMP::OpenMPModule);
 #endif
+
 #include "realm/procset/procset_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::ProcSet::ProcSetModule);
+
 #ifdef REALM_USE_PYTHON
 #include "realm/python/python_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::Python::PythonModule);
 #endif
+
 #ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::Cuda::CudaModule);
 #endif
+
 #ifdef REALM_USE_HIP
 #include "realm/hip/hip_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::Hip::HipModule);
 #endif
+
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::LLVMJit::LLVMJitModule);
 #endif
+
 #ifdef REALM_USE_HDF5
 #include "realm/hdf5/hdf5_module.h"
+REGISTER_REALM_MODULE_STATIC(Realm::HDF5::HDF5Module);
 #endif
+
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module);
 #endif
+
 #ifdef REALM_USE_GASNETEX
 #include "realm/gasnetex/gasnetex_module.h"
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule);
 #endif
+
 #if defined REALM_USE_MPI
 #include "realm/mpi/mpi_module.h"
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::MPIModule);
 #endif
 
 namespace Realm {
@@ -150,6 +180,27 @@ namespace Realm {
 
 
 #ifdef REALM_USE_DLFCN
+  extern "C" {
+    // a dummy symbol we use with dlsym to make sure internal api symbols are
+    //  available to dynamically loaded modules
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE int realm_internal_api_symbols_visible;
+  };
+#endif
+
+  /*static*/ bool ModuleRegistrar::check_symbol_visibility(void)
+  {
+#ifdef REALM_USE_DLFCN
+    void *sym = dlsym(RTLD_DEFAULT,
+                      "realm_internal_api_symbols_visible");
+    (void) dlerror(); // clear any lookup error
+    return(sym == &realm_internal_api_symbols_visible);
+#else
+    // definitely won't work without dlfcn
+    return false;
+#endif
+  }
+
+#ifdef REALM_USE_DLFCN
   // accepts a colon-separated list of so files to try to load
   static void load_module_list(const char *sonames,
 			       RuntimeImpl *runtime,
@@ -161,7 +212,7 @@ namespace Realm {
     if(!sonames || !*sonames) return;
 
     const char *p1 = sonames;
-    while(true) {
+    while(*p1) {
       // skip leading colons
       while(*p1 == ':') p1++;
       if(!*p1) break;
@@ -171,38 +222,62 @@ namespace Realm {
 
       char filename[1024];
       strncpy(filename, p1, p2 - p1);
+      filename[p2 - p1] = 0;
+
+      // skip the color after the filename (if it exists)
+      p1 = p2 + (*p2 ? 1 : 0);
 
       // no leftover errors from anybody else please...
       assert(dlerror() == 0);
 
       // open so file, resolving all symbols but not polluting global namespace
       void *handle = dlopen(filename, RTLD_NOW | RTLD_LOCAL);
-
-      if(handle != 0) {
-	// this file should have a "create_realm_module" symbol
-	void *sym = dlsym(handle, "create_realm_module");
-
-	if(sym != 0) {
-	  // TODO: hold onto the handle even if it doesn't create a module?
-	  handles.push_back(handle);
-
-	  Module *m = ((Module *(*)(RuntimeImpl *, std::vector<std::string>&))dlsym)(runtime, cmdline);
-	  if(m)
-	    modules.push_back(m);
-	} else {
-	  log_module.error() << "symbol 'create_realm_module' not found in " << filename;
-#ifndef NDEBUG
-	  int ret =
-#endif
-	    dlclose(handle);
-	  assert(ret == 0);
-	}
-      } else {
+      if(handle == 0) {
 	log_module.error() << "could not load " << filename << ": " << dlerror();
+        continue;
       }
 
-      if(!*p2) break;
-      p1 = p2 + 1;
+      {
+        // this file should have a "realm_module_version" symbol
+        void *sym = dlsym(handle, "realm_module_version");
+        if(!sym) {
+	  log_module.error() << "symbol 'realm_module_version' not found in " << filename;
+          dlclose(handle);
+          continue;
+        }
+        const char *module_version = static_cast<const char *>(sym);
+
+        // a module version mismatch can lead to crashes/hangs/etc.
+        if(strcmp(REALM_VERSION, module_version)) {
+          const char *e = getenv("REALM_PERMIT_MODULE_VERSION_MISMATCH");
+          if(e && (atoi(e) > 0)) {
+            log_module.warning() << "module version mismatch in '" << filename
+                                 << "': realm='" << REALM_VERSION
+                                 << "' module='" << module_version << "'";
+          } else {
+            log_module.error() << "module version mismatch in '" << filename
+                               << "': realm='" << REALM_VERSION
+                               << "' module='" << module_version << "' - set REALM_PERMIT_MODULE_VERSION_MISMATCH to load anyway";
+            dlclose(handle);
+            continue;
+          }
+        }
+      }
+
+      // this file should also have a "create_realm_module" symbol
+      void *sym = dlsym(handle, "create_realm_module");
+      if(!sym) {
+        log_module.error() << "symbol 'create_realm_module' not found in " << filename;
+        dlclose(handle);
+        continue;
+      }
+
+      // TODO: hold onto the handle even if it doesn't create a module?
+      handles.push_back(handle);
+
+      Module *m = ((Module *(*)(RuntimeImpl *, std::vector<std::string>&))sym)(runtime, cmdline);
+      if(m)
+        modules.push_back(m);
     }
   }
 #endif
@@ -242,18 +317,23 @@ namespace Realm {
       }
     }
 
-#ifdef REALM_USE_DLFCN
-    for(std::vector<std::string>::const_iterator it = sonames_list.begin();
-	it != sonames_list.end();
-	it++)
-      load_module_list(it->c_str(),
-		       runtime, cmdline, sofile_handles, modules);
-#else
     if(!sonames_list.empty()) {
-      log_module.error() << "loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
-      exit(1);
-    }
+#ifdef REALM_USE_DLFCN
+      if(!check_symbol_visibility()) {
+        log_module.fatal() << "symbols for Realm internal API are not visible - dynamic modules will not work";
+        abort();
+      }
+
+      for(std::vector<std::string>::const_iterator it = sonames_list.begin();
+          it != sonames_list.end();
+          it++)
+        load_module_list(it->c_str(),
+                         runtime, cmdline, sofile_handles, modules);
+#else
+      log_module.fatal() << "loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
+      abort();
 #endif
+    }
   }
 
   // called by runtime after all modules have been cleaned up

@@ -175,8 +175,6 @@ namespace Realm {
       long long cpu_bgwork_timeslice, util_bgwork_timeslice;
     };
 
-    REGISTER_REALM_MODULE(CoreModule);
-
     template <typename K, typename V, typename LT = Mutex>
     class LockedMap {
     public:

@@ -147,8 +147,6 @@ namespace Realm {
     GASNetEXInternal *internal;
   };
 
-  REGISTER_REALM_NETWORK_MODULE(GASNetEXModule);
-
 }; // namespace Realm
 
 #endif
