@@ -3353,7 +3353,7 @@ namespace Legion {
       virtual const char* get_task_name(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return TASK_MAPPABLE; }
+        { return LEGION_TASK_MAPPABLE; }
       virtual const Task* as_task(void) const { return this; }
     public:
       // Task argument information
@@ -3397,7 +3397,7 @@ namespace Legion {
       Copy(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return COPY_MAPPABLE; }
+        { return LEGION_COPY_MAPPABLE; }
       virtual const Copy* as_copy(void) const { return this; }
     public:
       // Copy Launcher arguments
@@ -3426,7 +3426,7 @@ namespace Legion {
       InlineMapping(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return INLINE_MAPPABLE; }
+        { return LEGION_INLINE_MAPPABLE; }
       virtual const InlineMapping* as_inline(void) const { return this; }
     public:
       // Inline Launcher arguments
@@ -3448,7 +3448,7 @@ namespace Legion {
       Acquire(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return ACQUIRE_MAPPABLE; }
+        { return LEGION_ACQUIRE_MAPPABLE; }
       virtual const Acquire* as_acquire(void) const { return this; }
     public:
       // Acquire Launcher arguments
@@ -3471,7 +3471,7 @@ namespace Legion {
       Release(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return RELEASE_MAPPABLE; }
+        { return LEGION_RELEASE_MAPPABLE; }
       virtual const Release* as_release(void) const { return this; }
     public:
       // Release Launcher arguments
@@ -3498,7 +3498,7 @@ namespace Legion {
       Close(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return CLOSE_MAPPABLE; }
+        { return LEGION_CLOSE_MAPPABLE; }
       virtual const Close* as_close(void) const { return this; }
     public:
       // Synthesized region requirement
@@ -3517,7 +3517,7 @@ namespace Legion {
       Fill(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return FILL_MAPPABLE; }
+        { return LEGION_FILL_MAPPABLE; }
       virtual const Fill* as_fill(void) const { return this; }
     public:
       // Synthesized region requirement
@@ -3545,7 +3545,7 @@ namespace Legion {
       Partition(void);
     public:
       virtual MappableType get_mappable_type(void) const 
-        { return PARTITION_MAPPABLE; }
+        { return LEGION_PARTITION_MAPPABLE; }
       virtual const Partition* as_partition(void) const { return this; }
     public:
       enum PartitionKind {
@@ -3579,7 +3579,7 @@ namespace Legion {
       MustEpoch(void);
     public:
       virtual MappableType get_mappable_type(void) const
-        { return MUST_EPOCH_MAPPABLE; }
+        { return LEGION_MUST_EPOCH_MAPPABLE; }
       virtual const MustEpoch* as_must_epoch(void) const { return this; }
     public:
       std::vector<const Task*>                  individual_tasks;
