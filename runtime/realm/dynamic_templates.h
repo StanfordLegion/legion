@@ -167,6 +167,72 @@ namespace Realm {
 
     template <int _N> struct Int { static const int N = _N; };
 
+    template <typename TARGET, int BASE, int DELTA>
+    struct IntDemuxHelper {
+      template <typename T1>
+      static void demux(int index, T1 arg1)
+      {
+        if(index == (BASE + DELTA))
+          TARGET::template demux<Int<BASE + DELTA> >(arg1);
+        else
+          IntDemuxHelper<TARGET, BASE, DELTA-1>::template demux<T1>(index, arg1);
+      }
+
+      template <typename T1, typename T2>
+      static void demux(int index, T1 arg1, T2 arg2)
+      {
+        if(index == (BASE + DELTA))
+          TARGET::template demux<Int<BASE + DELTA> >(arg1, arg2);
+        else
+          IntDemuxHelper<TARGET, BASE, DELTA-1>::template demux<T1,T2>(index, arg1, arg2);
+      }
+
+      template <typename T1, typename T2, typename T3>
+      static void demux(int index, T1 arg1, T2 arg2, T3 arg3)
+      {
+        if(index == (BASE + DELTA))
+          TARGET::template demux<Int<BASE + DELTA> >(arg1, arg2, arg3);
+        else
+          IntDemuxHelper<TARGET, BASE, DELTA-1>::template demux<T1,T2,T3>(index, arg1, arg2, arg3);
+      }
+
+      template <typename T1, typename T2, typename T3, typename T4>
+      static void demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
+      {
+        if(index == (BASE + DELTA))
+          TARGET::template demux<Int<BASE + DELTA> >(arg1, arg2, arg3, arg4);
+        else
+          IntDemuxHelper<TARGET, BASE, DELTA-1>::template demux<T1,T2,T3,T4>(index, arg1, arg2, arg3, arg4);
+      }
+    };
+
+    template <typename TARGET, int BASE>
+    struct IntDemuxHelper<TARGET, BASE, 0> {
+      template <typename T1>
+      static void demux(int index, T1 arg1)
+      {
+        TARGET::template demux<Int<BASE> >(arg1);
+      }
+
+      template <typename T1, typename T2>
+      static void demux(int index, T1 arg1, T2 arg2)
+      {
+        TARGET::template demux<Int<BASE> >(arg1, arg2);
+      }
+
+      template <typename T1, typename T2, typename T3>
+      static void demux(int index, T1 arg1, T2 arg2, T3 arg3)
+      {
+        TARGET::template demux<Int<BASE> >(arg1, arg2, arg3);
+      }
+
+      template <typename T1, typename T2, typename T3, typename T4>
+      static void demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
+      {
+        TARGET::template demux<Int<BASE> >(arg1, arg2, arg3, arg4);
+      }
+    };
+
     template <int MIN, int MAX>
     struct IntList {
       template <int N>
@@ -196,36 +262,6 @@ namespace Realm {
       template <int N>
       struct IndexToType {
 	typedef typename TypeIndexHelper<N, TypePresent<N>::value>::TYPE TYPE;
-      };
-
-      template <typename TARGET, int N>
-      struct DemuxHelper {
-	template <typename T1>
-	static void demux(int index, T1 arg1);
-
-	template <typename T1, typename T2>
-	static void demux(int index, T1 arg1, T2 arg2);
-
-	template <typename T1, typename T2, typename T3>
-	static void demux(int index, T1 arg1, T2 arg2, T3 arg3);
-
-	template <typename T1, typename T2, typename T3, typename T4>
-	static void demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4);
-      };
-
-      template <typename TARGET>
-      struct DemuxHelper<TARGET, MAX> {
-	template <typename T1>
-	static void demux(int index, T1 arg1);
-
-	template <typename T1, typename T2>
-	static void demux(int index, T1 arg1, T2 arg2);
-
-	template <typename T1, typename T2, typename T3>
-	static void demux(int index, T1 arg1, T2 arg2, T3 arg3);
-
-	template <typename T1, typename T2, typename T3, typename T4>
-	static void demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4);
       };
 
       template <typename TARGET, typename T1>

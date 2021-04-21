@@ -139,111 +139,35 @@ namespace Realm {
     // class IntList<MIN,MAX>
 
     template <int MIN, int MAX>
-    template <typename TARGET, int N>
-    template <typename T1>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,N>::demux(int index, T1 arg1)
-    {
-      if(index == N)
-	TARGET::template demux<Int<N> >(arg1);
-      else
-	DemuxHelper<TARGET, N+1>::template demux<T1>(index, arg1);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET, int N>
-    template <typename T1, typename T2>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,N>::demux(int index, T1 arg1, T2 arg2)
-    {
-      if(index == N)
-	TARGET::template demux<Int<N> >(arg1, arg2);
-      else
-	DemuxHelper<TARGET, N+1>::template demux<T1,T2>(index, arg1, arg2);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET, int N>
-    template <typename T1, typename T2, typename T3>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,N>::demux(int index, T1 arg1, T2 arg2, T3 arg3)
-    {
-      if(index == N)
-	TARGET::template demux<Int<N> >(arg1, arg2, arg3);
-      else
-	DemuxHelper<TARGET, N+1>::template demux<T1,T2,T3>(index, arg1, arg2, arg3);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET, int N>
-    template <typename T1, typename T2, typename T3, typename T4>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,N>::demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
-    {
-      if(index == N)
-	TARGET::template demux<Int<N> >(arg1, arg2, arg3, arg4);
-      else
-	DemuxHelper<TARGET, N+1>::template demux<T1,T2>(index, arg1, arg2, arg3, arg4);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET>
-    template <typename T1>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,MAX>::demux(int index, T1 arg1)
-    {
-      assert(index == MAX);
-      TARGET::template demux<Int<MAX> >(arg1);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET>
-    template <typename T1, typename T2>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,MAX>::demux(int index, T1 arg1, T2 arg2)
-    {
-      assert(index == MAX);
-      TARGET::template demux<Int<MAX> >(arg1, arg2);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET>
-    template <typename T1, typename T2, typename T3>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,MAX>::demux(int index, T1 arg1, T2 arg2, T3 arg3)
-    {
-      assert(index == MAX);
-      TARGET::template demux<Int<MAX> >(arg1, arg2, arg3);
-    }
-
-    template <int MIN, int MAX>
-    template <typename TARGET>
-    template <typename T1, typename T2, typename T3, typename T4>
-    inline /*static*/ void IntList<MIN,MAX>::DemuxHelper<TARGET,MAX>::demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
-    {
-      assert(index == MAX);
-      TARGET::template demux<Int<MAX> >(arg1, arg2, arg3, arg4);
-    }
-
-    template <int MIN, int MAX>
     template <typename TARGET, typename T1>
     inline /*static*/ void IntList<MIN,MAX>::demux(int index, T1 arg1)
     {
-      DemuxHelper<TARGET,MIN>::template demux<T1>(index, arg1);
+      assert((MIN <= index) && (index <= MAX));
+      IntDemuxHelper<TARGET,MIN,MAX-MIN>::template demux<T1>(index, arg1);
     }
 
     template <int MIN, int MAX>
     template <typename TARGET, typename T1, typename T2>
     inline /*static*/ void IntList<MIN,MAX>::demux(int index, T1 arg1, T2 arg2)
     {
-      DemuxHelper<TARGET,MIN>::template demux<T1,T2>(index, arg1, arg2);
+      assert((MIN <= index) && (index <= MAX));
+      IntDemuxHelper<TARGET,MIN,MAX-MIN>::template demux<T1,T2>(index, arg1, arg2);
     }
 
     template <int MIN, int MAX>
     template <typename TARGET, typename T1, typename T2, typename T3>
     inline /*static*/ void IntList<MIN,MAX>::demux(int index, T1 arg1, T2 arg2, T3 arg3)
     {
-      DemuxHelper<TARGET,MIN>::template demux<T1,T2,T3>(index, arg1, arg2, arg3);
+      assert((MIN <= index) && (index <= MAX));
+      IntDemuxHelper<TARGET,MIN,MAX-MIN>::template demux<T1,T2,T3>(index, arg1, arg2, arg3);
     }
 
     template <int MIN, int MAX>
     template <typename TARGET, typename T1, typename T2, typename T3, typename T4>
     inline /*static*/ void IntList<MIN,MAX>::demux(int index, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
     {
-      DemuxHelper<TARGET,MIN>::template demux<T1,T2,T3,T4>(index, arg1, arg2, arg3, arg4);
+      assert((MIN <= index) && (index <= MAX));
+      IntDemuxHelper<TARGET,MIN,MAX-MIN>::template demux<T1,T2,T3,T4>(index, arg1, arg2, arg3, arg4);
     }
 
 
