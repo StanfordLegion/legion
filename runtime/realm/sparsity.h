@@ -23,7 +23,12 @@
 #ifndef REALM_SPARSITY_H
 #define REALM_SPARSITY_H
 
-#include "realm/indexspace.h"
+#include "realm/compiler_support.h"
+#include "realm/realm_c.h"
+#include "realm/event.h"
+
+#include <iostream>
+#include <vector>
 
 namespace Realm {
 

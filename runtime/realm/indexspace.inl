@@ -18,6 +18,7 @@
 // nop, but helps IDEs
 #include "realm/indexspace.h"
 
+#include "realm/sparsity.h"
 //include "realm/instance.h"
 //include "realm/inst_layout.h"
 
