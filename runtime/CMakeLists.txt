@@ -719,7 +719,14 @@ if(Legion_USE_Fortran)
   )
 endif()               
 
-add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
+# HACK: completely separating the Legion and Realm cmake stuff will take
+#  a while, so just exclude LegionRuntime from the "all" target for the
+#  Realm-only case for now
+if(Legion_BUILD_REALM_ONLY)
+  set(EXCLUDE_LEGION EXCLUDE_FROM_ALL)
+endif()
+
+add_library(LegionRuntime ${EXCLUDE_LEGION} ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
 # do we have any cuda source files in Legion itself?
 if(LEGION_CUDA_SRC)
   if("${Legion_CUDA_ARCH}" STREQUAL "")

@@ -601,6 +601,12 @@ if(NOT WIN32)
 endif()
 
 #------------------------------------------------------------------------------#
+# Hacks for building only Realm
+#------------------------------------------------------------------------------#
+option(Legion_BUILD_REALM_ONLY "HACK: only build realm" OFF)
+option(Legion_BUILD_REALM_TESTS "HACK: build realm-only tests" OFF)
+
+#------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
 add_subdirectory(runtime)
@@ -745,6 +751,10 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
   endif()
+elseif(Legion_BUILD_REALM_TESTS)
+  # temporary hackery to just enable the realm tests
+  add_library(Legion::Realm ALIAS Realm)
+  add_subdirectory(test/realm)
 endif()
 
 #------------------------------------------------------------------------------#
