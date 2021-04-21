@@ -33,13 +33,7 @@
 #include <windows.h>
 #include <io.h>
 
-static int open(const char *filename, int flags, int mode)
-{
-  int fd = -1;
-  int ret = _sopen_s(&fd, filename, flags, -SH_DENYNO, mode);
-  return (ret < 0) ? ret : fd;
-}
-
+#define open _open
 #define close _close
 #define unlink _unlink
 

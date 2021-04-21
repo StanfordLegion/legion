@@ -98,7 +98,7 @@ void child_task(const void *args, size_t arglen,
 }
 
 Barrier response_counter;
-long expected_responses_remaining = 0;
+int expected_responses_remaining = 0;
 
 void response_task(const void *args, size_t arglen,
 		   const void *userdata, size_t userlen, Processor p)
