@@ -536,7 +536,18 @@ endif()
 #------------------------------------------------------------------------------#
 # zlib configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_ZLIB "Enable support for zlib" ON)
+if(NOT DEFINED Legion_USE_ZLIB)
+  # neither ON nor OFF at user's request, so use it if we can find it
+  find_package(ZLIB)
+  if(ZLIB_FOUND)
+    set(Legion_USE_ZLIB ON)
+  else()
+    set(Legion_USE_ZLIB OFF)
+  endif()
+else()
+  set(Legion_USE_ZLIB "$CACHE{Legion_USE_ZLIB}")
+endif()
+set(Legion_USE_ZLIB "${Legion_USE_ZLIB}" CACHE BOOL "Enable support for zlib")
 if(Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
