@@ -242,7 +242,7 @@ if(COMPILER_SUPPORTS_DEFCHECK)
   #  any place it needs to be
   target_compile_options(RealmRuntime PRIVATE --defcheck realm_defines.h)
 endif()
-if(Legion_USE_LIBDL)
+if(REALM_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
   if(APPLE)
     target_link_libraries(RealmRuntime PRIVATE "-undefined dynamic_lookup")

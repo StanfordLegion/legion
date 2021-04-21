@@ -492,7 +492,9 @@ endif()
 #------------------------------------------------------------------------------#
 # libdl configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_LIBDL "Enable support for libdl" ON)
+# NOTE: although the name of the variable is "libdl", this is dynamic linking
+#  support on any system, even if it doesn't have a libdl
+option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
 if(Legion_USE_LIBDL)
   # define variable for legion_defines.h
   set(LEGION_USE_LIBDL ON)

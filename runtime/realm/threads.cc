@@ -90,7 +90,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #include <hwloc.h>
 #endif
 
-#ifdef REALM_USE_LIBDL
+#ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
 #endif
 
