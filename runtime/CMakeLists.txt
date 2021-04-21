@@ -254,8 +254,11 @@ if(UNIX AND NOT APPLE)
 endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
-set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
-set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+
+if(REALM_LIMIT_SYMBOL_VISIBILITY)
+  set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+endif()
 
 if(Legion_USE_PAPI)
   target_include_directories(RealmRuntime PRIVATE ${PAPI_INCLUDE_DIRS})
@@ -414,8 +417,10 @@ if(Legion_USE_CUDA)
 	realm/cuda/cudart_hijack.cc
 	realm/cuda/cudart_hijack.h)
       set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
-      set_target_properties(realm_cudarthijack PROPERTIES CXX_VISIBILITY_PRESET hidden)
-      set_target_properties(realm_cudarthijack PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+      if(REALM_LIMIT_SYMBOL_VISIBILITY)
+        set_target_properties(realm_cudarthijack PROPERTIES CXX_VISIBILITY_PRESET hidden)
+        set_target_properties(realm_cudarthijack PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+      endif()
       target_include_directories(realm_cudarthijack PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}
 	${PROJECT_BINARY_DIR}/runtime
@@ -536,8 +541,10 @@ if(Legion_USE_Kokkos)
                                      "-I${CMAKE_CURRENT_SOURCE_DIR}"
                                      "-I${PROJECT_BINARY_DIR}/runtime")
 
-  # control symbol visibility
-  list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    # control symbol visibility
+    list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
+  endif()
 
   # and then finally, tell clang (if it is clang) where to find CUDA
   if(Legion_USE_CUDA AND (KOKKOS_CXX_COMPILER MATCHES ".*clang.*"))

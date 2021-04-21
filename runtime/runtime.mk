@@ -119,8 +119,12 @@ endif
 endif
 LEGION_LIBS     := -L. -llegion -lrealm
 
-# realm hides internal classes/methods from shared library exports
-REALM_SYMBOL_VISIBILITY = -fvisibility=hidden -fvisibility-inlines-hidden
+# if requested, realm hides internal classes/methods from shared library exports
+REALM_LIMIT_SYMBOL_VISIBILITY ?= 1
+ifeq ($(strip $(REALM_LIMIT_SYMBOL_VISIBILITY)),1)
+  REALM_SYMBOL_VISIBILITY = -fvisibility=hidden -fvisibility-inlines-hidden
+  REALM_CC_FLAGS += -DREALM_LIMIT_SYMBOL_VISIBILITY
+endif
 
 # generate header files for public-facing defines
 DEFINE_HEADERS_DIR ?= $(CURDIR)

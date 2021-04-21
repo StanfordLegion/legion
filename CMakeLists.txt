@@ -593,6 +593,11 @@ set(LEGION_BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
 option(Legion_PRIVILEGE_CHECKS "Enable privilege checking in Legion accessors" OFF)
 set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
 
+# hiding internal symbols is much more complicated in Windows
+if(NOT WIN32)
+  option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
+endif()
+
 #------------------------------------------------------------------------------#
 # Runtime library targets
 #------------------------------------------------------------------------------#
