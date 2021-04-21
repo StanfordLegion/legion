@@ -274,7 +274,7 @@ namespace Realm {
 
       last_span = i; // will update on subsequent iterations if needed
 
-      T gap = entries[i].lo.x - entries[i - 1].hi.x - 1;
+      T gap = entries[i].lo[merge_dim] - entries[i - 1].hi[merge_dim] - 1;
       assert(gap > 0);  // if not, rectangles should have been merged
       if(gap <= gap_sizes[0]) {
 	// this gap is smaller than any other, so we'll merge it, but
