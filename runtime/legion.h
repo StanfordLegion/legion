@@ -3467,16 +3467,15 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const = 0;
-      virtual const Task* as_task(void) const = 0;
-      virtual const Copy* as_copy(void) const = 0;
-      virtual const InlineMapping* as_inline(void) const = 0;
-      virtual const Acquire* as_acquire(void) const = 0;
-      virtual const Release* as_release(void) const = 0;
-      virtual const Close* as_close(void) const = 0;
-      virtual const Fill* as_fill(void) const = 0;
-      virtual const Partition* as_partition(void) const = 0;
-      virtual const DynamicCollective* as_dynamic_collective(void) const = 0;
-      virtual const MustEpoch* as_must_epoch(void) const = 0;
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
@@ -3506,8 +3505,6 @@ namespace Legion {
       static const MappableType FILL_MAPPABLE = ::LEGION_FILL_MAPPABLE;
       static const MappableType PARTITION_MAPPABLE = 
                                         ::LEGION_PARTITION_MAPPABLE;
-      static const MappableType DYNAMIC_COLLECTIVE_MAPPABLE = 
-                                        ::LEGION_DYNAMIC_COLLECTIVE_MAPPABLE;
       static const MappableType MUST_EPOCH_MAPPABLE = 
                                         ::LEGION_MUST_EPOCH_MAPPABLE;
     };
@@ -3532,16 +3529,6 @@ namespace Legion {
       virtual MappableType get_mappable_type(void) const 
         { return TASK_MAPPABLE; }
       virtual const Task* as_task(void) const { return this; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Task argument information
       TaskID                              task_id; 
@@ -3586,17 +3573,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return COPY_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
       virtual const Copy* as_copy(void) const { return this; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -3626,17 +3603,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return INLINE_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
       virtual const InlineMapping* as_inline(void) const { return this; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -3658,17 +3625,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return ACQUIRE_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
       virtual const Acquire* as_acquire(void) const { return this; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -3691,17 +3648,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return RELEASE_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
       virtual const Release* as_release(void) const { return this; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -3728,17 +3675,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return CLOSE_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return this; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -3757,17 +3694,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return FILL_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return this; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement               requirement;
@@ -3796,17 +3723,7 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return PARTITION_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
       virtual const Partition* as_partition(void) const { return this; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       enum PartitionKind {
         BY_FIELD, // create partition by field
@@ -3840,16 +3757,6 @@ namespace Legion {
     public:
       virtual MappableType get_mappable_type(void) const 
         { return MUST_EPOCH_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return NULL; }
       virtual const MustEpoch* as_must_epoch(void) const { return this; }
     public:
       std::vector<const Task*>                  individual_tasks;
