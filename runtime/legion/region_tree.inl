@@ -1462,13 +1462,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
-      assert(privilege_node != NULL);
+      assert((privilege_node != NULL) || (priv_node == NULL));
 #else
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
 #endif
-      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
-                                           privilege_node);
+      if (piece_list == NULL)
+      {
+        std::vector<Rect<DIM,T> > all_rects;
+        Realm::IndexSpace<DIM,T> realm_space;
+        const ApEvent ready = get_realm_index_space(realm_space, true/*tight*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        for (Realm::IndexSpaceIterator<DIM,T> itr(realm_space); 
+              itr.valid; itr.step())
+          all_rects.push_back(Rect<DIM,T>(itr.rect));
+        return new PieceIteratorImplT<DIM,T>(&(all_rects.front()), 
+            all_rects.size() * sizeof(Rect<DIM,T>), privilege_node);
+      }
+      else
+        return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                             privilege_node);
     }
 
     //--------------------------------------------------------------------------
@@ -2553,13 +2567,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
-      assert(privilege_node != NULL);
+      assert((privilege_node != NULL) || (priv_node == NULL));
 #else
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
 #endif
-      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
-                                           privilege_node);
+      if (piece_list == NULL)
+      {
+        std::vector<Rect<DIM,T> > all_rects;
+        Realm::IndexSpace<DIM,T> realm_space;
+        const ApEvent ready = get_realm_index_space(realm_space, true/*tight*/);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        for (Realm::IndexSpaceIterator<DIM,T> itr(realm_space); 
+              itr.valid; itr.step())
+          all_rects.push_back(Rect<DIM,T>(itr.rect));
+        return new PieceIteratorImplT<DIM,T>(&(all_rects.front()),
+            all_rects.size() * sizeof(Rect<DIM,T>), privilege_node);
+      }
+      else
+        return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                             privilege_node);
     }
 
     //--------------------------------------------------------------------------
