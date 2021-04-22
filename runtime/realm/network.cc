@@ -595,7 +595,7 @@ namespace Realm {
           need_loopback = false;
 #else
         // no loggers yet - use stderr
-        std::cerr >> "FATAL: loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
+        std::cerr << "FATAL: loading of dynamic Realm modules requested, but REALM_USE_DLFCN=0!";
         abort();
 #endif
       }

@@ -417,6 +417,12 @@ before_script:
     - darwin-slurm
     - power9
 
+# For MSVC-in-wine tests:
+.msvc_wine: &msvc_wine
+  tags:
+    - linux
+    - msvc_wine
+
 # For compute-heavy tests:
 .linux_compute: &linux_compute
   tags:
@@ -501,6 +507,8 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
 .image_icc: &image_icc
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc
+.image_msvc169: &image_msvc169
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc
 
 ###
 ### Tests
@@ -579,6 +587,19 @@ before_script:
     when:
       - runner_system_failure
       - unknown_failure
+
+# testing MSVC builds is kinda hacky right now - not supported by test.py
+.msvc_tests: &msvc_tests
+  <<: *test_rules
+  script:
+    - pwd
+    - ln -s `pwd` /home/wine/.wine/drive_c/repo
+    - cd /home/wine/.wine/drive_c
+    - su wine -c "wine64 cmd /c 'x64.bat && cmake -G Ninja -S repo -B build -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON'"
+    - "# wine doesn't seem to cope with concurrent file access, so use a serial build"
+    - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -- -j1'"
+    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2019\\VC\\Redist\\MSVC\\14.28.29910\\debug_nonredist\\x64\\Microsoft.VC142.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.18362.0\\x64\\ucrt;%PATH% && cd build && ctest'"
+    - echo OK
 
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
@@ -1253,4 +1274,10 @@ icc212_cxx11_release_legion:
 icc212_cxx11_debug_cmake_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
+    <<: [*icc212, *debug, *cxx11_normal, *cmake, *legion, *ctest]
+
+# MSVC (Realm only):
+msvc169_realm:
+  <<: [*msvc_wine, *image_msvc169, *msvc_tests]
+  variables:
+    <<: [*short]

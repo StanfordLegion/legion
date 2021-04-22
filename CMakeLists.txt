@@ -495,7 +495,9 @@ endif()
 #------------------------------------------------------------------------------#
 # libdl configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_LIBDL "Enable support for libdl" ON)
+# NOTE: although the name of the variable is "libdl", this is dynamic linking
+#  support on any system, even if it doesn't have a libdl
+option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
 if(Legion_USE_LIBDL)
   # define variable for legion_defines.h
   set(LEGION_USE_LIBDL ON)
@@ -539,7 +541,18 @@ endif()
 #------------------------------------------------------------------------------#
 # zlib configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_ZLIB "Enable support for zlib" ON)
+if(NOT DEFINED Legion_USE_ZLIB)
+  # neither ON nor OFF at user's request, so use it if we can find it
+  find_package(ZLIB)
+  if(ZLIB_FOUND)
+    set(Legion_USE_ZLIB ON)
+  else()
+    set(Legion_USE_ZLIB OFF)
+  endif()
+else()
+  set(Legion_USE_ZLIB "$CACHE{Legion_USE_ZLIB}")
+endif()
+set(Legion_USE_ZLIB "${Legion_USE_ZLIB}" CACHE BOOL "Enable support for zlib")
 if(Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
@@ -584,6 +597,17 @@ set(LEGION_BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
 
 option(Legion_PRIVILEGE_CHECKS "Enable privilege checking in Legion accessors" OFF)
 set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
+
+# hiding internal symbols is much more complicated in Windows
+if(NOT WIN32)
+  option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# Hacks for building only Realm
+#------------------------------------------------------------------------------#
+option(Legion_BUILD_REALM_ONLY "HACK: only build realm" OFF)
+option(Legion_BUILD_REALM_TESTS "HACK: build realm-only tests" OFF)
 
 #------------------------------------------------------------------------------#
 # Runtime library targets
@@ -730,6 +754,10 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
   endif()
+elseif(Legion_BUILD_REALM_TESTS)
+  # temporary hackery to just enable the realm tests
+  add_library(Legion::Realm ALIAS Realm)
+  add_subdirectory(test/realm)
 endif()
 
 #------------------------------------------------------------------------------#

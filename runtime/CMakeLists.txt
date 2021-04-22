@@ -215,17 +215,13 @@ list(APPEND REALM_SRC
 )
 
 # generate per-dimension object files for deppart stuff
-foreach(N1 RANGE 1 ${REALM_MAX_DIM})
-  foreach(N2 RANGE 1 ${REALM_MAX_DIM})
-    foreach(SRC image preimage byfield)
-      # echo -e is not portable, so use perl and try to limit the escape
-      #  characters we need to tunnel through cmake
-      add_custom_command(
-	COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTrealm/deppart/${SRC}_tmpl.ccQTEOL'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > ${SRC}_${N1}_${N2}.cc
-	OUTPUT ${SRC}_${N1}_${N2}.cc
-	VERBATIM
-	)
-      list(APPEND REALM_SRC ${SRC}_${N1}_${N2}.cc)
+foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
+  foreach(INST_N2 RANGE 1 ${REALM_MAX_DIM})
+    foreach(SRCFILE realm/deppart/image realm/deppart/preimage realm/deppart/byfield)
+      # use cmake's configure_file for a portable way of creating wrapper
+      #  source files
+      configure_file(${CMAKE_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
+      list(APPEND REALM_SRC ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
     endforeach()
   endforeach()
 endforeach()
@@ -246,7 +242,7 @@ if(COMPILER_SUPPORTS_DEFCHECK)
   #  any place it needs to be
   target_compile_options(RealmRuntime PRIVATE --defcheck realm_defines.h)
 endif()
-if(Legion_USE_LIBDL)
+if(REALM_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
   if(APPLE)
     target_link_libraries(RealmRuntime PRIVATE "-undefined dynamic_lookup")
@@ -258,8 +254,11 @@ if(UNIX AND NOT APPLE)
 endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
-set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
-set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+
+if(REALM_LIMIT_SYMBOL_VISIBILITY)
+  set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+endif()
 
 if(Legion_USE_PAPI)
   target_include_directories(RealmRuntime PRIVATE ${PAPI_INCLUDE_DIRS})
@@ -418,8 +417,10 @@ if(Legion_USE_CUDA)
 	realm/cuda/cudart_hijack.cc
 	realm/cuda/cudart_hijack.h)
       set_target_properties(realm_cudarthijack PROPERTIES POSITION_INDEPENDENT_CODE ON)
-      set_target_properties(realm_cudarthijack PROPERTIES CXX_VISIBILITY_PRESET hidden)
-      set_target_properties(realm_cudarthijack PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+      if(REALM_LIMIT_SYMBOL_VISIBILITY)
+        set_target_properties(realm_cudarthijack PROPERTIES CXX_VISIBILITY_PRESET hidden)
+        set_target_properties(realm_cudarthijack PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+      endif()
       target_include_directories(realm_cudarthijack PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}
 	${PROJECT_BINARY_DIR}/runtime
@@ -540,8 +541,10 @@ if(Legion_USE_Kokkos)
                                      "-I${CMAKE_CURRENT_SOURCE_DIR}"
                                      "-I${PROJECT_BINARY_DIR}/runtime")
 
-  # control symbol visibility
-  list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
+  if(REALM_LIMIT_SYMBOL_VISIBILITY)
+    # control symbol visibility
+    list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
+  endif()
 
   # and then finally, tell clang (if it is clang) where to find CUDA
   if(Legion_USE_CUDA AND (KOKKOS_CXX_COMPILER MATCHES ".*clang.*"))
@@ -694,24 +697,18 @@ if(Legion_USE_HIP AND Legion_GPU_REDUCTIONS)
 endif()
 
 # generate per-dimension object files for deppart stuff
-foreach(N1 RANGE 1 ${LEGION_MAX_DIM})
-  # echo -e is not portable, so use perl and try to limit the escape
-  #  characters we need to tunnel through cmake
-  add_custom_command(
-    COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#include QTlegion/region_tree_tmpl.ccQTEOL'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}.cc
-    OUTPUT region_tree_${N1}.cc
-    VERBATIM
-    )
-  list(APPEND LEGION_SRC region_tree_${N1}.cc)
+foreach(INST_N1 RANGE 1 ${LEGION_MAX_DIM})
+  # use cmake's configure_file for a portable way of creating wrapper
+  #  source files
+  set(SRCFILE legion/region_tree)
+  configure_file(${CMAKE_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}.cc)
+  list(APPEND LEGION_SRC ${SRCFILE}_${INST_N1}.cc)
   
-  foreach(N2 RANGE 1 ${LEGION_MAX_DIM})
-    add_custom_command(
-      COMMAND perl -e "$x='#define INST_N1 ${N1}EOL#define INST_N2 ${N2}EOL#include QTlegion/region_tree_tmpl.ccQTEOL'; $x=~s/EOL/chr(10)/ge; $x=~s/QT/chr(34)/ge; print $x;" > region_tree_${N1}_${N2}.cc
-      OUTPUT region_tree_${N1}_${N2}.cc
-      VERBATIM
-      )
-    list(APPEND LEGION_SRC region_tree_${N1}_${N2}.cc)
+  foreach(INST_N2 RANGE 1 ${LEGION_MAX_DIM})
+    configure_file(${CMAKE_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
+    list(APPEND LEGION_SRC ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
   endforeach()
+  unset(SRCFILE)
 endforeach()
               
 # Legion Fortran
@@ -723,7 +720,14 @@ if(Legion_USE_Fortran)
   )
 endif()               
 
-add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
+# HACK: completely separating the Legion and Realm cmake stuff will take
+#  a while, so just exclude LegionRuntime from the "all" target for the
+#  Realm-only case for now
+if(Legion_BUILD_REALM_ONLY)
+  set(EXCLUDE_LEGION EXCLUDE_FROM_ALL)
+endif()
+
+add_library(LegionRuntime ${EXCLUDE_LEGION} ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
 # do we have any cuda source files in Legion itself?
 if(LEGION_CUDA_SRC)
   if("${Legion_CUDA_ARCH}" STREQUAL "")
