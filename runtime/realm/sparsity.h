@@ -23,8 +23,7 @@
 #ifndef REALM_SPARSITY_H
 #define REALM_SPARSITY_H
 
-#include "realm/compiler_support.h"
-#include "realm/realm_c.h"
+#include "realm/realm_config.h"
 #include "realm/event.h"
 
 #include <iostream>
