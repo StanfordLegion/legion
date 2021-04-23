@@ -36,6 +36,7 @@ namespace TestConfig {
   bool skip_launch_procs = false;
   bool use_posttriger_barrier = false;
   bool group_procs = false;
+  bool run_immediately = false;
 };
 
 // TASK IDs
@@ -231,13 +232,15 @@ void task_launcher(const void *args, size_t arglen,
   double spawn_rate = total_tasks / (t2 - t1);
   log_app.print() << "spawn rate on " << p << ": " << spawn_rate << " tasks/s";
 
-  // we're all done - we can arrive at the start barrier and then finish this task
-  double t3 = Clock::current_time();
-  la.start_barrier.arrive();
-  double t4 = Clock::current_time();
-  if(!TestConfig::chain_tasks) {
-    double trigger_rate = total_tasks / (t4 - t3);
-    log_app.print() << "trigger rate on " << p << ": " << trigger_rate << " tasks/s";
+  if(!TestConfig::run_immediately) {
+    // we're all done - we can arrive at the start barrier and then finish this task
+    double t3 = Clock::current_time();
+    la.start_barrier.arrive();
+    double t4 = Clock::current_time();
+    if(!TestConfig::chain_tasks) {
+      double trigger_rate = total_tasks / (t4 - t3);
+      log_app.print() << "trigger rate on " << p << ": " << trigger_rate << " tasks/s";
+    }
   }
 
   if(TestConfig::use_posttriger_barrier)
@@ -308,8 +311,11 @@ void top_level_task(const void *args, size_t arglen,
   // two barriers will coordinate the running of the test tasks
   // 1) one triggered by each of the launcher tasks that starts the tasks running
   // 2) one triggered by each processor when all task launches have been seen
-  launch_args.start_barrier = Barrier::create_barrier(all_procs.size() * 
-						      TestConfig::launching_processors);
+  if(TestConfig::run_immediately)
+    launch_args.start_barrier = Barrier::NO_BARRIER;
+  else
+    launch_args.start_barrier = Barrier::create_barrier(all_procs.size() *
+                                                        TestConfig::launching_processors);
   launch_args.posttrigger_barrier = Barrier::create_barrier(all_procs.size() * 
 							    TestConfig::launching_processors);
   launch_args.finish_barrier = Barrier::create_barrier(total_procs);
@@ -360,7 +366,8 @@ int main(int argc, char **argv)
     .add_option_bool("-noself", TestConfig::skip_launch_procs)
     .add_option_bool("-post", TestConfig::use_posttriger_barrier)
     .add_option_bool("-prof", TestConfig::with_profiling)
-    .add_option_bool("-group", TestConfig::group_procs);
+    .add_option_bool("-group", TestConfig::group_procs)
+    .add_option_bool("-immed", TestConfig::run_immediately);
   ok = cp.parse_command_line(argc, (const char **)argv);
   assert(ok);
 
