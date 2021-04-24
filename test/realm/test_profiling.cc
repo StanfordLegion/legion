@@ -131,9 +131,12 @@ void response_task(const void *args, size_t arglen,
 	   op_timeline->start_time,
 	   op_timeline->end_time,
 	   op_timeline->complete_time,
-	   op_timeline->start_time - op_timeline->ready_time,
-	   op_timeline->end_time - op_timeline->start_time,
-	   op_timeline->complete_time - op_timeline->end_time);
+           (((op_timeline->start_time >= 0) && (op_timeline->ready_time >= 0)) ?
+            (op_timeline->start_time - op_timeline->ready_time) : -1),
+           (((op_timeline->end_time >= 0) && (op_timeline->start_time >= 0)) ?
+            (op_timeline->end_time - op_timeline->start_time) : -1),
+           (((op_timeline->complete_time >= 0) && (op_timeline->end_time >= 0)) ?
+            (op_timeline->complete_time - op_timeline->end_time) : -1));
     // ready/start/end/complete should at least be ordered (if they exist)
     if(result != OperationStatus::CANCELLED) {
       assert(op_timeline->ready_time >= 0);
