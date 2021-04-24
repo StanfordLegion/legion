@@ -1475,16 +1475,15 @@ namespace Legion {
 #endif
       if (piece_list == NULL)
       {
-        std::vector<Rect<DIM,T> > all_rects;
         Realm::IndexSpace<DIM,T> realm_space;
-        const ApEvent ready = get_realm_index_space(realm_space, true/*tight*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-        for (Realm::IndexSpaceIterator<DIM,T> itr(realm_space); 
-              itr.valid; itr.step())
-          all_rects.push_back(Rect<DIM,T>(itr.rect));
-        return new PieceIteratorImplT<DIM,T>(&(all_rects.front()), 
-            all_rects.size() * sizeof(Rect<DIM,T>), privilege_node);
+        get_realm_index_space(realm_space, true/*tight*/);
+#ifdef DEBUG_LEGION
+        // If there was no piece list it has to be because there
+        // was just one piece which was a single dense rectangle
+        assert(realm_space.dense());
+#endif
+        return new PieceIteratorImplT<DIM,T>(&realm_space.bounds,
+                      sizeof(realm_space.bounds), privilege_node);
       }
       else
         return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
@@ -2632,16 +2631,15 @@ namespace Legion {
 #endif
       if (piece_list == NULL)
       {
-        std::vector<Rect<DIM,T> > all_rects;
         Realm::IndexSpace<DIM,T> realm_space;
-        const ApEvent ready = get_realm_index_space(realm_space, true/*tight*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-        for (Realm::IndexSpaceIterator<DIM,T> itr(realm_space); 
-              itr.valid; itr.step())
-          all_rects.push_back(Rect<DIM,T>(itr.rect));
-        return new PieceIteratorImplT<DIM,T>(&(all_rects.front()),
-            all_rects.size() * sizeof(Rect<DIM,T>), privilege_node);
+        get_realm_index_space(realm_space, true/*tight*/);
+#ifdef DEBUG_LEGION
+        // If there was no piece list it has to be because there
+        // was just one piece which was a single dense rectangle
+        assert(realm_space.dense());
+#endif
+        return new PieceIteratorImplT<DIM,T>(&realm_space.bounds,
+                      sizeof(realm_space.bounds), privilege_node);
       }
       else
         return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
