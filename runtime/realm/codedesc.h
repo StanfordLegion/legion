@@ -342,7 +342,7 @@ namespace Realm {
   bool serialize(S& serializer, const CodeImplementation& ci);
 
   // this is the interface that actual CodePropertys must follow
-  class CodeProperty {
+  class REALM_PUBLIC_API CodeProperty {
   protected:
     // not directly constructed
     CodeProperty(void);

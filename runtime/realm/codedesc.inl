@@ -819,6 +819,17 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class CodeProperty
+
+  inline CodeProperty::CodeProperty(void)
+  {}
+
+  inline CodeProperty::~CodeProperty(void)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class CodeTranslator
 
   template <typename TARGET_TYPE>
