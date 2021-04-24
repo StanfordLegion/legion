@@ -176,9 +176,25 @@ set(CMAKE_ENABLE_EXPORTS ON)
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
-# add an "TSAN" build type for thread sanitizer goodness
-set(CMAKE_CXX_FLAGS_TSAN "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -DTSAN_ENABLED" CACHE STRING "additional C++ compiler flags for thread sanitizer" FORCE)
-set(CMAKE_EXE_LINKER_FLAGS_TSAN "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=thread" CACHE STRING "additional linker flags for thread sanitizier" FORCE)
+# add build types for thread/ub sanitizer goodness
+set(CMAKE_CXX_FLAGS_TSAN
+  "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -DTSAN_ENABLED"
+  CACHE STRING "additional C++ compiler flags for thread sanitizer" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_TSAN
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=thread"
+  CACHE STRING "additional linker flags for thread sanitizer" FORCE)
+set(CMAKE_CXX_FLAGS_UBSAN
+  "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=undefined"
+  CACHE STRING "additional C++ compiler flags for UB sanitizer" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_UBSAN
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=undefined"
+  CACHE STRING "additional linker flags for UB sanitizer" FORCE)
+set(CMAKE_CXX_FLAGS_ASAN
+  "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -DASAN_ENABLED"
+  CACHE STRING "additional C++ compiler flags for address sanitizer" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_ASAN
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=address"
+  CACHE STRING "additional linker flags for address sanitizer" FORCE)
 
 # if requested (and we know how to) make any warnings during the build fatal
 option(Legion_BUILD_WARN_AS_ERROR "Consider warnings during build of Legion to be fatal errors" OFF)
