@@ -181,12 +181,12 @@ namespace Realm {
 
   inline void TransferDesc::add_reference()
   {
-    refcount.fetch_add(1);
+    refcount.fetch_add_acqrel(1);
   }
 
   inline void TransferDesc::remove_reference()
   {
-    int prev = refcount.fetch_sub(1);
+    int prev = refcount.fetch_sub_acqrel(1);
     if(prev == 1)
       delete this;
   }
