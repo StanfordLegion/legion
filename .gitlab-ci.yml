@@ -235,6 +235,14 @@ variables:
   DARWIN_JOB_TYPE: "power9"
   IS_DARWIN_JOB: "1"
 
+.tsan: &tsan
+  SANITIZER_TYPE: "TSAN"
+.ubsan: &ubsan
+  SANITIZER_TYPE: "UBSAN"
+  UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+.asan: &asan
+  SANITIZER_TYPE: "ASAN"
+
 ###
 ### Setup
 ###
@@ -599,6 +607,17 @@ before_script:
     - "# wine doesn't seem to cope with concurrent file access, so use a serial build"
     - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -- -j1'"
     - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2019\\VC\\Redist\\MSVC\\14.28.29910\\debug_nonredist\\x64\\Microsoft.VC142.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.18362.0\\x64\\ucrt;%PATH% && cd build && ctest'"
+    - echo OK
+
+# use a custom script for running Realm tests with sanitizers
+.realm_sanitizer_tests: &realm_sanitizer_tests
+  <<: *test_rules
+  script:
+    - mkdir build
+    - cd build
+    - cmake -DCMAKE_BUILD_TYPE=${SANITIZER_TYPE} -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON ..
+    - make -j8
+    - ctest --output-on-failure .
     - echo OK
 
 # For performance tests, run these commands:
@@ -1281,3 +1300,17 @@ msvc169_realm:
   <<: [*msvc_wine, *image_msvc169, *msvc_tests]
   variables:
     <<: [*short]
+
+# sanitizer tests (Realm only):
+gcc9_tsan_realm:
+  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *tsan, *short]
+gcc9_ubsan_realm:
+  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *ubsan, *short]
+gcc9_asan_realm:
+  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *asan, *short]
