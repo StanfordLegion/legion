@@ -1022,6 +1022,8 @@ namespace Realm {
       }
     }
 #endif
+    if(poisoned_generations)
+      delete[] poisoned_generations;
   }
 
   void GenEventImpl::init(ID _me, unsigned _init_owner)

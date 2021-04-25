@@ -404,7 +404,10 @@ void top_level_task(const void *args, size_t arglen,
 					      std::vector<size_t>(1, 1024),
 					      0, // SOA
 					      prs);
-    inst.destroy(e);
+    // a normal inst.destroy(e) would not work here, as 'e' is poisoned...
+    // instead, we need to "launder" the poison in order to actually clean
+    //  up the metadata for the failed allocation
+    inst.destroy(Event::ignorefaults(e));
   }
 
   printf("waiting for profiling responses...\n");
