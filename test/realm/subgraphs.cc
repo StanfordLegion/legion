@@ -91,7 +91,7 @@ void reader_task(const void *args, size_t arglen,
 
 struct CleanupTaskArgs {
   Event precond;
-  Subgraph subgraph;
+  Subgraph subgraph, subgraph_inner;
   UserEvent cleanup_done;
 };
 
@@ -131,6 +131,7 @@ void cleanup_task(const void *args, size_t arglen,
   // destroy the subgraph and trigger the done event upon completion of this
   //  instance
   cta.subgraph.destroy(e);
+  cta.subgraph_inner.destroy(e);
   cta.cleanup_done.trigger(e);
 }
 
@@ -352,6 +353,7 @@ void top_level_task(const void *args, size_t arglen,
   CleanupTaskArgs cleanup_args;
   cleanup_args.precond = e;
   cleanup_args.subgraph = sg;
+  cleanup_args.subgraph_inner = sg_inner;
   cleanup_args.cleanup_done = UserEvent::create_user_event();
   lastp.spawn(CLEANUP_TASK, &cleanup_args, sizeof(CleanupTaskArgs),
 	      ProfilingRequestSet());
@@ -411,8 +413,7 @@ int main(int argc, char **argv)
   rt.register_task(READER_TASK, reader_task);
   rt.register_task(CLEANUP_TASK, cleanup_task);
 
-  rt.register_reduction(REDOP_INT_ADD,
-			ReductionOpUntyped::create_reduction_op<ReductionOpIntAdd>());
+  rt.register_reduction<ReductionOpIntAdd>(REDOP_INT_ADD);
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())

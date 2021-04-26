@@ -295,7 +295,7 @@ namespace Realm {
       static T *deserialize_new(FixedBufferDeserializer& deserializer);
 
     protected:
-      typedef int TypeTag;
+      typedef unsigned TypeTag;
       struct SubclassMap {
 	std::map<const char *, const PolymorphicSerdezIntfc<T> *> by_typename;
 	std::map<TypeTag, const PolymorphicSerdezIntfc<T> *> by_tag;

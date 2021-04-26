@@ -131,9 +131,12 @@ void response_task(const void *args, size_t arglen,
 	   op_timeline->start_time,
 	   op_timeline->end_time,
 	   op_timeline->complete_time,
-	   op_timeline->start_time - op_timeline->ready_time,
-	   op_timeline->end_time - op_timeline->start_time,
-	   op_timeline->complete_time - op_timeline->end_time);
+           (((op_timeline->start_time >= 0) && (op_timeline->ready_time >= 0)) ?
+            (op_timeline->start_time - op_timeline->ready_time) : -1),
+           (((op_timeline->end_time >= 0) && (op_timeline->start_time >= 0)) ?
+            (op_timeline->end_time - op_timeline->start_time) : -1),
+           (((op_timeline->complete_time >= 0) && (op_timeline->end_time >= 0)) ?
+            (op_timeline->complete_time - op_timeline->end_time) : -1));
     // ready/start/end/complete should at least be ordered (if they exist)
     if(result != OperationStatus::CANCELLED) {
       assert(op_timeline->ready_time >= 0);
@@ -401,7 +404,10 @@ void top_level_task(const void *args, size_t arglen,
 					      std::vector<size_t>(1, 1024),
 					      0, // SOA
 					      prs);
-    inst.destroy(e);
+    // a normal inst.destroy(e) would not work here, as 'e' is poisoned...
+    // instead, we need to "launder" the poison in order to actually clean
+    //  up the metadata for the failed allocation
+    inst.destroy(Event::ignorefaults(e));
   }
 
   printf("waiting for profiling responses...\n");

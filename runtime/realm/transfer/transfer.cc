@@ -4088,6 +4088,7 @@ namespace Realm {
 				  priority,
                                   xdn.redop,
 				  fill_data, fill_size);
+      xd_factory->release();
     }
 
     // record requested profiling information

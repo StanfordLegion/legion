@@ -76,7 +76,7 @@ namespace Realm {
     return true;
   }
 
-  intptr_t Backtrace::hash(void) const
+  uintptr_t Backtrace::hash(void) const
   {
     return pc_hash;
   }
@@ -109,11 +109,11 @@ namespace Realm {
     return false;
   }
 
-  intptr_t Backtrace::compute_hash(int depth /*= 0*/) const
+  uintptr_t Backtrace::compute_hash(int depth /*= 0*/) const
   {
-    intptr_t newhash = 0;
+    uintptr_t newhash = 0;
     int i = 0;
-    for(std::vector<intptr_t>::const_iterator it = pcs.begin();
+    for(std::vector<uintptr_t>::const_iterator it = pcs.begin();
 	it != pcs.end();
 	it++) {
       newhash = (newhash * 0x10021) ^ *it;
@@ -127,7 +127,7 @@ namespace Realm {
   //   and records pointers
   void Backtrace::capture_backtrace(int skip /*= 0*/, int max_depth /*= 0*/)
   {
-    intptr_t *rawptrs;
+    uintptr_t *rawptrs;
     // if we weren't given a max depth, pick 100 for now
     if(max_depth <= 0)
       max_depth = 100;
@@ -140,7 +140,7 @@ namespace Realm {
     // allocate space for the result of backtrace(), including the stuff on
     //  the front we're going to skip
     assert(sizeof(void *) == sizeof(intptr_t));
-    rawptrs = (intptr_t *)alloca(sizeof(void *) * (max_depth + skip));
+    rawptrs = (uintptr_t *)alloca(sizeof(void *) * (max_depth + skip));
 #ifdef REALM_ON_WINDOWS
     int count = 0; // TODO: StackWalk appears to be the right API call?
 #else
@@ -219,7 +219,7 @@ namespace Realm {
         if(print_raw)
 	  os << bt.symbols[i];
       } else {
-        os << std::hex << std::setfill('0') << std::setw(sizeof(intptr_t)*2) << bt.pcs[i];
+        os << std::hex << std::setfill('0') << std::setw(sizeof(uintptr_t)*2) << bt.pcs[i];
         os << std::dec << std::setfill(' ');
       }
       os << std::endl;

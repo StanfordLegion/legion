@@ -792,7 +792,7 @@ namespace Realm {
       delete core_reservations;
       delete core_map;
 
-      delete_container_contents(reduce_op_table.map);
+      delete_container_contents_free(reduce_op_table.map);
       delete_container_contents(custom_serdez_table.map);
     }
 

@@ -484,6 +484,11 @@ namespace Realm {
     size_t msglen;
     // string data stored immediately after the fixed-size structure
     char *msgdata() { return reinterpret_cast<char *>(this + 1); }
+    void operator delete(void *p) {
+      // Since this object has tail-padding, use an unsized delete to avoid
+      // upsetting allocators that check sizes.
+      ::operator delete(p);
+    }
   };
 
 

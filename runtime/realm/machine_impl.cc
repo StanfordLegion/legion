@@ -1747,7 +1747,7 @@ namespace Realm {
             pval =  (*clist)[lrand48() % clist->size()];
             break;
           default:
-            assert("invalid query \n");
+            assert(false); // invalid query
             break;
           }
         }
@@ -2580,7 +2580,7 @@ namespace Realm {
             mval =  (*clist)[lrand48() % clist->size()];
             break;
           default:
-            assert("invalid query \n");
+            assert(false);  // invalid query
             break;
           }
         }

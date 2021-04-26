@@ -159,7 +159,7 @@
 
 #ifndef MAX_FIELDS // For backwards compatibility
 #ifndef LEGION_MAX_FIELDS
-#define LEGION_MAX_FIELDS         512 // must be a power of 2
+#define LEGION_MAX_FIELDS         256 // must be a power of 2
 #endif
 #else
 #ifndef LEGION_MAX_FIELDS

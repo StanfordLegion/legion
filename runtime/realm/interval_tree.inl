@@ -18,6 +18,8 @@
 // nop, but helps IDEs
 #include "realm/interval_tree.h"
 
+#include <cassert>
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
