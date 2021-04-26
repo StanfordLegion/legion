@@ -249,6 +249,7 @@ namespace Realm {
 	       (s >> value_set) &&
 	       (s >> sparsity_outputs));
     assert(ok);
+    (void)ok;
   }
 
   template <int N, typename T, typename FT>

@@ -1731,7 +1731,7 @@ namespace Realm {
     {
       std::vector<XferDesPortInfo> inputs_info, outputs_info;
       int priority = 0;
-      size_t element_size;
+      size_t element_size = 0;
       std::vector<IndexSpace<N,T> > spaces;
 
       Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);

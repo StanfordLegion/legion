@@ -37,6 +37,10 @@
 #endif
 #endif
 
+#include "legion/legion_config.h"
+
+#include <cstdint>
+
 namespace Legion {
 
   template<typename T>

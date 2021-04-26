@@ -361,13 +361,12 @@ namespace Realm {
       IT to_lookup = next_alloc;
       next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS; // do this before letting go of lock
       lock.unlock();
-#ifndef NDEBUG
       typename DynamicTable<ALLOCATOR>::ET *dummy =
-#endif
         table.lookup_entry(to_lookup, owner, this);
       assert(dummy != 0);
       // can't actually use dummy because we let go of lock - retake lock
       //  and hopefully find non-empty list next time
+      (void)dummy;
       lock.lock();
     }
   }

@@ -18,6 +18,7 @@
 #define __LEGION_GARBAGE_COLLECTION__
 
 #include "legion/legion_types.h"
+#include "legion/bitmask.h"
 
 // This is a macro for enabling the use of remote references
 // on distributed collectable objects. Remote references 
