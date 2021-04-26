@@ -9393,10 +9393,16 @@ namespace Legion {
       }
       else if (!owned)
       {
-        void *result_copy = malloc(res_size);
-        memcpy(result_copy, res, res_size);
-        parent_ctx->add_to_post_task_queue(this, effects_done,
-                                           result_copy, res_size);
+        if (res_size > 0)
+        {
+          void *result_copy = malloc(res_size);
+          memcpy(result_copy, res, res_size);
+          parent_ctx->add_to_post_task_queue(this, effects_done,
+                                             result_copy, res_size);
+        }
+        else
+          parent_ctx->add_to_post_task_queue(this, effects_done,
+                                             res, res_size);
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);
@@ -12292,10 +12298,16 @@ namespace Legion {
       }
       else if (!owned)
       {
-        void *result_copy = malloc(res_size);
-        memcpy(result_copy, res, res_size);
-        parent_ctx->add_to_post_task_queue(this, effects_done,
-                                           result_copy, res_size); 
+        if (res_size > 0)
+        {
+          void *result_copy = malloc(res_size);
+          memcpy(result_copy, res, res_size);
+          parent_ctx->add_to_post_task_queue(this, effects_done,
+                                             result_copy, res_size); 
+        }
+        else
+          parent_ctx->add_to_post_task_queue(this, effects_done,
+                                             res, res_size);
       }
       else
         parent_ctx->add_to_post_task_queue(this, effects_done, res, res_size);

@@ -1952,8 +1952,9 @@ namespace Legion {
             std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         iterator(FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask>::aligned::iterator _it)
-          : set(_set), result(&(*_it)), it(_it), single(false) { }
+            typename LegionMap<T*,FieldMask>::aligned::iterator _it,
+            bool end = false)
+          : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
         iterator(const iterator &rhs)
           : set(rhs.set), result(rhs.result), 
@@ -2062,8 +2063,9 @@ namespace Legion {
             const std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         const_iterator(const FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask>::aligned::const_iterator _it)
-          : set(_set), result(&(*_it)), it(_it), single(false) { }
+            typename LegionMap<T*,FieldMask>::aligned::const_iterator _it,
+            bool end = false)
+          : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
         const_iterator(const const_iterator &rhs)
           : set(rhs.set), result(rhs.result), it(rhs.it), single(rhs.single) { }
@@ -2593,7 +2595,7 @@ namespace Legion {
       if (single)
         return iterator(this, NULL);
       else
-        return iterator(this, entries.multi_entries->end());
+        return iterator(this, entries.multi_entries->end(), true/*end*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2649,7 +2651,7 @@ namespace Legion {
       if (single)
         return const_iterator(this, NULL);
       else
-        return const_iterator(this, entries.multi_entries->end());
+        return const_iterator(this, entries.multi_entries->end(), true/*end*/);
     }
 
     //--------------------------------------------------------------------------
