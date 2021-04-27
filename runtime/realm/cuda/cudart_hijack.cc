@@ -1071,4 +1071,98 @@ extern "C" {
     return cudaErrorInvalidValue;
   }
 
+  REALM_PUBLIC_API
+  cudaError_t cudaDeviceSetLimit(cudaLimit limit, size_t value)
+  {
+    get_gpu_or_die("cudaDeviceSetLimit");
+    switch(limit) {
+    case cudaLimitStackSize:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_STACK_SIZE, value);
+
+    case cudaLimitPrintfFifoSize:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_PRINTF_FIFO_SIZE, value);
+
+    case cudaLimitMallocHeapSize:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_MALLOC_HEAP_SIZE, value);
+
+    case cudaLimitDevRuntimeSyncDepth:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH, value);
+
+    case cudaLimitDevRuntimePendingLaunchCount:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT, value);
+
+#if CUDA_VERSION >= 10000
+    case cudaLimitMaxL2FetchGranularity:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_MAX_L2_FETCH_GRANULARITY, value);
+#endif
+
+#if CUDA_VERSION >= 11000
+    case cudaLimitPersistingL2CacheSize:
+      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_PERSISTING_L2_CACHE_SIZE, value);
+#endif
+
+    default:
+      return cudaErrorInvalidValue;
+    }
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaDeviceGetLimit(size_t *value, cudaLimit limit)
+  {
+    get_gpu_or_die("cudaDeviceGetLimit");
+    switch(limit) {
+    case cudaLimitStackSize:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_STACK_SIZE);
+
+    case cudaLimitPrintfFifoSize:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_PRINTF_FIFO_SIZE);
+
+    case cudaLimitMallocHeapSize:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_MALLOC_HEAP_SIZE);
+
+    case cudaLimitDevRuntimeSyncDepth:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH);
+
+    case cudaLimitDevRuntimePendingLaunchCount:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT);
+
+#if CUDA_VERSION >= 10000
+    case cudaLimitMaxL2FetchGranularity:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_MAX_L2_FETCH_GRANULARITY);
+#endif
+
+#if CUDA_VERSION >= 11000
+    case cudaLimitPersistingL2CacheSize:
+      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_PERSISTING_L2_CACHE_SIZE);
+#endif
+
+    default:
+      return cudaErrorInvalidValue;
+    }
+  }
+
+  cudaError_t cudaSetDeviceFlags(unsigned flags)
+  {
+    get_gpu_or_die("cudaSetDeviceFlags");
+
+    // flags must be set before contexts are created, which is before any
+    //  task can run in Realm, so we know it's too late
+    return cudaErrorSetOnActiveProcess;
+  }
+
+  cudaError_t cudaGetDeviceFlags(unsigned *flags)
+  {
+    get_gpu_or_die("cudaGetDeviceFlags");
+
+    // we're going to pass back the flags from the driver API, so assert
+    //  the bits are in the same places
+    assert((cudaDeviceScheduleAuto == CU_CTX_SCHED_AUTO) &&
+           (cudaDeviceScheduleSpin == CU_CTX_SCHED_SPIN) &&
+           (cudaDeviceScheduleYield == CU_CTX_SCHED_YIELD) &&
+           (cudaDeviceScheduleBlockingSync == CU_CTX_SCHED_BLOCKING_SYNC) &&
+           (cudaDeviceMapHost == CU_CTX_MAP_HOST) &&
+           (cudaDeviceLmemResizeToMax == CU_CTX_LMEM_RESIZE_TO_MAX));
+    return (cudaError_t)cuCtxGetFlags(flags);
+  }
+
 }; // extern "C"
