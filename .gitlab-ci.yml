@@ -537,6 +537,9 @@ before_script:
     # do not automatically run pipelines for pull requests
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       when: never
+    # if 'all-cuda' appears in a commit message, run all cuda tests
+    - if: '$CI_PIPELINE_SOURCE == "push" && $USE_CUDA == "1" && $CI_COMMIT_MESSAGE =~ /all-cuda/'
+      when: always
     # commits only run a short suite of jobs
     - if: '$CI_PIPELINE_SOURCE == "push" && $IS_SHORT_JOB != "1"'
       when: never
