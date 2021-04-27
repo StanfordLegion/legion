@@ -217,8 +217,10 @@ namespace Realm {
     for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++)
       active_work_item_mask[i].store(0);
 
-    for(unsigned i = 0; i < MAX_WORK_ITEMS; i++)
+    for(unsigned i = 0; i < MAX_WORK_ITEMS; i++) {
+      work_item_usecounts[i].store(0);
       work_items[i] = 0;
+    }
   }
 
   BackgroundWorkManager::~BackgroundWorkManager(void)
@@ -228,9 +230,15 @@ namespace Realm {
 
   unsigned BackgroundWorkManager::assign_slot(BackgroundWorkItem *item)
   {
-    unsigned slot = num_work_items.fetch_add(1);
+    AutoLock<> al(mutex);
+    // TODO: reuse slots
+    unsigned slot = num_work_items.load();
     assert(slot < MAX_WORK_ITEMS);
     work_items[slot] = item;
+    int prev = work_item_usecounts[slot].fetch_add_acqrel(1);
+    assert(prev == 0);
+    (void)prev;
+    num_work_items.store_release(slot + 1);
     return slot;
   }
 
@@ -242,8 +250,20 @@ namespace Realm {
     BitMask mask = BitMask(1) << ofs;
     assert((active_work_item_mask[elem].load() & mask) == 0);
 
-    // NOTE: no reuse of released slots right now
-    work_items[slot] = 0;
+    // use count has to change from 1 (i.e. we are only remaining user)
+    //  to 0 _before_ we enter critical section
+    while(true) {
+      int expected = 1;
+      if(work_item_usecounts[slot].compare_exchange(expected, 0))
+        break;
+      Thread::yield();
+    }
+
+    {
+      AutoLock<> al(mutex);
+      // NOTE: no reuse of released slots right now
+      work_items[slot] = 0;
+    }
   }
 
   void BackgroundWorkManager::advertise_work(unsigned slot)
@@ -441,12 +461,13 @@ namespace Realm {
   BackgroundWorkManager::Worker::Worker(void)
     : manager(0)
     , starting_slot(0)
-    , known_work_items(0)
     , max_timeslice(-1)
     , numa_domain(-1)
   {
-    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++)
+    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++) {
+      known_work_item_mask[i] = 0;
       allowed_work_item_mask[i] = 0;
+    }
   }
 
   BackgroundWorkManager::Worker::~Worker(void)
@@ -456,27 +477,30 @@ namespace Realm {
   {
     manager = _manager;
     // reset our cache of allowed work items
-    known_work_items = 0;
-    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++)
+    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++) {
+      known_work_item_mask[i] = 0;
       allowed_work_item_mask[i] = 0;
+    }
   }
 
   void BackgroundWorkManager::Worker::set_max_timeslice(long long _timeslice_in_ns)
   {
     max_timeslice = _timeslice_in_ns;
     // reset our cache of allowed work items
-    known_work_items = 0;
-    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++)
+    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++) {
+      known_work_item_mask[i] = 0;
       allowed_work_item_mask[i] = 0;
+    }
   }
 
   void BackgroundWorkManager::Worker::set_numa_domain(int _numa_domain)
   {
     numa_domain = _numa_domain;
     // reset our cache of allowed work items
-    known_work_items = 0;
-    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++)
+    for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++) {
+      known_work_item_mask[i] = 0;
       allowed_work_item_mask[i] = 0;
+    }
   }
   
   bool BackgroundWorkManager::Worker::do_work(long long max_time_in_ns,
@@ -491,55 +515,71 @@ namespace Realm {
     while(true) {
       // if we've exhausted the known work items, loop back around and
       //  check to see if any new work items have showed up
-      if(starting_slot >= known_work_items) {
+      if(starting_slot >= manager->num_work_items.load_acquire()) {
 	// if we get here twice in a row without doing any work, return
 	//  to the caller to let them spin/sleep/whatever
 	if(!did_work) return false;
 	did_work = false;
-	unsigned cur_work_items = manager->num_work_items.load();
-	while(known_work_items < cur_work_items) {
-	  BackgroundWorkItem *item = manager->work_items[known_work_items];
 
-	  // ignore deleted items
-	  if(item == 0) {
-	    known_work_items++;
-	    continue;
-	  }
-
-	  // don't take things whose timeslice is too long
-	  if((max_timeslice > 0) && (item->min_timeslice_needed > 0) &&
-	     (max_timeslice < item->min_timeslice_needed)) {
-	    known_work_items++;
-	    continue;
-	  }
-
-	  // don't take things that are in the wrong numa domain
-	  if((numa_domain >= 0) && (item->numa_domain >= 0) &&
-	     (numa_domain != item->numa_domain)) {
-	    known_work_items++;
-	    continue;
-	  }
-
-	  unsigned elem = known_work_items / BITMASK_BITS;
-	  unsigned ofs = known_work_items % BITMASK_BITS;
-	  BitMask mask = BitMask(1) << ofs;
-	  allowed_work_item_mask[elem] |= mask;
-
-	  known_work_items++;
-	}
 	starting_slot = 0;
+        // TODO: if/when slots are reused, we need a way to invalidate
+        //  our known/allowed masks
       }
 
       // look at a whole BitMask entry at once, skipping over 0's
       unsigned elem = starting_slot / BITMASK_BITS;
       unsigned ofs = starting_slot % BITMASK_BITS;
-      BitMask mask;
-      mask = (manager->active_work_item_mask[elem].load() &
-	      allowed_work_item_mask[elem] &
-	      (~BitMask(0) << ofs));
-      while(mask != 0) {
+      BitMask active_mask = (manager->active_work_item_mask[elem].load() &
+                             (~BitMask(0) << ofs));
+
+      // are there any bits set that we've not seen before?
+      BitMask unknown_mask = active_mask & ~known_work_item_mask[elem];
+      while(unknown_mask != 0) {
+        BitMask unknown_bit = (unknown_mask & ~(unknown_mask - 1));
+        unsigned unknown_slot = (elem * BITMASK_BITS) + ctz(unknown_bit);
+
+        // attempt to increment the user count for this slot so we can
+        //  peek at information that tells us if we want to service it
+        int prev_count = manager->work_item_usecounts[unknown_slot].fetch_add_acqrel(1);
+        if(prev_count > 0) {
+          // slot pointer is valid and can't change until we decrement the
+          //  use count again
+	  BackgroundWorkItem *item = manager->work_items[unknown_slot];
+          assert(item != 0);
+
+          bool allowed = true;
+
+	  // don't take things whose timeslice is too long
+	  if((max_timeslice > 0) && (item->min_timeslice_needed > 0) &&
+	     (max_timeslice < item->min_timeslice_needed)) {
+            allowed = false;
+	  }
+
+	  // don't take things that are in the wrong numa domain
+	  if((numa_domain >= 0) && (item->numa_domain >= 0) &&
+	     (numa_domain != item->numa_domain)) {
+            allowed = false;
+	  }
+
+          log_bgwork.info() << "worker " << this << " discovered slot " << unknown_slot << " (" << item->name << ") allowed=" << allowed;
+
+          if(allowed)
+            allowed_work_item_mask[elem] |= unknown_bit;
+        }
+        // unconditional decrement to match the increment
+        manager->work_item_usecounts[unknown_slot].fetch_sub(1);
+
+        known_work_item_mask[elem] |= unknown_bit;
+        unknown_mask &= ~unknown_bit;
+      }
+
+      // now that everything is at least known, limit the active mask to
+      //  just things we're allowed to take
+      BitMask allowed_mask = (active_mask & allowed_work_item_mask[elem]);
+
+      while(allowed_mask != 0) {
 	// this leaves only the least significant 1 bit set
-	BitMask target_bit = mask & ~(mask - 1);
+	BitMask target_bit = allowed_mask & ~(allowed_mask - 1);
 	// attempt to clear this bit
 	BitMask prev = manager->active_work_item_mask[elem].fetch_and_acqrel(~target_bit);
 	if(prev & target_bit) {
@@ -555,6 +595,14 @@ namespace Realm {
 	  long long t_quantum = (manager->cfg.work_item_timeslice + t_start);
 	  if((work_until_time > 0) && (work_until_time < t_quantum))
 	    t_quantum = work_until_time;
+
+          // increase the use count for this slot - this should NEVER see
+          //  an invalid slot because we have claimed a work request and
+          //  not ack'd it yet
+          int prev_usecount = manager->work_item_usecounts[slot].fetch_add_acqrel(1);
+          assert(prev_usecount > 0);
+          (void)prev_usecount;
+
 	  BackgroundWorkItem *item = manager->work_items[slot];
 #ifdef DEBUG_REALM
 	  item->make_inactive();
@@ -568,17 +616,21 @@ namespace Realm {
 	                           0);
 	  log_bgwork.print() << "work: slot=" << slot << " elapsed=" << elapsed << " overshoot=" << overshoot;
 #endif
+          // we're done with this slot for now
+          manager->work_item_usecounts[slot].fetch_sub_acqrel(1);
+
 	  starting_slot = slot + 1;
 	  did_work = true;
 	  break;
 	} else {
 	  // loop around and try other bits
-	  mask &= ~target_bit;
+	  allowed_mask &= ~target_bit;
 	}
       }
+
       // if we get here with a zero mask, skip ahead to next chunk of bits
-      if(mask == 0)
-	starting_slot = (elem + 1) * BITMASK_BITS;
+      if(allowed_mask == 0)
+        starting_slot = (elem + 1) * BITMASK_BITS;
 
       // before we loop around, see if there's been an interupt requested or
       //  we've used all the time permitted
