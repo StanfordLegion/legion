@@ -407,6 +407,7 @@ namespace Legion {
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
+      LG_DEFER_COLLECTIVE_TASK_ID,
       LG_YIELD_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -533,6 +534,7 @@ namespace Legion {
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
+        "Defer Collective Async",                                 \
         "Yield",                                                  \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
@@ -877,6 +879,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
+      SEND_EQUIVALENCE_SET_REMOTE_CLONES,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
@@ -1095,6 +1098,7 @@ namespace Legion {
         "Send Equivalence Set Remote Copies Across",                  \
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
+        "Send Equivalence Set Remote Clones",                         \
         "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \

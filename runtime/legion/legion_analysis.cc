@@ -368,22 +368,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceRecorder* RemoteTraceRecorder::clone(Memoizable *newmemo)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent clone_applied = Runtime::create_rt_user_event();
-      PhysicalTraceRecorder* result = new RemoteTraceRecorder(runtime,
-          origin_space, local_space, newmemo, remote_tpl, clone_applied,
-          collect_event);
-      AutoLock a_lock(applied_lock);
-      applied_events.insert(clone_applied);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_get_term_event(Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -434,6 +424,9 @@ namespace Legion {
                                               ApUserEvent lhs, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -459,6 +452,9 @@ namespace Legion {
                                                    Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -485,6 +481,9 @@ namespace Legion {
                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
@@ -500,6 +499,9 @@ namespace Legion {
                                                   ApEvent e2, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
@@ -517,6 +519,9 @@ namespace Legion {
                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
@@ -535,6 +540,9 @@ namespace Legion {
                                                   Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -575,6 +583,9 @@ namespace Legion {
                                              bool reduction_fold)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -669,6 +680,9 @@ namespace Legion {
                              ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         // TODO
@@ -693,6 +707,9 @@ namespace Legion {
                                              PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -787,6 +804,9 @@ namespace Legion {
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -839,6 +859,9 @@ namespace Legion {
                                              std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -870,6 +893,9 @@ namespace Legion {
                                                        Memoizable *memo)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -898,6 +924,9 @@ namespace Legion {
                               std::set<RtEvent> &external_applied)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -937,6 +966,9 @@ namespace Legion {
                                                  ApEvent &rhs)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event();
@@ -962,6 +994,9 @@ namespace Legion {
                                                      ApEvent rhs)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event();
@@ -988,6 +1023,9 @@ namespace Legion {
                   ApEvent precondition, ApEvent postcondition)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -1756,6 +1794,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(SingleTask *task, RemoteTraceRecorder *r, bool init)
+      : op(task), memo(task), rec(r), recording(rec != NULL)
+    //--------------------------------------------------------------------------
+    {
+      if (recording)
+      {
+        rec->add_recorder_reference();
+        if (init)
+          record_get_term_event();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(const TraceInfo &rhs)
       : op(rhs.op), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
     //--------------------------------------------------------------------------
@@ -1764,27 +1815,7 @@ namespace Legion {
         rec->add_recorder_reference();
     }
 
-    //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(const TraceInfo &rhs, Operation *o)
-      : op(o), memo(o->get_memoizable()), rec(rhs.rec), recording(rhs.recording)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(memo != NULL);
-#endif
-      if (rec != NULL)
-        rec->add_recorder_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    TraceInfo::~TraceInfo(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((rec != NULL) && rec->remove_recorder_reference())
-        delete rec;
-    }
-
-    //--------------------------------------------------------------------------
+   //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(Operation *o, Memoizable *m, 
                          PhysicalTraceRecorder *r, const bool record)
       : op(o), memo(m), rec(r), recording(record)
@@ -1795,51 +1826,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceInfo::pack_remote_trace_info(Serializer &rez, 
-                        AddressSpaceID target, std::set<RtEvent> &applied) const
+    TraceInfo::~TraceInfo(void)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<bool>(recording);
-      if (recording)
-      {
-        // Only need to pack these if we're recording
-        memo->pack_remote_memoizable(rez, target);
-        rec->pack_recorder(rez, applied, target);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ TraceInfo* TraceInfo::unpack_remote_trace_info(
-        Deserializer &derez, Operation *op, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      bool recording;
-      derez.deserialize<bool>(recording);
-      if (recording)
-      {
-        Memoizable *memo = 
-          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime); 
-        // PhysicalTraceRecord takes possible ownership of memoizable
-        PhysicalTraceRecorder *rec = 
-          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
-        return new TraceInfo(op, memo, rec, true/*recording*/);
-      }
-      else
-        return new TraceInfo(op, NULL, NULL, false/*recording*/);
-    }
-
-    //--------------------------------------------------------------------------
-    TraceInfo* TraceInfo::clone(Operation *newop)
-    //--------------------------------------------------------------------------
-    {
-      if (recording)
-      {
-        Memoizable *newmemo = memo->clone(newop);
-        PhysicalTraceRecorder *newrec = rec->clone(newmemo);
-        return new TraceInfo(newop, newmemo, newrec, true/*recording*/);
-      }
-      else
-        return new TraceInfo(newop, NULL, NULL, false/*recording*/);
+      if ((rec != NULL) && rec->remove_recorder_reference())
+        delete rec;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9311,6 +9302,198 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Clone Analysis
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
+               Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
+      : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/),
+        sources(std::move(srcs))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::CloneAnalysis(Runtime *rt, AddressSpaceID src,
+                                 AddressSpaceID prev,IndexSpaceExpression *expr,
+                                 Operation *op, unsigned idx,
+                                 FieldMaskSet<EquivalenceSet> &&srcs)
+      : PhysicalAnalysis(rt, src, prev, op, idx, expr, true/*on heap*/),
+        sources(std::move(srcs))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::CloneAnalysis(const CloneAnalysis &rhs)
+      : PhysicalAnalysis(rhs), sources(rhs.sources)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis::~CloneAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CloneAnalysis& CloneAnalysis::operator=(const CloneAnalysis &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CloneAnalysis::perform_traversal(EquivalenceSet *set,
+                                          IndexSpaceExpression *expr,
+                                          const bool expr_covers,
+                                          const FieldMask &mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->clone_set(*this, expr, expr_covers, mask, deferral_events,
+                     applied_events, already_deferred);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CloneAnalysis::perform_remote(RtEvent perform_precondition,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      if (perform_precondition.exists() && 
+          !perform_precondition.has_triggered())
+      {
+        // Defer this until the precondition is met
+        DeferPerformRemoteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
+        applied_events.insert(args.applied_event);
+        return args.done_event;
+      }
+      // If there are no sets we're done
+      if (remote_sets.empty())
+        return RtEvent::NO_RT_EVENT;
+      for (LegionMap<AddressSpaceID,
+                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+            rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const AddressSpace target = rit->first;
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(original_source);
+          rez.serialize<size_t>(rit->second.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          analysis_expr->pack_expression(rez, target);
+          op->pack_remote_operation(rez, target, applied_events);
+          rez.serialize(index);
+          rez.serialize<size_t>(sources.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                sources.begin(); it != sources.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(applied);
+        }
+        runtime->send_equivalence_set_remote_clones(target, rez);
+        applied_events.insert(applied);
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CloneAnalysis::handle_remote_clones(Deserializer &derez,
+                                      Runtime *runtime, AddressSpaceID previous)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID original_source;
+      derez.deserialize(original_source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+        derez.deserialize(eq_masks[idx]);
+      }
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez,runtime->forest,previous);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      unsigned index;
+      derez.deserialize(index);
+      size_t num_sources;
+      derez.deserialize(num_sources);
+      FieldMaskSet<EquivalenceSet> sources;
+      for (unsigned idx = 0; idx < num_sources; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        EquivalenceSet *set = 
+          runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        sources.insert(set, mask);
+      }
+      RtUserEvent applied;
+      derez.deserialize(applied);
+
+      // This takes ownership of the operation
+      CloneAnalysis *analysis = new CloneAnalysis(runtime, original_source,
+                            previous, expr, op, index, std::move(sources));
+      analysis->add_reference();
+      std::set<RtEvent> deferral_events, applied_events;
+      // Make sure that all our pointers are ready
+      RtEvent ready_event;
+      if (!ready_events.empty())
+        ready_event = Runtime::merge_events(ready_events);
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        analysis->traverse(eq_sets[idx], eq_masks[idx], deferral_events, 
+                           applied_events, ready_event);
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      if (traversal_done.exists() || analysis->has_remote_sets())
+        analysis->perform_remote(traversal_done, applied_events);
+      // Now we can trigger our applied event
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+      if (analysis->remove_reference())
+        delete analysis;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Equivalence Set
     /////////////////////////////////////////////////////////////
 
@@ -14370,7 +14553,7 @@ namespace Legion {
               for (std::vector<InstanceView*>::const_iterator it =
                     to_erase.begin(); it != to_erase.end(); it++)
               {
-                if (expr_refs_to_remove != NULL)
+                if (view_refs_to_remove != NULL)
                 {
                   std::map<LogicalView*,unsigned>::iterator finder =
                     view_refs_to_remove->find(*it);
@@ -14652,7 +14835,7 @@ namespace Legion {
             for (std::vector<InstanceView*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
             {
-              if (expr_refs_to_remove != NULL)
+              if (view_refs_to_remove != NULL)
               {
                 std::map<LogicalView*,unsigned>::iterator finder =
                   view_refs_to_remove->find(*it);
@@ -15394,6 +15577,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::clone_set(CloneAnalysis &analysis, 
+                                   IndexSpaceExpression *expr, 
+                                   const bool expr_covers, 
+                                   const FieldMask &clone_mask, 
+                                   std::set<RtEvent> &deferral_events,
+                                   std::set<RtEvent> &applied_events,
+                                   const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, clone_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      if (is_remote_analysis(analysis, clone_mask, deferral_events,
+                             applied_events, expr_covers))
+        return;
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner() || has_replicated_fields(clone_mask));
+#endif
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            analysis.sources.begin(); it != analysis.sources.end(); it++)
+      {
+        // Check that the fields overlap 
+        const FieldMask overlap = clone_mask & it->second;
+        if (!overlap)
+          continue;
+        // Check that the expressions overlap
+        IndexSpaceExpression *overlap_expr = 
+          runtime->forest->intersect_index_spaces(expr,
+              it->first->region_node->row_source);
+        if (overlap_expr->is_empty())
+          continue;
+        it->first->clone_to_local(this, overlap, applied_events,
+            false/*invalidate overlap*/, true/*forward to owner*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::update_tracing_valid_views(LogicalView *view,
                                                     IndexSpaceExpression *expr,
                                                     const RegionUsage &usage,
@@ -16114,22 +16339,6 @@ namespace Legion {
         if (replicated_states.insert(mapping, mask))
           mapping->add_reference();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::clone_owner(EquivalenceSet *src, const FieldMask &mask,
-                                     std::set<RtEvent> &applied_events,
-                                     const bool invalidate_overlap)
-    //--------------------------------------------------------------------------
-    {
-      // Get a first guess at where the owner is
-      AddressSpaceID guess_target;
-      {
-        AutoLock eq(eq_lock,1,false/*exclusive*/);
-        guess_target = logical_owner_space;
-      }
-      clone_from(guess_target, src, mask, true/*forward to owner*/,
-                 applied_events, invalidate_overlap);
     }
 
     //--------------------------------------------------------------------------

@@ -18,6 +18,8 @@
 #ifndef REALM_DEPPART_CONFIG_H
 #define REALM_DEPPART_CONFIG_H
 
+#include <cstddef>
+
 namespace Realm {
 
   namespace DeppartConfig {

@@ -15,6 +15,8 @@
 
 // GASNet-EX network module implementation for Realm
 
+#include "realm/realm_config.h"
+
 #include "realm/network.h"
 
 #include "realm/gasnetex/gasnetex_module.h"
@@ -23,6 +25,10 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/logging.h"
+
+#ifdef REALM_GASNETEX_MODULE_DYNAMIC
+REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::GASNetEXModule);
+#endif
 
 namespace Realm {
 
@@ -426,12 +432,24 @@ namespace Realm {
     //  (https://gasnet-bugs.lbl.gov/bugzilla/show_bug.cgi?id=3447), but
     //  we can't set the flag if gasnet does NOT have multiple-hca support
     //  because it'll print warnings
-    // there are no supported ways to detect this, and we can't even see the
-    //  internal GASNETC_HAVE_FENCED_PUTS define, so we use the same condition
-    //  that's used to set that in gasnet_core_internal.h and hope it doesn't
-    //  change
-#if GASNETC_IBV_MAX_HCAS_CONFIGURE
+    // in 2021.3.0 and earlier releases, there is no official way to detect
+    //  this, and we can't even see the internal GASNETC_HAVE_FENCED_PUTS
+    //  define, so we use the same condition that's used to set that in
+    //  gasnet_core_internal.h and hope it doesn't change
+    // releases after 2021.3.0 will define/expose GASNET_IBV_MULTIRAIL for us
+    //  to look at
+#if GASNET_IBV_MULTIRAIL || GASNETC_IBV_MAX_HCAS_CONFIGURE
     setenv("GASNET_USE_FENCED_PUTS", "1", 0 /*no overwrite*/);
+#endif
+
+#ifdef REALM_GASNETEX_MODULE_DYNAMIC
+    // if we're a dynamic module, we can't have GASNet trying to do stuff
+    //  in atexit handlers - we will have been unloaded at that point
+    setenv("GASNET_CATCH_EXIT", "0", 1 /*overwrite!*/);
+
+    // if enabled, IBV's ODP (on-demand pinning) registers an atexit handler
+    //  as well, so make sure it's not enabled (Realm doesn't really need ODP)
+    setenv("GASNET_USE_ODP", "0", 1 /*overwrite!*/);
 #endif
 
     // GASNetEX no longer modifies argc/argv, but we've got it here, so share

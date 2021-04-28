@@ -61,6 +61,7 @@ typedef enum realm_processor_kind_t {
 
 // Different Memory types
 #define REALM_MEMORY_KINDS(__op__) \
+  __op__(NO_MEMKIND, "") \
   __op__(GLOBAL_MEM, "Guaranteed visible to all processors on all nodes (e.g. GASNet memory, universally slow)") \
   __op__(SYSTEM_MEM, "Visible to all processors on a node") \
   __op__(REGDMA_MEM, "Registered memory visible to all processors on a node, can be a target of RDMA") \

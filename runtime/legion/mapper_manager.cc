@@ -3120,6 +3120,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::acquire_future(MappingCallInfo *ctx,
+                                       const Future &future, Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      if ((future.impl == NULL) || !memory.exists())
+        return false;
+      if ((ctx->kind != MAP_TASK_CALL) && 
+          (ctx->kind != MAP_REPLICATE_TASK_CALL))
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+                        "Ignoring acquire future request in unsupported mapper "
+                        "call %s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      pause_mapper_call(ctx);
+      const bool result = future.impl->find_or_create_application_instance(
+                                memory, ctx->operation->get_unique_op_id()); 
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::record_acquired_instance(MappingCallInfo *ctx,
                                              InstanceManager *man, bool created)
     //--------------------------------------------------------------------------

@@ -85,12 +85,28 @@ namespace Legion {
      */
     class ShardCollective {
     public:
+      struct DeferCollectiveArgs : public LgTaskArgs<DeferCollectiveArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_TASK_ID;
+      public:
+        DeferCollectiveArgs(ShardCollective *c)
+          : LgTaskArgs(implicit_provenance), collective(c) { }
+      public:
+        ShardCollective *const collective;
+      };
+    public:
       ShardCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       ShardCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~ShardCollective(void);
     public:
+      virtual void perform_collective_async(
+                     RtEvent precondition = RtEvent::NO_RT_EVENT) = 0;
+      virtual RtEvent perform_collective_wait(bool block = false) = 0;
       virtual void handle_collective_message(Deserializer &derez) = 0;
+      void perform_collective_sync(RtEvent pre = RtEvent::NO_RT_EVENT);
+      static void handle_deferred_collective(const void *args);
     protected:
+      bool defer_collective_async(RtEvent precondition);
       int convert_to_index(ShardID id, ShardID origin) const;
       ShardID convert_to_shard(int index, ShardID origin) const;
     public:
@@ -120,8 +136,8 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const = 0;
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
-      void perform_collective_async(void);
-      RtEvent perform_collective_wait(bool block = true);
+      virtual void perform_collective_async(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
     public:
       RtEvent get_done_event(void) const;
@@ -152,9 +168,9 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const = 0;
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
-      void perform_collective_async(void);
+      virtual void perform_collective_async(RtEvent pre = RtEvent::NO_RT_EVENT);
       // Make sure to call this in the destructor of anything not the target
-      RtEvent perform_collective_wait(bool block = true);
+      virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
       inline bool is_target(void) const { return (target == local_shard); }
       // Use this method in case we don't actually end up using the collective
@@ -190,9 +206,8 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage) = 0;
       virtual void unpack_collective_stage(Deserializer &derez, int stage) = 0;
     public:
-      void perform_collective_sync(void);
-      void perform_collective_async(void);
-      RtEvent perform_collective_wait(bool block = true);
+      virtual void perform_collective_async(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
       // Use this method in case we don't actually end up using the collective
       void elide_collective(void);

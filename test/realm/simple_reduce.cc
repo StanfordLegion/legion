@@ -244,8 +244,7 @@ int main(int argc, char **argv)
   // register a reduction op capable of running on cpu or gpu
   register_gpu_reduction(rt, REDOP_MIXED_ADD);
 #else
-  rt.register_reduction(REDOP_MIXED_ADD,
-			ReductionOpUntyped::create_reduction_op<ReductionOpMixedAdd>());
+  rt.register_reduction<ReductionOpMixedAdd>(REDOP_MIXED_ADD);
 #endif
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);

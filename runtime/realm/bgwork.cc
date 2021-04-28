@@ -57,7 +57,8 @@ namespace Realm {
   // set a default assuming a 2GHz clock so that we do something sensible
   //  if calibration doesn't happen for some reason
 
-  /*static*/ uint64_t TimeLimit::rdtsc_per_64k_nanoseconds = 131072;
+  REALM_INTERNAL_API_EXTERNAL_LINKAGE
+  uint64_t TimeLimit::rdtsc_per_64k_nanoseconds = 131072;
 
   /*static*/ void TimeLimit::calibrate_rdtsc()
   {

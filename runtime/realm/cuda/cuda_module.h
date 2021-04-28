@@ -93,8 +93,6 @@ namespace Realm {
       std::vector<void *> registered_host_ptrs;
     };
 
-    REGISTER_REALM_MODULE(CudaModule);
-
   }; // namespace Cuda
 
 }; // namespace Realm 

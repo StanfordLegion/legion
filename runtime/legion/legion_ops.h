@@ -1054,8 +1054,8 @@ namespace Legion {
       enum MemoizableState {
         NO_MEMO,   // The operation is not subject to memoization
         MEMO_REQ,  // The mapper requested memoization on this operation
-        RECORD,    // The runtime is recording analysis for this operation
-        REPLAY,    // The runtime is replaying analysis for this opeartion
+        MEMO_RECORD,    // The runtime is recording analysis for this operation
+        MEMO_REPLAY,    // The runtime is replaying analysis for this opeartion
       };
     public:
       MemoizableOp(Runtime *rt);
@@ -1063,9 +1063,6 @@ namespace Legion {
       virtual Operation* get_operation(void) const 
         { return const_cast<MemoizableOp<OP>*>(this); }
       virtual Memoizable* get_memoizable(void) { return this; }
-    protected:
-      void pack_memoizable(Serializer &rez);
-      void unpack_memoizable(Deserializer &derez);
     protected:
       void activate_memoizable(void);
     public:
@@ -1091,8 +1088,8 @@ namespace Legion {
       void invoke_memoize_operation(MapperID mapper_id);
     public:
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
-      virtual bool is_recording(void) const { return memo_state == RECORD; }
-      inline bool is_replaying(void) const { return memo_state == REPLAY; }
+      virtual bool is_recording(void) const { return memo_state == MEMO_RECORD;}
+      inline bool is_replaying(void) const { return memo_state == MEMO_REPLAY; }
       virtual bool is_memoizable_task(void) const { return false; }
       virtual AddressSpaceID get_origin_space(void) const 
         { return this->runtime->address_space; }
@@ -2402,8 +2399,7 @@ namespace Legion {
      * us the framework necessary to handle roll backs on 
      * collectives so we can memoize their results.
      */
-    class DynamicCollectiveOp : public Mappable,
-                                public MemoizableOp<Operation>,
+    class DynamicCollectiveOp : public MemoizableOp<Operation>,
                                 public LegionHeapify<DynamicCollectiveOp> {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
@@ -2416,24 +2412,6 @@ namespace Legion {
     public:
       Future initialize(InnerContext *ctx, const DynamicCollective &dc);
     public:
-      // From Mappable
-      virtual UniqueID get_unique_id(void) const { return unique_op_id; }
-      virtual size_t get_context_index(void) const;
-      virtual int get_depth(void) const;
-      virtual const Task* get_parent_task(void) const;
-      virtual MappableType get_mappable_type(void) const
-        { return DYNAMIC_COLLECTIVE_MAPPABLE; }
-      virtual const Task* as_task(void) const { return NULL; }
-      virtual const Copy* as_copy(void) const { return NULL; }
-      virtual const InlineMapping* as_inline(void) const { return NULL; }
-      virtual const Acquire* as_acquire(void) const { return NULL; }
-      virtual const Release* as_release(void) const { return NULL; }
-      virtual const Close* as_close(void) const { return NULL; }
-      virtual const Fill* as_fill(void) const { return NULL; }
-      virtual const Partition* as_partition(void) const { return NULL; }
-      virtual const DynamicCollective* as_dynamic_collective(void) const
-        { return &collective; }
-      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
       virtual const VersionInfo& get_version_info(unsigned idx) const
         { assert(false); return *(new VersionInfo()); }
       virtual const RegionRequirement& get_requirement(unsigned idx) const

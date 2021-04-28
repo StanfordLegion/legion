@@ -11,7 +11,7 @@
 #include <cassert>
 #include <cstring>
 #include <cmath>
-#ifdef REALM_USE_LIBDL
+#ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
 #endif
 

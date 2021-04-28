@@ -18,6 +18,8 @@
 // nop, but helps IDEs
 #include "realm/lists.h"
 
+#include <iostream>
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////

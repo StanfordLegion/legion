@@ -68,7 +68,7 @@ namespace Realm {
 
     bool operator==(const Backtrace& rhs) const;
 
-    intptr_t hash(void) const;
+    uintptr_t hash(void) const;
 
     bool empty(void) const;
 
@@ -89,10 +89,10 @@ namespace Realm {
     friend std::ostream& operator<<(std::ostream& os, const Backtrace& bt);
 
   protected:
-    intptr_t compute_hash(int depth = 0) const;
+    uintptr_t compute_hash(int depth = 0) const;
 
-    intptr_t pc_hash; // used for fast comparisons
-    std::vector<intptr_t> pcs;
+    uintptr_t pc_hash; // used for fast comparisons
+    std::vector<uintptr_t> pcs;
     std::vector<std::string> symbols;
 
     template <typename S>

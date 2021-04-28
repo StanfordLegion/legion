@@ -145,7 +145,7 @@ namespace Realm {
 
   // a network module provides additional functionality on top of a normal Realm
   //  module
-  class NetworkModule : public Module {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NetworkModule : public Module {
   protected:
     NetworkModule(const std::string& _name);
 
@@ -261,7 +261,7 @@ namespace Realm {
     static const MemoryType HostMem = 1;
   };
 
-  class NetworkSegment {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE NetworkSegment {
   public:
     NetworkSegment();
     

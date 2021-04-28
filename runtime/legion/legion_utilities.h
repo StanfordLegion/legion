@@ -2638,8 +2638,9 @@ namespace Legion {
             std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         iterator(FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask>::aligned::iterator _it)
-          : set(_set), result(&(*_it)), it(_it), single(false) { }
+            typename LegionMap<T*,FieldMask>::aligned::iterator _it,
+            bool end = false)
+          : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
         iterator(const iterator &rhs)
           : set(rhs.set), result(rhs.result), 
@@ -2749,8 +2750,9 @@ namespace Legion {
             const std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         const_iterator(const FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask>::aligned::const_iterator _it)
-          : set(_set), result(&(*_it)), it(_it), single(false) { }
+            typename LegionMap<T*,FieldMask>::aligned::const_iterator _it,
+            bool end = false)
+          : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
         const_iterator(const const_iterator &rhs)
           : set(rhs.set), result(rhs.result), it(rhs.it), single(rhs.single) { }
@@ -2832,11 +2834,13 @@ namespace Legion {
         : single(true) { entries.single_entry = NULL; }
       inline FieldMaskSet(T *init, const FieldMask &m, bool no_null = true);
       inline FieldMaskSet(const FieldMaskSet<T> &rhs);
+      inline FieldMaskSet(FieldMaskSet<T> &&rhs);
       // If copy is set to false then this is a move constructor
       inline FieldMaskSet(FieldMaskSet<T> &rhs, bool copy);
       ~FieldMaskSet(void) { clear(); }
     public:
       inline FieldMaskSet& operator=(const FieldMaskSet &rhs);
+      inline FieldMaskSet& operator=(FieldMaskSet &&rhs);
     public:
       inline bool empty(void) const 
         { return single && (entries.single_entry == NULL); }
@@ -2912,6 +2916,21 @@ namespace Legion {
             rhs.entries.multi_entries->begin(),
             rhs.entries.multi_entries->end());
     }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline FieldMaskSet<T>::FieldMaskSet(FieldMaskSet<T> &&rhs)
+      : valid_fields(rhs.valid_fields), single(rhs.single)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+        entries.single_entry = rhs.entries.single_entry;
+      else
+        entries.multi_entries = rhs.entries.multi_entries;
+      rhs.valid_fields.clear();
+      rhs.single = true;
+      rhs.entries.single_entry = NULL;
+    }
     
     //--------------------------------------------------------------------------
     template<typename T>
@@ -2978,6 +2997,47 @@ namespace Legion {
         }
       }
       valid_fields = rhs.valid_fields;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline FieldMaskSet<T>& FieldMaskSet<T>::operator=(FieldMaskSet<T> &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Check our current state
+      if (single != rhs.single)
+      {
+        // Different data structures
+        if (single)
+        {
+          entries.multi_entries = rhs.entries.multi_entries;
+        }
+        else
+        {
+          // Free our map
+          delete entries.multi_entries;
+          entries.single_entry = rhs.entries.single_entry;
+        }
+        single = rhs.single;
+      }
+      else
+      {
+        // Same data structures so we can just copy things over
+        if (single)
+        {
+          entries.single_entry = rhs.entries.single_entry;
+        }
+        else
+        {
+          delete entries.multi_entries;
+          entries.multi_entries = rhs.entries.multi_entries;
+        }
+      }
+      valid_fields = rhs.valid_fields;
+      rhs.valid_fields.clear();
+      rhs.single = true;
+      rhs.entries.single_entry = NULL;
       return *this;
     }
 
@@ -3347,7 +3407,7 @@ namespace Legion {
       if (single)
         return iterator(this, NULL);
       else
-        return iterator(this, entries.multi_entries->end());
+        return iterator(this, entries.multi_entries->end(), true/*end*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3403,7 +3463,7 @@ namespace Legion {
       if (single)
         return const_iterator(this, NULL);
       else
-        return const_iterator(this, entries.multi_entries->end());
+        return const_iterator(this, entries.multi_entries->end(), true/*end*/);
     }
 
     //--------------------------------------------------------------------------

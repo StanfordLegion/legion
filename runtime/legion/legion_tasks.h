@@ -576,7 +576,8 @@ namespace Legion {
       ApEvent                               task_effects_complete;
     protected:
       TaskContext*                          execution_context;
-      TraceInfo*                            remote_trace_info;
+      RemoteTraceRecorder*                  remote_trace_recorder;
+      RtEvent                               remote_collect_event;
       // For replication of this task
       ShardManager*                         shard_manager;
     protected:
@@ -1385,7 +1386,6 @@ namespace Legion {
       UniqueID remote_unique_id;
       bool origin_mapped;
       UniqueID remote_owner_uid;
-      TraceInfo *remote_trace_info;
       DomainPoint reduction_instance_point;
       // An event for tracking when origin-mapped slices on the owner
       // node have committed so we can trigger things appropriately

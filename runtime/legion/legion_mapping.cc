@@ -834,6 +834,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::acquire_future(MapperContext ctx,
+                                       const Future &f, Memory memory) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_future(ctx, f, memory);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx, 
                                    const Domain &bounds, TypeTag type_tag) const
     //--------------------------------------------------------------------------

@@ -99,6 +99,16 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
+  // hacks to force linkage of things
+  //
+
+  extern int force_utils_cc_linkage;
+
+  int *linkage_forcing[] = { &force_utils_cc_linkage };
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // signal handlers
   //
 
@@ -362,6 +372,16 @@ namespace Realm {
       // explicit namespace qualifier here due to name collision
       r.impl = Realm::get_runtime();
       return r;
+    }
+
+    // returns a valid (but possibly empty) string pointer describing the
+    //  version of the Realm library - this can be compared against
+    //  REALM_VERSION in application code to detect a header/library mismatch
+    const char *realm_library_version = REALM_VERSION;
+
+    /*static*/ const char *Runtime::get_library_version()
+    {
+      return realm_library_version;
     }
 
     // performs any network initialization and, critically, makes sure
@@ -772,7 +792,7 @@ namespace Realm {
       delete core_reservations;
       delete core_map;
 
-      delete_container_contents(reduce_op_table.map);
+      delete_container_contents_free(reduce_op_table.map);
       delete_container_contents(custom_serdez_table.map);
     }
 

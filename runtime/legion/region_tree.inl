@@ -1468,13 +1468,26 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
-      assert(privilege_node != NULL);
+      assert((privilege_node != NULL) || (priv_node == NULL));
 #else
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
 #endif
-      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
-                                           privilege_node);
+      if (piece_list == NULL)
+      {
+        Realm::IndexSpace<DIM,T> realm_space;
+        get_realm_index_space(realm_space, true/*tight*/);
+#ifdef DEBUG_LEGION
+        // If there was no piece list it has to be because there
+        // was just one piece which was a single dense rectangle
+        assert(realm_space.dense());
+#endif
+        return new PieceIteratorImplT<DIM,T>(&realm_space.bounds,
+                      sizeof(realm_space.bounds), privilege_node);
+      }
+      else
+        return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                             privilege_node);
     }
 
     //--------------------------------------------------------------------------
@@ -2611,13 +2624,26 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         dynamic_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
-      assert(privilege_node != NULL);
+      assert((privilege_node != NULL) || (priv_node == NULL));
 #else
       IndexSpaceNodeT<DIM,T> *privilege_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(priv_node);
 #endif
-      return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
-                                           privilege_node);
+      if (piece_list == NULL)
+      {
+        Realm::IndexSpace<DIM,T> realm_space;
+        get_realm_index_space(realm_space, true/*tight*/);
+#ifdef DEBUG_LEGION
+        // If there was no piece list it has to be because there
+        // was just one piece which was a single dense rectangle
+        assert(realm_space.dense());
+#endif
+        return new PieceIteratorImplT<DIM,T>(&realm_space.bounds,
+                      sizeof(realm_space.bounds), privilege_node);
+      }
+      else
+        return new PieceIteratorImplT<DIM,T>(piece_list, piece_list_size, 
+                                             privilege_node);
     }
 
     //--------------------------------------------------------------------------

@@ -69,8 +69,6 @@ namespace Realm {
       std::vector<int> active_numa_domains;
     };
 
-    REGISTER_REALM_MODULE(OpenMPModule);
-
   }; // namespace OpenMP
 
 }; // namespace Realm

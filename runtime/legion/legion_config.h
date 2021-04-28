@@ -159,7 +159,7 @@
 
 #ifndef MAX_FIELDS // For backwards compatibility
 #ifndef LEGION_MAX_FIELDS
-#define LEGION_MAX_FIELDS         512 // must be a power of 2
+#define LEGION_MAX_FIELDS         256 // must be a power of 2
 #endif
 #else
 #ifndef LEGION_MAX_FIELDS
@@ -1572,7 +1572,6 @@ typedef enum legion_mappable_type_id_t {
   LEGION_CLOSE_MAPPABLE = 5,
   LEGION_FILL_MAPPABLE = 6,
   LEGION_PARTITION_MAPPABLE = 7,
-  LEGION_DYNAMIC_COLLECTIVE_MAPPABLE = 8,
   LEGION_MUST_EPOCH_MAPPABLE = 9,
   // for backwards compatibility
   LEGION_DEPRECATED_ENUM(TASK_MAPPABLE)
@@ -1583,7 +1582,6 @@ typedef enum legion_mappable_type_id_t {
   LEGION_DEPRECATED_ENUM(CLOSE_MAPPABLE)
   LEGION_DEPRECATED_ENUM(FILL_MAPPABLE)
   LEGION_DEPRECATED_ENUM(PARTITION_MAPPABLE)
-  LEGION_DEPRECATED_ENUM(DYNAMIC_COLLECTIVE_MAPPABLE)
   LEGION_DEPRECATED_ENUM(MUST_EPOCH_MAPPABLE)
 } legion_mappable_type_id;
 

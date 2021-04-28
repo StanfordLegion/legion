@@ -90,7 +90,7 @@ namespace Realm {
   //
 
   template <typename CHANNEL, typename XD>
-  XDQueue<CHANNEL,XD>::XDQueue(CHANNEL *_channel,
+  XDQueue<CHANNEL,XD>::XDQueue(LocalChannel *_channel,
 			       const std::string& _name,
 			       bool _ordered)
     : BackgroundWorkItem(_name)
@@ -157,7 +157,8 @@ namespace Realm {
 	  //  on it
 	  unsigned progress = xd->current_progress();
 
-	  bool did_work = xd->progress_xd(channel, work_until);
+	  bool did_work = xd->progress_xd(static_cast<CHANNEL *>(channel),
+                                          work_until);
 
 	  // if we didn't do any work, and we're not done (i.e. by
 	  //  concluding there wasn't any work to actually do), re-check
@@ -278,7 +279,7 @@ namespace Realm {
 						 XferDesKind _kind,
 						 const std::string &_name)
     : LocalChannel(_kind)
-    , xdq(static_cast<CHANNEL *>(this), _name, CHANNEL::is_ordered)
+    , xdq(this, _name, CHANNEL::is_ordered)
   {
     xdq.add_to_manager(bgwork);
   }

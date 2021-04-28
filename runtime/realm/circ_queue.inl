@@ -18,6 +18,8 @@
 // nop, but helps IDEs
 #include "realm/circ_queue.h"
 
+#include <cassert>
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////

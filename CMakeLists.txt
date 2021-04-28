@@ -41,6 +41,51 @@ set(SOVERSION 1)
 set(INSTALL_SUFFIX "" CACHE STRING "Suffix to add to installed libraries and binaries")
 
 #------------------------------------------------------------------------------#
+# Version information
+#------------------------------------------------------------------------------#
+
+# the Legion/Realm version string is set by the first of these that works:
+# 1) a defined value for the cmake Legion_VERSION variable
+# 2) the output of `git describe`, if successful
+# 3) the contents of 'VERSION' (at the root of the source tree), if available
+# 4) "unknown", if all else fails
+
+if(NOT DEFINED Legion_VERSION)
+  find_package(Git)
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --dirty --match legion*
+      WORKING_DIRECTORY ${Legion_SOURCE_DIR}
+      RESULT_VARIABLE _git_result
+      OUTPUT_VARIABLE Legion_VERSION
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  else()
+    set(_git_result -1)
+  endif()
+  if(_git_result EQUAL 0)
+    message(STATUS "Version string from git: ${Legion_VERSION}")
+  else()
+    if(EXISTS ${Legion_SOURCE_DIR}/VERSION)
+      file(READ ${Legion_SOURCE_DIR}/VERSION _file_contents)
+      string(STRIP "${_file_contents}" Legion_VERSION)
+      unset(_file_contents)
+      message(STATUS "Version string from VERSION file: ${Legion_VERSION}")
+    else()
+      set(Legion_VERSION "unknown")
+      message(WARNING "Could not determine version string - using 'unknown'")
+    endif()
+  endif()
+  unset(_git_result)
+else()
+  # it's just a "cache variable" right now, so turn into a normal variable
+  set(Legion_VERSION "$CACHE{Legion_VERSION}")
+endif()
+set(Legion_VERSION "${Legion_VERSION}" CACHE STRING "string to use for Legion/Realm version")
+# these are the actual variables that are written into the headers
+set(LEGION_VERSION "${Legion_VERSION}")
+set(REALM_VERSION "${Legion_VERSION}")
+
+#------------------------------------------------------------------------------#
 # Build type and shared vs static library
 #------------------------------------------------------------------------------#
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
@@ -131,9 +176,25 @@ set(CMAKE_ENABLE_EXPORTS ON)
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
-# add an "TSAN" build type for thread sanitizer goodness
-set(CMAKE_CXX_FLAGS_TSAN "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -DTSAN_ENABLED" CACHE STRING "additional C++ compiler flags for thread sanitizer" FORCE)
-set(CMAKE_EXE_LINKER_FLAGS_TSAN "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=thread" CACHE STRING "additional linker flags for thread sanitizier" FORCE)
+# add build types for thread/ub sanitizer goodness
+set(CMAKE_CXX_FLAGS_TSAN
+  "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=thread -DTSAN_ENABLED"
+  CACHE STRING "additional C++ compiler flags for thread sanitizer" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_TSAN
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=thread"
+  CACHE STRING "additional linker flags for thread sanitizer" FORCE)
+set(CMAKE_CXX_FLAGS_UBSAN
+  "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=undefined"
+  CACHE STRING "additional C++ compiler flags for UB sanitizer" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_UBSAN
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=undefined"
+  CACHE STRING "additional linker flags for UB sanitizer" FORCE)
+set(CMAKE_CXX_FLAGS_ASAN
+  "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -DASAN_ENABLED"
+  CACHE STRING "additional C++ compiler flags for address sanitizer" FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_ASAN
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=address"
+  CACHE STRING "additional linker flags for address sanitizer" FORCE)
 
 # if requested (and we know how to) make any warnings during the build fatal
 option(Legion_BUILD_WARN_AS_ERROR "Consider warnings during build of Legion to be fatal errors" OFF)
@@ -250,6 +311,11 @@ if(Legion_USE_CUDA)
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
+
+  # before cmake 3.13, the CUDAHOSTCXX env variable wasn't propagated to CUDA_HOST_COMPILER automatically
+  if(CMAKE_VERSION VERSION_LESS "3.13" AND DEFINED ENV{CUDAHOSTCXX})
+    set(CUDA_HOST_COMPILER $ENV{CUDAHOSTCXX} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
+  endif()
 
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
@@ -445,7 +511,9 @@ endif()
 #------------------------------------------------------------------------------#
 # libdl configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_LIBDL "Enable support for libdl" ON)
+# NOTE: although the name of the variable is "libdl", this is dynamic linking
+#  support on any system, even if it doesn't have a libdl
+option(Legion_USE_LIBDL "Enable run-time support for dynamic shared objects" ON)
 if(Legion_USE_LIBDL)
   # define variable for legion_defines.h
   set(LEGION_USE_LIBDL ON)
@@ -489,7 +557,18 @@ endif()
 #------------------------------------------------------------------------------#
 # zlib configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_ZLIB "Enable support for zlib" ON)
+if(NOT DEFINED Legion_USE_ZLIB)
+  # neither ON nor OFF at user's request, so use it if we can find it
+  find_package(ZLIB)
+  if(ZLIB_FOUND)
+    set(Legion_USE_ZLIB ON)
+  else()
+    set(Legion_USE_ZLIB OFF)
+  endif()
+else()
+  set(Legion_USE_ZLIB "$CACHE{Legion_USE_ZLIB}")
+endif()
+set(Legion_USE_ZLIB "${Legion_USE_ZLIB}" CACHE BOOL "Enable support for zlib")
 if(Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
   # define variable for legion_defines.h
@@ -534,6 +613,17 @@ set(LEGION_BOUNDS_CHECKS ${Legion_BOUNDS_CHECKS})
 
 option(Legion_PRIVILEGE_CHECKS "Enable privilege checking in Legion accessors" OFF)
 set(LEGION_PRIVILEGE_CHECKS ${Legion_PRIVILEGE_CHECKS})
+
+# hiding internal symbols is much more complicated in Windows
+if(NOT WIN32)
+  option(REALM_LIMIT_SYMBOL_VISIBILITY "hide private symbols in realm" ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# Hacks for building only Realm
+#------------------------------------------------------------------------------#
+option(Legion_BUILD_REALM_ONLY "HACK: only build realm" OFF)
+option(Legion_BUILD_REALM_TESTS "HACK: build realm-only tests" OFF)
 
 #------------------------------------------------------------------------------#
 # Runtime library targets
@@ -680,6 +770,10 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
   endif()
+elseif(Legion_BUILD_REALM_TESTS)
+  # temporary hackery to just enable the realm tests
+  add_library(Legion::Realm ALIAS Realm)
+  add_subdirectory(test/realm)
 endif()
 
 #------------------------------------------------------------------------------#

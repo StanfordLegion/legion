@@ -922,7 +922,7 @@ namespace Realm {
     template <typename CHANNEL, typename XD>
     class XDQueue : public BackgroundWorkItem {
     public:
-      XDQueue(CHANNEL *_channel, const std::string& _name,
+      XDQueue(LocalChannel *_channel, const std::string& _name,
 	      bool _ordered);
 
       void enqueue_xd(XD *xd, bool at_front = false);
@@ -930,7 +930,7 @@ namespace Realm {
       virtual void do_work(TimeLimit work_until);
 
     protected:
-      CHANNEL *channel;
+      LocalChannel *channel;
       bool ordered_mode, in_ordered_worker;
       Mutex mutex;
       XferDes::XferDesList ready_xds;

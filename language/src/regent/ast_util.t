@@ -20,8 +20,25 @@ local std = require("regent/std")
 
 local ast_util = {}
 
+function ast_util.mk_stat_break()
+  return ast.typed.stat.Break {
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations()
+  }
+end
+
 function ast_util.mk_expr_id(sym, ty)
   ty = ty or sym:gettype()
+  return ast.typed.expr.ID {
+    value = sym,
+    expr_type = ty,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+function ast_util.mk_expr_id_rawref(sym, ty)
+  ty = ty or std.rawref(&sym:gettype())
   return ast.typed.expr.ID {
     value = sym,
     expr_type = ty,
@@ -96,6 +113,16 @@ function ast_util.mk_expr_binary(op, lhs, rhs)
   }
 end
 
+function ast_util.mk_expr_method_call(value, expr_type, method_name, args)
+  return ast.typed.expr.MethodCall {
+    value = value,
+    expr_type = expr_type,
+    method_name = method_name,
+    args = args,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations()
+  }
+end
 function ast_util.mk_expr_call(fn, args, replicable)
   args = args or terralib.newlist()
   if not terralib.islist(args) then
@@ -297,6 +324,17 @@ function ast_util.mk_stat_if(cond, stat)
   }
 end
 
+function ast_util.mk_stat_if_else(cond, then_stats, else_stats)
+  return ast.typed.stat.If {
+    cond = cond,
+    then_block = ast_util.mk_block(then_stats),
+    elseif_blocks = terralib.newlist(),
+    else_block = ast_util.mk_block(else_stats),
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
 function ast_util.mk_stat_elseif(cond, stat)
   return ast.typed.stat.Elseif {
     cond = cond,
@@ -335,6 +373,17 @@ function ast_util.mk_stat_for_list(symbol, value, block)
     metadata = false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
+  }
+end
+
+function ast_util.mk_stat_for_num(symbol, values, block)
+  return ast.typed.stat.ForNum {
+    block = block,
+    values = values,
+    symbol = symbol,
+    metadata = false,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations()
   }
 end
 

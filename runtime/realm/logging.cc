@@ -152,6 +152,8 @@ namespace Realm {
     //   we know the desired settings
     void configure(Logger *logger);
 
+    void remove_logger(Logger *logger);
+
   protected:
     bool parse_level_argument(const std::string& s);
 
@@ -463,6 +465,14 @@ namespace Realm {
     logger->configure_done();
   }
 
+  void LoggerConfig::remove_logger(Logger *logger)
+  {
+    // if we haven't read the command line yet, don't try to configure the
+    //  logger that was removed
+    if(!cmdline_read)
+      pending_configs.erase(logger);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -474,6 +484,11 @@ namespace Realm {
     size_t msglen;
     // string data stored immediately after the fixed-size structure
     char *msgdata() { return reinterpret_cast<char *>(this + 1); }
+    void operator delete(void *p) {
+      // Since this object has tail-padding, use an unsized delete to avoid
+      // upsetting allocators that check sizes.
+      ::operator delete(p);
+    }
   };
 
 
@@ -492,6 +507,9 @@ namespace Realm {
 
   Logger::~Logger(void)
   {
+    // tell the logger config we no longer exist
+    LoggerConfig::get_config()->remove_logger(this);
+
     // go through our streams and delete any we're supposed to
     for(std::vector<LogStream>::iterator it = streams.begin();
         it != streams.end();

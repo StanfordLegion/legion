@@ -78,6 +78,10 @@ variables:
   F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvfortran"
   # cmake gets confused and can't figure out library arch
   EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
+.icc212: &icc212
+  CC: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icc"
+  CXX: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icpc"
+  F90: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/ifort"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -230,6 +234,14 @@ variables:
   FLEGION_USER: "gitlab-runner-flegion"
   DARWIN_JOB_TYPE: "power9"
   IS_DARWIN_JOB: "1"
+
+.tsan: &tsan
+  SANITIZER_TYPE: "TSAN"
+.ubsan: &ubsan
+  SANITIZER_TYPE: "UBSAN"
+  UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+.asan: &asan
+  SANITIZER_TYPE: "ASAN"
 
 ###
 ### Setup
@@ -413,6 +425,12 @@ before_script:
     - darwin-slurm
     - power9
 
+# For MSVC-in-wine tests:
+.msvc_wine: &msvc_wine
+  tags:
+    - linux
+    - msvc_wine
+
 # For compute-heavy tests:
 .linux_compute: &linux_compute
   tags:
@@ -495,6 +513,10 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 .image_hpcsdk: &image_hpcsdk
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
+.image_icc: &image_icc
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc
+.image_msvc169: &image_msvc169
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc
 
 ###
 ### Tests
@@ -573,6 +595,30 @@ before_script:
     when:
       - runner_system_failure
       - unknown_failure
+
+# testing MSVC builds is kinda hacky right now - not supported by test.py
+.msvc_tests: &msvc_tests
+  <<: *test_rules
+  script:
+    - pwd
+    - ln -s `pwd` /home/wine/.wine/drive_c/repo
+    - cd /home/wine/.wine/drive_c
+    - su wine -c "wine64 cmd /c 'x64.bat && cmake -G Ninja -S repo -B build -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON'"
+    - "# wine doesn't seem to cope with concurrent file access, so use a serial build"
+    - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -- -j1'"
+    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2019\\VC\\Redist\\MSVC\\14.28.29910\\debug_nonredist\\x64\\Microsoft.VC142.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.18362.0\\x64\\ucrt;%PATH% && cd build && ctest'"
+    - echo OK
+
+# use a custom script for running Realm tests with sanitizers
+.realm_sanitizer_tests: &realm_sanitizer_tests
+  <<: *test_rules
+  script:
+    - mkdir build
+    - cd build
+    - cmake -DCMAKE_BUILD_TYPE=${SANITIZER_TYPE} -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON ..
+    - make -j8
+    - ctest --output-on-failure .
+    - echo OK
 
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
@@ -1238,3 +1284,33 @@ hpcsdk212_cxx11_debug_cmake_legion:
   <<: [*linux, *image_hpcsdk, *tests]
   variables:
     <<: [*hpcsdk212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
+
+# Intel compiler (icc/icpc) tests:
+icc212_cxx11_release_legion:
+  <<: [*linux, *image_icc, *tests]
+  variables:
+    <<: [*icc212, *release, *cxx11_normal, *legion]
+icc212_cxx11_debug_cmake_legion:
+  <<: [*linux, *image_icc, *tests]
+  variables:
+    <<: [*icc212, *debug, *cxx11_normal, *cmake, *legion, *ctest]
+
+# MSVC (Realm only):
+msvc169_realm:
+  <<: [*msvc_wine, *image_msvc169, *msvc_tests]
+  variables:
+    <<: [*short]
+
+# sanitizer tests (Realm only):
+gcc9_tsan_realm:
+  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *tsan, *short]
+gcc9_ubsan_realm:
+  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *ubsan, *short]
+gcc9_asan_realm:
+  <<: [*linux, *image_2004, *realm_sanitizer_tests]
+  variables:
+    <<: [*gcc9, *cxx11_normal, *asan, *short]

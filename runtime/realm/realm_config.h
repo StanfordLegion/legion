@@ -32,7 +32,8 @@
 
 // if set, uses ucontext.h for user level thread switching, otherwise falls
 //  back to POSIX threads
-#if !defined(REALM_USE_NATIVE_THREADS) && !defined(REALM_ON_MACOS)
+// address sanitizer doesn't cope with makecontext/swapcontext either
+#if !defined(REALM_USE_NATIVE_THREADS) && !defined(REALM_ON_MACOS) && !defined(ASAN_ENABLED)
 // clang on Mac is generating apparently-broken code in the user thread
 //  scheduler, so disable this code path for now
 #define REALM_USE_USER_THREADS
@@ -50,10 +51,10 @@
 
 // dynamic loading via dlfcn and a not-completely standard dladdr extension
 #ifdef REALM_USE_LIBDL
-#define REALM_USE_DLFCN
-#ifndef REALM_NO_USE_DLADDR
-#define REALM_USE_DLADDR
-#endif
+  #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+    #define REALM_USE_DLFCN
+    #define REALM_USE_DLADDR
+  #endif
 #endif
 
 // can Realm use exceptions to propagate errors back to the profiling interace?

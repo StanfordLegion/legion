@@ -174,7 +174,7 @@ namespace Realm {
   };
 
   // type-erased wrappers for completion callbacks
-  class CompletionCallbackBase {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE CompletionCallbackBase {
   public:
     virtual ~CompletionCallbackBase();
     virtual void invoke() = 0;
@@ -331,7 +331,7 @@ namespace Realm {
     extern REALM_THREAD_LOCAL bool in_message_handler;
   };
   
-  class IncomingMessageManager : public BackgroundWorkItem {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE IncomingMessageManager : public BackgroundWorkItem {
   public:
     IncomingMessageManager(int _nodes, int _dedicated_threads,
 			   Realm::CoreReservationSet& crs);

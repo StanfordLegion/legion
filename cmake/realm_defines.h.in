@@ -11,7 +11,11 @@
 //
 // ******************** IMPORTANT **************************
 
+#cmakedefine REALM_VERSION "@REALM_VERSION@"
+
 #cmakedefine DEBUG_REALM
+
+#cmakedefine REALM_LIMIT_SYMBOL_VISIBILITY
 
 #cmakedefine COMPILE_TIME_MIN_LEVEL @COMPILE_TIME_MIN_LEVEL@
 

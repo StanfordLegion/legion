@@ -24,6 +24,8 @@
 #include "realm/cuda/cuda_redop.h"
 #endif
 
+#include <cstddef>
+
 namespace Realm {
 
     // a reduction op needs to look like this
@@ -197,5 +199,3 @@ namespace Realm {
 //include "redop.inl"
 
 #endif // ifndef REALM_REDOP_H
-
-

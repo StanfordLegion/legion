@@ -230,8 +230,7 @@ int main(int argc, char **argv)
   rt.register_task(CHILD_TASK, child_task);
   rt.register_task(CHECK_TASK, check_task);
 
-  rt.register_reduction(REDOP_ADD, 
-			ReductionOpUntyped::create_reduction_op<ReductionOpIntAdd>());
+  rt.register_reduction<ReductionOpIntAdd>(REDOP_ADD);
 
   signal(SIGALRM, sigalrm_handler);
 

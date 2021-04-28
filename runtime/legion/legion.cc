@@ -2000,7 +2000,7 @@ namespace Legion {
     TaskVariantRegistrar::TaskVariantRegistrar(void)
       : task_id(0), global_registration(true), 
         task_variant_name(NULL), leaf_variant(false), 
-        inner_variant(false), idempotent_variant(false), 
+        inner_variant(false), idempotent_variant(false),
         replicable_variant(false)
     //--------------------------------------------------------------------------
     {
@@ -3451,7 +3451,6 @@ namespace Legion {
           case LEGION_ACQUIRE_MAPPABLE:
           case LEGION_RELEASE_MAPPABLE:
           case LEGION_CLOSE_MAPPABLE:
-          case LEGION_DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
@@ -3527,7 +3526,6 @@ namespace Legion {
           case LEGION_ACQUIRE_MAPPABLE:
           case LEGION_RELEASE_MAPPABLE:
           case LEGION_CLOSE_MAPPABLE:
-          case LEGION_DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
@@ -7125,6 +7123,14 @@ namespace Legion {
             "Legion tasks.")
       return
          Internal::implicit_context->destroy_task_local_instance(instance);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const char* Runtime::get_legion_version(void)
+    //--------------------------------------------------------------------------
+    {
+      static const char *legion_runtime_version = LEGION_VERSION;
+      return legion_runtime_version;
     }
 
     //--------------------------------------------------------------------------

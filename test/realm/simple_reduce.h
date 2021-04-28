@@ -1,6 +1,9 @@
 #ifndef SIMPLE_REDUCE_H
 #define SIMPLE_REDUCE_H
 
+#include <cstdint>
+#include <cstring>
+
 class ReductionOpMixedAdd {
 public:
   typedef double LHS;

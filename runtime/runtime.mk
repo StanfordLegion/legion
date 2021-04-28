@@ -44,6 +44,28 @@ FC_FLAGS += $(FFLAGS)
 SO_FLAGS += $(LDLIBS)
 LD_FLAGS += $(LDFLAGS)
 
+# the Legion/Realm version string is set by the first of these that works:
+# 1) a defined value for the make REALM_VERSION variable
+# 2) the output of `git describe`, if successful
+# 3) the contents of 'VERSION' (at the root of the source tree), if available
+# 4) "unknown", if all else fails
+ifndef REALM_VERSION
+  REALM_VERSION := $(shell git -C $(LG_RT_DIR) describe --dirty --match legion\* 2> /dev/null)
+  ifneq ($(REALM_VERSION),)
+    $(info Version string from git: ${REALM_VERSION})
+  else
+    REALM_VERSION := $(shell cat $(LG_RT_DIR)/../VERSION 2> /dev/null)
+    ifneq ($(REALM_VERSION),)
+      $(info Version string from VERSION file: ${REALM_VERSION})
+    else
+      REALM_VERSION := unknown
+      $(warning Could not determine version string - using 'unknown')
+    endif
+  endif
+endif
+REALM_CC_FLAGS += -DREALM_VERSION='"${REALM_VERSION}"'
+LEGION_CC_FLAGS += -DLEGION_VERSION='"${REALM_VERSION}"'
+
 USE_OPENMP ?= 0
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
@@ -97,8 +119,12 @@ endif
 endif
 LEGION_LIBS     := -L. -llegion -lrealm
 
-# realm hides internal classes/methods from shared library exports
-REALM_SYMBOL_VISIBILITY = -fvisibility=hidden -fvisibility-inlines-hidden
+# if requested, realm hides internal classes/methods from shared library exports
+REALM_LIMIT_SYMBOL_VISIBILITY ?= 1
+ifeq ($(strip $(REALM_LIMIT_SYMBOL_VISIBILITY)),1)
+  REALM_SYMBOL_VISIBILITY = -fvisibility=hidden -fvisibility-inlines-hidden
+  REALM_CC_FLAGS += -DREALM_LIMIT_SYMBOL_VISIBILITY
+endif
 
 # generate header files for public-facing defines
 DEFINE_HEADERS_DIR ?= $(CURDIR)
@@ -680,20 +706,32 @@ SKIP_MACHINES= titan% daint% excalibur% cori%
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
-    ifneq ($(strip $(shell $(CC) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
-      export OMPI_CC  	:= $(CC)
-      export MPICH_CC  	:= $(CC)
-      CC		:= mpicc
+    # OpenMPI check
+    ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CC) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
+      # MPICH check
+      ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CC) -show 2>&1 > /dev/null; echo $$?)),0)
+	export OMPI_CC  	:= $(CC)
+	export MPICH_CC  	:= $(CC)
+	CC			:= mpicc
+      endif
     endif
-    ifneq ($(strip $(shell $(CXX) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
-      export OMPI_CXX 	:= $(CXX)
-      export MPICH_CXX 	:= $(CXX)
-      CXX		:= mpicxx
+    # OpenMPI check
+    ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CXX) -showme:compile 2>&1 > /dev/null; echo $$?)),0)
+      # MPICH check
+      ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(CXX) -show 2>&1 > /dev/null; echo $$?)),0)
+	export OMPI_CXX 	:= $(CXX)
+	export MPICH_CXX 	:= $(CXX)
+	CXX			:= mpicxx
+      endif
     endif
-    ifneq ($(strip $(shell $(FC) -showme:compile 2>&1 > /dev/null; echo $$?)),0) 
-      export OMPI_FC  	:= $(FC)
-      export MPICH_FC  	:= $(FC)
-      FC		:= mpif90
+    # OpenMPI check
+    ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(FC) -showme:compile 2>&1 > /dev/null; echo $$?)),0) 
+      # MPICH check
+      ifneq ($(strip $(shell __INTEL_POST_CFLAGS+=' -we10006' $(FC) -show 2>&1 > /dev/null; echo $$?)),0)
+	export OMPI_FC  	:= $(FC)
+	export MPICH_FC  	:= $(FC)
+	FC			:= mpif90
+      endif
     endif
     # Summit/Summitdev are strange and link this automatically (but still uses mpicxx).
     # FIXME: Unfortunately you can't match against the Summit hostname right now...

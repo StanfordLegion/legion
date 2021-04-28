@@ -444,6 +444,7 @@ namespace Legion {
                                     const std::vector<MappingInstance> &insts);
       void release_instances(       MappingCallInfo *ctx, const std::vector<
                                     std::vector<MappingInstance> > &instances);
+      bool acquire_future(MappingCallInfo *ctx, const Future &f, Memory memory);
     public:
       void record_acquired_instance(MappingCallInfo *info, 
                                     InstanceManager *manager, bool created);

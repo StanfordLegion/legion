@@ -7531,8 +7531,9 @@ namespace Legion {
       ApEvent term_event;
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
-      if (runtime->program_order_execution && !unordered &&
-          ((current_trace == NULL) || !current_trace->is_fixed()))
+      if (runtime->program_order_execution && !unordered && 
+          ((current_trace == NULL) || !current_trace->is_fixed() || 
+           !current_trace->has_physical_trace()))
         term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -7926,7 +7927,9 @@ namespace Legion {
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) &&
           (context_configuration.max_window_size > 0) &&
-            (outstanding_count > context_configuration.max_window_size))
+            (outstanding_count > context_configuration.max_window_size) &&
+            ((current_trace == NULL) || !current_trace->is_fixed() ||
+             !current_trace->has_physical_trace()))
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result,
@@ -7995,7 +7998,9 @@ namespace Legion {
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
-            (outstanding_count > context_configuration.max_window_size))
+            (outstanding_count > context_configuration.max_window_size) &&
+            ((current_trace == NULL) || !current_trace->is_fixed() ||
+             !current_trace->has_physical_trace()))
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
@@ -17938,7 +17943,8 @@ namespace Legion {
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered &&
-          ((current_trace == NULL) || !current_trace->is_fixed()))
+          ((current_trace == NULL) || !current_trace->is_fixed() ||
+           !current_trace->has_physical_trace()))
       {
 #ifdef DEBUG_LEGION
         assert(inorder_barrier.exists());

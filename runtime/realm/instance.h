@@ -172,8 +172,8 @@ namespace Realm {
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
 
-    REALM_ATTR_DEPRECATED2("use RegionInstance::create_external_instance instead",
     template <int N, typename T>
+    REALM_ATTR_DEPRECATED("use RegionInstance::create_external_instance instead",
     static Event create_file_instance(RegionInstance& inst,
 				      const char *file_name,
 				      const IndexSpace<N,T>& space,

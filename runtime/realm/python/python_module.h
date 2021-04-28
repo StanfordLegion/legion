@@ -76,8 +76,6 @@ namespace Realm {
       std::set<int> active_numa_domains;
     };
 
-    REGISTER_REALM_MODULE(PythonModule);
-
   }; // namespace Python
 
 }; // namespace Realm

@@ -57,6 +57,18 @@ namespace Realm {
       m.clear();
   }
 
+  template <typename K, typename V>
+  void delete_container_contents_free(std::map<K, V *>& m, bool clear_cont = true)
+  {
+    for(typename std::map<K, V *>::iterator it = m.begin();
+	it != m.end();
+	it++)
+      free(it->second);
+
+    if(clear_cont)
+      m.clear();
+  }
+
   // streambuf that holds most messages in an internal buffer
   template <size_t _INTERNAL_BUFFER_SIZE, size_t _INITIAL_EXTERNAL_SIZE>
   class shortstringbuf : public std::streambuf {
@@ -344,7 +356,7 @@ namespace Realm {
   // accumulates a crc32c checksum
   //   initialization (traditionally to 0xFFFFFFFF) and finalization (by
   //   inverting) the accumulator is left to the caller
-  uint32_t crc32c_accumulate(uint32_t accum_in, const void *data, size_t len);
+  REALM_PUBLIC_API uint32_t crc32c_accumulate(uint32_t accum_in, const void *data, size_t len);
 
 
 }; // namespace Realm

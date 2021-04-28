@@ -25,7 +25,13 @@
 #include "realm/runtime_impl.h"
 #include "realm/utils.h"
 
+#ifndef REALM_USE_LIBDL
+  #error the Realm python module currently requires DSO support
+#endif
+
+#ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
+#endif
 #ifdef REALM_USE_DLMOPEN
 #include <link.h>
 #endif // REALM_USE_DLMOPEN
