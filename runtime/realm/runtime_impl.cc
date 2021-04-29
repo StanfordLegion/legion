@@ -384,13 +384,41 @@ namespace Realm {
       return realm_library_version;
     }
 
+#if defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
+    // global flag that tells us if a realm runtime has already been
+    //  initialized in this process - some underlying libraries (e.g. mpi,
+    //  gasnet, kokkos) do not permit reinitialization
+    static bool runtime_initialized = false;
+#endif
+
     // performs any network initialization and, critically, makes sure
     //  *argc and *argv contain the application's real command line
     //  (instead of e.g. mpi spawner information)
     bool Runtime::network_init(int *argc, char ***argv)
     {
+#if defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
+      if(runtime_initialized) {
+        fprintf(stderr, "ERROR: reinitialization not supported by these Realm components:"
+#ifdef REALM_USE_MPI
+                " mpi"
+#endif
+#ifdef REALM_USE_GASNET1
+                " gasnet1"
+#endif
+#ifdef REALM_USE_GASNETEX
+                " gasnetex"
+#endif
+#ifdef REALM_USE_KOKKOS
+                " kokkos"
+#endif
+                "\n");
+        return false;
+      }
+      runtime_initialized = true;
+#endif
+
       if(runtime_singleton != 0) {
-	fprintf(stderr, "ERROR: cannot initialize more than one runtime at a time!\n");
+	fprintf(stderr, "ERROR: cannot initialize more than one Realm runtime at a time!\n");
 	return false;
       }
 
@@ -2280,6 +2308,7 @@ namespace Realm {
 	  (*it)->cleanup();
 	  delete (*it);
 	}
+        Network::single_network = 0;
 
 	module_registrar.unload_module_sofiles();
       }

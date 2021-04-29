@@ -569,6 +569,13 @@ namespace Realm {
     ActiveMessageHandlerTable::append_handler_reg(this);
   }
 
+  template <typename T, typename T2>
+  ActiveMessageHandlerReg<T, T2>::~ActiveMessageHandlerReg(void)
+  {
+    if(must_free)
+      free(const_cast<char *>(name));
+  }
+
   namespace HandlerWrappers {
     // this type only exists if you can supply a value of the right type
     template <typename T, T fnptr> struct HasRightType {};

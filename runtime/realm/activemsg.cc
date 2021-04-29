@@ -119,13 +119,7 @@ namespace Realm {
   {}
 
   ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
-  {
-    for(std::vector<HandlerEntry>::iterator it = handlers.begin();
-	it != handlers.end();
-	++it)
-      if(it->must_free)
-	free(const_cast<char *>(it->name));
-  }
+  {}
 
   ActiveMessageHandlerTable::HandlerEntry *ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
   {
@@ -192,7 +186,6 @@ namespace Realm {
       HandlerEntry e;
       e.hash = nextreg->hash;
       e.name = nextreg->name;
-      e.must_free = nextreg->must_free;
       e.handler = nextreg->get_handler();
       e.handler_notimeout = nextreg->get_handler_notimeout();
       // at least one of the two above must be non-null

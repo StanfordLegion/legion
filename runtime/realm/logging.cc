@@ -308,6 +308,10 @@ namespace Realm {
       exit(1);
     }
 
+    // TODO: can't currently change streams (they are cached in loggers)
+    if(stream)
+      return;
+
     // lots of choices for log output
     if(logname.empty()) {
       // the gasnet UDP job spawner (amudprun) seems to buffer stdout, so make stderr the default
