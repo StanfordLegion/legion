@@ -125,6 +125,9 @@ variables:
 .cxx17_normal: &cxx17_normal
   CXXFLAGS: "-std=c++17"
   CXX_STANDARD: "17"
+.cxx20_normal: &cxx20_normal
+  CXXFLAGS: "-std=c++20"
+  CXX_STANDARD: "20"
 .cxx11_32bit_normal: &cxx11_32bit_normal
   CXXFLAGS: "-std=c++11 -m32"
   LDFLAGS: "-m32 -latomic"
@@ -1156,6 +1159,10 @@ gcc10_cxx17_release_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc10, *terra9, *release, *cxx17_normal, *regent]
+gcc10_cxx20_release_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc10, *terra9, *release, *cxx20_normal, *legion, *short]
 
 # Clang 9
 clang9_cxx17_debug_legion:
@@ -1192,6 +1199,10 @@ clang10_cxx17_release_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*clang10, *terra9, *release, *cxx17_normal, *regent]
+clang10_cxx20_debug_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*clang10, *terra9, *debug, *cxx20_normal, *regent]
 
 # Linux with Clang 3.5
 clang35_cxx11_debug_legion:
