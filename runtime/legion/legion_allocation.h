@@ -428,12 +428,20 @@ namespace Legion {
       inline pointer address(reference r) { return &r; }
       inline const_pointer address(const_reference r) { return &r; }
     public:
+#if __cplusplus >= 202002L
+      inline pointer allocate(std::size_t cnt)
+      {
+        void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        return reinterpret_cast<pointer>(result);
+      }
+#else
       inline pointer allocate(size_type cnt,
                               typename std::allocator<void>::const_pointer = 0)
       {
         void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         return reinterpret_cast<pointer>(result);
       }
+#endif
       inline void deallocate(pointer p, size_type size) {
         free(p);
       }
