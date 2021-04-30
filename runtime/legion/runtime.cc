@@ -23237,16 +23237,16 @@ namespace Legion {
                                          int shard_id)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime_started);
-#endif
-      // Check that we're on an external thread
-      const Processor p = Processor::get_executing_processor();
-      if (p.exists())
+      if (!runtime_started)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
-            "Implicit top-level tasks are not allowed to be started on "
-            "processors managed by Legion. They can only be started on "
-            "external threads that Legion does not control.")
+            "Implicit top-level tasks are not allowed to be started before "
+            "the Legion runtime is started.")
+      // Check that we're not inside a task
+      if (implicit_context != NULL)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+            "Implicit top-level tasks are not allowed to be started inside "
+            "of Legion tasks. Only external computations are permitted "
+            "to create new implicit top-level tasks.")
       // Wait for the runtime to have started if necessary
       if (!runtime_started_event.has_triggered())
         runtime_started_event.external_wait();
@@ -23272,20 +23272,22 @@ namespace Legion {
       implicit_runtime = this;
       // Add a reference to the top level context
       top_context->add_reference();
-      // Set the executing processor
-#ifdef DEBUG_LEGION
-      assert(!local_procs.empty());
-#endif 
-      // Find a proxy processor, we'll prefer a CPU processor for
-      // backwards compatibility, but will take anything we get
-      Processor proxy = Processor::NO_PROC;
-      for (std::set<Processor>::const_iterator it =
-            local_procs.begin(); it != local_procs.end(); it++)
+      // Find a proxy processor for us to use for this task 
+      // We might already even be on a Realm processor
+      Processor proxy = Processor::get_executing_processor();
+      if (!proxy.exists())
       {
-        if (it->kind() == proc_kind)
+#ifdef DEBUG_LEGION
+        assert(!local_procs.empty());
+#endif
+        for (std::set<Processor>::const_iterator it =
+              local_procs.begin(); it != local_procs.end(); it++)
         {
-          proxy = *it;
-          break;
+          if (it->kind() == proc_kind)
+          {
+            proxy = *it;
+            break;
+          }
         }
       }
 #ifdef DEBUG_LEGION
@@ -23323,24 +23325,22 @@ namespace Legion {
     void Runtime::unbind_implicit_task_from_external_thread(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (Processor::get_executing_processor().exists())
+      if (!ctx->implicit_task)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
-            "Illegal call to unbind an implicit task from an external thread "
-            "for task %s (UID %lld) from an internal Realm task thread.",
+            "Illegal call to unbind a context for task %s (UID %lld) that "
+            "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      implicit_runtime = NULL;
       implicit_context = NULL;
-      implicit_provenance = 0;
     }
 
     //--------------------------------------------------------------------------
     void Runtime::bind_implicit_task_to_external_thread(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (Processor::get_executing_processor().exists())
+      if (!ctx->implicit_task)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
-            "Illegal call to bind an implicit task to an external thread "
-            "for task %s (UID %lld) from an internal Realm task thread.",
+            "Illegal call to bind a context for task %s (UID %lld) that "
+            "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
       implicit_runtime = this;
       implicit_context = ctx;
@@ -23351,11 +23351,13 @@ namespace Legion {
     void Runtime::finish_implicit_task(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
+      if (!ctx->implicit_task)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Illegal call to finish an implicit task for task %s (UID %lld) "
+            "that is not an implicit top-level task",
+            ctx->get_task_name(), ctx->get_unique_id())
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, NULL);
-      // Record that this is no longer an implicit external task
-      implicit_runtime = NULL;
-      implicit_context = NULL;
     }
 
     //--------------------------------------------------------------------------

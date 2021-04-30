@@ -3371,7 +3371,8 @@ namespace Legion {
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), false/*is inner*/, regions, parent_req_indexes,
-          virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT);
+          virtual_mapped, unique_op_id, ApEvent::NO_AP_EVENT,
+          false/*remote*/, false/*inline*/, true/*implicit*/);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);

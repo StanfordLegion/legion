@@ -38,14 +38,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(Runtime *rt, SingleTask *owner, int d,
-                      const std::vector<RegionRequirement> &reqs, bool inline_t)
+                      const std::vector<RegionRequirement> &reqs,
+                      bool inline_t, bool implicit_t)
       : runtime(rt), owner_task(owner), regions(reqs), depth(d),
         next_created_index(reqs.size()), 
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
         overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
-        inline_task(inline_t)
+        inline_task(inline_t), implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
     }
@@ -53,7 +54,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
       : runtime(NULL), owner_task(NULL), regions(rhs.regions), depth(-1), 
-        inline_task(false)
+        inline_task(false), implicit_task(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2386,8 +2387,8 @@ namespace Legion {
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote,
-                               bool inline_task)
-      : TaskContext(rt, owner, d, reqs, inline_task),
+                               bool inline_task, bool implicit_task)
+      : TaskContext(rt, owner, d, reqs, inline_task, implicit_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(finner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
