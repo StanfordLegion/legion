@@ -16276,10 +16276,8 @@ namespace Legion {
         else
           unordered_ops_counter = 0;
       }
-      // If we're at the end of the task and we don't have any unordered ops
-      // then nobody else should have any either so we are done
-      else if (unordered_ops.empty())
-        return;
+      // else we always do a match at the end of the replicated task 
+
       // If we make it here then all the shards are agreed that they are
       // going to do the sync up and will exchange information 
       // We're going to release the lock so we need to grab a local copy
@@ -16366,6 +16364,11 @@ namespace Legion {
         assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
 #endif
       }
+      else if (!unordered_ops.empty())
+        REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS,
+            "Control replicated task %s (UID %lld) had %zd mismatched unordered"
+            " operations at the end of its execution that are now leaked.",
+            get_task_name(), get_unique_id(), unordered_ops.size())
     }
 
     //--------------------------------------------------------------------------
