@@ -1858,33 +1858,27 @@ namespace Legion {
               std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions, RtBarrier &ready_barrier, 
-              RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
+              std::set<RtEvent> &preconditions);
       void register_region_deletions(ApEvent precondition,
                      const std::map<Operation*,GenerationID> &dependences,
                      std::vector<LogicalRegion> &regions,
-                     std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
-                     RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
+                     std::set<RtEvent> &preconditions);
       void register_field_deletions(ApEvent precondition,
             const std::map<Operation*,GenerationID> &dependences,
             std::vector<std::pair<FieldSpace,FieldID> > &fields,
-            std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
-            RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
+            std::set<RtEvent> &preconditions);
       void register_field_space_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
                     std::vector<FieldSpace> &spaces,
-                    std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
-                    RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
+                    std::set<RtEvent> &preconditions);
       void register_index_space_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
                     std::vector<std::pair<IndexSpace,bool> > &spaces,
-                    std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
-                    RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
+                    std::set<RtEvent> &preconditions);
       void register_index_partition_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
                     std::vector<std::pair<IndexPartition,bool> > &parts,
-                    std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
-                    RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
+                    std::set<RtEvent> &preconditions);
     public:
       void perform_replicated_region_deletions(
                      std::vector<LogicalRegion> &regions,
@@ -2350,6 +2344,10 @@ namespace Legion {
       RtBarrier get_next_refinement_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
+      RtBarrier get_next_deletion_ready_barrier(void);
+      RtBarrier get_next_deletion_mapping_barrier(void);
+      RtBarrier get_next_deletion_execution_barrier(void);
+      RtBarrier get_next_detach_resource_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);
@@ -2455,7 +2453,8 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier inline_mapping_barrier;
-      RtBarrier external_resource_barrier;
+      RtBarrier attach_resource_barrier;
+      RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
@@ -2475,12 +2474,6 @@ namespace Legion {
       bool collective_guard_reentrant;
       bool logical_guard_reentrant;
 #endif
-    protected:
-      // local barriers to this context for handling returned
-      // resources from sub-tasks
-      RtBarrier returned_resource_ready_barrier;
-      RtBarrier returned_resource_mapped_barrier;
-      RtBarrier returned_resource_execution_barrier;
     protected:
       int shard_collective_radix;
       int shard_collective_log_radix;

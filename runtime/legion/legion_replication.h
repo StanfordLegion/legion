@@ -1549,14 +1549,13 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx, 
-          RtBarrier &deletion_ready_barrier,RtBarrier &deletion_mapping_barrier,
-          RtBarrier &deletion_execution_barrier, bool is_total, bool is_first,
-          bool unordered = false);
+                                  bool is_total, bool is_first);
       // Help for handling unordered deletions 
       void record_unordered_kind(
        std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
@@ -2010,11 +2009,9 @@ namespace Legion {
     public:
       ReplDetachOp& operator=(const ReplDetachOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx,
-                                  RtBarrier &resource_bar);
-    public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void select_sources(const unsigned index,
                                   const InstanceRef &target,
@@ -2365,8 +2362,10 @@ namespace Legion {
         { return deletion_mapping_barrier; }
       inline RtBarrier get_inline_mapping_barrier(void) const
         { return inline_mapping_barrier; }
-      inline RtBarrier get_external_resource_barrier(void) const
-        { return external_resource_barrier; }
+      inline RtBarrier get_attach_resource_barrier(void) const
+        { return attach_resource_barrier; }
+      inline RtBarrier get_detach_resource_barrier(void) const
+        { return detach_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
       inline RtBarrier get_resource_return_barrier(void) const
@@ -2549,7 +2548,8 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier inline_mapping_barrier;
-      RtBarrier external_resource_barrier;
+      RtBarrier attach_resource_barrier;
+      RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;

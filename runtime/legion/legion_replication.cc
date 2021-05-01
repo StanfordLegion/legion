@@ -3172,6 +3172,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplDeletionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call
+      DeletionOp::trigger_dependence_analysis();
+      // Then get any barriers that we need for our execution
+#ifdef DEBUG_LEGION
+      assert(!ready_barrier.exists());
+      assert(!mapping_barrier.exists());
+      assert(!execution_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Only field and region deletions need a ready barrier since they
+      // will be touching the physical states of the region tree
+      if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
+      {
+        ready_barrier = repl_ctx->get_next_deletion_ready_barrier();
+        // Only field deletions need a mapping barrier for downward facing
+        // dependences in other shards
+        if (kind == FIELD_DELETION)
+          mapping_barrier = repl_ctx->get_next_deletion_mapping_barrier();
+      }
+      // All deletion kinds need an execution barrier
+      execution_barrier = repl_ctx->get_next_deletion_execution_barrier();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplDeletionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -3466,44 +3496,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
-                                                RtBarrier &delready_barrier,
-                                                RtBarrier &delmap_barrier, 
-                                                RtBarrier &delexec_barrier,
-                                                bool is_total, bool is_first,
-                                                bool unordered/*=false*/)
+                                                bool is_total, bool is_first)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!ready_barrier.exists());
-      assert(!mapping_barrier.exists());
-      assert(!execution_barrier.exists());
-#endif
-      // Only field and region deletions need a ready barrier since they
-      // will be touching the physical states of the region tree
-      if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
-      {
-        ready_barrier = delready_barrier;
-        if (unordered)
-          Runtime::advance_barrier(delready_barrier);
-        else
-          ctx->advance_replicate_barrier(delready_barrier, ctx->total_shards);
-        // Only field deletions need a mapping barrier for downward facing
-        // dependences in other shards
-        if (kind == FIELD_DELETION)
-        {
-          mapping_barrier = delmap_barrier;
-          if (unordered)
-            Runtime::advance_barrier(delmap_barrier);
-          else
-            ctx->advance_replicate_barrier(delmap_barrier, ctx->total_shards);
-        }
-      }
-      // All deletion kinds need an execution barrier
-      execution_barrier = delexec_barrier;
-      if (unordered)
-        Runtime::advance_barrier(delexec_barrier);
-      else
-        ctx->advance_replicate_barrier(delexec_barrier, ctx->total_shards);
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
     }
@@ -6519,18 +6514,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
-                                              RtBarrier &resource_bar)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(resource_bar.exists());
-#endif
-      resource_barrier = resource_bar;
-      ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -6544,6 +6527,21 @@ namespace Legion {
     {
       deactivate_detach_op();
       runtime->free_repl_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call, then get our barrier
+      DetachOp::trigger_dependence_analysis();
+ #ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif     
+      resource_barrier = repl_ctx->get_next_detach_resource_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -8332,7 +8330,9 @@ namespace Legion {
         inline_mapping_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // External resource barrier for synchronizing attach/detach ops
-        external_resource_barrier = 
+        attach_resource_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        detach_resource_barrier =
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
@@ -8425,7 +8425,8 @@ namespace Legion {
           deletion_mapping_barrier.destroy_barrier();
           deletion_execution_barrier.destroy_barrier();
           inline_mapping_barrier.destroy_barrier();
-          external_resource_barrier.destroy_barrier();
+          attach_resource_barrier.destroy_barrier();
+          detach_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
           resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
@@ -8658,7 +8659,8 @@ namespace Legion {
           assert(deletion_mapping_barrier.exists());
           assert(deletion_execution_barrier.exists());
           assert(inline_mapping_barrier.exists());
-          assert(external_resource_barrier.exists());
+          assert(attach_resource_barrier.exists());
+          assert(detach_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
           assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
@@ -8677,7 +8679,8 @@ namespace Legion {
           rez.serialize(deletion_mapping_barrier);
           rez.serialize(deletion_execution_barrier);
           rez.serialize(inline_mapping_barrier);
-          rez.serialize(external_resource_barrier);
+          rez.serialize(attach_resource_barrier);
+          rez.serialize(detach_resource_barrier);
           rez.serialize(mapping_fence_barrier);
           rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
@@ -8766,7 +8769,8 @@ namespace Legion {
         derez.deserialize(deletion_mapping_barrier);
         derez.deserialize(deletion_execution_barrier);
         derez.deserialize(inline_mapping_barrier);
-        derez.deserialize(external_resource_barrier);
+        derez.deserialize(attach_resource_barrier);
+        derez.deserialize(detach_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);
