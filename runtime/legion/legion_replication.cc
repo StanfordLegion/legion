@@ -3507,7 +3507,7 @@ namespace Legion {
     void ReplDeletionOp::record_unordered_kind(
        std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
        std::map<IndexPartition,ReplDeletionOp*> &index_partition_deletions,
-       std::map<FieldSpace,ReplDeletionOp*> field_space_deletions,
+       std::map<FieldSpace,ReplDeletionOp*> &field_space_deletions,
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
        std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions)
     //--------------------------------------------------------------------------
