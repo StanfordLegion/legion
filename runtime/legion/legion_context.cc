@@ -3187,8 +3187,6 @@ namespace Legion {
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
                                             true/*skip dependence analysis*/);
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -3265,8 +3263,6 @@ namespace Legion {
              true/*unordered*/, allocator, false/*non owner shard*/,
              true/*skip dependence analysis*/);
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -3434,8 +3430,6 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -3536,8 +3530,6 @@ namespace Legion {
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -3639,8 +3631,6 @@ namespace Legion {
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
