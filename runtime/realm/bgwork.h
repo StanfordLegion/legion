@@ -112,7 +112,7 @@ namespace Realm {
     protected:
       BackgroundWorkManager *manager;
       unsigned starting_slot;
-      unsigned known_work_items;
+      BitMask known_work_item_mask[BITMASK_ARRAY_SIZE];
       BitMask allowed_work_item_mask[BITMASK_ARRAY_SIZE];
       long long max_timeslice;
       int numa_domain;
@@ -130,6 +130,7 @@ namespace Realm {
     atomic<int> active_work_items;
     atomic<BitMask> active_work_item_mask[BITMASK_ARRAY_SIZE];
 
+    atomic<int> work_item_usecounts[MAX_WORK_ITEMS];
     BackgroundWorkItem *work_items[MAX_WORK_ITEMS];
 
     friend class BackgroundWorkThread;

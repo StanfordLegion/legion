@@ -3079,6 +3079,7 @@ namespace Realm {
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
       , cfg_max_ctxsync_threads(4)
+      , cfg_lmem_resize_to_max(false)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
       , uvm_base(0), uvmmem(0)
@@ -3176,7 +3177,8 @@ namespace Realm {
 	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
 	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
 	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads);
+	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
+          .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max);
 #ifdef REALM_USE_CUDART_HIJACK
 	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif
@@ -3219,11 +3221,28 @@ namespace Realm {
 	//  need this to be the device's "primary context"
 
 	// set context flags before we create it, but it's ok to be told that
-	//  it's too late
+	//  it's too late (unless lmem resize is wrong)
 	{
-	  CUresult res = cuDevicePrimaryCtxSetFlags(gpu_info[i]->device,
-						    CU_CTX_SCHED_BLOCKING_SYNC);
-	  assert((res == CUDA_SUCCESS) || (res == CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE));
+          unsigned flags = CU_CTX_SCHED_BLOCKING_SYNC;
+          if(cfg_lmem_resize_to_max)
+            flags |= CU_CTX_LMEM_RESIZE_TO_MAX;
+
+	  CUresult res = cuDevicePrimaryCtxSetFlags(gpu_info[i]->device, flags);
+          if(res != CUDA_SUCCESS) {
+            bool lmem_ok;
+            if(res == CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE) {
+              if(cfg_lmem_resize_to_max) {
+                unsigned act_flags = 0;
+                CHECK_CU( cuCtxGetFlags(&act_flags) );
+                lmem_ok = ((act_flags & CU_CTX_LMEM_RESIZE_TO_MAX) != 0);
+              } else
+                lmem_ok = true;
+            } else
+              lmem_ok = false;
+
+            if(!lmem_ok)
+              REPORT_CU_ERROR("cuDevicePrimaryCtxSetFlags", res);
+          }
 	}
 
 	CUcontext context;

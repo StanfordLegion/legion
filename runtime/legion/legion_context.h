@@ -51,7 +51,7 @@ namespace Legion {
       TaskContext(Runtime *runtime, SingleTask *owner, int depth,
                   const std::vector<RegionRequirement> &reqs,
                   const std::vector<RegionRequirement> &output_reqs,
-                  bool inline_task);
+                  bool inline_task, bool implicit_ctx = false);
       TaskContext(const TaskContext &rhs);
       virtual ~TaskContext(void);
     public:
@@ -724,6 +724,7 @@ namespace Legion {
       bool children_commit_invoked;
     public:
       const bool inline_task;
+      const bool implicit_task; 
 #ifdef LEGION_SPY
     protected:
       UniqueID current_fence_uid;
@@ -890,7 +891,7 @@ namespace Legion {
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped, UniqueID context_uid, 
                    ApEvent execution_fence, bool remote = false, 
-                   bool inline_task = false);
+                   bool inline_task = false, bool implicit_task = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:

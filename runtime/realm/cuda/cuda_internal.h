@@ -43,27 +43,25 @@
 
 // Need CUDA 6.5 or later for good error reporting
 #if CUDA_VERSION >= 6050
-#define CHECK_CU(cmd) do { \
-  CUresult ret = (cmd); \
-  if(ret != CUDA_SUCCESS) { \
+#define REPORT_CU_ERROR(cmd, ret) \
+  do { \
     const char *name, *str; \
     cuGetErrorName(ret, &name); \
     cuGetErrorString(ret, &str); \
-    fprintf(stderr, "CU: %s = %d (%s): %s\n", #cmd, ret, name, str); \
-    assert(0); \
-    exit(1); \
-  } \
-} while(0)
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } while(0)
 #else
-#define CHECK_CU(cmd) do { \
-  CUresult ret = (cmd); \
-  if(ret != CUDA_SUCCESS) { \
-    fprintf(stderr, "CU: %s = %d\n", #cmd, ret); \
-    assert(0); \
-    exit(1); \
-  } \
-} while(0)
+  do { \
+    fprintf(stderr, "CU: %s = %d\n", cmd, ret); \
+    abort(); \
+  } while(0)
 #endif
+
+#define CHECK_CU(cmd) do {                      \
+  CUresult ret = (cmd); \
+  if(ret != CUDA_SUCCESS) REPORT_CU_ERROR(#cmd, ret); \
+} while(0)
 
 namespace Realm {
 
