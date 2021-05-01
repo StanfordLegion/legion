@@ -7658,7 +7658,8 @@ namespace Legion {
       ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, unique_op_id,
-          execution_fence_event, shard_manager, false/*inline task*/);
+          execution_fence_event, shard_manager,
+          false/*inline task*/, true/*implicit*/);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       repl_ctx->configure_context(mapper, task_priority);

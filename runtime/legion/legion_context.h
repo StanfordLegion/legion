@@ -1815,7 +1815,8 @@ namespace Legion {
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
                        UniqueID context_uid, ApEvent execution_fence_event,
-                       ShardManager *manager, bool inline_task);
+                       ShardManager *manager, bool inline_task, 
+                       bool implicit_task = false);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:

@@ -10889,9 +10889,11 @@ namespace Legion {
                                  const std::vector<unsigned> &parent_indexes,
                                  const std::vector<bool> &virt_mapped,
                                  UniqueID ctx_uid, ApEvent exec_fence,
-                                 ShardManager *manager, bool inline_task)
+                                 ShardManager *manager, bool inline_task,
+                                 bool implicit_task)
       : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
-         virt_mapped, ctx_uid, exec_fence, false/*remote*/, inline_task),
+         virt_mapped, ctx_uid, exec_fence, false/*remote*/,
+         inline_task, implicit_task),
         owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
