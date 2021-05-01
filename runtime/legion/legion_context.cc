@@ -2731,7 +2731,7 @@ namespace Legion {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
-            result = TaskContext::create_index_space(domain, \
+            result = create_index_space(domain, \
               NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             break; \
           }
