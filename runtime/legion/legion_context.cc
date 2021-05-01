@@ -19021,8 +19021,6 @@ namespace Legion {
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -19077,8 +19075,6 @@ namespace Legion {
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -19158,8 +19154,6 @@ namespace Legion {
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -19239,8 +19233,6 @@ namespace Legion {
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
           op->set_deletion_preconditions(precondition, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
@@ -19321,8 +19313,6 @@ namespace Legion {
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
           op->set_deletion_preconditions(precond, dependences);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
           add_to_dependence_queue(op, true/*unordered*/);
         }
       }
