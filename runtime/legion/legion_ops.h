@@ -1650,8 +1650,8 @@ namespace Legion {
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
-      inline void set_execution_precondition(ApEvent precondition)
-        { execution_precondition = precondition; }
+      void set_deletion_preconditions(ApEvent precondition,
+          const std::map<Operation*,GenerationID> &dependences);
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
                                    std::vector<IndexPartition> &sub_partitions,
@@ -1704,6 +1704,8 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;
       std::set<RtEvent> map_applied_conditions;
+      std::map<Operation*,GenerationID> dependences;
+      bool has_preconditions;
     }; 
 
     /**
