@@ -3186,14 +3186,10 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
                                             true/*skip dependence analysis*/);
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -3268,14 +3264,10 @@ namespace Legion {
           op->initialize_field_deletions(this, it->first, it->second, 
              true/*unordered*/, allocator, false/*non owner shard*/,
              true/*skip dependence analysis*/);
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -3441,14 +3433,10 @@ namespace Legion {
         {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -3547,14 +3535,10 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -3654,14 +3638,10 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -19050,14 +19030,10 @@ namespace Legion {
                                             true/*skip dependence analysis*/);
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -19110,14 +19086,10 @@ namespace Legion {
               true/*skip dependence analysis*/);
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -19195,14 +19167,10 @@ namespace Legion {
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -19280,14 +19248,10 @@ namespace Legion {
                             sub_partitions[idx], true/*unordered*/);
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }
@@ -19366,14 +19330,10 @@ namespace Legion {
                             sub_partitions[idx], true/*unordered*/);
           op->initialize_replication(this, shard_manager->is_total_sharding(),
                             shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precond);
+          op->set_deletion_preconditions(precond, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          add_to_dependence_queue(op, true/*unordered*/);
         }
       }
     }

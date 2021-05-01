@@ -8710,6 +8710,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DeletionOp::set_deletion_preconditions(ApEvent precondition,
+                                  const std::map<Operation*,GenerationID> &deps)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!has_preconditions);
+#endif
+      dependences = deps;
+      execution_precondition = precondition;
+      has_preconditions = true;
+    }
+
+    //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_space_deletion(InnerContext *ctx,
                            IndexSpace handle, std::vector<IndexPartition> &subs,
                            const bool unordered)
@@ -8868,6 +8881,7 @@ namespace Legion {
     {
       activate_operation();
       allocator = NULL;
+      has_preconditions = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8900,6 +8914,7 @@ namespace Legion {
       version_infos.clear();
       map_applied_conditions.clear();
       to_release.clear();
+      dependences.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -8920,6 +8935,13 @@ namespace Legion {
     void DeletionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (has_preconditions)
+      {
+        for (std::map<Operation*,GenerationID>::const_iterator dit = 
+              dependences.begin(); dit != dependences.end(); dit++)
+          register_dependence(dit->first, dit->second);
+        return;
+      }
       switch (kind)
       {
         // These cases do not need any kind of analysis to construct
