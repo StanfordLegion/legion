@@ -1361,7 +1361,7 @@ end
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer)
-  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer() or pointer_type == niltype) then
     report.error(node, "isnull requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Isnull {
@@ -1400,7 +1400,7 @@ end
 
 function type_check.expr_null(cx, node)
   local pointer_type = node.pointer_type
-  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer() or pointer_type == niltype) then
     report.error(node, "null requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Null {
