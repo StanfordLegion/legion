@@ -2391,8 +2391,9 @@ namespace Legion {
       : TaskContext(rt, owner, d, reqs, inline_task, implicit_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(finner),
-        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
-        total_children_count(0), total_close_count(0), total_summary_count(0),
+        finished_execution(false), parent_req_indexes(parent_indexes),
+        virtual_mapped(virt_mapped), total_children_count(0),
+        total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
@@ -2767,7 +2768,14 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          add_to_dependence_queue(op, true/*unordered*/);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -2840,7 +2848,14 @@ namespace Legion {
           op->initialize_field_deletions(this, it->first, it->second, 
                                          true/*unordered*/, allocator);
           op->set_deletion_preconditions(precondition, dependences);
-          add_to_dependence_queue(op, true/*unordered*/);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3007,7 +3022,14 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          add_to_dependence_queue(op, true/*unordered*/);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3107,7 +3129,14 @@ namespace Legion {
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          add_to_dependence_queue(op, true/*unordered*/);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3208,7 +3237,14 @@ namespace Legion {
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
           op->set_deletion_preconditions(precondition, dependences);
-          add_to_dependence_queue(op, true/*unordered*/);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3620,7 +3656,17 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3686,7 +3732,17 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index partition deletion performed after task %s"
+            " (UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5130,7 +5186,17 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -5371,7 +5437,17 @@ namespace Legion {
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered, allocator);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field free performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -5417,7 +5493,17 @@ namespace Legion {
         return;
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, free_now,unordered,allocator);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered free fields performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5483,7 +5569,17 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered logical region deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6445,7 +6541,17 @@ namespace Legion {
       }
       DetachOp *op = runtime->get_available_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -6459,7 +6565,17 @@ namespace Legion {
         return Future();
       IndexDetachOp *op = runtime->get_available_index_detach_op();
       Future result = resources.impl->detach(this, op, flush, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -6936,7 +7052,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_dependence_queue(Operation *op, bool unordered)
+    bool InnerContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
       // Launch the task to perform the prepipeline stage for the operation
@@ -6973,10 +7089,12 @@ namespace Legion {
         AutoLock d_lock(dependence_lock);
         if (unordered)
         {
+          if (finished_execution)
+            return false;
           // If this is unordered, stick it on the list of 
           // unordered ops to be added later and then we're done
           unordered_ops.push_back(op);
-          return;
+          return true;
         }
         if (!outstanding_dependence)
         {
@@ -7008,6 +7126,7 @@ namespace Legion {
           raise_poison_exception();
         end_task_wait();
       }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9313,8 +9432,12 @@ namespace Legion {
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
+#ifdef DEBUG_LEGION
+        assert(!finished_execution);
+#endif
         if (!unordered_ops.empty())
           insert_unordered_ops(d_lock);
+        finished_execution = true;
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -11922,10 +12045,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_to_dependence_queue(Operation *op, bool unordered)
+    bool LeafContext::add_to_dependence_queue(Operation *op, bool unordered)
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------

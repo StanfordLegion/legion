@@ -392,7 +392,7 @@ namespace Legion {
                const std::vector<StaticDependence> *dependences) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual void add_to_dependence_queue(Operation *op, 
+      virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false) = 0;
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
@@ -1154,7 +1154,7 @@ namespace Legion {
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual void add_to_dependence_queue(Operation *op, 
+      virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false);
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
@@ -1284,6 +1284,8 @@ namespace Legion {
       const UniqueID context_uid;
       const bool remote_context;
       const bool full_inner_context;
+    protected:
+      bool finished_execution;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
       std::vector<std::pair<size_t,DomainPoint> > context_coordinates;
@@ -1852,7 +1854,7 @@ namespace Legion {
                 const std::vector<StaticDependence> *dependences);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual void add_to_dependence_queue(Operation *op, 
+      virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                           const void *result, size_t size, 
