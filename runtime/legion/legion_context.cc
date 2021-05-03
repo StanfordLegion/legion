@@ -12846,7 +12846,17 @@ namespace Legion {
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
       op->initialize_replication(this, shard_manager->is_total_sharding(),
                         shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12953,7 +12963,17 @@ namespace Legion {
                                          sub_partitions, unordered);
       op->initialize_replication(this, shard_manager->is_total_sharding(),
                         shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index partition deletion performed after task %s"
+            " (UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15373,7 +15393,17 @@ namespace Legion {
       op->initialize_field_space_deletion(this, handle, unordered);
       op->initialize_replication(this, shard_manager->is_total_sharding(),
                         shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15639,7 +15669,17 @@ namespace Legion {
                                     (owner_shard->shard_id != 0));
       op->initialize_replication(this, shard_manager->is_total_sharding(),
                         shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field free performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15904,7 +15944,17 @@ namespace Legion {
                                      allocator, (owner_shard->shard_id != 0));
       op->initialize_replication(this, shard_manager->is_total_sharding(),
                         shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered free fields performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16148,7 +16198,17 @@ namespace Legion {
       op->initialize_logical_region_deletion(this, handle, unordered);
       op->initialize_replication(this, shard_manager->is_total_sharding(),
                         shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered logical region deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17557,7 +17617,17 @@ namespace Legion {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -17592,7 +17662,17 @@ namespace Legion {
         return Future();
       ReplIndexDetachOp *op = runtime->get_available_repl_index_detach_op();
       Future result = resources.impl->detach(this, op, flush, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
