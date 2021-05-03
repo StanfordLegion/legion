@@ -3998,7 +3998,7 @@ function codegen.expr_isnull(cx, node)
           expr_type),
         expr_type)
     end
-  elseif pointer_type:ispointer() then
+  elseif pointer_type:ispointer() or pointer_type == niltype then
     return values.value(
       node,
       expr.once_only(
@@ -4023,7 +4023,7 @@ function codegen.expr_null(cx, node)
         `([pointer_type]{ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }}),
         expr_type),
       expr_type)
-  elseif pointer_type:ispointer() then
+  elseif pointer_type:ispointer() or pointer_type == niltype then
     return values.value(
       node,
       expr.once_only(
