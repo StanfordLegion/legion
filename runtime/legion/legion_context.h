@@ -1861,27 +1861,33 @@ namespace Legion {
               std::vector<std::pair<IndexSpace,bool> > &deleted_index_spaces,
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
-              std::set<RtEvent> &preconditions);
+              std::set<RtEvent> &preconditions, RtBarrier &ready_barrier, 
+              RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_region_deletions(ApEvent precondition,
                      const std::map<Operation*,GenerationID> &dependences,
                      std::vector<LogicalRegion> &regions,
-                     std::set<RtEvent> &preconditions);
+                     std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
+                     RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_field_deletions(ApEvent precondition,
             const std::map<Operation*,GenerationID> &dependences,
             std::vector<std::pair<FieldSpace,FieldID> > &fields,
-            std::set<RtEvent> &preconditions);
+            std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
+            RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_field_space_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
                     std::vector<FieldSpace> &spaces,
-                    std::set<RtEvent> &preconditions);
+                    std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
+                    RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_index_space_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
                     std::vector<std::pair<IndexSpace,bool> > &spaces,
-                    std::set<RtEvent> &preconditions);
+                    std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
+                    RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
       void register_index_partition_deletions(ApEvent precondition,
                     const std::map<Operation*,GenerationID> &dependences,
                     std::vector<std::pair<IndexPartition,bool> > &parts,
-                    std::set<RtEvent> &preconditions);
+                    std::set<RtEvent> &preconditions, RtBarrier &ready_barrier,
+                    RtBarrier &mapped_barrier, RtBarrier &execution_barrier);
     public:
       void perform_replicated_region_deletions(
                      std::vector<LogicalRegion> &regions,
@@ -2477,6 +2483,12 @@ namespace Legion {
       bool collective_guard_reentrant;
       bool logical_guard_reentrant;
 #endif
+    protected:
+      // local barriers to this context for handling returned
+      // resources from sub-tasks
+      RtBarrier returned_resource_ready_barrier;
+      RtBarrier returned_resource_mapped_barrier;
+      RtBarrier returned_resource_execution_barrier;
     protected:
       int shard_collective_radix;
       int shard_collective_log_radix;

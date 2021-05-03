@@ -3178,8 +3178,10 @@ namespace Legion {
       // Do the base call
       DeletionOp::trigger_dependence_analysis();
       // Then get any barriers that we need for our execution
+      // We might have already received our barriers
+      if (execution_barrier.exists())
+        return;
 #ifdef DEBUG_LEGION
-      assert(!ready_barrier.exists());
       assert(!mapping_barrier.exists());
       assert(!execution_barrier.exists());
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -3496,11 +3498,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
-                                                bool is_total, bool is_first)
+                                                bool is_total, bool is_first,
+                                                RtBarrier *ready_bar,
+                                                RtBarrier *mapping_bar,
+                                                RtBarrier *execution_bar)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!ready_barrier.exists());
+      assert(!mapping_barrier.exists());
+      assert(!execution_barrier.exists());
+#endif
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
+      if (execution_bar != NULL)
+      {
+        // Get our barriers now
+        if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
+        {
+          ready_barrier = *ready_bar;
+          Runtime::advance_barrier(*ready_bar);
+          // Only field deletions need a mapping barrier for downward facing
+          // dependences in other shards
+          if (kind == FIELD_DELETION)
+          {
+            mapping_barrier = *mapping_bar;
+            Runtime::advance_barrier(*mapping_bar);
+          }
+        }
+        // All deletion kinds need an execution barrier
+        execution_barrier = *execution_bar;
+        Runtime::advance_barrier(*execution_bar);
+      }
     }
 
     //--------------------------------------------------------------------------

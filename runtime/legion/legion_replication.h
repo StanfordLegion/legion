@@ -1555,7 +1555,10 @@ namespace Legion {
       virtual void trigger_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx, 
-                                  bool is_total, bool is_first);
+                                  bool is_total, bool is_first,
+                                  RtBarrier *ready_barrier = NULL,
+                                  RtBarrier *mapping_barrier = NULL,
+                                  RtBarrier *execution_barrier = NULL);
       // Help for handling unordered deletions 
       void record_unordered_kind(
        std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
