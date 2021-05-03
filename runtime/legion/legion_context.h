@@ -445,9 +445,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true) = 0;
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true) = 0;
       virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -1314,9 +1314,9 @@ namespace Legion {
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true);
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                   FutureInstance *instance,
@@ -1475,6 +1475,8 @@ namespace Legion {
       const UniqueID context_uid;
       const bool remote_context;
       const bool full_inner_context;
+    protected:
+      bool finished_execution;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
       std::vector<std::pair<size_t,DomainPoint> > context_coordinates;
@@ -2227,9 +2229,9 @@ namespace Legion {
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true);
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -3011,9 +3013,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true);
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);

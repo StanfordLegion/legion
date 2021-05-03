@@ -5039,6 +5039,23 @@ namespace Realm {
     xdq.add_to_manager(bgwork);
   }
 
+  bool MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                       CustomSerdezID src_serdez_id,
+                                       CustomSerdezID dst_serdez_id,
+                                       ReductionOpID redop_id,
+                                       XferDesKind *kind_ret /*= 0*/,
+                                       unsigned *bw_ret /*= 0*/,
+                                       unsigned *lat_ret /*= 0*/)
+  {
+    // if it's not a reduction, we don't want it
+    if(redop_id == 0)
+      return false;
+
+    // otherwise consult the normal supports_path logic
+    return Channel::supports_path(src_mem, dst_mem, src_serdez_id, dst_serdez_id,
+                                  redop_id, kind_ret, bw_ret, lat_ret);
+  }
+
   XferDes *MemreduceChannel::create_xfer_des(uintptr_t dma_op,
                                              NodeID launch_node,
                                              XferDesID guid,

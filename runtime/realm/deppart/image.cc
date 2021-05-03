@@ -315,7 +315,8 @@ namespace Realm {
 	SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
 	typename std::map<int, HybridRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
 	if(it2 != rect_map.end()) {
-	  impl->contribute_dense_rect_list(it2->second->convert_to_vector());
+	  impl->contribute_dense_rect_list(it2->second->convert_to_vector(),
+                                           false /*!disjoint*/);
 	  delete it2->second;
 	} else
 	  impl->contribute_nothing();

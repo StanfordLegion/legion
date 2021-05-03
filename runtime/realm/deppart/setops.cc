@@ -1022,7 +1022,7 @@ namespace Realm {
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
-      impl->contribute_dense_rect_list(drl.rects);
+      impl->contribute_dense_rect_list(drl.rects, false /*!disjoint*/);
     }
   }
 
@@ -1187,7 +1187,7 @@ namespace Realm {
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
-      impl->contribute_dense_rect_list(drl.rects);
+      impl->contribute_dense_rect_list(drl.rects, true /*disjoint*/);
     }
   }
 
@@ -1420,7 +1420,7 @@ namespace Realm {
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
-      impl->contribute_dense_rect_list(drl.rects);
+      impl->contribute_dense_rect_list(drl.rects, true /*disjoint*/);
     }
   }
 

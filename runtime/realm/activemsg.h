@@ -262,7 +262,6 @@ namespace Realm {
     struct HandlerEntry {
       TypeHash hash;
       const char *name;
-      bool must_free;
       MessageHandler handler;
       MessageHandlerNoTimeout handler_notimeout;
       MessageHandlerInline handler_inline;
@@ -296,6 +295,7 @@ namespace Realm {
   class ActiveMessageHandlerReg : public ActiveMessageHandlerRegBase {
   public:
     ActiveMessageHandlerReg(void);
+    ~ActiveMessageHandlerReg(void);
 
     // when registering an active message handler, the following three methods
     //  are looked for in class T2

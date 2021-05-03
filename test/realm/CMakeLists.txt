@@ -45,6 +45,7 @@ list(APPEND REALM_TESTS
   coverings
   alltoall
   simple_reduce
+  realm_reinit
   )
 
 if(Legion_USE_CUDA)

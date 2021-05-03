@@ -1297,6 +1297,7 @@ typedef enum legion_error_t {
   ERROR_DEFERRED_ALLOCATION_FAILURE = 576,
   ERROR_INDEX_SPACE_ATTACH = 577,
   ERROR_INDEX_SPACE_DETACH = 578,
+  ERROR_POST_EXECUTION_UNORDERED_OPERATION = 579,
   ERROR_RESERVED_SHARDING_ID = 601,
   ERROR_DUPLICATE_SHARDING_ID = 602,
   ERROR_INVALID_SHARDING_ID = 603,
@@ -1633,8 +1634,9 @@ typedef enum legion_redop_kind_t {
 
 #ifndef LEGION_USE_PYTHON_CFFI
 // Normal way of doing things for sane compilers
-#define LEGION_REDOP_VALUE(kind, type) LEGION_REDOP_BASE + \
-  LEGION_REDOP_KIND_##kind * LEGION_TYPE_TOTAL + LEGION_TYPE_##type
+#define LEGION_REDOP_VALUE(kind, type) (LEGION_REDOP_BASE +       \
+  ((int)LEGION_REDOP_KIND_##kind * (int)LEGION_TYPE_TOTAL) +      \
+  (int)LEGION_TYPE_##type)
 #else
 // Dumb stuff for the Python CFFI parser which can't multiply
 // so we'll do it the old-school way for them from a time 
