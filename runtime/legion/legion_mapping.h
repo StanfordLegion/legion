@@ -22,6 +22,7 @@
 #include "realm/profiling.h"
 
 #include <iostream>
+#include <type_traits>
 
 namespace Legion {
   namespace Mapping { 
@@ -2165,8 +2166,12 @@ namespace Legion {
       template<typename T>
       void pack_tunable(const T &result, Mapper::SelectTunableOutput &output)
       {
-        T *output_result = new T();
-        *output_result = result;
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
+        static_assert(std::is_trivially_copyable<T>::value,
+                      "tunable type must be trivially copyable");
+#endif  // !defined(__GNUC__) || (__GNUC__ >= 5)
+        void *output_result = malloc(sizeof(T));
+        memcpy(output_result, &result, sizeof(T));
         output.value = output_result;
         output.size = sizeof(T);
       }
