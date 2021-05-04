@@ -213,7 +213,7 @@ namespace Realm {
 
     // in the common case, we won't need to add levels to the tree - grab the root (no lock)
     // and see if it covers the range that includes our index
-    intptr_t rlval = root_and_level.load();
+    intptr_t rlval = root_and_level.load_acquire();
     NodeBase *n = extract_root(rlval);
     int n_level = extract_level(rlval);
 #ifdef DEBUG_REALM
