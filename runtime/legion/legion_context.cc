@@ -18550,6 +18550,9 @@ namespace Legion {
 
       RegionNode *node = runtime->forest->get_node(handle);
       VersionInfo *result_info = new VersionInfo();
+      // Need this for the terrible case where the region is empty and
+      // we might not find equivalence sets for all the fields
+      result_info->relax_valid_mask(request_mask);
       std::set<RtEvent> ready_events;
       node->perform_versioning_analysis(tree_context.get_id(), this,
           result_info, request_mask, opid, original_source, ready_events);
@@ -18598,6 +18601,9 @@ namespace Legion {
         derez.deserialize(mask);
         version_info->record_equivalence_set(set, mask);
       }
+      FieldMask valid_mask;
+      derez.deserialize(valid_mask);
+      version_info->relax_valid_mask(valid_mask);
       UniqueID opid;
       derez.deserialize(opid);
       RtUserEvent done_event;
@@ -18650,12 +18656,25 @@ namespace Legion {
       if (target_space == runtime->address_space)
       {
         // local case
-        FieldMask dummy_parent;
+        FieldMask dummy_parent, covered_mask;
         std::set<RtEvent> applied_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               result_sets.begin(); it != result_sets.end(); it++)
+        {
+          covered_mask |= it->second;
           target->record_refinement(it->first, it->second, 
                                     dummy_parent, applied_events);
+        }
+        if (covered_mask != result_sets.get_valid_mask())
+        {
+#ifdef DEBUG_LEGION
+          // We should have an equivalence set for every field unless this
+          // region is empty in which case we might have fewer
+          assert(target->node->as_region_node()->row_source->is_empty());
+#endif
+          FieldMask empty_mask = result_sets.get_valid_mask() - covered_mask;
+          target->record_empty_refinement(empty_mask);
+        }
         if (!applied_events.empty())
           Runtime::trigger_event(done_event, 
               Runtime::merge_events(applied_events));
@@ -18676,6 +18695,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
+          rez.serialize(result_sets.get_valid_mask());
           rez.serialize(opid);
           rez.serialize(done_event);
         }

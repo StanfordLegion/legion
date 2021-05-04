@@ -2935,6 +2935,7 @@ namespace Legion {
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
                              FieldMask &parent_mask,
                              std::set<RtEvent> &applied_events);
+      void record_empty_refinement(const FieldMask &mask);
     public:
       // Call these from partition nodes
       void compute_equivalence_sets(const FieldMask &mask,

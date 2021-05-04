@@ -18830,6 +18830,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::record_empty_refinement(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+      assert(node->as_region_node()->row_source->is_empty());
+#endif
+      disjoint_complete |= mask;
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const FieldMask &mask, 
                                             FieldMask &parent_traversal, 
                                             FieldMask &children_traversal) const
