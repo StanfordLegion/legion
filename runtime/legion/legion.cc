@@ -1396,7 +1396,7 @@ namespace Legion {
           (valid_requirement != rhs.valid_requirement))
         return false;
       return static_cast<const RegionRequirement&>(*this) ==
-             static_cast<const OutputRequirement&>(rhs);
+             static_cast<const RegionRequirement&>(rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -1416,7 +1416,7 @@ namespace Legion {
       if (valid_requirement > rhs.valid_requirement)
         return false;
       return static_cast<const RegionRequirement&>(*this) <
-             static_cast<const OutputRequirement&>(rhs);
+             static_cast<const RegionRequirement&>(rhs);
     }
 
     /////////////////////////////////////////////////////////////
