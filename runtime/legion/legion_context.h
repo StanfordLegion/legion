@@ -1719,12 +1719,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
       public:
         DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
-             AddressSpaceID space, VersionInfo *version_info, RtUserEvent done);
+                               AddressSpaceID space, VersionInfo *version_info,
+                               RtUserEvent done, const FieldMask *mask = NULL);
       public:
         VersionManager *const target;
-        const AddressSpaceID target_space;
         VersionInfo *const version_info;
+        FieldMask *const request_mask;
         const RtUserEvent done_event;
+        const AddressSpaceID target_space;
       };
     public:
       enum ReplicateAPICall {

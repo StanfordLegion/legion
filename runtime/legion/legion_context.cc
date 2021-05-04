@@ -18550,9 +18550,6 @@ namespace Legion {
 
       RegionNode *node = runtime->forest->get_node(handle);
       VersionInfo *result_info = new VersionInfo();
-      // Need this for the terrible case where the region is empty and
-      // we might not find equivalence sets for all the fields
-      result_info->relax_valid_mask(request_mask);
       std::set<RtEvent> ready_events;
       node->perform_versioning_analysis(tree_context.get_id(), this,
           result_info, request_mask, opid, original_source, ready_events);
@@ -18565,13 +18562,16 @@ namespace Legion {
         const RtEvent ready = Runtime::merge_events(ready_events);
         if (ready.exists() && !ready.has_triggered())
         {
-          DeferDisjointCompleteResponseArgs args(opid, target,
-                        target_space, result_info, done_event);
+          DeferDisjointCompleteResponseArgs args(opid, target, target_space,
+                                      result_info, done_event, &request_mask);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, ready);
           return;
         }
       }
+      // Need this for the terrible case where the region is empty and
+      // we might not find equivalence sets for all the fields
+      result_info->relax_valid_mask(request_mask);
       finalize_disjoint_complete_response(runtime, opid, target, target_space,
                                           result_info, done_event);
     }
@@ -18627,9 +18627,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplicateContext::DeferDisjointCompleteResponseArgs::
       DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
-                      AddressSpaceID s, VersionInfo *info, RtUserEvent d)
+      AddressSpaceID s, VersionInfo *info, RtUserEvent d, const FieldMask *mask)
       : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
-        target_space(s), version_info(info), done_event(d)
+        version_info(info), request_mask((mask == NULL) ? NULL :
+            new FieldMask(*mask)), done_event(d), target_space(s)
     //--------------------------------------------------------------------------
     {
     }
@@ -18641,6 +18642,12 @@ namespace Legion {
     {
       const DeferDisjointCompleteResponseArgs *dargs =
         (const DeferDisjointCompleteResponseArgs*)args;
+      if (dargs->request_mask != NULL)
+      {
+        // Handle nasty nasty cases for empty regions
+        dargs->version_info->relax_valid_mask(*(dargs->request_mask));
+        delete dargs->request_mask;
+      }
       finalize_disjoint_complete_response(runtime, dargs->provenance, 
        dargs->target,dargs->target_space,dargs->version_info,dargs->done_event);
     }
