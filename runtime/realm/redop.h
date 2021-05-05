@@ -135,7 +135,7 @@ namespace Realm {
       }
     };
 
-#if defined(REALM_USE_CUDA) && defined(__NVCC__)
+#if defined(REALM_USE_CUDA) && defined(__CUDACC__)
     // with a cuda-capable compiler, we'll automatically add cuda reduction
     //  kernels if the REDOP class defines has_cuda_reductions AND it's true
     // this requires a bunch of SFINAE template-fu
@@ -184,7 +184,7 @@ namespace Realm {
         cpu_apply_nonexcl_fn = &ReductionKernels::cpu_apply_wrapper<REDOP, false>;
         cpu_fold_excl_fn = &ReductionKernels::cpu_fold_wrapper<REDOP, true>;
         cpu_fold_nonexcl_fn = &ReductionKernels::cpu_fold_wrapper<REDOP, false>;
-#if defined(REALM_USE_CUDA) && defined(__NVCC__)
+#if defined(REALM_USE_CUDA) && defined(__CUDACC__)
         // if REDOP defines/sets 'has_cuda_reductions' to true, try to
         //  automatically build wrappers for apply_cuda<> and fold_cuda<>
         MaybeAddCudaReductions<REDOP, HasHasCudaReductions<REDOP>::value>::if_member_exists(this);

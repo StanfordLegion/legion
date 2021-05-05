@@ -22,7 +22,7 @@ namespace Realm {
 
   namespace Cuda {
 
-#ifdef __NVCC__
+#ifdef __CUDACC__
     // the ability to add CUDA kernels to a reduction op is only available
     //  when using a compiler that understands CUDA
     namespace ReductionKernels {

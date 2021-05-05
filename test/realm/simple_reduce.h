@@ -44,7 +44,7 @@ public:
     }
   }
 
-#ifdef __NVCC__
+#ifdef __CUDACC__
   static const bool has_cuda_reductions = true;
 
   // device methods for CUDA
