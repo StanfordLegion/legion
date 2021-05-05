@@ -36,8 +36,8 @@ namespace Realm {
       {
         size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
         for(size_t idx = tid; tid < count; tid += blockDim.x * gridDim.x)
-          redop.apply_cuda<EXCL>(*reinterpret_cast<typename REDOP::LHS *>(lhs_base + idx * lhs_stride),
-                                 *reinterpret_cast<const typename REDOP::RHS *>(rhs_base + idx * rhs_stride));
+          redop.template apply_cuda<EXCL>(*reinterpret_cast<typename REDOP::LHS *>(lhs_base + idx * lhs_stride),
+                                          *reinterpret_cast<const typename REDOP::RHS *>(rhs_base + idx * rhs_stride));
       }
 
       template <typename REDOP, bool EXCL>
@@ -50,8 +50,8 @@ namespace Realm {
       {
         size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
         for(size_t idx = tid; tid < count; tid += blockDim.x * gridDim.x)
-          redop.fold_cuda<EXCL>(*reinterpret_cast<typename REDOP::RHS *>(rhs1_base + idx * rhs1_stride),
-                                *reinterpret_cast<const typename REDOP::RHS *>(rhs2_base + idx * rhs2_stride));
+          redop.template fold_cuda<EXCL>(*reinterpret_cast<typename REDOP::RHS *>(rhs1_base + idx * rhs1_stride),
+                                         *reinterpret_cast<const typename REDOP::RHS *>(rhs2_base + idx * rhs2_stride));
       }
     };
 
