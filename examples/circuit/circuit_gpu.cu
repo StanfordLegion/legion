@@ -103,7 +103,7 @@ void calc_new_currents_kernel(Point<1> first,
     Point<1> out_ptr = fa_out_ptr[wire_ptr];
     PointerLocation out_loc = fa_out_loc[wire_ptr];
     temp_v[WIRE_SEGMENTS] = 
-      find_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, in_ptr, in_loc);
+      find_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, out_ptr, out_loc);
 
     // Solve the RLC model iteratively
     float inductance = fa_inductance[wire_ptr];
