@@ -416,21 +416,26 @@ namespace Realm {
 	} else
 
 	// 3) anything else - walk rectangles and count/union those that
-	//   overlap our bounds - if only 1, we can drop the sparsity map
+	//   overlap our bounds - if only 1 or if the volume inside the
+        //   tightened bounds equals the bounds themselves, we can drop
+        //   the sparsity map
 	{
 	  size_t overlap_count = 0;
+          size_t volume_sum = 0;
 	  bool need_sparsity = false;
 	  result = IndexSpace<N,T>::make_empty();
 	  for(size_t i = 0; i < entries.size(); i++) {
 	    Rect<N,T> isect = bounds.intersection(entries[i].bounds);
 	    if(!isect.empty()) {
 	      overlap_count++;
+              volume_sum += isect.volume();
 	      result.bounds = result.bounds.union_bbox(isect);
 	      if(entries[i].sparsity.exists() || (entries[i].bitmap != 0))
 		need_sparsity = true;
 	    }
 	  }
-	  if((overlap_count > 1) || need_sparsity)
+	  if(need_sparsity ||
+             ((overlap_count > 1) && (result.bounds.volume() > volume_sum)))
 	    result.sparsity = sparsity;
 	}
 
