@@ -336,7 +336,7 @@ impl State {
         kinds
     }
 
-    fn emit_utilization_tsv<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+    fn emit_utilization_tsv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let (timepoint, proc_count) = self.group_node_proc_kind_timepoints();
 
         let nodes = self.get_nodes();
@@ -452,15 +452,13 @@ fn write_file<P: AsRef<Path>>(path: P, content: &[u8]) -> io::Result<()> {
 }
 
 pub fn emit_interactive_visualization<P: AsRef<Path>>(
-    state: &mut State,
+    state: &State,
     path: P,
     force: bool,
     show_procs: bool,
     show_channels: bool,
     show_instances: bool,
 ) -> io::Result<()> {
-    state.assign_colors();
-
     let path = create_unique_dir(path, force)?;
     println!(
         "Generating interactive visualization files in directory {:?}",

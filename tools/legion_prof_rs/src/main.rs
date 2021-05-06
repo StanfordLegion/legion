@@ -84,6 +84,7 @@ fn main() -> io::Result<()> {
         emit_trace(&mut state, output, force)?;
     }
     if !statistics && !trace {
+        state.assign_colors();
         emit_interactive_visualization(&mut state, output, force, true, true, true)?;
     }
 
