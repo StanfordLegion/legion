@@ -101,16 +101,16 @@ namespace Legion {
     Memory PhysicalInstance::get_location(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
-      return impl->as_instance_manager()->get_memory();
+      return impl->as_physical_manager()->get_memory();
     }
 
     //--------------------------------------------------------------------------
     unsigned long PhysicalInstance::get_instance_id(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
       return impl->get_instance(DomainPoint()).id;
     }
@@ -119,16 +119,16 @@ namespace Legion {
     size_t PhysicalInstance::get_instance_size(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
-      return impl->as_instance_manager()->get_instance_size();
+      return impl->as_physical_manager()->get_instance_size();
     }
 
     //--------------------------------------------------------------------------
     Domain PhysicalInstance::get_instance_domain(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return Domain::NO_DOMAIN;
       Internal::ApEvent ready;
       Domain domain = impl->instance_domain->get_domain(ready, true);
@@ -140,7 +140,7 @@ namespace Legion {
     FieldSpace PhysicalInstance::get_field_space(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return FieldSpace::NO_SPACE;
       return impl->field_space_node->handle;
     }
@@ -149,7 +149,7 @@ namespace Legion {
     RegionTreeID PhysicalInstance::get_tree_id(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
       return impl->tree_id;
     }
@@ -158,7 +158,7 @@ namespace Legion {
     LayoutConstraintID PhysicalInstance::get_layout_id(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
       return impl->layout->constraints->layout_id;
     }
@@ -167,7 +167,7 @@ namespace Legion {
     bool PhysicalInstance::exists(bool strong_test /*= false*/) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return false;
       // Check to see if it still exists for now, maybe in the future
       // we could do a full check to see if it still exists on its owner node
@@ -180,7 +180,7 @@ namespace Legion {
     bool PhysicalInstance::is_normal_instance(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return false;
       return !impl->is_reduction_manager();
     }
@@ -198,7 +198,7 @@ namespace Legion {
     bool PhysicalInstance::is_reduction_instance(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return false;
       return impl->is_reduction_manager();
     }
@@ -207,7 +207,7 @@ namespace Legion {
     bool PhysicalInstance::is_external_instance(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return false;
       return impl->is_external_instance();
     }
@@ -216,7 +216,7 @@ namespace Legion {
     bool PhysicalInstance::is_collective_instance(void) const
     //--------------------------------------------------------------------------
     {
-      if ((impl == NULL) || !impl->is_instance_manager())
+      if ((impl == NULL) || !impl->is_physical_manager())
         return false;
       return impl->is_collective_manager();
     }

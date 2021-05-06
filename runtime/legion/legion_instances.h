@@ -140,18 +140,18 @@ namespace Legion {
                                             AddressSpaceID logical_owner) = 0;
     public:
       inline bool is_reduction_manager(void) const;
-      inline bool is_instance_manager(void) const;
+      inline bool is_physical_manager(void) const;
       inline bool is_virtual_manager(void) const;
       inline bool is_external_instance(void) const;
       inline bool is_collective_manager(void) const;
-      inline PhysicalManager* as_instance_manager(void) const;
+      inline PhysicalManager* as_physical_manager(void) const;
       inline VirtualManager* as_virtual_manager(void) const;
       inline IndividualManager* as_individual_manager(void) const;
       inline CollectiveManager* as_collective_manager(void) const;
     public:
       static inline DistributedID encode_instance_did(DistributedID did,
                         bool external, bool reduction, bool collective);
-      static inline bool is_instance_did(DistributedID did);
+      static inline bool is_physical_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_external_did(DistributedID did);
       static inline bool is_collective_did(DistributedID did);
@@ -169,11 +169,7 @@ namespace Legion {
         { if (layout != NULL) layout->remove_space_fields(fields);
           else fields.clear(); }
     public:
-      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
-      bool meets_regions(const std::vector<LogicalRegion> &regions,
-                         bool tight_region_bounds = false) const;
-      bool meets_expression(IndexSpaceExpression *expr, 
-                            bool tight_bounds = false) const;
+      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const; 
       bool entails(LayoutConstraints *constraints, const DomainPoint &key,
                    const LayoutConstraint **failed_constraint) const;
       bool entails(const LayoutConstraintSet &constraints, 
@@ -298,6 +294,11 @@ namespace Legion {
                               RtEvent collect, std::set<ApEvent> &to_collect, 
                               bool &add_ref, bool &remove_ref);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
+    public:
+      bool meets_regions(const std::vector<LogicalRegion> &regions,
+                         bool tight_region_bounds = false) const;
+      bool meets_expression(IndexSpaceExpression *expr, 
+                            bool tight_bounds = false) const;
     protected:
       void prune_gc_events(void);
     public: 
@@ -777,18 +778,18 @@ namespace Legion {
               DistributedID did, bool external, bool reduction, bool collective)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, INSTANCE_MANAGER_DC | 
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHYSICAL_MANAGER_DC | 
                                         (external ? EXTERNAL_CODE : 0) | 
                                         (reduction ? REDUCTION_CODE : 0) |
                                         (collective ? COLLECTIVE_CODE : 0));
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline bool InstanceManager::is_instance_did(DistributedID did)
+    /*static*/ inline bool InstanceManager::is_physical_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
       return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xF) == 
-                                                        INSTANCE_MANAGER_DC);
+                                                        PHYSICAL_MANAGER_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -796,7 +797,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != INSTANCE_MANAGER_DC)
+      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & REDUCTION_CODE) != 0);
     }
@@ -806,7 +807,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != INSTANCE_MANAGER_DC)
+      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & EXTERNAL_CODE) != 0);
     }
@@ -816,7 +817,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != INSTANCE_MANAGER_DC)
+      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & COLLECTIVE_CODE) != 0);
     }
@@ -829,10 +830,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool InstanceManager::is_instance_manager(void) const
+    inline bool InstanceManager::is_physical_manager(void) const
     //--------------------------------------------------------------------------
     {
-      return is_instance_did(did);
+      return is_physical_did(did);
     }
 
     //--------------------------------------------------------------------------
@@ -857,11 +858,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline PhysicalManager* InstanceManager::as_instance_manager(void) const
+    inline PhysicalManager* InstanceManager::as_physical_manager(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_instance_manager());
+      assert(is_physical_manager());
 #endif
       return static_cast<PhysicalManager*>(const_cast<InstanceManager*>(this));
     }

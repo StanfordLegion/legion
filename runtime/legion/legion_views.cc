@@ -3842,9 +3842,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(manager->is_instance_manager());
+      assert(manager->is_physical_manager());
 #endif
-      PhysicalManager *inst_manager = manager->as_instance_manager();
+      PhysicalManager *inst_manager = manager->as_physical_manager();
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))

@@ -1382,7 +1382,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
-        PhysicalManager *manager = ref.get_instance_manager();
+        PhysicalManager *manager = ref.get_physical_manager();
         if (!manager->has_visible_from(visible_filter))
           continue;
         input_valid.resize(next_index+1);
@@ -3600,7 +3600,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        PhysicalManager *manager = chosen_instances[idx].get_instance_manager();
+        PhysicalManager *manager = chosen_instances[idx].get_physical_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_inline' "
@@ -3629,7 +3629,7 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          if (!chosen_instances[idx].get_manager()->is_instance_manager())
+          if (chosen_instances[idx].get_manager()->is_reduction_manager())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of "
                           "'map_inline' on mapper %s. Mapper selected an "
@@ -6060,7 +6060,7 @@ namespace Legion {
         InstanceManager *man = ref.get_manager();
         if (man->is_virtual_manager())
           continue;
-        PhysicalManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_physical_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
@@ -6095,7 +6095,7 @@ namespace Legion {
       {
         if ((REQ_TYPE == SRC_REQ) && (int(idx) == composite_idx))
           continue;
-        if (!targets[idx].get_manager()->is_instance_manager())
+        if (!targets[idx].get_manager()->is_physical_manager())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper specified an illegal "
@@ -14388,7 +14388,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
-        PhysicalManager *manager = mapped_instances[idx].get_instance_manager();
+        PhysicalManager *manager = mapped_instances[idx].get_physical_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
@@ -17035,7 +17035,7 @@ namespace Legion {
       }
       // Register this instance with the memory manager
       PhysicalManager *external_manager = 
-        external_instance.get_instance_manager();
+        external_instance.get_physical_manager();
       const RtEvent attached = external_manager->attach_external_instance();
       if (attached.exists())
         attached.wait();
@@ -18358,7 +18358,7 @@ namespace Legion {
       // them valid through the end of mapping them, we'll release the valid
       // references when we are done mapping
       WrapperReferenceMutator mutator(map_applied_conditions);
-      PhysicalManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_physical_manager();
       if (!manager->is_external_instance())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation (ID %lld) performed in "
@@ -18459,7 +18459,7 @@ namespace Legion {
       assert(references.size() == 1);
 #endif
       const InstanceRef &reference = references[0];
-      PhysicalManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_physical_manager();
       // We can remove the acquire reference that we added after we're mapped
       if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
         delete manager;

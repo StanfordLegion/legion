@@ -1089,6 +1089,86 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    inline bool IndexSpaceExpression::meets_layout_expression_internal(
+                          IndexSpaceExpression *space_expr, bool tight_bounds,
+                          const Rect<DIM,T> *piece_list, size_t piece_list_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(type_tag == space_expr->type_tag);
+#endif
+      // See if this an convex hull or a piece list case
+      if (piece_list == NULL)
+      {
+        // Get the bounds for each of them, can ignore ready events
+        // since we're just going to be looking at the bounds
+        Realm::IndexSpace<DIM,T> local, other;
+        get_expr_index_space(&local, type_tag, true/*tight*/);
+        space_expr->get_expr_index_space(&other, type_tag, true/*tight*/);
+        // Check to see if we contain the space expression
+        if (!local.bounds.contains(other.bounds))
+          return false;
+        // If tight, check to see if they are equivalent
+        if (tight_bounds)
+          return local.bounds == other.bounds;
+        return true;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(piece_list_size > 0);
+#endif
+        // Iterate the rectangles in the space expr over the piece list
+        // and compute the intersection volume summary
+        // Note that this assumes that the rectangles in the piece list
+        // are all non-overlapping with each other
+        Realm::IndexSpace<DIM,T> other;
+        const ApEvent ready =
+          space_expr->get_expr_index_space(&other, type_tag, true/*tight*/);
+        if (ready.exists() && !ready.has_triggered_faultignorant())
+          ready.wait_faultignorant();
+        size_t space_volume = 0; 
+        size_t overlap_volume = 0;
+        for (Realm::IndexSpaceIterator<DIM,T> itr(other); itr.valid; itr.step())
+        {
+          size_t local_volume = itr.rect.volume();
+          space_volume += local_volume;
+          for (unsigned idx = 0; idx < piece_list_size; idx++)
+          {
+            const Rect<DIM,T> overlap = piece_list[idx].intersection(itr.rect);
+            size_t volume = overlap.volume();
+            if (volume == 0)
+              continue;
+            overlap_volume += volume;
+            local_volume -= volume;
+            if (local_volume == 0)
+              break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(overlap_volume <= space_volume);
+#endif
+        // If we didn't cover all the points in the space then we can't meet
+        if (overlap_volume < space_volume)
+          return false;
+        if (tight_bounds)
+        {
+          // Check the total volume of all the pieces
+          size_t piece_volume = 0;
+          for (unsigned idx = 0; idx < piece_list_size; idx++)
+            piece_volume += piece_list[idx].volume();
+#ifdef DEBUG_LEGION
+          assert(space_volume <= piece_volume);
+#endif
+          // Only meets if they have exactly the same points
+          return (space_volume == piece_volume);
+        }
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     inline IndexSpaceExpression*
               IndexSpaceExpression::find_congruent_expression_internal(
                                    std::set<IndexSpaceExpression*> &expressions)
@@ -1690,6 +1770,21 @@ namespace Legion {
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                  compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+    }
+    
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceOperationT<DIM,T>::meets_layout_expression(
+                            IndexSpaceExpression *space_expr, bool tight_bounds,
+                            const void *piece_list, size_t piece_list_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((piece_list_size % sizeof(Rect<DIM,T>)) == 0);
+#endif
+      return meets_layout_expression_internal<DIM,T>(space_expr, tight_bounds,
+                                  static_cast<const Rect<DIM,T>*>(piece_list),
+                                  piece_list_size / sizeof(Rect<DIM,T>));
     }
 
     //--------------------------------------------------------------------------
@@ -5181,6 +5276,21 @@ namespace Legion {
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                  compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::meets_layout_expression(
+                            IndexSpaceExpression *space_expr, bool tight_bounds,
+                            const void *piece_list, size_t piece_list_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((piece_list_size % sizeof(Rect<DIM,T>)) == 0);
+#endif
+      return meets_layout_expression_internal<DIM,T>(space_expr, tight_bounds,
+                                  static_cast<const Rect<DIM,T>*>(piece_list),
+                                  piece_list_size / sizeof(Rect<DIM,T>));
     }
 
     //--------------------------------------------------------------------------

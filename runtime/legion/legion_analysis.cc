@@ -14713,20 +14713,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      if (!manager->is_instance_manager())
+      if (!manager->is_physical_manager())
         return Memory::NO_MEMORY;
-      return manager->as_instance_manager()->get_memory();
+      return manager->as_physical_manager()->get_memory();
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* InstanceRef::get_instance_manager(void) const
+    PhysicalManager* InstanceRef::get_physical_manager(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
-      assert(manager->is_instance_manager());
+      assert(manager->is_physical_manager());
 #endif
-      return manager->as_instance_manager();
+      return manager->as_physical_manager();
     }
 
     //--------------------------------------------------------------------------

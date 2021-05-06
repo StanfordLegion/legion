@@ -2215,7 +2215,7 @@ namespace Legion {
         const InstanceRef &ref = references[idx];
         if (ref.is_field_set(fid))
         {
-          PhysicalManager *manager = ref.get_instance_manager();
+          PhysicalManager *manager = ref.get_physical_manager();
           if (privilege_only)
           {
             IndexSpaceNode *privilege_node =
@@ -2379,7 +2379,7 @@ namespace Legion {
         const InstanceRef &ref = references[idx];
         if (ref.is_field_set(fid))
         {
-          PhysicalManager *manager = ref.get_instance_manager();
+          PhysicalManager *manager = ref.get_physical_manager();
           if (check_field_size)
           {
             const size_t actual_size = 
@@ -20318,7 +20318,7 @@ namespace Legion {
         dc = find_or_request_distributed_collectable<
           CollectiveManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
-      else if (InstanceManager::is_instance_did(did))
+      else if (InstanceManager::is_physical_did(did))
         dc = find_or_request_distributed_collectable<
           IndividualManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
