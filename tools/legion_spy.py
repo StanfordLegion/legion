@@ -2867,6 +2867,9 @@ class IndexPartition(object):
     def set_disjoint(self, disjoint):
         self.disjoint = disjoint
 
+    def set_complete(self, complete):
+        self.complete = complete
+
     def set_name(self, name):
         self.name = name
 
@@ -2896,28 +2899,45 @@ class IndexPartition(object):
             # Recurse down the tree too
             child.check_partition_properties()
         # Check disjointness
-        if self.disjoint:
-            previous = PointSet()
-            for child in itervalues(self.children):
-                child_shape = child.get_point_set()
-                if not (child_shape & previous).empty():
-                    print(('WARNING: %s was logged disjoint '+
+        # We always compute disjointness and fill it in if
+        # it wasnt' computed previously
+        previous = PointSet()
+        aliased = False
+        for child in itervalues(self.children):
+            child_shape = child.get_point_set()
+            if not (child_shape & previous).empty():
+                aliased = True
+                if self.disjoint:
+                    print(('ERROR: %s was labelled disjoint '+
                             'but there are overlapping children. This '+
                             'is definitely an application bug.') % self)
-                    if self.state.assert_on_warning:
+                    if self.state.assert_on_error:
                         assert False
-                    break
-                previous |= child_shape
-        if self.complete:
+                break
+            previous |= child_shape
+        if self.disjoint is not None:
+            if not self.disjoint and not aliased:
+                print(('WARNING: %s was labelled aliased '+
+                        'but there are no overlapping children. This '+
+                        'could lead to a performance bug.') % self)
+        else:
+            self.disjoint = not aliased
+        if self.complete is not None:
             total = PointSet()
             for child in itervalues(self.children):
                 total |= child.get_point_set()
-            if len(total) != len(self.parent.get_point_set()):
-                print(('WARNING: %s was logged complete '+
-                        'but there are missing points. This '+
-                        'is definitely an application bug.') % self)
-                if self.state.assert_on_warning:
-                    assert False
+            if self.complete:
+                if len(total) != len(self.parent.get_point_set()):
+                    print(('ERROR: %s was labelled complete '+
+                            'but there are missing points. This '+
+                            'is definitely an application bug.') % self)
+                    if self.state.assert_on_error:
+                        assert False
+            else:
+                if len(total) == len(self.parent.get_point_set()):
+                    print(('WARNING: %s was labelled incomplete '+
+                            'but actually covers all points. This '+
+                            'could lead to a performance bug.') % self)
 
     def update_index_sets(self, index_sets, done, total_spaces):
         for child in itervalues(self.children):
@@ -10088,8 +10108,8 @@ top_index_pat            = re.compile(
 index_name_pat           = re.compile(
     prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_part_pat           = re.compile(
-    prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) "+
-           "(?P<color>[0-9]+)")
+    prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-2]) "+
+           "(?P<complete>[0-2]) (?P<color>[0-9]+)")
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_subspace_pat       = re.compile(
@@ -11030,7 +11050,12 @@ def parse_legion_spy_line(line, state):
         color= Point(1)
         color.vals[0] = int(m.group('color'))
         part.set_parent(parent, color)
-        part.set_disjoint(True if int(m.group('disjoint')) == 1 else False)
+        disjoint = int(m.group('disjoint'))
+        if disjoint > 0:
+            part.set_disjoint(True if disjoint == 2 else False)
+        complete = int(m.group('complete'))
+        if complete > 0:
+            part.set_complete(True if complete == 2 else False)
         return True
     m = index_part_name_pat.match(line)
     if m is not None:

@@ -218,6 +218,9 @@ namespace Legion {
         node = create_node(pid, parent_node, color_node, partition_color,
                     disjointness_event, complete, did, partition_ready, 
                     partial_pending, RtEvent::NO_RT_EVENT, applied);
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
+                                         complete, partition_color);
       }
       else
       {
@@ -234,8 +237,8 @@ namespace Legion {
                     disjoint, complete, did, partition_ready, partial_pending, 
                     RtEvent::NO_RT_EVENT, applied);
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-                                         partition_color);
+          LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
+                                         complete, partition_color);
 	if (runtime->profiler != NULL)
 	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
 						    partition_color);
@@ -9274,10 +9277,6 @@ namespace Legion {
       // Once we get here, we know the disjointness result so we can
       // trigger the event saying when the disjointness value is ready
       Runtime::trigger_event(ready_event);
-      // Record the result for Legion Spy
-      if (runtime->legion_spy_enabled)
-          LegionSpy::log_index_partition(parent->handle.id, handle.id, 
-                                         disjoint, color);
       if (runtime->profiler != NULL)
 	runtime->profiler->record_index_partition(parent->handle.id, handle.id,
             disjoint, color);
