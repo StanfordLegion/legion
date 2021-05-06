@@ -4,7 +4,7 @@
 // CPU/GPU implementation of DE Shaw's Philox 2x32 PRNG
 
 #ifndef CUDAPREFIX
-#ifdef __NVCC__
+#ifdef __CUDACC__
 #define CUDAPREFIX __device__ __forceinline__
 #else
 #define CUDAPREFIX
@@ -24,12 +24,12 @@ public:
   CUDAPREFIX
   static u64 rand_raw(u32 key, u32 ctr_hi, u32 ctr_lo)
   {
-#ifdef __NVCC__
+#ifdef __CUDACC__
     #pragma unroll
 #endif
     for(int i = 0; i < ROUNDS; i++) {
       u32 prod_hi, prod_lo;
-#ifdef __NVCC__
+#ifdef __CUDACC__
       prod_hi = __umulhi(ctr_lo, PHILOX_M2x32_0x);
       prod_lo = ctr_lo * PHILOX_M2x32_0x;
 #else
@@ -51,7 +51,7 @@ public:
     // need 32 random bits
     u32 bits = rand_raw(key, ctr_hi, ctr_lo);
     // now treat them as a 0.32 fixed-point value, multiply by n and truncate
-#ifdef __NVCC__
+#ifdef __CUDACC__
     return __umulhi(bits, n);
 #else
     return (((u64)n) * ((u64)bits)) >> 32;

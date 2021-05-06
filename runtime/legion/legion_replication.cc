@@ -6335,7 +6335,7 @@ namespace Legion {
         // Once we're ready to map we can tell the memory manager that
         // this instance can be safely acquired for use
         IndividualManager *external_manager = 
-          external_instance.get_instance_manager()->as_individual_manager();
+          external_instance.get_physical_manager()->as_individual_manager();
         MemoryManager *memory_manager = external_manager->memory_manager;
         memory_manager->attach_external_instance(external_manager);
         RegionNode *node = runtime->forest->get_node(requirement.region);
@@ -6433,7 +6433,7 @@ namespace Legion {
           // Once we're ready to map we can tell the memory manager that
           // this instance can be safely acquired for use
           IndividualManager *external_manager = 
-            external_instance.get_instance_manager()->as_individual_manager();
+            external_instance.get_physical_manager()->as_individual_manager();
           MemoryManager *memory_manager = external_manager->memory_manager;
           memory_manager->attach_external_instance(external_manager);
           // We can't broadcast the DID until after doing the attach
@@ -6593,7 +6593,7 @@ namespace Legion {
 #endif
       InstanceRef reference = references[0];
       // Check that this is actually a file
-      PhysicalManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_physical_manager();
       if (!manager->is_external_instance())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation (ID %lld) performed in "
@@ -6669,7 +6669,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < sources.size(); idx++)
       {
         const InstanceRef &ref = sources[idx];
-        PhysicalManager *manager = ref.get_instance_manager();
+        PhysicalManager *manager = ref.get_physical_manager();
         if (manager->is_external_instance())
           continue;
         if (manager->owner_space == runtime->address_space)
@@ -12911,7 +12911,7 @@ namespace Legion {
         for (unsigned idx2 = 0; idx2 < dids.size(); idx2++)
         {
           const Mapping::PhysicalInstance &inst = mappings[idx1][idx2];
-          PhysicalManager *manager = inst.impl->as_instance_manager();
+          PhysicalManager *manager = inst.impl->as_physical_manager();
           dids[idx2] = manager->did;
           if (held_references.find(manager) != held_references.end())
             continue;
@@ -12975,7 +12975,7 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mapping.begin(); it != mapping.end(); it++)
         {
-          PhysicalManager *manager = it->impl->as_instance_manager();
+          PhysicalManager *manager = it->impl->as_physical_manager();
           // If we already had a reference to this instance
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())
@@ -13157,7 +13157,7 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mappings[idx].begin(); it != mappings[idx].end(); it++)
         {
-          PhysicalManager *manager = it->impl->as_instance_manager();
+          PhysicalManager *manager = it->impl->as_physical_manager();
           if (held_references.find(manager) != held_references.end())
             continue;
           manager->add_base_valid_ref(REPLICATION_REF, &mutator);
@@ -13259,7 +13259,7 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mapping.begin(); it != mapping.end(); it++)
         {
-          PhysicalManager *manager = it->impl->as_instance_manager();
+          PhysicalManager *manager = it->impl->as_physical_manager();
           // If we already had a reference to this instance
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())

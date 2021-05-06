@@ -1036,7 +1036,7 @@ namespace Legion {
                                   ReferenceMutator *mutator) const;
     public:
       Memory get_memory(void) const;
-      PhysicalManager* get_instance_manager(void) const;
+      PhysicalManager* get_physical_manager(void) const;
     public:
       bool is_field_set(FieldID fid) const;
       LegionRuntime::Accessor::RegionAccessor<

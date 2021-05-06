@@ -213,7 +213,7 @@ namespace Realm {
 
     // in the common case, we won't need to add levels to the tree - grab the root (no lock)
     // and see if it covers the range that includes our index
-    intptr_t rlval = root_and_level.load();
+    intptr_t rlval = root_and_level.load_acquire();
     NodeBase *n = extract_root(rlval);
     int n_level = extract_level(rlval);
 #ifdef DEBUG_REALM
@@ -361,13 +361,12 @@ namespace Realm {
       IT to_lookup = next_alloc;
       next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS; // do this before letting go of lock
       lock.unlock();
-#ifndef NDEBUG
       typename DynamicTable<ALLOCATOR>::ET *dummy =
-#endif
         table.lookup_entry(to_lookup, owner, this);
       assert(dummy != 0);
       // can't actually use dummy because we let go of lock - retake lock
       //  and hopefully find non-empty list next time
+      (void)dummy;
       lock.lock();
     }
   }

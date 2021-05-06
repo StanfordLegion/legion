@@ -51,21 +51,23 @@ processor_kinds = {
 
 # Make sure this is up to date with lowlevel.h
 memory_kinds = {
-    0 : 'GASNet Global',
-    1 : 'System',
-    2 : 'Registered',
-    3 : 'Socket',
-    4 : 'Zero-Copy',
-    5 : 'Framebuffer',
-    6 : 'Disk',
-    7 : 'HDF5',
-    8 : 'File',
-    9 : 'L3 Cache',
-    10 : 'L2 Cache',
-    11 : 'L1 Cache',
+    0 : 'No MemKind',
+    1 : 'GASNet Global',
+    2 : 'System',
+    3 : 'Registered',
+    4 : 'Socket',
+    5 : 'Zero-Copy',
+    6 : 'Framebuffer',
+    7 : 'Disk',
+    8 : 'HDF5',
+    9 : 'File',
+    10 : 'L3 Cache',
+    11 : 'L2 Cache',
+    12 : 'L1 Cache',
 }
 # Make sure this is up to date with memory_kinds
 memory_node_proc = {
+    'No MemKind': 'None',
     'GASNet Global': 'None',
     'System': 'Node_id',
     'Registered': 'Node_id',
@@ -81,6 +83,7 @@ memory_node_proc = {
 }
 
 memory_kinds_abbr = {
+    'No MemKind': ' none',
     'GASNet Global': ' glob',
     'System': ' sys',
     'Registered': ' reg',

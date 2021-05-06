@@ -366,7 +366,8 @@ namespace Realm {
 						    int max_overhead,
 						    std::vector<Rect<N,T> >& covering)
   {
-    assert(entries_valid);
+    if(!entries_valid.load_acquire())
+      assert(false);
 
     // start with a scan over all of our pieces see which ones are within
     //  the given bounds
@@ -688,7 +689,8 @@ namespace Realm {
   Event SparsityMapImpl<N,T>::make_valid(bool precise /*= true*/)
   {
     // early out
-    if(precise ? this->entries_valid : this->approx_valid)
+    if(precise ? this->entries_valid.load_acquire() :
+                 this->approx_valid.load_acquire())
       return Event::NO_EVENT;
 
     // take lock to get/create event cleanly
@@ -699,13 +701,14 @@ namespace Realm {
       AutoLock<> al(mutex);
 
       if(precise) {
-	if(!this->entries_valid) {
+	if(!this->entries_valid.load()) {
 	  // do we need to request the data?
 	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
-	    request_approx = !(this->approx_valid || approx_requested);
+	    request_approx = !(this->approx_valid.load() ||
+                               approx_requested);
 	    approx_requested = true;
 	    // can't use set_contributor_count, so directly set
 	    //  remaining_contributor_count to the 1 contribution we expect
@@ -722,7 +725,7 @@ namespace Realm {
 	  }
 	}
       } else {
-	if(!this->approx_valid) {
+	if(!this->approx_valid.load()) {
 	  // do we need to request the data?
 	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !approx_requested) {
 	    request_approx = true;
@@ -1117,7 +1120,8 @@ namespace Realm {
   bool SparsityMapImpl<N,T>::add_waiter(PartitioningMicroOp *uop, bool precise)
   {
     // early out
-    if(precise ? this->entries_valid : this->approx_valid)
+    if(precise ? this->entries_valid.load_acquire() :
+                 this->approx_valid.load_acquire())
       return false;
 
     // take lock and retest, and register if not ready
@@ -1128,7 +1132,7 @@ namespace Realm {
       AutoLock<> al(mutex);
 
       if(precise) {
-	if(!this->entries_valid) {
+	if(!this->entries_valid.load()) {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
@@ -1136,7 +1140,8 @@ namespace Realm {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
-	    request_approx = !(this->approx_valid || approx_requested);
+	    request_approx = !(this->approx_valid.load() ||
+                               approx_requested);
 	    approx_requested = true;
 	    // can't use set_contributor_count, so directly set
 	    //  remaining_contributor_count to the 1 contribution we expect
@@ -1146,7 +1151,7 @@ namespace Realm {
 	  }
 	}
       } else {
-	if(!this->approx_valid) {
+	if(!this->approx_valid.load()) {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
@@ -1185,14 +1190,14 @@ namespace Realm {
       remote_sharers.add(requestor);
 
       if(send_precise) {
-	if(this->entries_valid)
+	if(this->entries_valid.load())
 	  reply_precise = true;
 	else
 	  remote_precise_waiters.add(requestor);
       }
 
       if(send_approx) {
-	if(this->approx_valid)
+	if(this->approx_valid.load())
 	  reply_approx = true;
 	else
 	  remote_approx_waiters.add(requestor);
@@ -1208,12 +1213,15 @@ namespace Realm {
   {
     if(reply_approx) {
       // TODO
-      assert(this->approx_valid);
+      if(!this->approx_valid.load_acquire())
+        assert(false);
     }
 
     if(reply_precise) {
       log_part.info() << "sending precise data: sparsity=" << me << " target=" << requestor;
       
+      if(!this->entries_valid.load_acquire())
+        assert(false);
       // scan the entry list, sending bitmaps first and making a list of rects
       std::vector<Rect<N,T> > rects;
       for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = this->entries.begin();
@@ -1398,9 +1406,9 @@ namespace Realm {
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
     if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
-      assert(!this->approx_valid);
+      assert(!this->approx_valid.load());
       compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
-      this->approx_valid = true;
+      this->approx_valid.store_release(true);
     }
 
 #ifdef DEBUG_PARTITIONING
@@ -1420,8 +1428,8 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
 
-      assert(!this->entries_valid);
-      this->entries_valid = true;
+      assert(!this->entries_valid.load());
+      this->entries_valid.store_release(true);
       precise_requested = false;
       if(precise_ready_event.exists()) {
 	trigger_precise = precise_ready_event;

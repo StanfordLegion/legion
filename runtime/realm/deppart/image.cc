@@ -426,6 +426,7 @@ namespace Realm {
 	       (s >> approx_output_index) &&
 	       (s >> approx_output_op));
     assert(ok);
+    (void)ok;
   }
 
   template <int N, typename T, int N2, typename T2>

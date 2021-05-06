@@ -9595,7 +9595,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
             {
               const InstanceRef &src_ref = sources[idx2];
-              PhysicalManager *manager = src_ref.get_instance_manager();
+              PhysicalManager *manager = src_ref.get_physical_manager();
               const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
               assert(!(view_mask - user_mask)); // should be dominated
@@ -9627,7 +9627,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
             {
               const InstanceRef &src_ref = sources[idx2];
-              PhysicalManager *manager = src_ref.get_instance_manager();
+              PhysicalManager *manager = src_ref.get_physical_manager();
               const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
               assert(!(view_mask - user_mask)); // should be dominated
@@ -9973,7 +9973,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           // See if we can find it
-          PhysicalManager *manager = targets[idx].get_instance_manager();
+          PhysicalManager *manager = targets[idx].get_physical_manager();
           std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
@@ -9988,7 +9988,7 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               still_needed.begin(); it != still_needed.end(); it++)
         {
-          PhysicalManager *manager = targets[*it].get_instance_manager();
+          PhysicalManager *manager = targets[*it].get_physical_manager();
           target_views[*it] = create_instance_top_view(manager, local_space);
         }
       }

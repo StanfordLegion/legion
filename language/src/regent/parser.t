@@ -668,6 +668,14 @@ function parser.expr_prefix(p)
       has_parens = false,
     }
 
+  elseif p:nextif("nil") then
+    return ast.unspecialized.expr.Null {
+      pointer_type_expr = function() return niltype end,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+      has_parens = false,
+    }
+
   elseif p:nextif("null") then
     p:expect("(")
     local pointer_type_expr = p:luaexpr()

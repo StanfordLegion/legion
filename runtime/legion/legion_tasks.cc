@@ -1674,7 +1674,8 @@ namespace Legion {
           {
             std::vector<LogicalRegion> regions_to_check(1, 
                                 regions[it->first].region);
-            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+            PhysicalManager *phy = manager->as_physical_manager();
+            if (!phy->meets_regions(regions_to_check,true/*tight*/))
             {
               conflict_constraint = &constraints->specialized_constraint;
               break;
@@ -3142,8 +3143,7 @@ namespace Legion {
           std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
-            PhysicalManager *manager = 
-              result[idx2].get_manager()->as_instance_manager();
+            PhysicalManager *manager = result[idx2].get_physical_manager();
             if (!manager->meets_regions(regions_to_check))
               // Doesn't satisfy the region requirement
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3192,7 +3192,7 @@ namespace Legion {
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
-              PhysicalManager *manager = result[idx2].get_instance_manager();
+              PhysicalManager *manager = result[idx2].get_physical_manager();
               if (!manager->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -3218,7 +3218,7 @@ namespace Legion {
           else
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-              if (!result[idx2].get_manager()->is_instance_manager())
+              if (result[idx2].get_manager()->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper selected illegal "
@@ -4292,8 +4292,8 @@ namespace Legion {
                                         regions[idx].region);
           for (unsigned check_idx = 0; check_idx < result.size(); check_idx++)
           {
-            if (!result[check_idx].get_manager()->meets_regions(
-                                                      regions_to_check))
+            PhysicalManager *manager = result[check_idx].get_physical_manager();
+            if (!manager->meets_regions(regions_to_check))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
                             "'postmap_task' on mapper %s. Mapper specified an "
@@ -9057,7 +9057,7 @@ namespace Legion {
                 check_idx < chosen_instances.size(); check_idx++)
           {
             PhysicalManager *manager = 
-              chosen_instances[check_idx].get_manager()->as_instance_manager();
+              chosen_instances[check_idx].get_physical_manager();
             if (!manager->meets_regions(regions_to_check))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "

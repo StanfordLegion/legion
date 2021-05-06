@@ -1155,6 +1155,8 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL,
                            size_t *piece_list_size = NULL) = 0;
+      virtual bool meets_layout_expression(IndexSpaceExpression *expr,
+         bool tight_bounds, const void *piece_list, size_t piece_list_size) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions) = 0;
@@ -1257,6 +1259,10 @@ namespace Legion {
                                bool compact, LayoutConstraintKind *unsat_kind,
                                unsigned *unsat_index, void **piece_list = NULL,
                                size_t *piece_list_size = NULL) const;
+      template<int DIM, typename T>
+      inline bool meets_layout_expression_internal(
+                         IndexSpaceExpression *space_expr, bool tight_bounds,
+                         const Rect<DIM,T> *piece_list, size_t piece_list_size);
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
@@ -1430,6 +1436,8 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+      virtual bool meets_layout_expression(IndexSpaceExpression *expr,
+         bool tight_bounds, const void *piece_list, size_t piece_list_size);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
@@ -2383,6 +2391,8 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+      virtual bool meets_layout_expression(IndexSpaceExpression *expr,
+         bool tight_bounds, const void *piece_list, size_t piece_list_size);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);

@@ -1977,7 +1977,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->first->is_instance_view());
 #endif
-        InstanceManager *manager = it->first->as_instance_view()->get_manager();
+        PhysicalManager *manager = it->first->as_instance_view()->get_manager();
         if (manager->meets_regions(to_meet))
           targets.add_instance(InstanceRef(manager, it->second));
       }
@@ -3300,7 +3300,7 @@ namespace Legion {
           continue;
         if (man->is_virtual_manager())
           continue;
-        PhysicalManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_physical_manager();
         // Check to see if the region trees are the same
         if (req_tid != manager->tree_id)
           continue;
@@ -3361,7 +3361,7 @@ namespace Legion {
           has_virtual = true;
           continue;
         }
-        PhysicalManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_physical_manager();
         // Check to see if the region trees are the same
         if (req_tid != manager->tree_id)
         {
@@ -3456,7 +3456,7 @@ namespace Legion {
           has_composite = true;
           continue;
         }
-        PhysicalManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_physical_manager();
         // Check to see if the tree IDs are the same
         if (reg_tree != manager->tree_id)
         {
