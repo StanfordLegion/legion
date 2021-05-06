@@ -2172,37 +2172,50 @@ namespace Legion {
                                                          TaskContext *ctx) const
     //--------------------------------------------------------------------------
     {
-      const char *mem_names[] = {
-#define MEM_NAMES(name, desc) #name,
-          REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-        };
-      IndividualManager *manager = view->get_manager()->as_individual_manager();
-      FieldSpaceNode *field_space = manager->field_space_node;
-      Memory memory = manager->memory_manager->memory;
-      char *m = mask.to_string();
-      std::vector<FieldID> fields;
-      field_space->get_field_set(mask, ctx, fields);
-
       std::stringstream ss;
-      ss << "view: " << view << " in " << mem_names[memory.kind()]
-         << " memory " << std::hex << memory.id << std::dec
-         << ", Index expr: " << expr->expr_id
-         << ", Field Mask: " << m << ", Fields: ";
-      for (std::vector<FieldID>::const_iterator it =
-            fields.begin(); it != fields.end(); it++)
+      char *m = mask.to_string();
+      if (view->is_fill_view())
       {
-        if (it != fields.begin())
-          ss << ", ";
-        const void *name = NULL;
-        size_t name_size = 0;
-        if (field_space->retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG,
-              name, name_size, true/*can fail*/, false/*wait until*/))
+        ss << "fill view: " << view
+           << ", Index expr: " << expr->expr_id
+           << ", Field Mask: " << m;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(view->is_instance_view());
+#endif
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+        IndividualManager *manager =
+          view->get_manager()->as_individual_manager();
+        FieldSpaceNode *field_space = manager->field_space_node;
+        Memory memory = manager->memory_manager->memory;
+
+        std::vector<FieldID> fields;
+        field_space->get_field_set(mask, ctx, fields);
+
+        ss << "view: " << view << " in " << mem_names[memory.kind()]
+           << " memory " << std::hex << memory.id << std::dec
+           << ", Index expr: " << expr->expr_id
+           << ", Field Mask: " << m << ", Fields: ";
+        for (std::vector<FieldID>::const_iterator it =
+              fields.begin(); it != fields.end(); it++)
         {
-          ss << ((const char*)name) << " (" << *it << ")";
+          if (it != fields.begin())
+            ss << ", ";
+          const void *name = NULL;
+          size_t name_size = 0;
+          if (field_space->retrieve_semantic_information(
+                LEGION_NAME_SEMANTIC_TAG, name, name_size,
+                true/*can fail*/, false/*wait until*/))
+            ss << ((const char*)name) << " (" << *it << ")";
+          else
+            ss << *it;
         }
-        else
-          ss << *it;
       }
       return ss.str();
     }
