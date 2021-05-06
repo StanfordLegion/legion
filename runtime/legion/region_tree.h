@@ -1155,6 +1155,8 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL,
                            size_t *piece_list_size = NULL) = 0;
+      virtual IndexSpaceExpression* create_layout_expression(
+                           const void *piece_list, size_t piece_list_size) = 0;
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
          bool tight_bounds, const void *piece_list, size_t piece_list_size) = 0;
     public:
@@ -1260,6 +1262,11 @@ namespace Legion {
                                unsigned *unsat_index, void **piece_list = NULL,
                                size_t *piece_list_size = NULL) const;
       template<int DIM, typename T>
+      inline IndexSpaceExpression* create_layout_expression_internal(
+                               RegionTreeForest *context,
+                               const Realm::IndexSpace<DIM,T> &space,
+                               const Rect<DIM,T> *rects, size_t num_rects);
+      template<int DIM, typename T>
       inline bool meets_layout_expression_internal(
                          IndexSpaceExpression *space_expr, bool tight_bounds,
                          const Rect<DIM,T> *piece_list, size_t piece_list_size);
@@ -1297,6 +1304,7 @@ namespace Legion {
         INTERSECT_OP_KIND,
         DIFFERENCE_OP_KIND,
         REMOTE_EXPRESSION_KIND,
+        INSTANCE_EXPRESSION_KIND,
       };
     public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
@@ -1436,6 +1444,8 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+      virtual IndexSpaceExpression* create_layout_expression(
+                           const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
          bool tight_bounds, const void *piece_list, size_t piece_list_size);
     public:
@@ -1568,6 +1578,25 @@ namespace Legion {
       const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
+    };
+
+    /**
+     * \class InstanceExpression 
+     * This class stores an expression corresponding to the
+     * rectangles that represent a physical instance
+     */
+    template<int DIM, typename T>
+    class InstanceExpression : public IndexSpaceOperationT<DIM,T> {
+    public:
+      InstanceExpression(const Rect<DIM,T> *rects, size_t num_rects,
+                         RegionTreeForest *context);
+      InstanceExpression(const InstanceExpression<DIM,T> &rhs);
+      virtual ~InstanceExpression(void);
+    public:
+      InstanceExpression& operator=(const InstanceExpression &rhs);
+    public:
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+      virtual bool remove_operation(RegionTreeForest *forest);
     };
 
     /**
@@ -2391,6 +2420,8 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+      virtual IndexSpaceExpression* create_layout_expression(
+                           const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
          bool tight_bounds, const void *piece_list, size_t piece_list_size);
     public:

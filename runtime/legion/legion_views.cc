@@ -1361,7 +1361,7 @@ namespace Legion {
           if (overlap_volume == user_volume)
           {
             // Check for the cases where we dominated perfectly
-            if (overlap_volume == it->first->view_expr->get_volume())
+            if (overlap_volume == it->first->view_volume)
             {
 #ifdef ENABLE_VIEW_REPLICATION
               PhysicalUser *dominate_user = new PhysicalUser(usage,
