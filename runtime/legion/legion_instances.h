@@ -240,7 +240,8 @@ namespace Legion {
                       IndexSpaceExpression *index_domain, 
                       const void *piece_list, size_t piece_list_size,
                       RegionTreeID tree_id, ApEvent unique, 
-                      bool register_now, bool shadow_instance = false);
+                      bool register_now, bool shadow_instance = false,
+                      bool output_instance = false);
       virtual ~PhysicalManager(void);
     public:
       virtual ApEvent get_unique_event(void) const { return unique_event; }

@@ -738,12 +738,12 @@ namespace Legion {
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id, ApEvent u_event,
-                                     bool register_now, bool shadow)
+                                     bool register_now, bool shadow,bool output)
       : InstanceManager(ctx, owner_space, did, layout, node,
           // If we're on the owner node we need to produce the expression
           // that actually describes this points in this space
           // On remote nodes we'll already have it from the owner
-          (owner_space == ctx->runtime->address_space) ?
+          (owner_space == ctx->runtime->address_space) && !output ?
              index_domain->create_layout_expression(pl, pl_size) : index_domain,
           tree_id, register_now), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
@@ -1187,8 +1187,8 @@ namespace Legion {
            (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
-          instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
-        memory_manager(memory), instance(inst),
+          instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow,
+          (k == UNBOUND_INSTANCE_KIND)), memory_manager(memory), instance(inst),
         use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
