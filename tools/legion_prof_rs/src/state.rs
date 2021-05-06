@@ -107,6 +107,7 @@ pub enum ProcEntry {
     MetaTask(OpID, VariantID, usize),
     MapperCall(usize),
     RuntimeCall(usize),
+    ProfTask(usize)
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -146,7 +147,7 @@ pub struct Proc {
     pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<MetaTask>>,
     pub mapper_calls: Vec<MapperCall>,
     pub runtime_calls: Vec<RuntimeCall>,
-    prof_tasks: Vec<ProfTask>,
+    pub prof_tasks: Vec<ProfTask>,
     pub max_levels: u32,
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
@@ -178,7 +179,7 @@ impl Proc {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tasks.is_empty() && self.mapper_calls.is_empty() && self.runtime_calls.is_empty()
+        self.tasks.is_empty() && self.mapper_calls.is_empty() && self.runtime_calls.is_empty() && self.prof_tasks.is_empty()
     }
 
     pub fn entry(&self, entry: ProcEntry) -> (&Base, &TimeRange, &Waiters) {
@@ -198,6 +199,10 @@ impl Proc {
             ProcEntry::RuntimeCall(idx) => {
                 let call = &self.runtime_calls[idx];
                 (&call.base, &call.time_range, &call.waiters)
+            }
+            ProcEntry::ProfTask(idx) => {
+                let task = &self.prof_tasks.get(idx).unwrap();
+                (&task.base, &task.time_range, &task.waiters)
             }
         }
     }
@@ -219,6 +224,10 @@ impl Proc {
             ProcEntry::RuntimeCall(idx) => {
                 let call = &mut self.runtime_calls[idx];
                 (&mut call.base, &mut call.time_range, &mut call.waiters)
+            }
+            ProcEntry::ProfTask(idx) => {
+                let task = self.prof_tasks.get_mut(idx).unwrap();
+                (&mut task.base, &mut task.time_range, &mut task.waiters)
             }
         }
     }
@@ -313,6 +322,13 @@ impl Proc {
             let entry = ProcEntry::RuntimeCall(idx);
             add(&time, entry, &mut all_points, &mut points, &mut util_points);
             add_waiters(&runtime_call.waiters, entry, &mut util_points);
+        }
+
+        for (idx, prof_task) in self.prof_tasks.iter().enumerate() {
+            let time = &prof_task.time_range;
+            let entry = ProcEntry::ProfTask(idx);
+            add(&time, entry, &mut all_points, &mut points, &mut util_points);
+            add_waiters(&prof_task.waiters, entry, &mut util_points);
         }
 
         points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
@@ -1363,7 +1379,7 @@ impl RuntimeCall {
 #[derive(Debug)]
 pub struct ProfTask {
     base: Base,
-    op_id: OpID,
+    pub op_id: OpID,
     time_range: TimeRange,
     deps: NoDependencies,
     waiters: Waiters,

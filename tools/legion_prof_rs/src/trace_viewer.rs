@@ -83,6 +83,9 @@ pub fn emit_trace<P: AsRef<Path>>(state: &mut State, path: P, force: bool) -> io
                         .unwrap()
                         .name
                         .clone(),
+                    ProcEntry::ProfTask(idx) => {
+                        unimplemented!("There is not a simple way to display the name of a ProfTask")
+                    }
                 };
 
                 let default = Event {

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::state::{NodeID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp};
+use crate::state::{NodeID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp, Color};
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/timeline.js");
@@ -106,6 +106,7 @@ impl Proc {
                 .unwrap()
                 .name
                 .clone(),
+            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id)
         };
 
         let color = match point.entry {
@@ -139,6 +140,12 @@ impl Proc {
                 .unwrap()
                 .color
                 .unwrap(),
+            ProcEntry::ProfTask(idx) => {
+                // proftask color is hardcoded to
+                // self.color = '#FFC0CB'  # Pink
+                // FIXME don't hardcode this here
+                Color(0xFFC0CB)
+            }
         };
         let color = format!("#{:06x}", color);
 
