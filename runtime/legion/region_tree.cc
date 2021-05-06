@@ -252,6 +252,9 @@ namespace Legion {
             runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY,
               Runtime::protect_event(partition_ready)));
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
+                                         complete, partition_color);
       }
       else
       {
@@ -268,8 +271,8 @@ namespace Legion {
                     complete, did, partition_ready, partial_pending, 
                     RtEvent::NO_RT_EVENT, NULL, &applied);
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-                                         partition_color);
+          LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
+                                         complete, partition_color);
 	if (runtime->profiler != NULL)
 	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
 						    partition_color);
@@ -581,8 +584,8 @@ namespace Legion {
             disjoint, complete, did, partition_ready, partial_pending,
             creation_ready, &mapping, &applied);
           if (runtime->legion_spy_enabled)
-            LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-                                           partition_color);
+            LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
+                                           complete, partition_color);
           if (runtime->profiler != NULL)
 	    runtime->profiler->record_index_partition(parent.id,pid.id,disjoint,
                                                       partition_color);
@@ -597,6 +600,9 @@ namespace Legion {
                                   disjointness_event, complete, did,
                                   partition_ready, partial_pending,
                                   creation_ready, &mapping, &applied);
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
+                                           complete, partition_color);
         }
         part_node->update_creation_set(mapping);
         if (disjointness_event.exists())
@@ -9866,10 +9872,6 @@ namespace Legion {
         // If we have a disjointness barrier, then signal the result
         if (collective != NULL)
           collective->broadcast(disjoint);
-        // Record the result for Legion Spy
-        if (implicit_runtime->legion_spy_enabled)
-            LegionSpy::log_index_partition(parent->handle.id, handle.id, 
-                                           disjoint, color);
         if (implicit_runtime->profiler != NULL)
           runtime->profiler->record_index_partition(parent->handle.id,handle.id,
                                                     disjoint, color);
