@@ -693,8 +693,13 @@ namespace Legion {
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id, ApEvent u_event,
                                      bool register_now, bool shadow)
-      : InstanceManager(ctx, owner_space, did, layout, node, index_domain,
-                        tree_id, register_now), 
+      : InstanceManager(ctx, owner_space, did, layout, node,
+          // If we're on the owner node we need to produce the expression
+          // that actually describes this points in this space
+          // On remote nodes we'll already have it from the owner
+          (owner_space == ctx->runtime->address_space) ?
+             index_domain->create_layout_expression(pl, pl_size) : index_domain,
+          tree_id, register_now), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size), 
         shadow_instance(shadow)

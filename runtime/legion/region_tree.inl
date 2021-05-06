@@ -1089,6 +1089,33 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    inline IndexSpaceExpression* 
+            IndexSpaceExpression::create_layout_expression_internal(
+                                     RegionTreeForest *context,
+                                     const Realm::IndexSpace<DIM,T> &space,
+                                     const Rect<DIM,T> *rects, size_t num_rects)
+    //--------------------------------------------------------------------------
+    {
+      if (rects == NULL)
+      {
+        if (!space.dense())
+          // Make a new expression for the bounding box
+          return new InstanceExpression<DIM,T>(&space.bounds,1/*size*/,context);
+        else // if we're dense we can just use ourselves
+          return this;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(num_rects > 0);
+#endif
+        // Make a realm expression from the rectangles
+        return new InstanceExpression<DIM,T>(rects, num_rects, context);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     inline bool IndexSpaceExpression::meets_layout_expression_internal(
                           IndexSpaceExpression *space_expr, bool tight_bounds,
                           const Rect<DIM,T> *piece_list, size_t piece_list_size)
@@ -1388,10 +1415,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (this->origin_space == this->context->runtime->address_space)
-      {
         this->realm_index_space.destroy(realm_index_space_ready);
-        this->tight_index_space.destroy(tight_index_space_ready);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1770,6 +1794,24 @@ namespace Legion {
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                  compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::create_layout_expression(
+                                 const void *piece_list, size_t piece_list_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((piece_list_size % sizeof(Rect<DIM,T>)) == 0);
+#endif
+      Realm::IndexSpace<DIM,T> local_is;
+      get_realm_index_space(local_is, true/*tight*/);
+      // No need to wait for the index space to be ready since we
+      // are never actually going to look at the sparsity map
+      return create_layout_expression_internal(context, local_is,
+                      static_cast<const Rect<DIM,T>*>(piece_list),
+                      piece_list_size / sizeof(Rect<DIM,T>));
     }
     
     //--------------------------------------------------------------------------
@@ -2314,6 +2356,141 @@ namespace Legion {
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference(true/*expr tree*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Instance Expression
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    InstanceExpression<DIM,T>::InstanceExpression(
+           const Rect<DIM,T> *rects, size_t num_rects, RegionTreeForest *forest)
+      : IndexSpaceOperationT<DIM,T>(
+          IndexSpaceOperation::INSTANCE_EXPRESSION_KIND, forest)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(num_rects > 0);
+#endif
+      if (num_rects > 1)
+      {
+        std::vector<Realm::Rect<DIM,T> > realm_rects(num_rects);
+        for (unsigned idx = 0; idx < num_rects; idx++)
+          realm_rects[idx] = rects[idx];
+        this->realm_index_space = Realm::IndexSpace<DIM,T>(realm_rects); 
+        const RtEvent valid_event(this->realm_index_space.make_valid());
+        if (!valid_event.has_triggered())
+        {
+          IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+          this->tight_index_space_ready = 
+            forest->runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_WORK_PRIORITY, valid_event);
+        }
+        else // We can do the tighten call now
+          this->tighten_index_space();
+      }
+      else
+      {
+        this->realm_index_space.bounds = rects[0];
+        this->realm_index_space.sparsity.id = 0;
+        this->tight_index_space = this->realm_index_space;
+        this->is_index_space_tight = true;
+      }
+      if (forest->runtime->legion_spy_enabled)
+      {
+        // These index expressions cannot be computed, so we'll pretend
+        // like they are index spaces to Legion Spy since these are 
+        // effectively new "atom" index spaces for Legion Spy's analysis
+        const IndexSpaceID fake_space_id = 
+          forest->runtime->get_unique_index_space_id();
+        LegionSpy::log_top_index_space(fake_space_id);
+        LegionSpy::log_index_space_expr(fake_space_id, this->expr_id);
+        bool all_empty = true;
+        for (unsigned idx = 0; idx < num_rects; idx++)
+        {
+          const size_t volume = rects[idx].volume();
+          if (volume == 0)
+            continue;
+          if (volume == 1)
+            LegionSpy::log_index_space_point(fake_space_id, rects[idx].lo);
+          else
+            LegionSpy::log_index_space_rect(fake_space_id, rects[idx]);
+          all_empty = false;
+        }
+        if (all_empty)
+          LegionSpy::log_empty_index_space(fake_space_id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    InstanceExpression<DIM,T>::InstanceExpression(
+                                           const InstanceExpression<DIM,T> &rhs)
+      : IndexSpaceOperationT<DIM,T>(
+          IndexSpaceOperation::INSTANCE_EXPRESSION_KIND, NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    InstanceExpression<DIM,T>::~InstanceExpression(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    InstanceExpression<DIM,T>& InstanceExpression<DIM,T>::operator=(
+                                           const InstanceExpression<DIM,T> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void InstanceExpression<DIM,T>::pack_expression_value(Serializer &rez,
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target != this->context->runtime->address_space);
+#endif
+      this->record_remote_expression(target);
+      rez.serialize<bool>(false); // not an index space
+      if (target == this->origin_space)
+      {
+        rez.serialize<bool>(true); // local
+        rez.serialize(this->origin_expr);
+      }
+      else
+      {
+        rez.serialize<bool>(false); // not local
+        rez.serialize(this->type_tag); // unpacked by creator
+        rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
+        rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
+        // unpacked by IndexSpaceOperationT
+        Realm::IndexSpace<DIM,T> temp;
+        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+        rez.serialize(temp);
+        rez.serialize(ready);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool InstanceExpression<DIM,T>::remove_operation(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5276,6 +5453,24 @@ namespace Legion {
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
                  compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::create_layout_expression(
+                                 const void *piece_list, size_t piece_list_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((piece_list_size % sizeof(Rect<DIM,T>)) == 0);
+#endif
+      Realm::IndexSpace<DIM,T> local_is;
+      get_realm_index_space(local_is, true/*tight*/);
+      // No need to wait for the index space to be ready since we
+      // are never actually going to look at the sparsity map
+      return create_layout_expression_internal(context, local_is,
+                      static_cast<const Rect<DIM,T>*>(piece_list),
+                      piece_list_size / sizeof(Rect<DIM,T>));
     }
 
     //--------------------------------------------------------------------------
