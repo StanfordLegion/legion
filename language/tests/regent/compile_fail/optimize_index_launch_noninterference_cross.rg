@@ -12,32 +12,22 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-findex-launch-dynamic", "0"]]
-
 -- fails-with:
--- optimize_index_launch_num_affine2.rg:40: loop optimization failed: argument 2 interferes with argument 1
---     g2(p[i], p[i+1])
---       ^
+-- optimize_index_launch_noninterference_cross.rg:29: loop optimization failed: argument 2 interferes with argument 1
 
 import "regent"
 
--- This tests the various loop optimizations supported by the
--- compiler.
-
-task g2(r : region(int), s : region(int)) : int
-where reads writes(r, s) do
-  return 5
+task foo(r: region(ispace(int1d), int), s: region(ispace(int1d), int), t: region(ispace(int1d), int))
+where reads writes(r), reads (s, t) do
 end
 
 task main()
-  var n = 5
-  var r = region(ispace(ptr, n), int)
+  var r = region(ispace(int1d, 10), int)
   var p = partition(equal, r, ispace(int1d, 5))
 
   __demand(__index_launch)
-  for i = 0, 2 do
-    g2(p[i], p[i+1])
+  for i in ispace(int1d, 5) do
+    foo(p[i], p[i/1], p[i/2])
   end
 end
 regentlib.start(main)
