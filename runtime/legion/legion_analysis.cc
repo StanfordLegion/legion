@@ -10475,7 +10475,12 @@ namespace Legion {
                             it->second = union_expr;
                           }
                           else
+                          {
+                            expr->add_expression_reference();
+                            if (it->second->remove_expression_reference())
+                              delete it->second;
                             it->second = expr;
+                          }
                         }
                         else
                           found_covered = true;
