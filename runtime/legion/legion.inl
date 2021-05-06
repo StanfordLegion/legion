@@ -2227,10 +2227,12 @@ namespace Legion {
         __CUDA_HD__
         inline void check_gpu_warning(void) const
         {
+#if 0
 #ifdef __CUDA_ARCH__
           bool need_warning = !bounds.dense();
           if (need_warning)
             printf("WARNING: GPU bounds check is imprecise!\n");
+#endif
 #endif
         }
       private:
