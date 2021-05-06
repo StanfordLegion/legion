@@ -4206,7 +4206,6 @@ namespace Legion {
       events.clear();
       events.resize(num_events);
       event_map.clear();
-      operations.pop_front();
       if (!remote_memos.empty())
         release_remote_memos();
       // Defer performing the transitive reduction because it might
@@ -4220,6 +4219,9 @@ namespace Legion {
       // Can dump now if we're not deferring the transitive reduction
       else if (trace->runtime->dump_physical_traces)
         dump_template();
+      // Can't pop the operations since we might still need them
+      // for when we dump the template
+      operations.pop_front();
     }
 
     //--------------------------------------------------------------------------
