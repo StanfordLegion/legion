@@ -98,7 +98,7 @@ pub enum DimKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
-pub struct Timestamp(pub u64);
+pub struct Timestamp(pub u64 /* ns */);
 
 #[derive(Debug, Copy, Clone)]
 pub enum ProcEntry {
@@ -2295,7 +2295,7 @@ fn process_record(record: &Record, state: &mut State) {
             assert!(state.mapper_call_kinds.contains_key(kind));
             assert!(*start <= *stop);
             // For now we'll only add very expensive mapper calls (more than 100 us)
-            if stop.0 - start.0 >= 100 {
+            if stop.0 - start.0 >= 100_000 /* ns */ {
                 let time_range = TimeRange::new_start(*start, *stop);
                 state.create_mapper_call(*kind, *proc_id, *op_id, time_range);
                 state.update_last_time(*stop);
