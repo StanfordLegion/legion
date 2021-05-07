@@ -6939,7 +6939,7 @@ class Operation(object):
                 else:
                     copy = self.find_or_create_indirection_copy(src_field,
                             src_inst, src_req, dst_field, dst_inst, dst_req,
-                            idx_field, idx_inst, idx_req, None, None, None, copy_redop)
+                            None, None, None, idx_field, idx_inst, idx_req, copy_redop)
                 local_copies.add(copy)
                 if self.index_owner is not None and self.index_owner.collective_dst:
                     global_copies = self.index_owner.find_collective_copies(copy_idx,
