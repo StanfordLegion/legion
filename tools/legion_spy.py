@@ -7431,7 +7431,7 @@ class Operation(object):
                         src_depth, src_field, src_req, src_inst, src_versions):
                     return False
                 if not dst_req.logical_node.perform_indirect_copy_verification(self,
-                        copy_redop, perform_checks, global_copies, dst_point,
+                        copy_redop, perform_checks, global_copies, dst_points,
                         dst_depth, dst_field, dst_req, dst_inst, dst_versions):
                     return False
             for copy in local_copies:

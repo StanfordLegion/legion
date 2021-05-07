@@ -35,6 +35,8 @@ RUN dpkg --add-architecture i386 && \
     pip3 install --upgrade setuptools && \
     pip3 install cffi github3.py numpy qualname
 
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
 RUN git clone -b luajit2.1 https://github.com/StanfordLegion/terra.git terra9 && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr/local/terra9 -DLLVM_DIR=/usr/lib/llvm-9/cmake -S terra9 -B terra9/build && \
     make -C terra9/build install -j8 && \
