@@ -4809,6 +4809,8 @@ namespace Legion {
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);
+        if (runtime->dump_physical_traces)
+          dump_template();
       }
       fence_completion = completion;
       if (recurrent)
@@ -4908,8 +4910,6 @@ namespace Legion {
       const TransitiveReductionArgs *targs = 
         (const TransitiveReductionArgs*)args;
       targs->tpl->transitive_reduction(true/*deferred*/);
-      if (runtime->dump_physical_traces)
-        targs->tpl->dump_template();
     }
 
     //--------------------------------------------------------------------------
