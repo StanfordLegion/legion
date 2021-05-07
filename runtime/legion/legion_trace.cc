@@ -2778,31 +2778,48 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); ++it)
         {
-          FieldMask mask = it->second;
-          if (!set.dominates(vit->first, it->first, mask))
+          if (allow_independent)
           {
-            if (allow_independent)
+            // If we're allowing independent views, that means the set
+            // does not need to dominate the view as long as there are no
+            // views in the set that overlap logically with the test view
+            // This allows us to handle the read-only precondition case
+            // where we have read-only views that show up in the preconditions
+            // but do not appear logically anywhere in the postconditions
+            FieldMaskSet<IndexSpaceExpression> non_dominated;
+            set.dominates(vit->first, it->first, it->second, non_dominated);
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
+                  non_dominated.begin(); nit != non_dominated.end(); nit++)
             {
-              // If we're allowing independent views, that means the set
-              // does not need to dominate the view as long as there are no
-              // views in the set that overlap logically with the test view
-              // This allows us to handle the read-only precondition case
-              // where we have read-only views that show up in the preconditions
-              // but do not appear logically anywhere in the postconditions
-              set.filter_independent_fields(it->first, mask);
               // If all the fields are independent from anything that was
               // written in the postcondition then we know this is a
               // read-only precondition that does not need to be subsumed
+              FieldMask mask = nit->second;
+              set.filter_independent_fields(nit->first, mask);
               if (!mask)
                 continue;
+              if (condition != NULL)
+              {
+                condition->view = vit->first;
+                condition->expr = nit->first;
+                condition->mask = mask;
+              }
+              return false;
             }
-            if (condition != NULL)
+          }
+          else
+          {
+            FieldMask mask = it->second;
+            if (!set.dominates(vit->first, it->first, mask))
             {
-              condition->view = vit->first;
-              condition->expr = it->first;
-              condition->mask = mask;
+              if (condition != NULL)
+              {
+                condition->view = vit->first;
+                condition->expr = it->first;
+                condition->mask = mask;
+              }
+              return false;
             }
-            return false;
           }
         }
 
