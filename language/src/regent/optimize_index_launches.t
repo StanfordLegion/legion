@@ -1227,8 +1227,8 @@ local function init_bitmask(bitmask, volume)
   local stats = terralib.newlist()
 
   local idx = std.newsymbol(int64, "i")
-  local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&bool))
-  stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool)))
+  local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&uint8))
+  stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(0, uint8)))
 
   local values = terralib.newlist()
   values:insert(util.mk_expr_constant(0, int64))
@@ -1274,125 +1274,165 @@ local function collapse_projection_functor(pf, dim, bounds)
   end
 end
 
+local function collect_and_sort_args(args, call_args, task, param_region_types)
+  local collected = {}
+
+  for _, idx in pairs(args) do
+    if type(idx) == "number" then
+      collected[call_args[idx].value.value] = collected[call_args[idx].value.value] or {}
+      collected[call_args[idx].value.value][idx] = true
+    else
+      -- Cross-check args are pairs
+      collected[call_args[idx[1]].value.value] = collected[call_args[idx[1]].value.value] or {}
+      collected[call_args[idx[1]].value.value][idx[1]] = true
+      collected[call_args[idx[1]].value.value][idx[2]] = true
+    end
+  end
+
+  local array = {}
+  for k, v in pairs(collected) do
+    array[k] = {}
+    for kk, vv in pairs(v) do
+      if vv then table.insert(array[k], kk) end
+    end 
+  end
+
+  for k, v in pairs(array) do
+    table.sort(v, function(p, q)
+      local p_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[p], task)
+      if p_privileges[1] == "reads_writes" then
+        return true
+      end
+      return false
+    end)
+  end
+
+  return array
+end
+
 local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local check = terralib.newlist()
 
   local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
   local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
 
+  local call_args = index_launch_ast.call.args
+  assert(#call_args < 256)
+
+  local param_region_types = index_launch_ast.call.fn.value:get_type().parameters
+  local task = index_launch_ast.call.fn.value
+
   local verdict = std.newsymbol(bool, "verdict")
   check:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
 
-   for _, idx in pairs(args_need_dynamic_check) do
-     local arg, cross_arg
-     if type(idx) == "table" then
-       -- Cross-check args are stored as pairs
-       arg, cross_arg = index_launch_ast.call.args[idx[1]], index_launch_ast.call.args[idx[2]]
-     else
-       arg = index_launch_ast.call.args[idx]
-     end
- 
-     local stats = terralib.newlist()
- 
-     -- Skip non-partition args
-     if arg:is(ast.typed.expr.IndexAccess) and
-        std.is_region(arg.expr_type) and
-        std.is_partition(std.as_read(arg.value.expr_type)) then
- 
-       local dim = arg.expr_type:ispace().dim
- 
-       -- Generate the AST for var volume = p.colors.bounds:volume()
-       local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
-       local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
-       local volume = std.newsymbol(int64, "volume")
-       stats:insert(util.mk_stat_var(volume, int64, util.mk_expr_method_call(p_bounds, int64, "volume", terralib.newlist())))
+  local collected_args = collect_and_sort_args(args_need_dynamic_check, call_args, task, param_region_types)
 
-       -- Malloc a bitmask of size volume and initialize it
-       local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
-       local bitmask = std.newsymbol(&bool, "bitmask")
-       local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(int64, util.mk_expr_id(volume)))
-       stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
-       stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
-       stats:insert(init_bitmask(bitmask, volume))
+  for _, args in pairs(collected_args) do
+    local stats = terralib.newlist()
 
-       local value = std.newsymbol(int64, "value")
-       stats:insert(util.mk_stat_var(value, int64))
+    local dim = call_args[args[1]].expr_type:ispace().dim
 
-       local conflict = std.newsymbol(bool, "conflict")
-       stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
- 
-       local duplicates_check = terralib.newlist()
-       index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
+    -- Generate the AST for var volume = p.colors.bounds:volume()
+    local p_colors = util.mk_expr_field_access(util.mk_expr_id(call_args[args[1]].value.value), "colors", std.ispace(index_types[dim]))
+    local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
+    local volume = std.newsymbol(int64, "volume")
+    stats:insert(util.mk_stat_var(volume, int64, util.mk_expr_method_call(p_bounds, int64, "volume", terralib.newlist())))
 
-       local mk_duplicates_check = function(index_expr, error_msg, duplicate_stats)
-         if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-           index_expr = index_expr.arg
-         end
- 
-         -- Assign: value = collapse(index_expr)
-         duplicate_stats:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value),
-             collapse_projection_functor(index_expr, dim, p_bounds)))
- 
-         local then_block = terralib.newlist()
- 
-         local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
-         then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
- 
-         then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
- 
-         -- Issue an error here if we have to
-         if is_demand then
-           local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
-             util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
-               error_msg, rawstring)
-             }))
-           then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { abort }))
-         else
-           local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
-           then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
-         end
- 
-         -- Bounds check
-         local cond = util.mk_expr_binary("and",
-           util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int64)),
-           util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
-         duplicate_stats:insert(util.mk_stat_if(cond, then_block))
- 
-       end
- 
-       if cross_arg == nil then
-         mk_duplicates_check(arg.index,
-           ": loop optimization failed: argument " .. idx .. " interferes with itself",
-           duplicates_check)
-       else
-         mk_duplicates_check(arg.index,
-           ": loop optimization failed: argument " .. idx[1] .. " interferes with argument " .. idx[2],
-           duplicates_check)
-         mk_duplicates_check(cross_arg.index,
-           ": loop optimization failed: argument " .. idx[1] .. " interferes with argument " .. idx[2],
-           duplicates_check)
-       end
- 
-       local bounds
-       -- Generate the AST based on loop type
-       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-         bounds = index_launch_ast.values
-         stats:insert(util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
-       else
-         bounds = index_launch_ast.value
-         stats:insert(util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
-       end
- 
-       stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
- 
-       if is_demand then
-         check:insert(util.mk_stat_block(util.mk_block(stats)))
-       else
-         -- Skip this check if a previous one failed
-         check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
-       end
-     end
-   end
+    -- Malloc a bitmask of size volume and initialize it
+    local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
+    local bitmask = std.newsymbol(&uint8, "bitmask")
+    local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(int64, util.mk_expr_id(volume)))
+    stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
+    stats:insert(util.mk_stat_var(bitmask, &uint8, util.mk_expr_cast(&uint8, util.mk_expr_id(bitmask_raw))))
+    stats:insert(init_bitmask(bitmask, volume))
+
+    local value = std.newsymbol(int64, "value")
+    stats:insert(util.mk_stat_var(value, int64))
+
+    local conflict = std.newsymbol(uint8, "conflict")
+    stats:insert(util.mk_stat_var(conflict, uint8, util.mk_expr_constant(0, uint8)))
+
+    for _, arg in ipairs(args) do
+      local duplicates_check = terralib.newlist()
+      index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
+  
+      local mk_duplicates_check = function(index_expr, error_msg, duplicate_stats)
+        if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+          index_expr = index_expr.arg
+        end
+  
+        -- Assign: value = collapse(index_expr)
+        duplicate_stats:insert(
+          util.mk_stat_assignment(
+            util.mk_expr_id_rawref(value),
+            collapse_projection_functor(index_expr, dim, p_bounds)))
+  
+        local then_block = terralib.newlist()
+  
+        local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask),
+          util.mk_expr_id(value), std.rawref(&uint8))
+        then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
+  
+        local privileges, _, _, _, _ = std.find_task_privileges(param_region_types[arg], task)
+        assert(#privileges == 1)
+        if privileges[1] ~= "reads" then
+          then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(arg, uint8)))
+        end
+  
+        -- Issue an error here if we have to
+        if is_demand then
+          local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
+            util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
+              error_msg, rawstring)
+            }))
+          then_block:insert(
+            util.mk_stat_if(
+              util.mk_expr_binary("~=",
+                util.mk_expr_id(conflict),
+                util.mk_expr_constant(0, uint8)),
+              terralib.newlist { abort }))
+        else
+          local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict),
+            util.mk_expr_constant(true, bool))
+          then_block:insert(
+            util.mk_stat_if(
+              util.mk_expr_binary("~=",
+                util.mk_expr_id(conflict),
+                util.mk_expr_constant(0, uint8)),
+              terralib.newlist { set_verdict, util.mk_stat_break() }))
+        end
+  
+        -- Bounds check
+        local cond = util.mk_expr_binary("and",
+          util.mk_expr_binary(">=", util.mk_expr_id(value), util.mk_expr_constant(0, int64)),
+          util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
+        duplicate_stats:insert(util.mk_stat_if(cond, then_block))
+      end
+  
+      mk_duplicates_check(call_args[arg].index,
+        " loop optimization failed: argument " .. arg .. " interferes",
+        duplicates_check)
+
+      local bounds
+      -- Generate the AST based on loop type
+      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
+        bounds = index_launch_ast.values
+        stats:insert(util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+      else
+        bounds = index_launch_ast.value
+        stats:insert(util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+      end
+    end -- for loop over args
+
+    stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
+
+    if is_demand then
+      check:insert(util.mk_stat_block(util.mk_block(stats)))
+    else
+      -- Skip this check if a previous one failed
+      check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
+    end
+   end -- for loop over collected_args
 
   -- In the demand case we know it's safe to optimize here, otherwise we need to check verdict
   if is_demand then
