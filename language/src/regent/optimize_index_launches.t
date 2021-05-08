@@ -1310,6 +1310,26 @@ local function collect_and_sort_args(args, call_args, task, param_region_types)
   return array
 end
 
+local c = terralib.includecstring([[
+#include <stdio.h>
+#include <stdlib.h>
+]])
+
+terra assert_dyn_check_error(x : bool, message : rawstring, arg1 : uint8, arg2: uint8)
+  if not x then
+    var stderr = c.fdopen(2, "w")
+    if arg1 == arg2 then
+      c.fprintf(stderr, "Errors reported during runtime.\n%s%d%s\n",
+        message, arg1, " interferes with itself")
+    else
+      c.fprintf(stderr, "Errors reported during runtime.\n%s%d%s%d\n",
+        message, arg1, " interferes with argument ", arg2)
+    end
+    c.fflush(stderr)
+    c.abort()
+  end
+end
+
 local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local check = terralib.newlist()
 
@@ -1381,9 +1401,11 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   
         -- Issue an error here if we have to
         if is_demand then
-          local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
-            util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
-              error_msg, rawstring)
+          local abort = util.mk_stat_expr(util.mk_expr_call(assert_dyn_check_error, terralib.newlist {
+            util.mk_expr_constant(false, bool),
+            util.mk_expr_constant(get_source_location(unopt_loop_ast) .. error_msg, rawstring),
+            util.mk_expr_constant(arg, uint8),
+            util.mk_expr_id(conflict)
             }))
           then_block:insert(
             util.mk_stat_if(
@@ -1410,7 +1432,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       end
   
       mk_duplicates_check(call_args[arg].index,
-        " loop optimization failed: argument " .. arg .. " interferes",
+        " loop optimization failed: argument ",
         duplicates_check)
 
       local bounds
