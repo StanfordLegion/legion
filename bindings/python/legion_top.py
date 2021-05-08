@@ -155,6 +155,13 @@ def run_cmd(cmd, run_name=None):
     except SyntaxError as ex:
         traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
         c.legion_runtime_set_return_code(1)
+    except SystemExit as ex:
+        if ex.code is not None:
+            if isinstance(ex.code,int):
+                c.legion_runtime_set_return_code(ex.code)
+            else:
+                traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
+                c.legion_runtime_set_return_code(1)
     # Wait for execution to finish here before removing the module
     # because executing tasks might still need to refer to it
     future = c.legion_runtime_issue_execution_fence(
@@ -197,6 +204,13 @@ def run_path(filename, run_name=None):
     except SyntaxError as ex:
         traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
         c.legion_runtime_set_return_code(1)
+    except SystemExit as ex:
+        if ex.code is not None:
+            if isinstance(ex.code,int):
+                c.legion_runtime_set_return_code(ex.code)
+            else:
+                traceback.print_exception(SyntaxError,ex,sys.exc_info()[2],0)
+                c.legion_runtime_set_return_code(1)
     # Wait for execution to finish here before removing the module
     # because executing tasks might still need to refer to it
     future = c.legion_runtime_issue_execution_fence(
