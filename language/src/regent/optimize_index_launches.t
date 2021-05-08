@@ -1275,6 +1275,7 @@ local function collapse_projection_functor(pf, dim, bounds)
 end
 
 local function collect_and_sort_args(args, call_args, task, param_region_types)
+  -- Collect all args of the same partition together
   local collected = {}
   for _, arg in pairs(args) do
     if type(arg) == "number" then
@@ -1415,26 +1416,21 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
         local abort = util.mk_stat_expr(util.mk_expr_call(assert_dynamic_check_error, terralib.newlist {
           util.mk_expr_constant(false, bool),
           util.mk_expr_constant(
-            get_source_location(unopt_loop_ast) ..
-            ": loop optimization failed: argument ",
+            get_source_location(unopt_loop_ast) ..  ": loop optimization failed: argument ",
             rawstring),
           util.mk_expr_constant(arg, uint8),
           util.mk_expr_id(conflict)
           }))
         then_block:insert(
           util.mk_stat_if(
-            util.mk_expr_binary("~=",
-              util.mk_expr_id(conflict),
-              util.mk_expr_constant(0, uint8)),
+            util.mk_expr_binary("~=", util.mk_expr_id(conflict), util.mk_expr_constant(0, uint8)),
             terralib.newlist { abort }))
       else
         local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict),
           util.mk_expr_constant(true, bool))
         then_block:insert(
           util.mk_stat_if(
-            util.mk_expr_binary("~=",
-              util.mk_expr_id(conflict),
-              util.mk_expr_constant(0, uint8)),
+            util.mk_expr_binary("~=", util.mk_expr_id(conflict), util.mk_expr_constant(0, uint8)),
             terralib.newlist { set_verdict, util.mk_stat_break() }))
       end
 
@@ -1444,18 +1440,23 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
         util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
       duplicates_check:insert(util.mk_stat_if(cond, then_block))
   
-      local bounds
-      -- Generate the AST based on loop type
+      -- Skip this check if a previous one failed
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        bounds = index_launch_ast.values
+        local bounds = index_launch_ast.values
         stats:insert(
-          util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+          util.mk_stat_if_else(
+            util.mk_expr_id(verdict),
+            terralib.newlist(),
+            util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check))))
       else
-        bounds = index_launch_ast.value
+        local bounds = index_launch_ast.value
         stats:insert(
-          util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+          util.mk_stat_if_else(
+            util.mk_expr_id(verdict),
+            terralib.newlist(),
+            util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check))))
       end
-    end -- for loop over args
+    end
 
     stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
 
@@ -1465,7 +1466,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       -- Skip this check if a previous one failed
       check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
     end
-  end -- for loop over collected_args
+  end
 
   -- In the demand case we know it's safe to optimize here, otherwise we need to check verdict
   if is_demand then
