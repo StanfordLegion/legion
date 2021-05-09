@@ -446,11 +446,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
-            AddressSpaceID own_space, ApEvent complete, Operation *o /*= NULL*/)
+    FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now, 
+                           DistributedID did, AddressSpaceID own_space,
+                           ApEvent complete, Operation *o /*= NULL*/)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
-          own_space, register_now),
+          own_space, register_now), context(ctx),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -471,8 +472,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
-      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0),
-        producer_depth(0)
+      : DistributedCollectable(NULL, 0, 0), context(NULL), producer_op(NULL),
+        op_gen(0), producer_depth(0)
 #ifdef LEGION_SPY
         , producer_uid(0)
 #endif
@@ -1469,7 +1470,7 @@ namespace Legion {
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
         Future result = 
-          runtime->help_create_future(ApEvent::NO_AP_EVENT, op);
+          runtime->help_create_future(context, ApEvent::NO_AP_EVENT, op);
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
@@ -1724,7 +1725,8 @@ namespace Legion {
 #endif
       std::set<RtEvent> done_events;
       WrapperReferenceMutator mutator(done_events);
-      FutureImpl *future = runtime->find_or_create_future(future_did, &mutator);
+      FutureImpl *future = runtime->find_or_create_future(future_did,
+                            impl->context->get_unique_id(), &mutator);
       // Add it to the map
       impl->set_future(point, future, &mutator);
       // Trigger the done event
@@ -14316,7 +14318,7 @@ namespace Legion {
                     ctx->get_unique_id());
 #endif
       const ApUserEvent to_trigger = Runtime::create_ap_user_event(NULL);
-      FutureImpl *result = new FutureImpl(this, true/*register*/,
+      FutureImpl *result = new FutureImpl(ctx, this, true/*register*/,
                               get_available_distributed_id(),
                               address_space, to_trigger,
                               ctx->get_owner_task());
@@ -20393,7 +20395,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
-                                               ReferenceMutator *mutator)
+                                UniqueID context_uid, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -20416,7 +20418,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(owner_space != address_space);
 #endif
-      FutureImpl *result = new FutureImpl(this, false/*register*/, did, 
+      InnerContext *context = find_context(context_uid);
+      FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
                                           owner_space, ApEvent::NO_AP_EVENT);
       // Retake the lock and see if we lost the race
       {
@@ -22071,11 +22074,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::help_create_future(ApEvent complete_event, 
+    Future Runtime::help_create_future(TaskContext *ctx, ApEvent complete_event, 
                                        Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(new FutureImpl(this, true/*register*/,
+      return Future(new FutureImpl(ctx, this, true/*register*/,
                                    get_available_distributed_id(),
                                    address_space, complete_event, op));
     }

@@ -382,7 +382,10 @@ namespace Legion {
       for (std::vector<Future>::const_iterator it =
             futures.begin(); it != futures.end(); it++) 
         if (it->impl != NULL)
+        {
           rez.serialize(it->impl->did);
+          rez.serialize(it->impl->context->get_unique_id());
+        }
         else
           rez.serialize<DistributedID>(0);
       rez.serialize(grants.size());
@@ -440,8 +443,10 @@ namespace Legion {
         derez.deserialize(future_did);
         if (future_did == 0)
           continue;
+        UniqueID uid;
+        derez.deserialize(uid);
         FutureImpl *impl = 
-          runtime->find_or_create_future(future_did, mutator);
+          runtime->find_or_create_future(future_did, uid, mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
         futures[idx] = Future(impl, false/*need reference*/);
       }
@@ -5244,7 +5249,7 @@ namespace Legion {
         local_function = true;
       }
       // Get a future from the parent context to use as the result
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements(); 
@@ -5882,7 +5887,7 @@ namespace Legion {
       {
         WrapperReferenceMutator mutator(ready_events);
         FutureImpl *impl = 
-          runtime->find_or_create_future(future_did, &mutator);
+          runtime->find_or_create_future(future_did, remote_unique_id,&mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         result = Future(impl, false/*need reference*/);
       }
@@ -5892,8 +5897,8 @@ namespace Legion {
       if (pred_false_did != 0)
       {
         WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = 
-          runtime->find_or_create_future(pred_false_did, &mutator);
+        FutureImpl *impl = runtime->find_or_create_future(pred_false_did,
+                                              remote_unique_id, &mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         predicate_false_future = Future(impl, false/*need reference*/);
       }
@@ -7056,7 +7061,7 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      reduction_future = Future(new FutureImpl(runtime,
+      reduction_future = Future(new FutureImpl(parent_ctx, runtime,
             true/*register*/, runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements();
@@ -9108,8 +9113,8 @@ namespace Legion {
       if (pred_false_did != 0)
       {
         WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = 
-          runtime->find_or_create_future(pred_false_did, &mutator);
+        FutureImpl *impl = runtime->find_or_create_future(pred_false_did,
+                                              remote_unique_id, &mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         predicate_false_future = Future(impl, false/*need reference*/);
       }

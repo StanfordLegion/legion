@@ -2238,7 +2238,7 @@ namespace Legion {
       if (result_future.impl == NULL)
       {
         Future temp = Future(
-              new FutureImpl(runtime, true/*register*/,
+              new FutureImpl(parent_ctx, runtime, true/*register*/,
                 runtime->get_available_distributed_id(),
                 runtime->address_space, get_completion_event(), this));
         AutoLock o_lock(op_lock);
@@ -7485,7 +7485,7 @@ namespace Legion {
       fence_kind = kind;
       if (need_future)
       {
-        result = Future(new FutureImpl(runtime, true/*register*/,
+        result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
               runtime->address_space, completion_event, this));
         // We can set the future result right now because we know that it
@@ -11368,7 +11368,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       initialize_memoizable();
-      future = Future(new FutureImpl(runtime, true/*register*/,
+      future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       collective = dc;
@@ -18215,7 +18215,7 @@ namespace Legion {
       requirement.privilege = LEGION_READ_WRITE;
       requirement.prop = LEGION_EXCLUSIVE;
       // Create the future result that we will complete when we're done
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
@@ -18657,7 +18657,7 @@ namespace Legion {
         points.push_back(point);
       }
       // Create the future result that we will complete when we're done
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
@@ -19005,7 +19005,7 @@ namespace Legion {
           if (it->impl != NULL)
             preconditions.insert(*it);
       }
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
@@ -19173,7 +19173,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       future_map = fm;
       redop = runtime->get_reduction(redop_id);
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       deterministic = is_deterministic;

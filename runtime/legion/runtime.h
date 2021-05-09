@@ -206,9 +206,9 @@ namespace Legion {
         FutureImpl *const impl;
       };
     public:
-      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, ApEvent complete_event,
-                 Operation *op = NULL);
+      FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
+                 DistributedID did, AddressSpaceID owner_space, 
+                 ApEvent complete_event, Operation *op = NULL);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:
@@ -272,6 +272,7 @@ namespace Legion {
       static void handle_contribute_to_collective(const void *args);
       static void handle_callback(const void *args);
     public:
+      TaskContext *const context;
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
@@ -2881,7 +2882,7 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did,
+      FutureImpl* find_or_create_future(DistributedID did, UniqueID uid,
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                 TaskContext *ctx, RtEvent complete, ReferenceMutator *mutator);
@@ -3039,7 +3040,8 @@ namespace Legion {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(ApEvent complete, Operation *op = NULL);
+      Future help_create_future(TaskContext *ctx, ApEvent complete,
+                                Operation *op = NULL);
       bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:

@@ -2149,7 +2149,7 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
-      FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+      FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
         runtime->get_available_distributed_id(), 
         runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_result.get_size() > 0)
@@ -2263,7 +2263,7 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
-      FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
+      FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), 
         runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_result.get_size() > 0)
@@ -5748,7 +5748,7 @@ namespace Legion {
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
           runtime->address_space, ApEvent::NO_AP_EVENT);
         result->set_result(reduction_op->identity,
@@ -5782,7 +5782,7 @@ namespace Legion {
       if (future_map.impl == NULL)
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
           runtime->address_space, ApEvent::NO_AP_EVENT);
         result->set_result(reduction_op->identity,
@@ -5821,7 +5821,7 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
-        FutureImpl *future = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT);
         future->set_result(it->second.get_ptr(), it->second.get_size(), false);
@@ -6820,14 +6820,14 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
@@ -12002,14 +12002,14 @@ namespace Legion {
     {
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
         result.impl->set_result(&value, sizeof(value), false/*owned*/);
         return result;

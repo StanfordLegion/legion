@@ -6706,8 +6706,8 @@ namespace Legion {
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      Future result = 
-        runtime->help_create_future(Internal::ApEvent::NO_AP_EVENT);
+      Future result = runtime->help_create_future(Internal::implicit_context,
+                                              Internal::ApEvent::NO_AP_EVENT);
       // Set the future result
       result.impl->set_result(value, value_size, owned);
       return result;
