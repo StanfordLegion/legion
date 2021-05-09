@@ -1317,14 +1317,16 @@ local c = terralib.includecstring([[
 #include <stdlib.h>
 ]])
 
-terra throw_dynamic_check_error(message : rawstring, arg1 : uint8, arg2 : uint8)
+terra throw_dynamic_check_error(loc : rawstring, arg1 : uint8, arg2 : uint8)
   var stderr = c.fdopen(2, "w")
   if arg1 == arg2 then
-    c.fprintf(stderr, "Errors reported during runtime.\n%s%d%s\n",
-      message, arg1, " interferes with itself")
+    c.fprintf(stderr, [[Errors reported during runtime.
+%s: loop optimization failed: argument %d interferes with itself
+]], loc, arg1)
   else
-    c.fprintf(stderr, "Errors reported during runtime.\n%s%d%s%d\n",
-      message, arg1, " interferes with argument ", arg2)
+    c.fprintf(stderr, [[Errors reported during runtime.
+%s: loop optimization failed: argument %d interferes with argument %d
+]], loc, arg1, arg2)
   end
   c.fflush(stderr)
   c.abort()
@@ -1412,9 +1414,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       -- Issue an error here if we have to
       if is_demand then
         local abort = util.mk_stat_expr(util.mk_expr_call(throw_dynamic_check_error, terralib.newlist {
-          util.mk_expr_constant(
-            get_source_location(unopt_loop_ast) ..  ": loop optimization failed: argument ",
-            rawstring),
+          util.mk_expr_constant(get_source_location(unopt_loop_ast), rawstring),
           util.mk_expr_constant(arg, uint8),
           util.mk_expr_id(conflict)
           }))
