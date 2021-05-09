@@ -1302,7 +1302,7 @@ local function collect_and_sort_args(args, call_args, task, param_region_types)
   for _, args in pairs(array) do
     table.sort(args, function(p, q)
       local p_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[p], task)
-      if p_privileges[1] == "reads_writes" then
+      if p_privileges[1] == "reads_writes" or string.find(p_privileges[1], "reduces") then
         return true
       end
       return false
