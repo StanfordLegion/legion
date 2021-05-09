@@ -7095,6 +7095,10 @@ namespace Legion {
                        Memory::Kind memory_kind, void (*freefunc)(void*,size_t))
     //--------------------------------------------------------------------------
     {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
       return Internal::implicit_context->from_value(value, value_size, owned,
                                                     memory_kind, freefunc); 
     }

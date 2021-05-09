@@ -237,12 +237,12 @@ namespace Legion {
         bool eager;
       };
     public:
-      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, ApEvent complete,
+      FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
+                 DistributedID did, AddressSpaceID owner_space,ApEvent complete,
                  Operation *op = NULL, bool compute_coordinates = true);
-      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, ApEvent complete, 
-                 Operation *op, GenerationID gen,
+      FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
+                 DistributedID did, AddressSpaceID owner_space,
+                 ApEvent complete, Operation *op, GenerationID gen,
 #ifdef LEGION_SPY
                  UniqueID op_uid,
 #endif
@@ -355,6 +355,7 @@ namespace Legion {
       static void handle_callback(const void *args);
       static void handle_release(const void *args);
     public:
+      TaskContext *const context;
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
@@ -3705,7 +3706,7 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did,
+      FutureImpl* find_or_create_future(DistributedID did, UniqueID uid,
                                         ReferenceMutator *mutator,
                       std::vector<std::pair<size_t,DomainPoint> > &coordinates,
                                         Operation *op = NULL,
@@ -3937,7 +3938,8 @@ namespace Legion {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(ApEvent complete, Operation *op = NULL);
+      Future help_create_future(TaskContext *ctx, ApEvent complete,
+                                Operation *op = NULL);
       bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:

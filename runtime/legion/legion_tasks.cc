@@ -5706,7 +5706,7 @@ namespace Legion {
         local_function = true;
       }
       // Get a future from the parent context to use as the result
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements(); 
@@ -8311,7 +8311,7 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      reduction_future = Future(new FutureImpl(runtime,
+      reduction_future = Future(new FutureImpl(parent_ctx, runtime,
             true/*register*/, runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements();

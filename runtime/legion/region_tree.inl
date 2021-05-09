@@ -1415,7 +1415,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (this->origin_space == this->context->runtime->address_space)
+      {
         this->realm_index_space.destroy(realm_index_space_ready);
+        this->tight_index_space.destroy(tight_index_space_ready);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2608,9 +2611,9 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
     { 
-      // Destory our index space if we are the owner and it has been set
-      if (is_owner() && realm_index_space_set.has_triggered())
-        realm_index_space.destroy();
+      if (is_owner())
+        realm_index_space.destroy(
+            tight_index_space ? tight_index_space_set : realm_index_space_set);
     }
 
     //--------------------------------------------------------------------------
