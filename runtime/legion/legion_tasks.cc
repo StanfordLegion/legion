@@ -5887,7 +5887,7 @@ namespace Legion {
       {
         WrapperReferenceMutator mutator(ready_events);
         FutureImpl *impl = 
-          runtime->find_or_create_future(future_did, remote_unique_id,&mutator);
+          runtime->find_or_create_future(future_did, remote_owner_uid,&mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         result = Future(impl, false/*need reference*/);
       }
@@ -5898,7 +5898,7 @@ namespace Legion {
       {
         WrapperReferenceMutator mutator(ready_events);
         FutureImpl *impl = runtime->find_or_create_future(pred_false_did,
-                                              remote_unique_id, &mutator);
+                                              remote_owner_uid, &mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         predicate_false_future = Future(impl, false/*need reference*/);
       }
@@ -9114,7 +9114,7 @@ namespace Legion {
       {
         WrapperReferenceMutator mutator(ready_events);
         FutureImpl *impl = runtime->find_or_create_future(pred_false_did,
-                                              remote_unique_id, &mutator);
+                                              remote_owner_uid, &mutator);
         impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
         predicate_false_future = Future(impl, false/*need reference*/);
       }
