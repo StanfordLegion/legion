@@ -1,4 +1,5 @@
 use std::cmp::{max, Reverse};
+use std::fmt;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 
@@ -100,6 +101,17 @@ pub enum DimKind {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
 pub struct Timestamp(pub u64 /* ns */);
+
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Time is stored in nanoseconds. But it is displayed in microseconds.
+        let nanoseconds = self.0;
+        let divisor = 1000;
+        let microseconds = nanoseconds / divisor;
+        let remainder = nanoseconds % divisor;
+        write!(f, "{}.{:0>3}", microseconds, remainder)
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum ProcEntry {

@@ -17,9 +17,9 @@ static UTIL_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/util.
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
-    ready: u64,
-    start: u64,
-    end: u64,
+    ready: &'a str,
+    start: &'a str,
+    end: &'a str,
     color: &'a str,
     opacity: f64,
     title: &'a str,
@@ -70,7 +70,6 @@ impl Proc {
         state: &State,
     ) -> io::Result<()> {
         let (base, time_range, waiters) = self.entry(point.entry);
-
         let name = match point.entry {
             ProcEntry::Task(op_id) => {
                 let task = &self.tasks.get(&op_id).unwrap();
@@ -106,7 +105,7 @@ impl Proc {
                 .unwrap()
                 .name
                 .clone(),
-            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id)
+            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id.0)
         };
 
         let color = match point.entry {
@@ -155,9 +154,9 @@ impl Proc {
         let default = DataRecord {
             level,
             level_ready,
-            ready: 0,
-            start: 0,
-            end: 0,
+            ready: "0",
+            start: "0",
+            end: "0",
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -172,26 +171,26 @@ impl Proc {
         let mut start = time_range.start.unwrap();
         for wait in &waiters.wait_intervals {
             f.serialize(DataRecord {
-                ready: start.0,
-                start: start.0,
-                end: wait.start.0,
+                ready: &format!("{}", start),
+                start: &format!("{}", start),
+                end: &format!("{}", wait.start),
                 opacity: 1.0,
                 title: &name,
                 ..default
             })?;
             f.serialize(DataRecord {
                 title: &format!("{} (waiting)", &name),
-                ready: wait.start.0,
-                start: wait.start.0,
-                end: wait.ready.0,
+                ready: &format!("{}", wait.start),
+                start: &format!("{}", wait.start),
+                end: &format!("{}", wait.ready),
                 opacity: 0.15,
                 ..default
             })?;
             f.serialize(DataRecord {
                 title: &format!("{} (ready)", &name),
-                ready: wait.ready.0,
-                start: wait.ready.0,
-                end: wait.end.0,
+                ready: &format!("{}", wait.ready),
+                start: &format!("{}", wait.ready),
+                end: &format!("{}", wait.end),
                 opacity: 0.45,
                 ..default
             })?;
@@ -199,9 +198,9 @@ impl Proc {
         }
         if start < time_range.stop.unwrap() {
             f.serialize(DataRecord {
-                ready: start.0,
-                start: start.0,
-                end: time_range.stop.unwrap().0,
+                ready: &format!("{}", start),
+                start: &format!("{}", start),
+                end: &format!("{}", time_range.stop.unwrap()),
                 opacity: 1.0,
                 title: &name,
                 ..default
@@ -413,7 +412,7 @@ impl State {
             })?;
             for (time, count) in utilization {
                 f.serialize(UtilizationRecord {
-                    time: &format!("{:.2}", time.0 as f64),
+                    time: &format!("{}", time),
                     count: &format!("{:.2}", count),
                 })?;
             }
