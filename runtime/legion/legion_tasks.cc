@@ -9825,6 +9825,10 @@ namespace Legion {
         assert(!serdez_redop_targets.empty());
 #endif
         reduction_instances.reserve(serdez_redop_targets.size());
+        // Make a wrapper future instance for the serdez buffer for copies
+        FutureInstance src_inst(serdez_redop_state, serdez_redop_state_size,
+            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, runtime,
+            false/*eager*/, false/*own allocation*/);
         for (std::vector<Memory>::const_iterator it =
               serdez_redop_targets.begin(); it !=
               serdez_redop_targets.end(); it++)
@@ -9833,6 +9837,9 @@ namespace Legion {
           reduction_instances.push_back(
               manager->create_future_instance(this, unique_op_id,
                 completion_event, serdez_redop_state_size, false/*eager*/));
+          ApEvent done = reduction_instances.back()->copy_from(&src_inst, this);
+          if (done.exists())
+            complete_effects.insert(done);
         }
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen
