@@ -523,7 +523,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                     op_id: task.op_id.0,
                     desc: &format!("{} <{}>", name, task.op_id.0),
                     proc: Some(&proc_record.full_text),
-                    level: task.base.level,
+                    level: task.base.level.map(|x| x + 1),
                 })?;
             }
         }
