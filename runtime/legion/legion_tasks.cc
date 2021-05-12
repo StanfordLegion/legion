@@ -9828,7 +9828,7 @@ namespace Legion {
         // Make a wrapper future instance for the serdez buffer for copies
         FutureInstance src_inst(serdez_redop_state, serdez_redop_state_size,
             runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, runtime,
-            false/*eager*/, false/*own allocation*/);
+            false/*eager*/, true/*external*/, false/*own allocation*/);
         for (std::vector<Memory>::const_iterator it =
               serdez_redop_targets.begin(); it !=
               serdez_redop_targets.end(); it++)
