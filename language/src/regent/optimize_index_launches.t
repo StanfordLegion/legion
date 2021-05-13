@@ -1237,40 +1237,38 @@ local function init_bitmask(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
--- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z + 1) + pf.x * (bounds.hi.z - bounds.lo.z + 1) * (bounds.hi.y - bounds.lo.y + 1)
 local function collapse_projection_functor(pf, dim, bounds)
-  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
+  local index_types = { std.int1d, std.int2d, std.int3d, std.int4d,
+    std.int5d, std.int6d, std.int7d, std.int8d, std.int9d }
+  local dim_names = { "x", "y", "z", "w", "v", "u", "t", "s", "r" }
 
-  if dim == 0 or dim == 1 then
+  local function mk_extent(dim)
+    return util.mk_expr_binary("+",
+      util.mk_expr_binary("-",
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), dim_names[dim], int64),
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), dim_names[dim], int64)),
+      util.mk_expr_constant(1, int64))
+  end
+
+  local function recurse(dim, prev_extent, prev_ast)
+    if dim == 0 then return prev_ast end
+
+    local extent = util.mk_expr_binary("*", mk_extent(dim + 1), prev_extent)
+    local ast = util.mk_expr_binary("+",
+                 util.mk_expr_binary("*",
+                   util.mk_expr_field_access(pf, dim_names[dim], int64),
+                   extent),
+                 prev_ast)
+    return recurse(dim - 1, extent, ast)
+  end
+
+  if dim <= 1 then
     return pf
   else
-    local x = util.mk_expr_field_access(pf, "x", int64)
-    local y = util.mk_expr_field_access(pf, "y", int64)
-  
-    local y_extent = util.mk_expr_binary("+",
-      util.mk_expr_binary("-",
-        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int64),
-        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int64)),
-      util.mk_expr_constant(1, int64))
-  
-    if dim == 2 then
-      return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
-
-    elseif dim == 3 then
-      local z = util.mk_expr_field_access(pf, "z", int64)
-      local z_extent = util.mk_expr_binary("+",
-        util.mk_expr_binary("-",
-          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int64),
-          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int64)),
-        util.mk_expr_constant(1, int64))
-
-      return util.mk_expr_binary("+",
-        util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)),
-        util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
-
-    else
-      assert(false)
-    end
+    return recurse(
+      dim - 1,
+      util.mk_expr_constant(1, int64),
+      util.mk_expr_field_access(pf, dim_names[dim], int64))
   end
 end
 
@@ -1335,8 +1333,10 @@ end
 local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local check = terralib.newlist()
 
-  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
-  local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
+  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d, std.int4d,
+    std.int5d, std.int6d, std.int7d, std.int8d, std.int9d }
+  local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d, std.rect4d,
+    std.rect5d, std.rect6d, std.rect7d, std.rect8d, std.rect9d }
 
   local call_args = index_launch_ast.call.args
   assert(#call_args < 256)
