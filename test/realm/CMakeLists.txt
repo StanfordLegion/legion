@@ -59,7 +59,7 @@ endif()
 
 foreach(test IN LISTS REALM_TESTS)
   if(CUDASRC_${test})
-    cuda_add_executable(${test} ${test} ${CUDASRC_${test}})
+    cuda_add_executable(${test} ${test}.cc ${CUDASRC_${test}})
   else()
     add_executable(${test} ${test}.cc)
   endif()
