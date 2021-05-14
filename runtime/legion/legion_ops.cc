@@ -4483,7 +4483,8 @@ namespace Legion {
       if (!dst_indirect_requirements.empty())
       {
         scatter_versions.resize(dst_indirect_requirements.size());
-        const size_t offset = src_requirements.size() + dst_requirements.size();
+        const size_t offset = src_requirements.size() +
+          dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
@@ -4588,18 +4589,18 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
       }
+      offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
       {
-        offset += dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  src_indirect_requirements[idx],
                                                  gather_versions[idx],
                                                  preconditions);
+        offset += src_indirect_requirements.size();
       }
       if (!dst_indirect_requirements.empty())
       {
-        offset += src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  dst_indirect_requirements[idx],
@@ -6830,9 +6831,9 @@ namespace Legion {
                                  dst_requirements[idx], runtime, 
                                  projection_points);
       }
+      offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
       {
-        offset += dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           if (src_indirect_requirements[idx].handle_type == 
@@ -6845,10 +6846,10 @@ namespace Legion {
                                    src_indirect_requirements[idx], runtime,
                                    projection_points);
         }
+        offset += src_indirect_requirements.size();
       }
       if (!dst_indirect_requirements.empty())
       {
-        offset += src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           if (dst_indirect_requirements[idx].handle_type == 
