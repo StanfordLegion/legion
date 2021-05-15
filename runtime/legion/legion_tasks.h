@@ -1094,6 +1094,7 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
+      virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);

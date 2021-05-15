@@ -8640,6 +8640,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do a quick test for empty index space launches
+      if (launch_space->is_empty())
+      {
+        // Clean up this task execution if there are no points
+        complete_mapping();
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
+      }
+      else
+        Operation::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
