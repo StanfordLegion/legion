@@ -15838,7 +15838,8 @@ namespace Legion {
           for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
                 expr_refs_to_remove.begin(); it != 
                 expr_refs_to_remove.end(); it++)
-            if (it->first->remove_expression_reference(it->second))
+            if (it->first->remove_expression_reference(false/*expr tree*/,
+                                                       it->second))
               delete it->first;
         }
       }
@@ -16996,7 +16997,8 @@ namespace Legion {
           for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
                 expr_refs_to_remove.begin(); it != 
                 expr_refs_to_remove.end(); it++)
-            if (it->first->remove_expression_reference(it->second))
+            if (it->first->remove_expression_reference(false/*expr tree*/,
+                                                       it->second))
               delete it->first;
         }
       }
