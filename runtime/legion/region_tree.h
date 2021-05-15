@@ -1082,10 +1082,10 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
       virtual bool try_add_canonical_reference(void) = 0;
       virtual bool remove_canonical_reference(void) = 0;
-      virtual void add_expression_reference(bool expr_tree = false,
-                                            unsigned cnt = 1) = 0;
-      virtual bool remove_expression_reference(bool expr_tree = false,
-                                               unsigned cnt = 1) = 0;
+      virtual void add_expression_reference(unsigned cnt = 1,
+                                            bool expr_tree = false) = 0;
+      virtual bool remove_expression_reference(unsigned cnt = 1,
+                                               bool expr_tree = false) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
@@ -1324,10 +1324,10 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(bool expr_tree = false,
-                                            unsigned cnt = 1);
-      virtual bool remove_expression_reference(bool expr_tree = false,
-                                               unsigned cnt = 1);
+      virtual void add_expression_reference(unsigned cnt = 1,
+                                            bool expr_tree = false);
+      virtual bool remove_expression_reference(unsigned cnt = 1,
+                                               bool expr_tree = false);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
@@ -1909,10 +1909,10 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(bool expr_tree = false, 
-                                            unsigned cnt = 1);
-      virtual bool remove_expression_reference(bool expr_tree = false,
-                                               unsigned cnt = 1);
+      virtual void add_expression_reference(unsigned cnt = 1,
+                                            bool expr_tree = false); 
+      virtual bool remove_expression_reference(unsigned cntx = 1,
+                                               bool expr_tree = false);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,

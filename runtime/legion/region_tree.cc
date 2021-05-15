@@ -6827,7 +6827,7 @@ namespace Legion {
       // forest has given us a reference back on it, see if we're the first
       // ones to write it, if not we can remove the reference now
       if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
-        expr->remove_expression_reference(true/*tree*/);
+        expr->remove_expression_reference(1/*count*/, true/*tree*/);
       return expr;
     }
 
@@ -6922,7 +6922,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
-      add_expression_reference(true/*expr tree*/);
+      add_expression_reference(1/*count*/, true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6935,7 +6935,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
-      add_expression_reference(true/*expr tree*/);
+      add_expression_reference(1/*count*/, true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6980,16 +6980,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceOperation::add_expression_reference(bool expr_tree,
-                                                       unsigned count)
+    void IndexSpaceOperation::add_expression_reference(unsigned count,
+                                                       bool expr_tree)
     //--------------------------------------------------------------------------
     {
       add_reference(count);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree,
-                                                          unsigned count)
+    bool IndexSpaceOperation::remove_expression_reference(unsigned count,
+                                                          bool expr_tree)
     //--------------------------------------------------------------------------
     {
       return remove_reference(count);
@@ -8960,8 +8960,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::add_expression_reference(bool expr_tree,
-                                                  unsigned count)
+    void IndexSpaceNode::add_expression_reference(unsigned count,
+                                                  bool expr_tree)
     //--------------------------------------------------------------------------
     {
       if (!expr_tree)
@@ -8974,8 +8974,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_expression_reference(bool expr_tree,
-                                                     unsigned count)
+    bool IndexSpaceNode::remove_expression_reference(unsigned count,
+                                                     bool expr_tree)
     //--------------------------------------------------------------------------
     {
       if (expr_tree)
@@ -8988,7 +8988,7 @@ namespace Legion {
     bool IndexSpaceNode::remove_operation(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      return remove_expression_reference(true/*expr tree*/);
+      return remove_expression_reference(1/*count*/, true/*expr tree*/);
     }
 
     //--------------------------------------------------------------------------
