@@ -1572,11 +1572,11 @@ class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
 
 class ProfTask(Base, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['proftask_id', 'color', 'is_task', 'proc']
-    def __init__(self, op, create, ready, start, stop):
+    def __init__(self, op_id, create, ready, start, stop):
         Base.__init__(self)
         HasNoDependencies.__init__(self)
         TimeRange.__init__(self, None, ready, start, stop)
-        self.proftask_id = op.op_id
+        self.proftask_id = op_id
         self.color = '#FFC0CB'  # Pink
         self.is_task = True
 
@@ -2829,7 +2829,7 @@ class State(object):
     def log_proftask_info(self, proc_id, op_id, start, stop):
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
-        proftask = ProfTask(Operation(op_id), start, start, start, stop) 
+        proftask = ProfTask(op_id, start, start, start, stop)
         proc = self.find_processor(proc_id)
         proc.add_task(proftask)
 
