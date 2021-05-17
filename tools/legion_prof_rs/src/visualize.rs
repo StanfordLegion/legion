@@ -80,7 +80,7 @@ impl Proc {
                     .unwrap()
                     .name;
                 match task_name {
-                    Some(task_name) => format!("{} ({})", task_name, variant_name),
+                    Some(task_name) => format!("{} [{}] <{}>", task_name, variant_name, op_id.0),
                     None => variant_name.clone(),
                 }
             }
