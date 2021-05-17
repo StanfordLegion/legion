@@ -165,7 +165,7 @@ impl Proc {
             out: "",
             children: "",
             parents: "",
-            prof_uid: 0,
+            prof_uid: base.prof_uid.0,
         };
 
         let mut start = time_range.start.unwrap();

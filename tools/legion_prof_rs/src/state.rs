@@ -1072,11 +1072,11 @@ impl Variant {
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct ProfUID(u64);
+pub struct ProfUID(pub u64);
 
 #[derive(Debug)]
 pub struct Base {
-    prof_uid: ProfUID,
+    pub prof_uid: ProfUID,
     pub level: Option<u32>,
     pub level_ready: Option<u32>,
     proc_id: Option<ProcID>,
