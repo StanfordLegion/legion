@@ -271,10 +271,10 @@
           { return AVXView<true>(bit_vector, index); }
 #endif
 #ifdef __ALTIVEC__
-        inline PPCView<true> ppc_view(unsigned index)
-          { return PPCView<true>(bit_vector, index); }
-        inline PPCView<false> ppc_view(unsigned index) const
+        inline PPCView<false> ppc_view(unsigned index)
           { return PPCView<false>(bit_vector, index); }
+        inline PPCView<true> ppc_view(unsigned index) const
+          { return PPCView<true>(bit_vector, index); }
 #endif
       public:
         static_assert((MAX % 64) == 0, "Bad bitmask size");
