@@ -27,18 +27,19 @@ pub enum ProcKind {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(i32)]
 pub enum MemKind {
-    Global = 0,
-    System = 1,
-    Registered = 2,
-    Socket = 3,
-    ZeroCopy = 4,
-    Framebuffer = 5,
-    Disk = 6,
-    HDF5 = 7,
-    File = 8,
-    L3Cache = 9,
-    L2Cache = 10,
-    L1Cache = 11,
+    NoMemKind = 0,
+    Global = 1,
+    System = 2,
+    Registered = 3,
+    Socket = 4,
+    ZeroCopy = 5,
+    Framebuffer = 6,
+    Disk = 7,
+    HDF5 = 8,
+    File = 9,
+    L3Cache = 10,
+    L2Cache = 11,
+    L1Cache = 12,
 }
 
 // Make sure this is up to date with lowlevel.h
