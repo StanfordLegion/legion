@@ -1618,7 +1618,7 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
         tsv_file.write(tsv_line)
 
     def __repr__(self):
-        return 'ProfTask' + (' <{:d}>'.format(self.proftask_id) if self.proftask_id > 0 else '')
+        return 'ProfTask' + (' <{:d}>'.format(self.proftask_id) if self.proftask_id >= 0 else '')
 
 class UserMarker(Base, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['name', 'color', 'is_task']
