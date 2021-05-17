@@ -1340,7 +1340,7 @@ class Operation(Base):
             else:
                 return 'Task '+str(self.task_kind.task_id)+' '+self.get_info()
         elif self.is_proftask:
-            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id > 0 else '')
+            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id >= 0 else '')
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
