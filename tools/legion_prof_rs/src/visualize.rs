@@ -51,7 +51,7 @@ struct ProcessorRecord {
     full_text: String,
     text: String,
     tsv: PathBuf,
-    level: u32,
+    levels: u32,
 }
 
 #[derive(Serialize, Copy, Clone)]
@@ -230,7 +230,7 @@ impl Proc {
             full_text: format!("{:?} Processor 0x{:x}", self.kind, self.proc_id),
             text: format!("{:?} Proc {}", self.kind, self.proc_in_node),
             tsv: filename,
-            level: level,
+            levels: level,
         })
     }
 }
@@ -488,7 +488,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     for proc in state.procs.values() {
         if !proc.is_empty() {
             let record = proc.emit_tsv(&path, state)?;
-            base_level += record.level;
+            base_level += record.levels;
             proc_records.insert(proc.proc_id, record);
         }
     }
