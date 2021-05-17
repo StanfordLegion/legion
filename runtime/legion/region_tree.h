@@ -3593,6 +3593,7 @@ namespace Legion {
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
                                  FieldMask &disjoint_complete_below,
+                                 FieldMask &first_touch_refinement,
                                  FieldMaskSet<RefinementOp> &refinements,
                                  RefinementTracker &refinement_tracker,
                                  std::set<RtEvent> &applied_events,

@@ -1731,13 +1731,15 @@ namespace Legion {
         FieldMask unopened_mask = user_mask;
         FieldMask already_closed_mask;
         FieldMask written_disjoint_complete;
+        FieldMask first_touch_refinement = user_mask;
         FieldMaskSet<RefinementOp> refinements;
         const bool check_for_unversioned = 
           !op->is_parent_nonexclusive_virtual_mapping(idx);
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                      projection_info, unopened_mask, already_closed_mask, 
-                     written_disjoint_complete, refinements, refinement_tracker,
-                     applied_events, true/*track disjoint complete below*/, 
+                     written_disjoint_complete, first_touch_refinement, 
+                     refinements, refinement_tracker, applied_events,
+                     true/*track disjoint complete below*/, 
                      check_for_unversioned);
 #ifdef DEBUG_LEGION
         // should never flow out here unless we're not checking for versioning
@@ -15437,6 +15439,7 @@ namespace Legion {
                                        FieldMask &unopened_field_mask,
                                        FieldMask &already_closed_mask,
                                        FieldMask &disjoint_complete_below,
+                                       FieldMask &first_touch_refinement,
                                        FieldMaskSet<RefinementOp> &refinements,
                                        RefinementTracker &refinement_tracker,
                                        std::set<RtEvent> &applied_events,
@@ -15606,29 +15609,46 @@ namespace Legion {
                     state.disjoint_complete_accesses.get_valid_mask();
                 if (!!disjoint_complete_below)
                 {
-                  if (proj_info.is_complete_projection(this, user))
+                  // If we're a first touch refinement then we don't need
+                  // to do the check for completeness
+                  FieldMask remainder = disjoint_complete_below;
+                  const FieldMask first_touch_overlap =
+                    disjoint_complete_below & first_touch_refinement;
+                  if (!!first_touch_overlap)
+                    remainder -= first_touch_overlap;
+                  if (!!remainder)
                   {
-                    // Record that we have a projection from this node
-                    RefProjectionSummary *summary = 
-                      new RefProjectionSummary(proj_info, applied_events);
-                    summary->add_reference();
-                    state.disjoint_complete_projections.insert(summary,
-                                              disjoint_complete_below);
-                    // Relax fields so we don't get any future projections
-                    state.disjoint_complete_accesses.relax_valid_mask(
-                        disjoint_complete_below);
+                    if (proj_info.is_complete_projection(this, user))
+                    {
+                      // Record that we have a projection from this node
+                      RefProjectionSummary *summary = 
+                        new RefProjectionSummary(proj_info, applied_events);
+                      summary->add_reference();
+                      state.disjoint_complete_projections.insert(summary,
+                                                                 remainder);
+                      // Relax fields so we don't get any future projections
+                      state.disjoint_complete_accesses.relax_valid_mask(
+                                                              remainder);
+                    }
+                    else
+                      disjoint_complete_below -= remainder;
                   }
-                  else
-                    disjoint_complete_below.clear();
                 }
               }
             }
             else if (proj_info.projection_space->get_volume() >=
                       ((index_part->get_num_children() + 1) / 2))
             {
-              // If depth 0, see if we've got enough points for at least half 
+              // If depth 0, see if we've got enough points for at least half
               // the subspaces, if so that is good enough for now
               disjoint_complete_below = user.field_mask;
+              if (!!state.disjoint_complete_tree)
+                disjoint_complete_below -= state.disjoint_complete_tree;
+            }
+            else if (!!first_touch_refinement)
+            {
+              disjoint_complete_below = 
+                user.field_mask & first_touch_refinement;
               if (!!state.disjoint_complete_tree)
                 disjoint_complete_below -= state.disjoint_complete_tree;
             }
@@ -15654,24 +15674,40 @@ namespace Legion {
                 state.disjoint_complete_accesses.get_valid_mask();
               if (!!disjoint_complete_below)
               {
-                if (proj_info.is_complete_projection(this, user))
+                // If we're a first touch refinement then we don't need
+                // to do the check for completeness
+                FieldMask remainder = disjoint_complete_below;
+                const FieldMask first_touch_overlap =
+                  disjoint_complete_below & first_touch_refinement;
+                if (!!first_touch_overlap)
+                  remainder -= first_touch_overlap;
+                if (!!remainder)
                 {
-                  // Record that we have a projection from this node
-                  RefProjectionSummary *summary =
-                    new RefProjectionSummary(proj_info, applied_events);
-                  summary->add_reference();
-                  state.disjoint_complete_projections.insert(summary,
-                                            disjoint_complete_below);
-                  // Relax fields so we don't get any future projections
-                  state.disjoint_complete_accesses.relax_valid_mask(
-                      disjoint_complete_below);
+                  if (proj_info.is_complete_projection(this, user))
+                  {
+                    // Record that we have a projection from this node
+                    RefProjectionSummary *summary =
+                      new RefProjectionSummary(proj_info, applied_events);
+                    summary->add_reference();
+                    state.disjoint_complete_projections.insert(summary,
+                                                               remainder);
+                    // Relax fields so we don't get any future projections
+                    state.disjoint_complete_accesses.relax_valid_mask(
+                        remainder);
+                  }
+                  else
+                    disjoint_complete_below -= remainder;
                 }
-                else
-                  disjoint_complete_below.clear();
               }
             }
             else
-              disjoint_complete_below.clear();
+            {
+              // We can keep any fields that are first touch
+              if (!!first_touch_refinement)
+                disjoint_complete_below &= first_touch_refinement;
+              else
+                disjoint_complete_below.clear();
+            }
           }
         }
       }
@@ -15696,6 +15732,32 @@ namespace Legion {
           assert(!open_below);
 #endif
 #endif
+        // The first touch refinement tracks if we're traversing for
+        // fields that have never been refined before and therefore
+        // we don't need to apply our usual tests in sub-trees for 
+        // when we should consider a disjoint complete sub-tree to 
+        // have been accessed. We want to see them immediately.
+        if (track_disjoint_complete_below && !!first_touch_refinement)
+        {
+          const FieldMask disjoint_complete_overlap = 
+            first_touch_refinement & state.disjoint_complete_tree;
+          if (!!disjoint_complete_overlap)
+          {
+            // Remove any fields which already have refinements
+            if (!state.disjoint_complete_children.empty())
+            {
+              const FieldMask &child_mask =
+                state.disjoint_complete_children.get_valid_mask();
+#ifdef DEBUG_LEGION
+              assert(!(child_mask - state.disjoint_complete_tree));
+#endif
+              first_touch_refinement -= child_mask;
+            }
+            if (!state.disjoint_complete_accesses.empty())
+              first_touch_refinement -= (disjoint_complete_overlap &
+                  state.disjoint_complete_accesses.get_valid_mask());
+          }
+        }
         FieldMask child_disjoint_complete;
         if (track_disjoint_complete_below && !is_region())
         {
@@ -15704,22 +15766,24 @@ namespace Legion {
           if (part_node->is_disjoint() && part_node->is_complete())
             next_child->register_logical_user(ctx, user, path, trace_info,
                      proj_info, unopened_field_mask, already_closed_mask, 
-                     child_disjoint_complete, refinements, refinement_tracker,
-                     applied_events, true/*track disjoint complete below*/, 
+                     child_disjoint_complete, first_touch_refinement,
+                     refinements, refinement_tracker, applied_events,
+                     true/*track disjoint complete below*/, 
                      false/*check unversioned*/);
           else
             next_child->register_logical_user(ctx, user, path, trace_info,
                      proj_info, unopened_field_mask, already_closed_mask, 
-                     child_disjoint_complete, refinements, refinement_tracker,
-                     applied_events, false/*track disjoint complete below*/, 
+                     child_disjoint_complete, first_touch_refinement,
+                     refinements, refinement_tracker, applied_events,
+                     false/*track disjoint complete below*/, 
                      false/*check unversioned*/);
         }
         else
           next_child->register_logical_user(ctx, user, path, trace_info,
              proj_info, unopened_field_mask, already_closed_mask, 
-             child_disjoint_complete, refinements, refinement_tracker,
-             applied_events, track_disjoint_complete_below,
-             false/*check unversioned*/);
+             child_disjoint_complete, first_touch_refinement,
+             refinements, refinement_tracker, applied_events, 
+             track_disjoint_complete_below, false/*check unversioned*/);
         if (!refinements.empty() &&
             (!state.curr_epoch_users.empty() || 
              !state.prev_epoch_users.empty()))
@@ -16074,7 +16138,7 @@ namespace Legion {
                     refinement_mask);
                   // Start the dependence analysis here, the initial caller of
                   // register_logical_user will be the function that finishes
-                  // it for each of the reginement operations
+                  // it for each of the refinement operations
                   perform_tree_dominance_analysis(ctx, refinement_user, 
                         refinement_mask, user.op/*skip op*/, user.gen);
                   // Register the refinement as an operation here
@@ -16137,98 +16201,117 @@ namespace Legion {
           {
             // At this point we're a partition that is not refined
             IndexPartNode *part_node = as_partition_node()->row_source; 
-            // If we're not a disjoint complete partition then
-            // we can just ignore this child being complete
-            if (part_node->is_disjoint() && part_node->is_complete())
+#ifdef DEBUG_LEGION
+            assert(part_node->is_disjoint() && part_node->is_complete());
+#endif
+            // Filter out any additional fields for which we are
+            // already disjoint and complete but just didn't refine
+            // for the children because we were the lowest level partition
+            if (!!state.disjoint_complete_tree)
+              child_disjoint_complete -= state.disjoint_complete_tree;
+            if (!!child_disjoint_complete)
             {
-              // Filter out any additional fields for which we are
-              // already disjoint and complete but just didn't refine
-              // for the children because we were the lowest level partition
-              if (!!state.disjoint_complete_tree)
-                child_disjoint_complete -= state.disjoint_complete_tree;
-              if (!!child_disjoint_complete)
+              // Check to see if we've already been counted
+              FieldMaskSet<RegionTreeNode>::iterator finder =
+                state.disjoint_complete_accesses.find(next_child);
+              if (finder != state.disjoint_complete_accesses.end())
               {
-                // Check to see if we've already been counted
-                FieldMaskSet<RegionTreeNode>::iterator finder =
-                  state.disjoint_complete_accesses.find(next_child);
-                if (finder != state.disjoint_complete_accesses.end())
+                child_disjoint_complete -= finder->second;
+                if (!!child_disjoint_complete)
+                  finder.merge(child_disjoint_complete);
+              }
+              else
+                state.disjoint_complete_accesses.insert(next_child,
+                                          child_disjoint_complete);
+            }
+            // Check to see if this a first-touch refinement in which
+            // case we can safely ignore the test for the number of
+            // children and propagate the information up immediately
+            if (!!first_touch_refinement)
+            {
+              const FieldMask first_touch_overlap =
+                child_disjoint_complete & first_touch_refinement;
+              if (!!first_touch_overlap)
+              {
+                disjoint_complete_below |= first_touch_overlap;
+                // filter out the individual children
+                state.disjoint_complete_accesses.filter(first_touch_overlap);
+                // but then relax the mask for these fields so that when
+                // we go to do the refinement update we know we need to
+                // traverse down below for those fields
+                state.disjoint_complete_accesses.relax_valid_mask(
+                                              first_touch_overlap);
+                // No more need to consider these children anymore
+                child_disjoint_complete -= first_touch_overlap;
+              }
+            }
+            if (!!child_disjoint_complete)
+            {
+              // Scan through and update the counts, if we hit
+              // the thresholds then we can count this as refined
+              for (LogicalState::FieldSizeMap::iterator it =
+                    state.disjoint_complete_child_counts.begin(); it !=
+                    state.disjoint_complete_child_counts.end(); /*nothing*/)
+              {
+                const FieldMask overlap = 
+                  child_disjoint_complete & it->second;
+                if (!overlap)
                 {
-                  child_disjoint_complete -= finder->second;
-                  if (!!child_disjoint_complete)
-                    finder.merge(child_disjoint_complete);
+                  it++;
+                  continue;
+                }
+                // Now see if we're done with this one
+                const size_t next_count = it->first + 1;
+                it->second -= overlap;
+                if (!it->second)
+                {
+                  // Remove it from the set
+                  LogicalState::FieldSizeMap::iterator to_delete = it++;
+                  state.disjoint_complete_child_counts.erase(to_delete);
                 }
                 else
-                  state.disjoint_complete_accesses.insert(next_child,
-                                            child_disjoint_complete);
+                  it++;
+                // Add one for the overlap fields, will not break iterator
+                // since it is going to be behind our traversal
+                LogicalState::FieldSizeMap::iterator finder =
+                  state.disjoint_complete_child_counts.find(next_count);
+                if (finder != state.disjoint_complete_child_counts.end())
+                  finder->second |= overlap;
+                else
+                  state.disjoint_complete_child_counts[next_count] = overlap;
+                child_disjoint_complete -= overlap;
+                if (!child_disjoint_complete)
+                  break;
               }
               if (!!child_disjoint_complete)
+                state.disjoint_complete_child_counts[1] = 
+                                            child_disjoint_complete;
+              // Only the first count can be big enough to exceed the
+              // threshold so check to see if it is big enough
+              LogicalState::FieldSizeMap::iterator first =
+                state.disjoint_complete_child_counts.begin();
+              // This is a heuristic here!
+              // We're looking for the count to grow to be at least as
+              // big as half of the children, we could change this later
+              static_assert(LEGION_REFINEMENT_PARTITION_PERCENTAGE > 0,
+                  "LEGION_REFINEMENT_PARTITION_PCT must be positive");
+              static_assert(LEGION_REFINEMENT_PARTITION_PERCENTAGE <= 100,
+                  "LEGION_REFINEMENT_PARTITION_PCT must be a percentage");
+              // x/y >= w/z is the same as xz >= wy when all positive
+              if ((100 * first->first) >= (part_node->get_num_children() * 
+                    LEGION_REFINEMENT_PARTITION_PERCENTAGE))
               {
-                // Scan through and update the counts, if we hit
-                // the thresholds then we can count this as refined
-                for (LogicalState::FieldSizeMap::iterator it =
-                      state.disjoint_complete_child_counts.begin(); it !=
-                      state.disjoint_complete_child_counts.end(); /*nothing*/)
-                {
-                  const FieldMask overlap = 
-                    child_disjoint_complete & it->second;
-                  if (!overlap)
-                  {
-                    it++;
-                    continue;
-                  }
-                  // Now see if we're done with this one
-                  const size_t next_count = it->first + 1;
-                  it->second -= overlap;
-                  if (!it->second)
-                  {
-                    // Remove it from the set
-                    LogicalState::FieldSizeMap::iterator to_delete = it++;
-                    state.disjoint_complete_child_counts.erase(to_delete);
-                  }
-                  else
-                    it++;
-                  // Add one for the overlap fields, will not break iterator
-                  // since it is going to be behind our traversal
-                  LogicalState::FieldSizeMap::iterator finder =
-                    state.disjoint_complete_child_counts.find(next_count);
-                  if (finder != state.disjoint_complete_child_counts.end())
-                    finder->second |= overlap;
-                  else
-                    state.disjoint_complete_child_counts[next_count] = overlap;
-                  child_disjoint_complete -= overlap;
-                  if (!child_disjoint_complete)
-                    break;
-                }
-                if (!!child_disjoint_complete)
-                  state.disjoint_complete_child_counts[1] = 
-                                              child_disjoint_complete;
-                // Only the first count can be big enough to exceed the
-                // threshold so check to see if it is big enough
-                LogicalState::FieldSizeMap::iterator first =
-                  state.disjoint_complete_child_counts.begin();
-                // This is a heuristic here!
-                // We're looking for the count to grow to be at least as
-                // big as half of the children, we could change this later
-                static_assert(LEGION_REFINEMENT_PARTITION_PERCENTAGE > 0,
-                    "LEGION_REFINEMENT_PARTITION_PCT must be positive");
-                static_assert(LEGION_REFINEMENT_PARTITION_PERCENTAGE <= 100,
-                    "LEGION_REFINEMENT_PARTITION_PCT must be a percentage");
-                // x/y >= w/z is the same as xz >= wy when all positive
-                if ((100 * first->first) >= (part_node->get_num_children() * 
-                      LEGION_REFINEMENT_PARTITION_PERCENTAGE))
-                {
-                  disjoint_complete_below = first->second;
-                  // Go through and filter out any child counts for these fields
-                  state.disjoint_complete_child_counts.erase(first);
-                  // filter out the individual children
-                  state.disjoint_complete_accesses.filter(
-                                  disjoint_complete_below);
-                  // but then relax the mask for these fields so that when
-                  // we go to do the refinement update we know we need to
-                  // traverse down below for those fields
-                  state.disjoint_complete_accesses.relax_valid_mask(
-                                            disjoint_complete_below);
-                }
+                disjoint_complete_below |= first->second;
+                // Go through and filter out any child counts for these fields
+                state.disjoint_complete_child_counts.erase(first);
+                // filter out the individual children
+                state.disjoint_complete_accesses.filter(
+                                disjoint_complete_below);
+                // but then relax the mask for these fields so that when
+                // we go to do the refinement update we know we need to
+                // traverse down below for those fields
+                state.disjoint_complete_accesses.relax_valid_mask(
+                                          disjoint_complete_below);
               }
             }
           }
