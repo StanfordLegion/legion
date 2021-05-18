@@ -68,7 +68,7 @@ impl Proc {
         f: &mut csv::Writer<File>,
         point: &ProcPoint,
         state: &State,
-    ) -> io::Result<()> {
+        ) -> io::Result<()> {
         let (base, time_range, waiters) = self.entry(point.entry);
         let name = match point.entry {
             ProcEntry::Task(op_id) => {
@@ -169,40 +169,49 @@ impl Proc {
         };
 
         let mut start = time_range.start.unwrap();
-        for wait in &waiters.wait_intervals {
+        if !waiters.wait_intervals.is_empty() {
+            for wait in &waiters.wait_intervals {
+                f.serialize(DataRecord {
+                    ready: &format!("{}", start),
+                    start: &format!("{}", start),
+                    end: &format!("{}", wait.start),
+                    opacity: 1.0,
+                    title: &name,
+                    ..default
+                })?;
+                f.serialize(DataRecord {
+                    title: &format!("{} (waiting)", &name),
+                    ready: &format!("{}", wait.start),
+                    start: &format!("{}", wait.start),
+                    end: &format!("{}", wait.ready),
+                    opacity: 0.15,
+                    ..default
+                })?;
+                f.serialize(DataRecord {
+                    title: &format!("{} (ready)", &name),
+                    ready: &format!("{}", wait.ready),
+                    start: &format!("{}", wait.ready),
+                    end: &format!("{}", wait.end),
+                    opacity: 0.45,
+                    ..default
+                })?;
+                start = max(start, wait.end);
+            }
+            if start < time_range.stop.unwrap() {
+                f.serialize(DataRecord {
+                    ready: &format!("{}", start),
+                    start: &format!("{}", start),
+                    end: &format!("{}", time_range.stop.unwrap()),
+                    opacity: 1.0,
+                    title: &name,
+                    ..default
+                })?;
+            }
+        } else {
             f.serialize(DataRecord {
-                ready: &format!("{}", start),
-                start: &format!("{}", start),
-                end: &format!("{}", wait.start),
-                opacity: 1.0,
-                title: &name,
-                ..default
-            })?;
-            f.serialize(DataRecord {
-                title: &format!("{} (waiting)", &name),
-                ready: &format!("{}", wait.start),
-                start: &format!("{}", wait.start),
-                end: &format!("{}", wait.ready),
-                opacity: 0.15,
-                ..default
-            })?;
-            f.serialize(DataRecord {
-                title: &format!("{} (ready)", &name),
-                ready: &format!("{}", wait.ready),
-                start: &format!("{}", wait.ready),
-                end: &format!("{}", wait.end),
-                opacity: 0.45,
-                ..default
-            })?;
-            start = max(start, wait.end);
-        }
-        if start < time_range.stop.unwrap() {
-            f.serialize(DataRecord {
-                ready: &format!("{}", start),
+                ready: &format!("{}", time_range.ready.unwrap_or(start)),
                 start: &format!("{}", start),
                 end: &format!("{}", time_range.stop.unwrap()),
-                opacity: 1.0,
-                title: &name,
                 ..default
             })?;
         }
