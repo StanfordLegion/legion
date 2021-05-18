@@ -5838,7 +5838,8 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = ~(bits.ppc_view(idx));
+        __vector unsigned long long rhs = bits.ppc_view(idx);
+        result(idx) = ~rhs;
       }
       return result;
     }
@@ -5852,7 +5853,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_or(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_or(rhs1, rhs2);
       }
       return result;
     }
@@ -5866,7 +5869,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_and(rhs1, rhs2);
       }
       return result;
     }
@@ -5880,7 +5885,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_xor(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_xor(rhs1, rhs2);
       }
       return result;
     }
@@ -5892,7 +5899,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_view(idx) = vec_or(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_or(rhs1, rhs2);
       }
       return *this;
     }
@@ -5904,7 +5913,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_view(idx) = vec_and(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_and(rhs1, rhs2);
       }
       return *this;
     }
@@ -5916,7 +5927,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_view(idx) = vec_xor(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_xor(rhs1, rhs2);
       }
       return *this;
     }
@@ -5943,7 +5956,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(~rhs(idx), bits.ppc_view(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_and(rhs1, ~rhs2);
       }
       return result;
     }
@@ -5955,7 +5970,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_view(idx) = vec_and(~rhs(idx), bits.ppc_view(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_and(rhs1, ~rhs2);
       }
       return *this;
     }
@@ -6495,8 +6512,10 @@
       __vector unsigned long long result_mask = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = ~(bits.ppc_view(idx));
-        result_mask = vec_or(result_mask, result(idx));
+        __vector unsigned long long rhs = bits.ppc_view(idx);
+        __vector unsigned long long lhs = ~rhs;
+        result(idx) = lhs;
+        result_mask = vec_or(result_mask, lhs);
       }
       result.sum_mask = extract_mask(result_mask);
       return result;
@@ -6512,7 +6531,9 @@
       result.sum_mask = sum_mask | rhs.sum_mask;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_or(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_or(rhs1, rhs2);
       }
       return result;
     }
@@ -6530,8 +6551,11 @@
         __vector unsigned long long temp_sum = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
         {
-          result(idx) = vec_and(bits.ppc_view(idx), rhs(idx));
-          temp_sum = vec_or(temp_sum, result(idx));
+          __vector unsigned long long rhs1 = bits.ppc_view(idx);
+          __vector unsigned long long rhs2 = rhs(idx);
+          __vector unsigned long long lhs = vec_and(rhs1, rhs2);
+          result(idx) = lhs;
+          temp_sum = vec_or(temp_sum, lhs);
         }
         result.sum_mask = extract_mask(temp_sum); 
       }
@@ -6548,8 +6572,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_xor(bits.ppc_view(idx), rhs(idx));
-        temp_sum = vec_or(temp_sum, result(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_xor(rhs1, rhs2);
+        result(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       result.sum_mask = extract_mask(temp_sum);
       return result;
@@ -6564,8 +6591,9 @@
       sum_mask |= rhs.sum_mask;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-	//bits.ppc_view(idx) |= rhs(idx);
-        bits.ppc_view(idx) = vec_or(bits.ppc_view(idx), rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_or(rhs1, rhs2);
       }
       return *this;
     }
@@ -6581,8 +6609,11 @@
         __vector unsigned long long temp_sum = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
         {
-          bits.ppc_view(idx) = vec_and(bits.ppc_view(idx), rhs(idx));
-          temp_sum = vec_or(temp_sum, bits.ppc_view(idx));
+          __vector unsigned long long rhs1 = bits.ppc_view(idx);
+          __vector unsigned long long rhs2 = rhs(idx);
+          __vector unsigned long long lhs = vec_and(rhs1, rhs2);
+          bits.ppc_view(idx) = lhs;
+          temp_sum = vec_or(temp_sum, lhs);
         }
         sum_mask = extract_mask(temp_sum); 
       }
@@ -6605,8 +6636,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_view(idx) = vec_xor(bits.ppc_view(idx), rhs(idx));
-        temp_sum = vec_or(temp_sum, bits.ppc_view(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_xor(rhs1, rhs2);
+        bits.ppc_view(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       sum_mask = extract_mask(temp_sum);
       return *this;
@@ -6638,8 +6672,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(~rhs(idx), bits.ppc_view(idx));
-        temp_sum = vec_or(temp_sum, result(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_and(rhs1, ~rhs2);
+        result(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       result.sum_mask = extract_mask(temp_sum);
       return result;
@@ -6654,8 +6691,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_view(idx) = vec_and(~rhs(idx), bits.ppc_view(idx));
-        temp_sum = vec_or(temp_sum, bits.ppc_view(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_and(rhs1, ~rhs2);
+        bits.ppc_view(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       sum_mask = extract_mask(temp_sum);
       return *this;
