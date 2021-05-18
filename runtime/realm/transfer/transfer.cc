@@ -2024,8 +2024,13 @@ namespace Realm {
 	  size_t max_bytes = MAX_POINTS * sizeof(Point<N,T>);
 	  if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
 	    max_bytes = input_ports[0].seq_remote.span_exists(input_ports[0].local_bytes_total, max_bytes);
-	    if(max_bytes < sizeof(Point<N,T>))
+	    if(max_bytes < sizeof(Point<N,T>)) {
+              // check to see if this is the end of the input
+              if(input_ports[0].local_bytes_total ==
+                 input_ports[0].remote_bytes_total.load_acquire())
+                input_done = true;
 	      break;
+            }
 	  }
 	  size_t bytes = input_ports[0].iter->step(max_bytes, p_info,
 						   0, false /*!tentative*/);
