@@ -20,9 +20,138 @@
 
 #include "realm/realm_config.h"
 
+#include "realm/atomics.h"
+
 #include <stdint.h>
 
 namespace Realm {
+
+  // a doorbell is used to notify a thread that whatever condition it has been
+  //  waiting for has been satisfied - all operations are lock-free in user space,
+  //  but wait and notify may cross into kernel space if the doorbell owner goes
+  //  (or tries to go) to sleep
+  // the notification process allows 31 bits worth of information to be
+  //  delivered as well
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE Doorbell {
+  protected:
+    // not constructed directly - use get_thread_doorbell
+    Doorbell();
+    ~Doorbell();
+
+  public:
+    // gets the doorbell for the current thread (you can't lookup anybody else's)
+    static Doorbell *get_thread_doorbell();
+
+    // each doorbell can be separately configured for how long it should spin
+    //  before going to sleep
+    static const long long DOORBELL_SLEEP_IMMEDIATE = 0;
+    static const long long DOORBELL_SLEEP_NEVER = -1;
+    static const long long DOORBELL_SLEEP_DEFAULT = 10000;  // 10 us
+
+    void set_sleep_timeout(long long timeout_in_ns);
+
+    // waiter interface
+    void prepare();
+    void cancel();
+    bool satisfied();  // indicates satisfaction - wait must be called but is guaranteed to be immediate
+    uint32_t wait();
+
+    // waker interface
+    bool is_sleeping() const;
+    void notify(uint32_t data);
+    // prewake does not ring the doorbell, but it does pre-wake the waiter
+    //  if needed so that some latency of kernel scheduling can be hidden
+    void prewake();
+    void cancel_prewake();
+
+  protected:
+    // "slow" versions of the above when the fast case isn't met
+    uint32_t wait_slow();
+    void notify_slow();
+    void prewake_slow();
+
+    static const uint32_t STATE_IDLE = 0;
+    static const uint32_t STATE_PENDING_AWAKE = 2;
+    static const uint32_t STATE_PENDING_ASLEEP = 4;
+    static const uint32_t STATE_PENDING_PREWAKE = 6;
+    static const uint32_t STATE_SATISFIED_BIT = 1; // LSB
+    static const unsigned STATE_SATISFIED_VAL_SHIFT = 1;
+    atomic<uint32_t> state;
+
+    long long sleep_timeout;
+    long long next_sleep_time;
+
+    // useful for debugging
+    uintptr_t owner_tid;
+
+    friend class DoorbellList;
+    Doorbell *next_doorbell;
+  };
+
+  // a list of doorbells that are waiting to be run - like an up/down
+  //  semaphore, a doorbell list can go "negative" - a pop that preceeds
+  //  a push will immediately satisfy the push rather than delaying the popper
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE DoorbellList {
+  public:
+    DoorbellList();
+    ~DoorbellList();
+
+    // returns true if the doorbell is added, false if it consumed an available
+    //  "doorbell to be named later" token
+    // adding doorbells is always lock-free and can be called concurrently
+    bool add_doorbell(Doorbell *db);
+
+    // extracts the a doorbell from the list and returns it, or increments
+    //  the "extra notifies" count (if 'allow_extra') and returns nullptr
+    // this is lock-free w.r.t. adders, but only one thread may be performing
+    //  extraction/notification at a time
+    // comes in two flavors, so choose wisely:
+    //  a) oldest-first - perhaps more "fair" but more expensive
+    //  b) newest-first - easier, and maybe better for cache locality?
+    Doorbell *extract_oldest(bool prefer_spinning, bool allow_extra);
+    Doorbell *extract_newest(bool prefer_spinning, bool allow_extra);
+
+    // helper routines to extract and notify exactly 'count' doorbells -
+    //  TODO: make slightly cheaper than repeated calls to extract
+    void notify_oldest(unsigned count, bool prefer_spinning);
+    void notify_newest(unsigned count, bool prefer_spinning);
+
+  protected:
+    // this field is either:
+    //  a) the first Doorbell in the waiting stack, or
+    //  b) 2*extra_notifies - 1, if notifies are waiting for matching doorbells
+    atomic<uintptr_t> head_or_count;
+  };
+
+  // a delegating mutex allows lock-free mutual exclusion between threads that
+  //  want to work on a shared resource - a lock attempt either succeeds
+  //  immediately or delegates the intended work "units" to some other thread
+  //  that already holds the mutex
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE DelegatingMutex {
+  public:
+    DelegatingMutex();
+
+    // attempts to enter the mutual exclusion zone in order to do 'work_units'
+    //  units of work - a non-zero return indicates success with a potentially-
+    //  different number of units of work that need to be performed, while a
+    //  return of zero indicates contention but a guarantee that some other
+    //  thread will perform the work instead
+    // a small amount of temporary state must be preserved by the caller across
+    //  the call to attempt_enter and any/all calls to attempt_exit (this is
+    //  not stored in the object to avoid false sharing)
+    uint64_t attempt_enter(uint64_t work_units, uint64_t& tstate);
+
+    // attempts to exit the mutual exclusion zone once all known work has been
+    //  performed - a zero return indicates success, while a non-zero return
+    //  indicates the caller is still in the mutex and has been given more work
+    //  to do
+    uint64_t attempt_exit(uint64_t& tstate);
+
+  protected:
+    // LSB indicates some thread is in the mutex, while the rest of the bits
+    //  accumulate delegated work
+    atomic<uint64_t> state;
+  };
 
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE Mutex {
   public:
