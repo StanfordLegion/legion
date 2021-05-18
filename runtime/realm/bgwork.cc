@@ -151,46 +151,65 @@ namespace Realm {
 
     log_bgwork.info() << "dedicated worker starting - worker=" << this << " numa=" << numa_domain;
 
-    while(manager->shutdown_flag.load() == 0) {
-      // see if there is work to do
-      if(manager->active_work_items.load() != 0) {
-	// do work until there's nothing left
+    long long spin_until = -1;
+    while(true) {
+      uint32_t state_val = manager->worker_state.load_acquire();
+
+      // if there's work to do, do it
+      if(((state_val >> BackgroundWorkManager::STATE_ACTIVE_ITEMS_SHIFT) &
+          BackgroundWorkManager::STATE_ACTIVE_ITEMS_MASK) != 0) {
+        // reset spin timer
+        spin_until = -1;
+
+        // do work until there's none left
 	while(worker.do_work(-1 /*max_time*/, 0 /*interrupt_flag*/)) {}
-      } else {
-	// (potentially) spin for a bit and then sleep
-	long long spin_until = (manager->cfg.worker_spin_interval +
-				Clock::current_time_in_nanoseconds());
-	while(manager->active_work_items.load() == 0) {
-	  if(manager->shutdown_flag.load() != 0)
-	    break;
+
+        // and then retest state variable
+        continue;
+      }
+
+      // shutdown requested?
+      if((state_val & BackgroundWorkManager::STATE_SHUTDOWN_BIT) != 0)
+        break;
+
+      // (potentially) spin for a bit and then sleep
+      if(manager->cfg.worker_spin_interval > 0) {
+        if(spin_until < 0) {
+          spin_until = (manager->cfg.worker_spin_interval +
+                        Clock::current_time_in_nanoseconds());
+          Thread::yield();
+          continue;
+        } else {
+          // if we haven't exhausted the spin timer, spin more
 	  if(Clock::current_time_in_nanoseconds() < spin_until) {
 	    Thread::yield();
-	  } else {
-	    log_bgwork.info() << "dedicated worker sleeping - worker=" << this;
-	    {
-	      AutoLock<> a(manager->mutex);
-
-	      // re-check shutdown flag with mutex held
-	      if(manager->shutdown_flag.load() != 0)
-		break;
-
-	      // indicate our desire to sleep and then check the 
-	      //  active_work_items count one more time
-	      int other_sleepers = manager->sleeping_workers.fetch_add(1);
-	      if(manager->active_work_items.load() == 0) {
-		manager->condvar.wait();
-	      } else {
-		manager->sleeping_workers.store(0);
-		if(other_sleepers)
-		  manager->condvar.broadcast();
-	      }
-	    }
-	    log_bgwork.info() << "dedicated worker awake - worker=" << this;
-	    // if we're woken up, there's probably work to do
-	    break;
-	  }
-	}
+            continue;
+          }
+        }
       }
+
+      // all other options exhausted - try to increment sleeping worker
+      //   count, but only if nothing has changed (false conflicts with
+      //   other workers going to sleep aren't a big deal)
+      {
+        uint32_t expected = state_val;
+        uint32_t newval = state_val + (1 << BackgroundWorkManager::STATE_SLEEPING_WORKERS_SHIFT);
+        if(!manager->worker_state.compare_exchange(expected, newval))
+          continue;
+      }
+
+      log_bgwork.info() << "dedicated worker sleeping - worker=" << this;
+      {
+        Doorbell *db = Doorbell::get_thread_doorbell();
+        db->prepare();
+        if(manager->db_list.add_doorbell(db)) {
+          db->wait();
+        } else {
+          // signal came first, so cancel our wait
+          db->cancel();
+        }
+      }
+      log_bgwork.info() << "dedicated worker awake - worker=" << this;
     }
 
     log_bgwork.info() << "dedicated worker terminating - worker=" << this;
@@ -209,10 +228,7 @@ namespace Realm {
 
   BackgroundWorkManager::BackgroundWorkManager(void)
     : num_work_items(0)
-    , active_work_items(0)
-    , condvar(mutex)
-    , shutdown_flag(0)
-    , sleeping_workers(0)
+    , worker_state(0)
   {
     for(unsigned i = 0; i < BITMASK_ARRAY_SIZE; i++)
       active_work_item_mask[i].store(0);
@@ -275,13 +291,29 @@ namespace Realm {
     BitMask prev = active_work_item_mask[elem].fetch_or_acqrel(mask);
     assert((prev & mask) == 0);
 
-    int prev_count = active_work_items.fetch_add(1);
-    if((prev_count == 0) && (sleeping_workers.load() > 0)) {
-      AutoLock<> a(mutex);
-      // check again - somebody else may have handled this
-      if(sleeping_workers.load() > 0) {
-	condvar.broadcast();
-	sleeping_workers.store(0);
+    // increment the active items field in 'worker_state' and see if there are
+    //  any sleeping workers that could help out
+    uint32_t state_val = worker_state.fetch_add_acqrel(1 << STATE_ACTIVE_ITEMS_SHIFT);
+    bool wake_worker = false;
+    while(((state_val >> STATE_SLEEPING_WORKERS_SHIFT) &
+           STATE_SLEEPING_WORKERS_MASK) != 0) {
+      // use a CAS to decrement without underflowing - retry as needed
+      if(worker_state.compare_exchange(state_val,
+                                       state_val - (1 << STATE_SLEEPING_WORKERS_SHIFT))) {
+        wake_worker = true;
+        break;
+      }
+    }
+    // actually waking a worker requires access to the doorbell list (or
+    //   delegating to somebody else)
+    if(wake_worker) {
+      uint64_t tstate;
+      uint64_t act_pops = db_mutex.attempt_enter(1, tstate);
+      while(act_pops != 0) {
+        db_list.notify_newest(act_pops, true /*prefer_spinning*/);
+
+        // try to release mutex, but loop in case work was delegated to us
+        act_pops = db_mutex.attempt_exit(tstate);
       }
     }
   }
@@ -346,12 +378,29 @@ namespace Realm {
   void BackgroundWorkManager::stop_dedicated_workers(void)
   {
     // set flag and signal any sleeping workers
-    shutdown_flag.store(1);
-    {
-      AutoLock<> a(mutex);
-      if(sleeping_workers.load() != 0)
-	condvar.broadcast();
-      sleeping_workers.store(0);
+    uint32_t prev_state = worker_state.fetch_or(STATE_SHUTDOWN_BIT);
+
+    // use CAS to actually claim workers since work advertisers might get
+    //   some of them
+    while(true) {
+      unsigned sleepers = ((prev_state >> STATE_SLEEPING_WORKERS_SHIFT) &
+                           STATE_SLEEPING_WORKERS_MASK);
+      if(sleepers == 0)
+        break;
+
+      if(worker_state.compare_exchange(prev_state,
+                                       prev_state - (sleepers << STATE_SLEEPING_WORKERS_SHIFT))) {
+        uint64_t tstate;
+        uint64_t act_pops = db_mutex.attempt_enter(sleepers, tstate);
+        while(act_pops != 0) {
+          db_list.notify_newest(act_pops, true /*prefer_spinning*/);
+
+          // try to release mutex, but loop in case work was delegated to us
+          act_pops = db_mutex.attempt_exit(tstate);
+        }
+
+        break;
+      }
     }
 
     // now join on all the threads
@@ -584,7 +633,11 @@ namespace Realm {
 	BitMask prev = manager->active_work_item_mask[elem].fetch_and_acqrel(~target_bit);
 	if(prev & target_bit) {
 	  // success!
-	  manager->active_work_items.fetch_sub(1);
+
+          // decrement count of active work items - temporary underflow is
+          //  possible here, so no way to sanity-check state
+          manager->worker_state.fetch_sub(1 << BackgroundWorkManager::STATE_ACTIVE_ITEMS_SHIFT);
+
 	  unsigned slot = ((elem * BITMASK_BITS) + ctz(target_bit));
 	  log_bgwork.info() << "work claimed: manager=" << manager
 			    << " slot=" << slot
@@ -612,7 +665,8 @@ namespace Realm {
             if(requeue) {
               // we can just call this item's work function again if we're not out
               //  of time and if there's nothing else to do
-              if(manager->active_work_items.load() == 0) {
+              uint32_t other_work_items = (manager->worker_state.load() >> BackgroundWorkManager::STATE_ACTIVE_ITEMS_SHIFT);
+              if(other_work_items == 0) {
                 long long now = Clock::current_time_in_nanoseconds();
                 if((work_until_time <= 0) || (work_until_time > now)) {
                   // update t_quantum and then loop back around

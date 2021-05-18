@@ -126,8 +126,10 @@ namespace Realm {
     void advertise_work(unsigned slot);
 
     Config cfg;
+
+    // mutex protects assignment of work items to slots
+    Mutex mutex;
     atomic<unsigned> num_work_items;
-    atomic<int> active_work_items;
     atomic<BitMask> active_work_item_mask[BITMASK_ARRAY_SIZE];
 
     atomic<int> work_item_usecounts[MAX_WORK_ITEMS];
@@ -135,10 +137,27 @@ namespace Realm {
 
     friend class BackgroundWorkThread;
 
-    Mutex mutex;
-    CondVar condvar;
-    atomic<int> shutdown_flag;
-    atomic<int> sleeping_workers;
+    // to manage sleeping workers, we need to stuff three things into a
+    //  single atomically-updatable state variable:
+    // a) the number of active work items - no worker should sleep if there are
+    //     any active work items, and any increment of the active work items
+    //     should wake up one sleeping worker (unless there are none)
+    //     (NOTE: this counter can temporarily underflow, so needs to be the top
+    //       field in the variable to avoid temporarily corrupting other fields)
+    // b) the number of sleeping workers
+    // c) a bit indicating if a shutdown has been requested (which should wake
+    //     up all remaining workers)
+    static const uint32_t STATE_SHUTDOWN_BIT = 1;
+    static const uint32_t STATE_ACTIVE_ITEMS_MASK = 0xFFFF;
+    static const unsigned STATE_ACTIVE_ITEMS_SHIFT = 16;
+    static const uint32_t STATE_SLEEPING_WORKERS_MASK = 0xFFF;
+    static const unsigned STATE_SLEEPING_WORKERS_SHIFT = 4;
+    atomic<uint32_t> worker_state;
+
+    // sleeping workers go in a doorbell list with a delegating mutex
+    DelegatingMutex db_mutex;
+    DoorbellList db_list;
+
     std::vector<BackgroundWorkThread *> dedicated_workers;
   };
 
