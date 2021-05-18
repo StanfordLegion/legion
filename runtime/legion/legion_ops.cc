@@ -18885,7 +18885,7 @@ namespace Legion {
               false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
+                                        unique_op_id, restricted);
       return region;
     }
 
@@ -19618,7 +19618,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
+                                        unique_op_id, false/*restricted*/);
         if (launch_space != NULL)
           runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }

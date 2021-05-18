@@ -637,10 +637,10 @@ namespace Legion {
       }
 
       static inline void log_attach_operation(UniqueID context,
-                                              UniqueID attach)
+                                              UniqueID attach, bool restricted)
       {
-        log_spy.print("Attach Operation %llu %llu", 
-                      context, attach);
+        log_spy.print("Attach Operation %llu %llu %u", 
+                      context, attach, restricted ? 1 : 0);
       }
 
       static inline void log_detach_operation(UniqueID context,

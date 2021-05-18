@@ -5723,7 +5723,7 @@ class Operation(object):
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
-                 'intra_space_dependences', 'merged', 'replayed']
+                 'intra_space_dependences', 'merged', 'replayed', 'restricted']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5792,6 +5792,8 @@ class Operation(object):
         self.merged = False
         # Check if this operation was physical replayed
         self.replayed = False
+        # For attach ops only - whether we should add a restriction
+        self.restricted = False
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -7786,7 +7788,8 @@ class Operation(object):
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
             # Add any restrictions for different kinds of ops
-            if self.kind == RELEASE_OP_KIND or self.kind == ATTACH_OP_KIND:
+            if self.kind == RELEASE_OP_KIND or \
+                    (self.kind == ATTACH_OP_KIND and self.restricted):
                 for index,req in iteritems(self.reqs):
                     if not self.add_restriction(index, req, perform_checks):
                         return False
@@ -10905,7 +10908,7 @@ creation_pat             = re.compile(
 deletion_pat             = re.compile(
     prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 attach_pat               = re.compile(
-    prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<restriction>[0-1])")
 detach_pat               = re.compile(
     prefix+"Detach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 dynamic_collective_pat   = re.compile(
@@ -11624,6 +11627,7 @@ def parse_legion_spy_line(line, state):
         op.set_name("Attach Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
+        op.restricted = True if int(m.group('restriction')) == 1 else False
         return True
     m = detach_pat.match(line)
     if m is not None:
