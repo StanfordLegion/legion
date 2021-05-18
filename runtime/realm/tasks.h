@@ -267,28 +267,32 @@ namespace Realm {
 	// called whenever new work is available
 	void increment_counter(void);
 
-	long long read_counter(void) const;
+	uint64_t read_counter(void) const;
 
 	// returns true if there is new work since the old_counter value was read
 	// this is non-blocking, and may be called while holding another lock
-	bool check_for_work(long long old_counter);
+	bool check_for_work(uint64_t old_counter);
 
-	// waits until new work arrives - this will possibly take the counter lock and 
-	// sleep, so should not be called while holding another lock
-	void wait_for_work(long long old_counter);
+	// waits until new work arrives - this will possibly go to sleep,
+	//  so should not be called while holding another lock
+	void wait_for_work(uint64_t old_counter);
 
       protected:
-	// 64-bit counters are used to avoid dealing with wrap-around cases
-	// consider trying to fit in 32 to use futexes?
-	atomic<long long> counter, wait_value;
+	// 64-bit counter is used to avoid dealing with wrap-around cases
+        // bottom bits count the number of sleepers, but a max of 2^56 operations
+        //   is still a lot
+        static const unsigned SLEEPER_BITS = 8;
+	atomic<uint64_t> counter;
 	atomic<bool> *interrupt_flag;
-	Mutex mutex;
-	CondVar condvar;
+
+        // doorbell list popping is protected with a lock-free delegating mutex
+        DelegatingMutex db_mutex;
+        DoorbellList db_list;
       };
 	
       WorkCounter work_counter;
 
-      virtual void wait_for_work(long long old_work_counter);
+      virtual void wait_for_work(uint64_t old_work_counter);
 
       // most of our work counter updates are going to come from priority queues, so a little
       //  template-fu here...
@@ -330,18 +334,18 @@ namespace Realm {
       int cfg_max_active_workers;
     };
 
-    inline long long ThreadedTaskScheduler::WorkCounter::read_counter(void) const
+    inline uint64_t ThreadedTaskScheduler::WorkCounter::read_counter(void) const
     {
-      // just return the counter value
-      return counter.load_acquire();
+      // just return the counter value with the sleeper bits removed
+      return (counter.load_acquire() >> SLEEPER_BITS);
     }
 
     // returns true if there is new work since the old_counter value was read
     // this is non-blocking, and may be called while holding another lock
-    inline bool ThreadedTaskScheduler::WorkCounter::check_for_work(long long old_counter)
+    inline bool ThreadedTaskScheduler::WorkCounter::check_for_work(uint64_t old_counter)
     {
       // test the counter value without synchronization
-      return (counter.load_acquire() > old_counter);
+      return (read_counter() != old_counter);
     }
 
 
@@ -375,7 +379,7 @@ namespace Realm {
       virtual void worker_wake(Thread *to_wake);
       virtual void worker_terminate(Thread *switch_to);
 
-      virtual void wait_for_work(long long old_work_counter);
+      virtual void wait_for_work(uint64_t old_work_counter);
 
       Processor proc;
       CoreReservation &core_rsrv;
@@ -424,7 +428,7 @@ namespace Realm {
       virtual void worker_wake(Thread *to_wake);
       virtual void worker_terminate(Thread *switch_to);
 
-      virtual void wait_for_work(long long old_work_counter);
+      virtual void wait_for_work(uint64_t old_work_counter);
 
       Processor proc;
       CoreReservation &core_rsrv;
