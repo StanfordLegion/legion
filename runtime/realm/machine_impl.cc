@@ -1741,7 +1741,7 @@ namespace Realm {
           is_valid = true;
           switch (q) {
           case QUERY_FIRST:
-            pval = (*clist)[0];
+            pval = clist->empty() ? Processor::NO_PROC : (*clist)[0];
             break;
           case QUERY_RANDOM:
             pval =  (*clist)[lrand48() % clist->size()];
@@ -2574,7 +2574,7 @@ namespace Realm {
           is_valid = true;
           switch (q) {
           case QUERY_FIRST:
-            mval = (*clist)[0];
+            mval = clist->empty() ? Memory::NO_MEMORY : (*clist)[0];
             break;
           case QUERY_RANDOM:
             mval =  (*clist)[lrand48() % clist->size()];
