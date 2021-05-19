@@ -90,6 +90,7 @@ local default_options = {
   -- Experimental CUDA code generation flags:
   ["cuda-2d-launch"] = true,
   ["cuda-licm"] = true,
+  ["cuda-generate-cubin"] = false,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
