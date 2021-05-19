@@ -16,6 +16,7 @@ local ast = require("regent/ast")
 local base = require("regent/std_base")
 local config = require("regent/config").args()
 local data = require("common/data")
+local profile = require("regent/profile")
 local report = require("common/report")
 
 local cudahelper = {}
@@ -393,14 +394,18 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   externcall_builtin = function(name, ftype)
     return llvmbc:extern(name, ftype)
   end
-  local ptx = cudalib.toptx(module, nil, version)
+  local ptx = profile('cuda:ptx_gen', nil, function()
+    return cudalib.toptx(module, nil, version)
+  end)()
 
   local cubin = nil
   local offline = config["offline"] or config["cuda-offline"]
   if not offline and config["cuda-generate-cubin"] then
-    local result = ptx_to_cubin(ptx, ptx:len() + 1, version)
     local ffi = require('ffi')
-    cubin = ffi.string(result.data, result.size)
+    cubin = profile('cuda:cubin_gen', nil, function()
+      local result = ptx_to_cubin(ptx, ptx:len() + 1, version)
+      return ffi.string(result.data, result.size)
+    end)()
   end
 
   local handle = terralib.newsymbol(&&opaque, "handle")
