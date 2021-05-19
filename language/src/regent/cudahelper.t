@@ -245,7 +245,7 @@ local terra register_ptx(ptxc : rawstring) : &&opaque
   return handle
 end
 
-local terra register_cubin(cubin : &uint8)
+local terra register_cubin(cubin : rawstring) : &&opaque
   var fat_bin : &fat_bin_t
   var fat_size = sizeof(fat_bin_t)
   -- TODO: this line is leaking memory
@@ -318,6 +318,11 @@ do
   end
 end
 
+local struct cubin_t {
+  data : rawstring,
+  size : uint64
+}
+
 local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
   var linkState : DriverAPI.CUlinkState
   var cubin : &opaque
@@ -364,8 +369,9 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
 
   -- Make a copy of the returned cubin before we destroy the linker and cuda context,
   -- which may deallocate the cubin
-  var to_return : &uint8 = [&uint8](c.malloc(cubinSize))
-  c.memcpy(to_return, [&uint8](cubin), cubinSize)
+  var to_return : rawstring = [rawstring](c.malloc(cubinSize + 1))
+  to_return[cubinSize] = 0
+  c.memcpy([&opaque](to_return), cubin, cubinSize)
 
   r = DriverAPI.cuLinkDestroy(linkState)
   base.assert(r == 0, "CUDA error in cuLinkDestroy")
@@ -373,7 +379,7 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
     DriverAPI.cuCtxDestroy(cx)
   end
 
-  return to_return
+  return cubin_t { to_return, cubinSize }
 end
 
 function cudahelper.jit_compile_kernels_and_register(kernels)
@@ -392,7 +398,9 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   local cubin = nil
   local offline = config["offline"] or config["cuda-offline"]
   if not offline and config["cuda-generate-cubin"] then
-    cubin = ptx_to_cubin(ptx, ptx:len() + 1, version)
+    local result = ptx_to_cubin(ptx, ptx:len() + 1, version)
+    local ffi = require('ffi')
+    cubin = ffi.string(result.data, result.size)
   end
 
   local handle = terralib.newsymbol(&&opaque, "handle")
@@ -403,6 +411,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
       var [handle] = register_ptx(ptxc)
     end
   else
+    local cubin = terralib.constant(cubin)
     register = quote
       var [handle] = register_cubin(cubin)
     end
