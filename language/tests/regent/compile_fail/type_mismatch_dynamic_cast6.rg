@@ -13,16 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_dynamic_cast3.rg:26: type mismatch in dynamic_cast: expected a pointer to int32, got float
---   var y = dynamic_cast(ptr(int, r), x)
+-- type_mismatch_dynamic_cast6.rg:24: ptr expected region(int32) as argument 2, got region(ispace(int2d), int32)
+--   var x = dynamic_cast(ptr(int, r), 0)
 --                      ^
 
 import "regent"
 
-task f()
-  var r = region(ispace(ptr, 5), int)
-  var s = region(ispace(ptr, 5), float)
-  var x = dynamic_cast(ptr(float, s), 0)
-  var y = dynamic_cast(ptr(int, r), x)
+task main()
+  var r = region(ispace(int2d, {2, 2}), int)
+  var x = dynamic_cast(ptr(int, r), 0)
 end
-f:compile()
+regentlib.start(main)
