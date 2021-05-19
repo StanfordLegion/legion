@@ -1436,6 +1436,7 @@ namespace Legion {
       output.postmap_task = false;
       // Figure out our target processors
       default_policy_select_target_processors(ctx, task, output.target_procs);
+      Processor target_proc = output.target_procs[0];
 
       // See if we have an inner variant, if we do virtually map all the regions
       // We don't even both caching these since they are so simple
@@ -1479,18 +1480,18 @@ namespace Legion {
               MemoryConstraint mem_constraint =
                 find_memory_constraint(ctx, task, output.chosen_variant, *it);
               Memory target_memory = default_policy_select_target_memory(ctx,
-                                                         task.target_proc,
+                                                         target_proc,
                                                          task.regions[*it],
                                                          mem_constraint);
               std::set<FieldID> copy = task.regions[*it].privilege_fields;
               size_t footprint;
-              if (!default_create_custom_instances(ctx, task.target_proc,
+              if (!default_create_custom_instances(ctx, target_proc,
                   target_memory, task.regions[*it], *it, copy,
                   layout_constraints, false/*needs constraint check*/,
                   output.chosen_instances[*it], &footprint))
               {
                 default_report_failed_instance_creation(task, *it,
-                      task.target_proc, target_memory, footprint);
+                      target_proc, target_memory, footprint);
               }
             }
           }
@@ -1503,7 +1504,7 @@ namespace Legion {
 
       // First, let's see if we've cached a result of this task mapping
       const unsigned long long task_hash = compute_task_hash(task);
-      std::pair<TaskID,Processor> cache_key(task.task_id, task.target_proc);
+      std::pair<TaskID,Processor> cache_key(task.task_id, target_proc);
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >::const_iterator
         finder = cached_task_mappings.find(cache_key);
@@ -1577,19 +1578,19 @@ namespace Legion {
         MemoryConstraint mem_constraint =
           find_memory_constraint(ctx, task, output.chosen_variant, idx);
         Memory target_memory = default_policy_select_target_memory(ctx,
-                                                         task.target_proc,
+                                                         target_proc,
                                                          task.regions[idx],
                                                          mem_constraint);
         if (task.regions[idx].privilege == LEGION_REDUCE)
         {
           size_t footprint;
-          if (!default_create_custom_instances(ctx, task.target_proc,
+          if (!default_create_custom_instances(ctx, target_proc,
                   target_memory, task.regions[idx], idx, missing_fields[idx],
                   layout_constraints, needs_field_constraint_check,
                   output.chosen_instances[idx], &footprint))
           {
             default_report_failed_instance_creation(task, idx,
-                  task.target_proc, target_memory, footprint);
+                  target_proc, target_memory, footprint);
           }
           continue;
         }
@@ -1630,13 +1631,13 @@ namespace Legion {
         }
         // Otherwise make normal instances for the given region
         size_t footprint;
-        if (!default_create_custom_instances(ctx, task.target_proc,
+        if (!default_create_custom_instances(ctx, target_proc,
                 target_memory, task.regions[idx], idx, missing_fields[idx],
                 layout_constraints, needs_field_constraint_check,
                 output.chosen_instances[idx], &footprint))
         {
           default_report_failed_instance_creation(task, idx,
-                  task.target_proc, target_memory, footprint);
+                  target_proc, target_memory, footprint);
         }
       }
       if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE) {
