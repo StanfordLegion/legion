@@ -5030,9 +5030,10 @@ namespace Legion {
                (kind == LEGION_ALIASED_INCOMPLETE_KIND))
       {
         if (node->is_disjoint(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+          REPORT_LEGION_WARNING(LEGION_WARNING_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is disjoint.",
+              "partition was %s but the partition is disjoint. This could "
+              "lead to a performance bug.",
               function_name, get_task_name(), get_unique_id(),
               (kind == LEGION_ALIASED_KIND) ? "ALIASED_KIND" :
               (kind == LEGION_ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
@@ -5057,15 +5058,16 @@ namespace Legion {
                (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         if (node->is_complete(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+          REPORT_LEGION_WARNING(LEGION_WARNING_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is complete.",
+              "partition was %s but the partition is complete. This could "
+              "lead to a performance bug.",
               function_name, get_task_name(), get_unique_id(),
               (kind == LEGION_DISJOINT_INCOMPLETE_KIND) ? 
                 "DISJOINT_INCOMPLETE_KIND" :
               (kind == LEGION_ALIASED_INCOMPLETE_KIND) ? 
               "ALIASED_INCOMPLETE_KIND" : "COMPUTE_INCOMPLETE_KIND")
-      } 
+      }
     }
 
     //--------------------------------------------------------------------------
