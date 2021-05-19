@@ -96,6 +96,190 @@
         static inline void operator delete(void *ptr, void *place);
         static inline void operator delete[](void *ptr, void *place);
       };
+
+#ifdef __SSE2__
+      template<bool READ_ONLY>
+      class SSEView {
+      public:
+        inline SSEView(uint64_t *base, unsigned index) 
+          : ptr(base + ((sizeof(__m128d)/sizeof(uint64_t))*index)) { }
+      public:
+        inline operator __m128i(void) const {
+          __m128i result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator __m128d(void) const {
+          __m128d result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        inline void operator=(const __m128i &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        inline void operator=(const __m128d &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        template<bool WHOCARES>
+        inline void operator=(const SSEView<WHOCARES> &rhs) {
+          memcpy(ptr, rhs.ptr, sizeof(__m128d));
+        }
+      public:
+        uint64_t *const ptr;
+      };
+      template<>
+      class SSEView<true> {
+      public:
+        inline SSEView(const uint64_t *base, unsigned index) 
+          : ptr(base + ((sizeof(__m128d)/sizeof(uint64_t))*index)) { }
+      public:
+        inline operator __m128i(void) const {
+          __m128i result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator __m128d(void) const {
+          __m128d result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        const uint64_t *const ptr;
+      };
+#endif
+#ifdef __AVX__
+      template<bool READ_ONLY>
+      class AVXView {
+      public:
+        inline AVXView(uint64_t *base, unsigned index) 
+          : ptr(base + ((sizeof(__m256d)/sizeof(uint64_t))*index)) { }
+      public:
+        inline operator __m256i(void) const {
+          __m256i result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator __m256d(void) const {
+          __m256d result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        inline void operator=(const __m256i &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        inline void operator=(const __m256d &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        template<bool WHOCARES>
+        inline void operator=(const AVXView<WHOCARES> &rhs) {
+          memcpy(ptr, rhs.ptr, sizeof(__m256d));
+        }
+      public:
+        uint64_t *const ptr;
+      };
+      template<>
+      class AVXView<true> {
+      public:
+        inline AVXView(const uint64_t *base, unsigned index) 
+          : ptr(base + ((sizeof(__m256d)/sizeof(uint64_t))*index)) { }
+      public:
+        inline operator __m256i(void) const {
+          __m256i result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator __m256d(void) const {
+          __m256d result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        const uint64_t *const ptr;
+      };
+#endif
+#ifdef __ALTIVEC__
+      template<bool READ_ONLY>
+      class PPCView {
+      public:
+        inline PPCView(uint64_t *base, unsigned index) 
+          : ptr(base + ((sizeof(__vector double)/sizeof(uint64_t))*index)) { }
+      public:
+        inline operator __vector unsigned long long(void) const {
+          __vector unsigned long long result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator __vector double(void) const {
+          __vector double result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        inline void operator=(const __vector unsigned long long &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        inline void operator=(const __vector double &value) {
+          memcpy(ptr, &value, sizeof(value));
+        }
+        template<bool WHOCARES>
+        inline void operator=(const PPCView<WHOCARES> &rhs) {
+          memcpy(ptr, rhs.ptr, sizeof(__vector double));
+        }
+      public:
+        uint64_t *const ptr;
+      };
+      template<>
+      class PPCView<true> {
+      public:
+        inline PPCView(const uint64_t *base, unsigned index) 
+          : ptr(base + ((sizeof(__vector double)/sizeof(uint64_t))*index)) { }
+      public:
+        inline operator __vector unsigned long long(void) const {
+          __vector unsigned long long result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        }
+        inline operator __vector double(void) const {
+          __vector double result;
+          memcpy(&result, ptr, sizeof(result));
+          return result;
+        };
+      public:
+        const uint64_t *const ptr;
+      };
+#endif
+
+      // Help with safe type-punning of bit representations
+      // This is only because C++ is a stupid fucking language
+      // and doesn't even follow the same semantics as C's union
+      // As a result we explode our compilation time and generate worse code
+      template<int MAX>
+      struct BitVector {
+      public:
+#ifdef __SSE2__
+        inline SSEView<false> sse_view(unsigned index)
+          { return SSEView<false>(bit_vector, index); }
+        inline SSEView<true> sse_view(unsigned index) const
+          { return SSEView<true>(bit_vector, index); }
+#endif
+#ifdef __AVX__
+        inline AVXView<false> avx_view(unsigned index)
+          { return AVXView<false>(bit_vector, index); }
+        inline AVXView<true> avx_view(unsigned index) const
+          { return AVXView<true>(bit_vector, index); }
+#endif
+#ifdef __ALTIVEC__
+        inline PPCView<false> ppc_view(unsigned index)
+          { return PPCView<false>(bit_vector, index); }
+        inline PPCView<true> ppc_view(unsigned index) const
+          { return PPCView<true>(bit_vector, index); }
+#endif
+      public:
+        static_assert((MAX % 64) == 0, "Bad bitmask size");
+        uint64_t bit_vector[MAX/64];
+      };
     };
 
     /////////////////////////////////////////////////////////////
@@ -280,8 +464,10 @@
       inline bool operator<(const SSEBitMask &rhs) const;
       inline bool operator!=(const SSEBitMask &rhs) const;
     public:
-      inline const __m128i& operator()(const unsigned &idx) const;
-      inline __m128i& operator()(const unsigned &idx);
+      inline BitMaskHelp::SSEView<true>
+        operator()(const unsigned &idx) const;
+      inline BitMaskHelp::SSEView<false>
+        operator()(const unsigned &idx);
       inline const uint64_t& operator[](const unsigned &idx) const;
       inline uint64_t& operator[](const unsigned &idx);
       inline SSEBitMask& operator=(const SSEBitMask &rhs);
@@ -322,10 +508,7 @@
       inline int pop_count(void) const;
       static inline int pop_count(const SSEBitMask<MAX> &mask);
     protected:
-      union {
-        __m128i sse_vector[MAX/128];
-        uint64_t bit_vector[MAX/64];
-      } bits;
+      BitMaskHelp::BitVector<MAX> bits;
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
@@ -355,8 +538,10 @@
       inline bool operator<(const SSETLBitMask &rhs) const;
       inline bool operator!=(const SSETLBitMask &rhs) const;
     public:
-      inline const __m128i& operator()(const unsigned &idx) const;
-      inline __m128i& operator()(const unsigned &idx);
+      inline BitMaskHelp::SSEView<true>
+        operator()(const unsigned &idx) const;
+      inline BitMaskHelp::SSEView<false>
+        operator()(const unsigned &idx);
       inline const uint64_t& operator[](const unsigned &idx) const;
       inline uint64_t& operator[](const unsigned &idx);
       inline SSETLBitMask& operator=(const SSETLBitMask &rhs);
@@ -398,10 +583,7 @@
       static inline int pop_count(const SSETLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m128i value);
     protected:
-      union {
-        __m128i sse_vector[MAX/128];
-        uint64_t bit_vector[MAX/64];
-      } bits;
+      BitMaskHelp::BitVector<MAX> bits;
       uint64_t sum_mask;
     public:
       static const unsigned ELEMENT_SIZE = 64;
@@ -434,13 +616,13 @@
       inline bool operator<(const AVXBitMask &rhs) const;
       inline bool operator!=(const AVXBitMask &rhs) const;
     public:
-      inline const __m256i& operator()(const unsigned &idx) const;
-      inline __m256i& operator()(const unsigned &idx);
+      inline BitMaskHelp::AVXView<true> 
+        operator()(const unsigned &idx) const;
+      inline BitMaskHelp::AVXView<false>
+        operator()(const unsigned &idx);
       inline const uint64_t& operator[](const unsigned &idx) const;
       inline uint64_t& operator[](const unsigned &idx);
       inline AVXBitMask& operator=(const AVXBitMask &rhs);
-      inline const __m256d& elem(const unsigned &idx) const;
-      inline __m256d& elem(const unsigned &idx);
     public:
       inline AVXBitMask operator~(void) const;
       inline AVXBitMask operator|(const AVXBitMask &rhs) const;
@@ -478,11 +660,7 @@
       inline int pop_count(void) const;
       static inline int pop_count(const AVXBitMask<MAX> &mask);
     protected:
-      union {
-        __m256i avx_vector[MAX/256];
-        __m256d avx_double[MAX/256];
-        uint64_t bit_vector[MAX/64];
-      } bits;
+      BitMaskHelp::BitVector<MAX> bits;
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
@@ -512,13 +690,13 @@
       inline bool operator<(const AVXTLBitMask &rhs) const;
       inline bool operator!=(const AVXTLBitMask &rhs) const;
     public:
-      inline const __m256i& operator()(const unsigned &idx) const;
-      inline __m256i& operator()(const unsigned &idx);
+      inline BitMaskHelp::AVXView<true> 
+        operator()(const unsigned &idx) const;
+      inline BitMaskHelp::AVXView<false>
+        operator()(const unsigned &idx);
       inline const uint64_t& operator[](const unsigned &idx) const;
       inline uint64_t& operator[](const unsigned &idx);
       inline AVXTLBitMask& operator=(const AVXTLBitMask &rhs);
-      inline const __m256d& elem(const unsigned &idx) const;
-      inline __m256d& elem(const unsigned &idx);
     public:
       inline AVXTLBitMask operator~(void) const;
       inline AVXTLBitMask operator|(const AVXTLBitMask &rhs) const;
@@ -558,11 +736,7 @@
       static inline uint64_t extract_mask(__m256i value);
       static inline uint64_t extract_mask(__m256d value);
     protected:
-      union {
-        __m256i avx_vector[MAX/256];
-        __m256d avx_double[MAX/256];
-        uint64_t bit_vector[MAX/64];
-      } bits;
+      BitMaskHelp::BitVector<MAX> bits;
       uint64_t sum_mask;
     public:
       static const unsigned ELEMENT_SIZE = 64;
@@ -595,14 +769,13 @@
       inline bool operator<(const PPCBitMask &rhs) const;
       inline bool operator!=(const PPCBitMask &rhs) const;
     public:
-      inline const __vector unsigned long long& 
+      inline BitMaskHelp::PPCView<true> 
         operator()(const unsigned &idx) const;
-      inline __vector unsigned long long& operator()(const unsigned &idx);
+      inline BitMaskHelp::PPCView<false>
+        operator()(const unsigned &idx);
       inline const uint64_t& operator[](const unsigned &idx) const;
       inline uint64_t& operator[](const unsigned &idx);
       inline PPCBitMask& operator=(const PPCBitMask &rhs);
-      inline const __vector double& elem(const unsigned &idx) const;
-      inline __vector double& elem(const unsigned &idx);
     public:
       inline PPCBitMask operator~(void) const;
       inline PPCBitMask operator|(const PPCBitMask &rhs) const;
@@ -640,11 +813,7 @@
       inline int pop_count(void) const;
       static inline int pop_count(const PPCBitMask<MAX> &mask);
     protected:
-      union {
-        __vector unsigned long long ppc_vector[MAX/128];
-        __vector double ppc_double[MAX/128];
-        uint64_t bit_vector[MAX/64];
-      } bits;
+      BitMaskHelp::BitVector<MAX> bits;
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
@@ -674,14 +843,13 @@
       inline bool operator<(const PPCTLBitMask &rhs) const;
       inline bool operator!=(const PPCTLBitMask &rhs) const;
     public:
-      inline const __vector unsigned long long& 
+      inline BitMaskHelp::PPCView<true> 
         operator()(const unsigned &idx) const;
-      inline __vector unsigned long long& operator()(const unsigned &idx);
+      inline BitMaskHelp::PPCView<false>
+        operator()(const unsigned &idx);
       inline const uint64_t& operator[](const unsigned &idx) const;
       inline uint64_t& operator[](const unsigned &idx);
       inline PPCTLBitMask& operator=(const PPCTLBitMask &rhs);
-      inline const __vector double& elem(const unsigned &idx) const;
-      inline __vector double& elem(const unsigned &idx);
     public:
       inline PPCTLBitMask operator~(void) const;
       inline PPCTLBitMask operator|(const PPCTLBitMask &rhs) const;
@@ -720,11 +888,7 @@
       static inline int pop_count(const PPCTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__vector unsigned long long value);
     protected:
-      union {
-        __vector unsigned long long ppc_vector[MAX/128];
-        __vector double ppc_double[MAX/128];
-        uint64_t bit_vector[MAX/64];
-      } bits;
+      BitMaskHelp::BitVector<MAX> bits;
       uint64_t sum_mask;
     public:
       static const unsigned ELEMENT_SIZE = 64;
@@ -2515,7 +2679,7 @@
       BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = rhs(idx);
+        bits.sse_view(idx) = rhs(idx);
       }
     }
 
@@ -2663,25 +2827,26 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_set1_epi32(0);
+        bits.sse_view(idx) = _mm_set1_epi32(0);
       }
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline const __m128i& SSEBitMask<MAX>::operator()(
-                                                 const unsigned int &idx) const
+    inline BitMaskHelp::SSEView<true>
+                     SSEBitMask<MAX>::operator()(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-      return bits.sse_vector[idx];
+      return bits.sse_view(idx);
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline __m128i& SSEBitMask<MAX>::operator()(const unsigned int &idx)
+    inline BitMaskHelp::SSEView<false>
+                           SSEBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-      return bits.sse_vector[idx];
+      return bits.sse_view(idx);
     }
 
     //-------------------------------------------------------------------------
@@ -2746,7 +2911,7 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = rhs(idx);
+        bits.sse_view(idx) = rhs(idx);
       }
       return *this;
     }
@@ -2773,7 +2938,7 @@
       SSEBitMask<MAX> result;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+        result(idx) = _mm_or_si128(bits.sse_view(idx), rhs(idx));
       }
       return result;
     }
@@ -2787,7 +2952,7 @@
       SSEBitMask<MAX> result;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+        result(idx) = _mm_and_si128(bits.sse_view(idx), rhs(idx));
       }
       return result;
     }
@@ -2801,7 +2966,7 @@
       SSEBitMask<MAX> result;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+        result(idx) = _mm_xor_si128(bits.sse_view(idx), rhs(idx));
       }
       return result;
     }
@@ -2813,7 +2978,7 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+        bits.sse_view(idx) = _mm_or_si128(bits.sse_view(idx), rhs(idx));
       }
       return *this;
     }
@@ -2825,7 +2990,7 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+        bits.sse_view(idx) = _mm_and_si128(bits.sse_view(idx), rhs(idx));
       }
       return *this;
     }
@@ -2837,7 +3002,7 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+        bits.sse_view(idx) = _mm_xor_si128(bits.sse_view(idx), rhs(idx));
       }
       return *this;
     }
@@ -2864,7 +3029,7 @@
       SSEBitMask<MAX> result;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+        result(idx) = _mm_andnot_si128(rhs(idx), bits.sse_view(idx));
       }
       return result;
     }
@@ -2876,7 +3041,7 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+        bits.sse_view(idx) = _mm_andnot_si128(rhs(idx), bits.sse_view(idx));
       }
       return *this;
     }
@@ -3156,7 +3321,7 @@
       BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = rhs(idx);
+        bits.sse_view(idx) = rhs(idx);
       }
     }
 
@@ -3312,26 +3477,27 @@
     {
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_set1_epi32(0); 
+        bits.sse_view(idx) = _mm_set1_epi32(0); 
       }
       sum_mask = 0;
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline const __m128i& SSETLBitMask<MAX>::operator()(
-                                                 const unsigned int &idx) const
+    inline BitMaskHelp::SSEView<true>
+                   SSETLBitMask<MAX>::operator()(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-      return bits.sse_vector[idx];
+      return bits.sse_view(idx);
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline __m128i& SSETLBitMask<MAX>::operator()(const unsigned int &idx)
+    inline BitMaskHelp::SSEView<false>
+                         SSETLBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-      return bits.sse_vector[idx];
+      return bits.sse_view(idx);
     }
 
     //-------------------------------------------------------------------------
@@ -3400,7 +3566,7 @@
       sum_mask = rhs.sum_mask;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = rhs(idx);
+        bits.sse_view(idx) = rhs(idx);
       }
       return *this;
     }
@@ -3429,7 +3595,7 @@
       result.sum_mask = sum_mask | rhs.sum_mask;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+        result(idx) = _mm_or_si128(bits.sse_view(idx), rhs(idx));
       }
       return result;
     }
@@ -3447,7 +3613,7 @@
         __m128i temp_sum = _mm_set1_epi32(0);
         for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
         {
-          result(idx) = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+          result(idx) = _mm_and_si128(bits.sse_view(idx), rhs(idx));
           temp_sum = _mm_or_si128(temp_sum, result(idx));
         }
         result.sum_mask = extract_mask(temp_sum); 
@@ -3465,7 +3631,7 @@
       __m128i temp_sum = _mm_set1_epi32(0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+        result(idx) = _mm_xor_si128(bits.sse_view(idx), rhs(idx));
         temp_sum = _mm_or_si128(temp_sum, result(idx));
       }
       result.sum_mask = extract_mask(temp_sum);
@@ -3481,7 +3647,7 @@
       sum_mask |= rhs.sum_mask;
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+        bits.sse_view(idx) = _mm_or_si128(bits.sse_view(idx), rhs(idx));
       }
       return *this;
     }
@@ -3497,8 +3663,8 @@
         __m128i temp_sum = _mm_set1_epi32(0);
         for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
         {
-          bits.sse_vector[idx] = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
-          temp_sum = _mm_or_si128(temp_sum, bits.sse_vector[idx]);
+          bits.sse_view(idx) = _mm_and_si128(bits.sse_view(idx), rhs(idx));
+          temp_sum = _mm_or_si128(temp_sum, bits.sse_view(idx));
         }
         sum_mask = extract_mask(temp_sum); 
       }
@@ -3506,7 +3672,7 @@
       {
         sum_mask = 0;
         for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
-          bits.sse_vector[idx] = _mm_set1_epi32(0);
+          bits.sse_view(idx) = _mm_set1_epi32(0);
       }
       return *this;
     }
@@ -3520,8 +3686,8 @@
       __m128i temp_sum = _mm_set1_epi32(0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
-        temp_sum = _mm_or_si128(temp_sum, bits.sse_vector[idx]);
+        bits.sse_view(idx) = _mm_xor_si128(bits.sse_view(idx), rhs(idx));
+        temp_sum = _mm_or_si128(temp_sum, bits.sse_view(idx));
       }
       sum_mask = extract_mask(temp_sum);
       return *this;
@@ -3553,7 +3719,7 @@
       __m128i temp_sum = _mm_set1_epi32(0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        result(idx) = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+        result(idx) = _mm_andnot_si128(rhs(idx), bits.sse_view(idx));
         temp_sum = _mm_or_si128(temp_sum, result(idx));
       }
       result.sum_mask = extract_mask(temp_sum);
@@ -3569,8 +3735,8 @@
       __m128i temp_sum = _mm_set1_epi32(0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.sse_vector[idx] = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
-        temp_sum = _mm_or_si128(temp_sum, bits.sse_vector[idx]);
+        bits.sse_view(idx) = _mm_andnot_si128(rhs(idx), bits.sse_view(idx));
+        temp_sum = _mm_or_si128(temp_sum, bits.sse_view(idx));
       }
       sum_mask = extract_mask(temp_sum);
       return *this;
@@ -3886,7 +4052,7 @@
       BITMASK_STATIC_ASSERT((MAX % 256) == 0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = rhs(idx);
+        bits.avx_view(idx) = rhs(idx);
       }
     }
 
@@ -4034,25 +4200,26 @@
     {
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_set1_epi32(0);
+        bits.avx_view(idx) = _mm256_set1_epi32(0);
       }
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline const __m256i& AVXBitMask<MAX>::operator()(
-                                                 const unsigned int &idx) const
+    inline BitMaskHelp::AVXView<true>
+                     AVXBitMask<MAX>::operator()(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-      return bits.avx_vector[idx];
+      return bits.avx_view(idx);
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline __m256i& AVXBitMask<MAX>::operator()(const unsigned int &idx)
+    inline BitMaskHelp::AVXView<false>
+                           AVXBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-      return bits.avx_vector[idx];
+      return bits.avx_view(idx);
     }
 
     //-------------------------------------------------------------------------
@@ -4070,22 +4237,6 @@
     //-------------------------------------------------------------------------
     {
       return bits.bit_vector[idx]; 
-    }
-
-    //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline const __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx) const
-    //-------------------------------------------------------------------------
-    {
-      return bits.avx_double[idx];
-    }
-
-    //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx)
-    //-------------------------------------------------------------------------
-    {
-      return bits.avx_double[idx];
     }
 
     //-------------------------------------------------------------------------
@@ -4133,7 +4284,7 @@
     {
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = rhs(idx);
+        bits.avx_view(idx) = rhs(idx);
       }
       return *this;
     }
@@ -4162,13 +4313,12 @@
       // If we have this instruction use it because it has higher throughput
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+        result(idx) = _mm256_or_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_or_pd(bits.avx_double[idx],
-                                        rhs.elem(idx));
+        result(idx) = _mm256_or_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4185,13 +4335,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_and_si256(bits.avx_vector[idx], rhs(idx));
+        result(idx) = _mm256_and_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_and_pd(bits.avx_double[idx],
-                                         rhs.elem(idx));
+        result(idx) = _mm256_and_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4208,13 +4357,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+        result(idx) = _mm256_xor_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_xor_pd(bits.avx_double[idx],
-                                         rhs.elem(idx));
+        result(idx) = _mm256_xor_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4229,12 +4377,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+        bits.avx_view(idx) = _mm256_or_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_or_pd(bits.avx_double[idx],rhs.elem(idx));
+        bits.avx_view(idx) = _mm256_or_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4249,13 +4397,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_and_si256(bits.avx_vector[idx], rhs(idx));
+        bits.avx_view(idx) = _mm256_and_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_and_pd(bits.avx_double[idx],
-                                             rhs.elem(idx));
+        bits.avx_view(idx) = _mm256_and_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4270,13 +4417,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+        bits.avx_view(idx) = _mm256_xor_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_xor_pd(bits.avx_double[idx], 
-                                             rhs.elem(idx));
+        bits.avx_view(idx) = _mm256_xor_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4306,13 +4452,13 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_vector[idx]);
+        result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_view(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_andnot_pd(rhs.elem(idx),
-                                            bits.avx_double[idx]);
+        result(idx) = _mm256_andnot_pd(rhs(idx),
+                                            bits.avx_view(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4327,14 +4473,13 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_andnot_si256(rhs(idx), 
-                                                   bits.avx_vector[idx]);
+        bits.avx_view(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_view(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_andnot_pd(rhs.elem(idx),
-                                                bits.avx_double[idx]);
+        bits.avx_view(idx) = _mm256_andnot_pd(rhs(idx),
+                                                bits.avx_view(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4616,7 +4761,7 @@
       BITMASK_STATIC_ASSERT((MAX % 256) == 0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = rhs(idx);
+        bits.avx_view(idx) = rhs(idx);
       }
     }
 
@@ -4772,26 +4917,27 @@
     {
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_set1_epi32(0);
+        bits.avx_view(idx) = _mm256_set1_epi32(0);
       }
       sum_mask = 0;
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline const __m256i& AVXTLBitMask<MAX>::operator()(
-                                                 const unsigned int &idx) const
+    inline BitMaskHelp::AVXView<true>
+                   AVXTLBitMask<MAX>::operator()(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-      return bits.avx_vector[idx];
+      return bits.avx_view(idx);
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline __m256i& AVXTLBitMask<MAX>::operator()(const unsigned int &idx)
+    inline BitMaskHelp::AVXView<false>
+                         AVXTLBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-      return bits.avx_vector[idx];
+      return bits.avx_view(idx);
     }
 
     //-------------------------------------------------------------------------
@@ -4809,22 +4955,6 @@
     //-------------------------------------------------------------------------
     {
       return bits.bit_vector[idx]; 
-    }
-
-    //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline const __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx) const
-    //-------------------------------------------------------------------------
-    {
-      return bits.avx_double[idx];
-    }
-
-    //-------------------------------------------------------------------------
-    template<unsigned int MAX>
-    inline __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx)
-    //-------------------------------------------------------------------------
-    {
-      return bits.avx_double[idx];
     }
 
     //-------------------------------------------------------------------------
@@ -4876,7 +5006,7 @@
       sum_mask = rhs.sum_mask;
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = rhs(idx);
+        bits.avx_view(idx) = rhs(idx);
       }
       return *this;
     }
@@ -4906,12 +5036,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+        result(idx) = _mm256_or_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_or_pd(bits.avx_double[idx], rhs.elem(idx));
+        result(idx) = _mm256_or_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -4932,15 +5062,15 @@
         __m256i temp_sum = _mm256_set1_epi32(0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
-          result(idx) = _mm256_and_si256(bits.avx_vector[idx], rhs(idx));
+          result(idx) = _mm256_and_si256(bits.avx_view(idx), rhs(idx));
           temp_sum = _mm256_or_si256(temp_sum, result(idx));
         }
 #else
         __m256d temp_sum = _mm256_set1_pd(0.0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
-          result.elem(idx) = _mm256_and_pd(bits.avx_double[idx],rhs.elem(idx));
-          temp_sum = _mm256_or_pd(temp_sum, result.elem(idx));
+          result(idx) = _mm256_and_pd(bits.avx_view(idx), rhs(idx));
+          temp_sum = _mm256_or_pd(temp_sum, result(idx));
         }
 #endif
         result.sum_mask = extract_mask(temp_sum); 
@@ -4960,15 +5090,15 @@
       __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+        result(idx) = _mm256_xor_si256(bits.avx_view(idx), rhs(idx));
         temp_sum = _mm256_or_si256(temp_sum, result(idx));
       }
 #else
       __m256d temp_sum = _mm256_set1_pd(0.0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_xor_pd(bits.avx_double[idx], rhs.elem(idx));
-        temp_sum = _mm256_or_pd(temp_sum, result.elem(idx));
+        result(idx) = _mm256_xor_pd(bits.avx_view(idx), rhs(idx));
+        temp_sum = _mm256_or_pd(temp_sum, result(idx));
       }
 #endif
       result.sum_mask = extract_mask(temp_sum);
@@ -4986,12 +5116,12 @@
 #ifdef __AVX2__
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+        bits.avx_view(idx) = _mm256_or_si256(bits.avx_view(idx), rhs(idx));
       }
 #else
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_or_pd(bits.avx_double[idx],rhs.elem(idx));
+        bits.avx_view(idx) = _mm256_or_pd(bits.avx_view(idx), rhs(idx));
       }
 #endif
       _mm256_zeroall();
@@ -5010,17 +5140,17 @@
         __m256i temp_sum = _mm256_set1_epi32(0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
-          bits.avx_vector[idx] = _mm256_and_si256(bits.avx_vector[idx], 
+          bits.avx_view(idx) = _mm256_and_si256(bits.avx_view(idx), 
                                                   rhs(idx));
-          temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);
+          temp_sum = _mm256_or_si256(temp_sum, bits.avx_view(idx));
         }
 #else
         __m256d temp_sum = _mm256_set1_pd(0.0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
-          bits.avx_double[idx] = _mm256_and_pd(bits.avx_double[idx], 
-                                               rhs.elem(idx));
-          temp_sum = _mm256_or_pd(temp_sum, bits.avx_double[idx]);
+          bits.avx_view(idx) = _mm256_and_pd(bits.avx_view(idx), 
+                                               rhs(idx));
+          temp_sum = _mm256_or_pd(temp_sum, bits.avx_view(idx));
         }
 #endif
         sum_mask = extract_mask(temp_sum); 
@@ -5029,7 +5159,7 @@
       {
         sum_mask = 0;
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
-          bits.avx_vector[idx] = _mm256_set1_epi32(0);
+          bits.avx_view(idx) = _mm256_set1_epi32(0);
       }
       _mm256_zeroall();
       return *this;
@@ -5045,16 +5175,15 @@
       __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
-        temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);
+        bits.avx_view(idx) = _mm256_xor_si256(bits.avx_view(idx), rhs(idx));
+        temp_sum = _mm256_or_si256(temp_sum, bits.avx_view(idx));
       }
 #else
       __m256d temp_sum = _mm256_set1_pd(0.0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_xor_pd(bits.avx_double[idx], 
-                                             rhs.elem(idx));
-        temp_sum = _mm256_or_pd(temp_sum, bits.avx_double[idx]);
+        bits.avx_view(idx) = _mm256_xor_pd(bits.avx_view(idx), rhs(idx));
+        temp_sum = _mm256_or_pd(temp_sum, bits.avx_view(idx));
       }
 #endif
       sum_mask = extract_mask(temp_sum);
@@ -5089,15 +5218,15 @@
       __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_vector[idx]);
+        result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_view(idx));
         temp_sum = _mm256_or_si256(temp_sum, result(idx));
       }
 #else
       __m256d temp_sum = _mm256_set1_pd(0.0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        result.elem(idx) = _mm256_andnot_pd(rhs.elem(idx),bits.avx_double[idx]);
-        temp_sum = _mm256_or_pd(temp_sum, result.elem(idx));
+        result(idx) = _mm256_andnot_pd(rhs(idx), bits.avx_view(idx));
+        temp_sum = _mm256_or_pd(temp_sum, result(idx));
       }
 #endif
       result.sum_mask = extract_mask(temp_sum);
@@ -5115,17 +5244,17 @@
       __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_vector[idx] = _mm256_andnot_si256(rhs(idx), 
-                                                   bits.avx_vector[idx]);
-        temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);
+        bits.avx_view(idx) = _mm256_andnot_si256(rhs(idx), 
+                                                   bits.avx_view(idx));
+        temp_sum = _mm256_or_si256(temp_sum, bits.avx_view(idx));
       }
 #else
       __m256d temp_sum = _mm256_set1_pd(0.0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.avx_double[idx] = _mm256_andnot_pd(rhs.elem(idx),
-                                                bits.avx_double[idx]);
-        temp_sum = _mm256_or_pd(temp_sum, bits.avx_double[idx]);
+        bits.avx_view(idx) = _mm256_andnot_pd(rhs(idx),
+                                                bits.avx_view(idx));
+        temp_sum = _mm256_or_pd(temp_sum, bits.avx_view(idx));
       }
 #endif
       sum_mask = extract_mask(temp_sum);
@@ -5463,7 +5592,7 @@
       BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = rhs(idx);
+        bits.ppc_view(idx) = rhs(idx);
       }
     }
 
@@ -5612,26 +5741,26 @@
       const __vector unsigned long long zero_vec = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = zero_vec;
+        bits.ppc_view(idx) = zero_vec;
       }
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline const __vector unsigned long long& PPCBitMask<MAX>::operator()(
-                                                 const unsigned int &idx) const
+    inline BitMaskHelp::PPCView<true>
+                     PPCBitMask<MAX>::operator()(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-      return bits.ppc_vector[idx];
+      return bits.ppc_view(idx);
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline __vector unsigned long long& PPCBitMask<MAX>::operator()(
-                                                       const unsigned int &idx)
+    inline BitMaskHelp::PPCView<false>
+                           PPCBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-      return bits.ppc_vector[idx];
+      return bits.ppc_view(idx);
     }
 
     //-------------------------------------------------------------------------
@@ -5672,7 +5801,7 @@
       // Only be less than if the bits are a subset of the rhs bits
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        if (bits.ppc_vector[idx] < rhs[idx])
+        if (bits.ppc_view(idx) < rhs[idx])
           return true;
         else if (bits.bits_vector[idx] > rhs[idx])
           return false;
@@ -5696,7 +5825,7 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = rhs(idx);
+        bits.ppc_view(idx) = rhs(idx);
       }
       return *this;
     }
@@ -5709,7 +5838,8 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = ~(bits.ppc_vector[idx]);
+        __vector unsigned long long rhs = bits.ppc_view(idx);
+        result(idx) = ~rhs;
       }
       return result;
     }
@@ -5723,7 +5853,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_or(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_or(rhs1, rhs2);
       }
       return result;
     }
@@ -5737,7 +5869,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_and(rhs1, rhs2);
       }
       return result;
     }
@@ -5751,7 +5885,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_xor(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_xor(rhs1, rhs2);
       }
       return result;
     }
@@ -5763,7 +5899,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_or(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_or(rhs1, rhs2);
       }
       return *this;
     }
@@ -5775,7 +5913,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_and(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_and(rhs1, rhs2);
       }
       return *this;
     }
@@ -5787,7 +5927,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_xor(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_xor(rhs1, rhs2);
       }
       return *this;
     }
@@ -5814,7 +5956,9 @@
       PPCBitMask<MAX> result;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(~rhs(idx), bits.ppc_vector[idx]);
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_and(rhs1, ~rhs2);
       }
       return result;
     }
@@ -5826,7 +5970,9 @@
     {
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_and(~rhs(idx), bits.ppc_vector[idx]);
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_and(rhs1, ~rhs2);
       }
       return *this;
     }
@@ -6106,7 +6252,7 @@
       BITMASK_STATIC_ASSERT((MAX % 128) == 0);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = rhs(idx);
+        bits.ppc_view(idx) = rhs(idx);
       }
     }
 
@@ -6263,27 +6409,27 @@
       const __vector unsigned long long zero_vec = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = zero_vec; 
+        bits.ppc_view(idx) = zero_vec; 
       }
       sum_mask = 0;
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline const __vector unsigned long long& PPCTLBitMask<MAX>::operator()(
-                                                 const unsigned int &idx) const
+    inline BitMaskHelp::PPCView<true>
+                   PPCTLBitMask<MAX>::operator()(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-      return bits.ppc_vector[idx];
+      return bits.ppc_view(idx);
     }
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline __vector unsigned long long& 
+    inline BitMaskHelp::PPCView<false>
                          PPCTLBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-      return bits.ppc_vector[idx];
+      return bits.ppc_view(idx);
     }
 
     //-------------------------------------------------------------------------
@@ -6352,7 +6498,7 @@
       sum_mask = rhs.sum_mask;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = rhs(idx);
+        bits.ppc_view(idx) = rhs(idx);
       }
       return *this;
     }
@@ -6366,8 +6512,10 @@
       __vector unsigned long long result_mask = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = ~(bits.ppc_vector[idx]);
-        result_mask = vec_or(result_mask, result(idx));
+        __vector unsigned long long rhs = bits.ppc_view(idx);
+        __vector unsigned long long lhs = ~rhs;
+        result(idx) = lhs;
+        result_mask = vec_or(result_mask, lhs);
       }
       result.sum_mask = extract_mask(result_mask);
       return result;
@@ -6383,7 +6531,9 @@
       result.sum_mask = sum_mask | rhs.sum_mask;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_or(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        result(idx) = vec_or(rhs1, rhs2);
       }
       return result;
     }
@@ -6401,8 +6551,11 @@
         __vector unsigned long long temp_sum = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
         {
-          result(idx) = vec_and(bits.ppc_vector[idx], rhs(idx));
-          temp_sum = vec_or(temp_sum, result(idx));
+          __vector unsigned long long rhs1 = bits.ppc_view(idx);
+          __vector unsigned long long rhs2 = rhs(idx);
+          __vector unsigned long long lhs = vec_and(rhs1, rhs2);
+          result(idx) = lhs;
+          temp_sum = vec_or(temp_sum, lhs);
         }
         result.sum_mask = extract_mask(temp_sum); 
       }
@@ -6419,8 +6572,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_xor(bits.ppc_vector[idx], rhs(idx));
-        temp_sum = vec_or(temp_sum, result(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_xor(rhs1, rhs2);
+        result(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       result.sum_mask = extract_mask(temp_sum);
       return result;
@@ -6435,8 +6591,9 @@
       sum_mask |= rhs.sum_mask;
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-	//bits.ppc_vector[idx] |= rhs(idx);
-        bits.ppc_vector[idx] = vec_or(bits.ppc_vector[idx], rhs(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        bits.ppc_view(idx) = vec_or(rhs1, rhs2);
       }
       return *this;
     }
@@ -6452,8 +6609,11 @@
         __vector unsigned long long temp_sum = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
         {
-          bits.ppc_vector[idx] = vec_and(bits.ppc_vector[idx], rhs(idx));
-          temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
+          __vector unsigned long long rhs1 = bits.ppc_view(idx);
+          __vector unsigned long long rhs2 = rhs(idx);
+          __vector unsigned long long lhs = vec_and(rhs1, rhs2);
+          bits.ppc_view(idx) = lhs;
+          temp_sum = vec_or(temp_sum, lhs);
         }
         sum_mask = extract_mask(temp_sum); 
       }
@@ -6462,7 +6622,7 @@
         sum_mask = 0;
 	const __vector unsigned long long zero_vec = vec_splats(0ULL);
         for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
-          bits.ppc_vector[idx] = zero_vec;
+          bits.ppc_view(idx) = zero_vec;
       }
       return *this;
     }
@@ -6476,8 +6636,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_xor(bits.ppc_vector[idx], rhs(idx));
-        temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_xor(rhs1, rhs2);
+        bits.ppc_view(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       sum_mask = extract_mask(temp_sum);
       return *this;
@@ -6509,8 +6672,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        result(idx) = vec_and(~rhs(idx), bits.ppc_vector[idx]);
-        temp_sum = vec_or(temp_sum, result(idx));
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_and(rhs1, ~rhs2);
+        result(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       result.sum_mask = extract_mask(temp_sum);
       return result;
@@ -6525,8 +6691,11 @@
       __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
-        bits.ppc_vector[idx] = vec_and(~rhs(idx), bits.ppc_vector[idx]);
-        temp_sum = vec_or(temp_sum, bits.ppc_vector[idx]);
+        __vector unsigned long long rhs1 = bits.ppc_view(idx);
+        __vector unsigned long long rhs2 = rhs(idx);
+        __vector unsigned long long lhs = vec_and(rhs1, ~rhs2);
+        bits.ppc_view(idx) = lhs;
+        temp_sum = vec_or(temp_sum, lhs);
       }
       sum_mask = extract_mask(temp_sum);
       return *this;

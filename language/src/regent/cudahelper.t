@@ -64,6 +64,14 @@ local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
 local CU_JIT_INPUT_PTX = 1
 local CU_JIT_TARGET = 9
 local DriverAPI = {
+  CU_JIT_ERROR_LOG_BUFFER = 5;
+  CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6;
+  CU_JIT_INPUT_PTX = 1;
+  CU_JIT_TARGET = 9;
+
+  CUlinkState = &CUlinkState_st;
+  CUjit_option = uint32;
+
   cuInit = ef("cuInit", {uint32} -> uint32);
   cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
   cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
@@ -72,6 +80,11 @@ local DriverAPI = {
   cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
   cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
     {&int32,&int32,int32} -> uint32);
+  cuLinkCreate_v2 = ef("cuLinkCreate_v2",{uint32,&uint32,&&opaque,&&CUlinkState_st} -> uint32);
+  cuLinkAddData_v2 = ef("cuLinkAddData_v2",
+    {&CUlinkState_st,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> uint32);
+  cuLinkComplete = ef("cuLinkComplete",{&CUlinkState_st,&&opaque,&uint64} -> uint32);
+  cuLinkDestroy = ef("cuLinkDestroy",{&CUlinkState_st} -> uint32);
 }
 
 local RuntimeAPI = false
@@ -219,7 +232,7 @@ end
 -- ## Registration functions
 -- #################
 
-local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
+local terra register_ptx(ptxc : rawstring) : &&opaque
   var fat_bin : &fat_bin_t
   var fat_size = sizeof(fat_bin_t)
   -- TODO: this line is leaking memory
@@ -227,10 +240,20 @@ local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) :
   base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
   fat_bin.magic = 1234
   fat_bin.versions = 5678
-  var fat_data_size = ptxSize + 1
-  fat_bin.data = c.malloc(fat_data_size)
-  base.assert(fat_data_size == 0 or fat_bin.data ~= nil, "malloc failed in register_ptx")
   fat_bin.data = ptxc
+  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
+  return handle
+end
+
+local terra register_cubin(cubin : rawstring) : &&opaque
+  var fat_bin : &fat_bin_t
+  var fat_size = sizeof(fat_bin_t)
+  -- TODO: this line is leaking memory
+  fat_bin = [&fat_bin_t](c.malloc(fat_size))
+  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_cubin")
+  fat_bin.magic = 1234
+  fat_bin.versions = 5678
+  fat_bin.data = cubin
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
@@ -295,6 +318,70 @@ do
   end
 end
 
+local struct cubin_t {
+  data : rawstring,
+  size : uint64
+}
+
+local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
+  var linkState : DriverAPI.CUlinkState
+  var cubin : &opaque
+  var cubinSize : uint64
+  var error_str : rawstring = nil
+  var error_sz : uint64 = 0
+
+  var options = arrayof(
+    DriverAPI.CUjit_option,
+    DriverAPI.CU_JIT_TARGET,
+    DriverAPI.CU_JIT_ERROR_LOG_BUFFER,
+    DriverAPI.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES
+  )
+  var option_values = arrayof(
+    [&opaque],
+    [&opaque](version),
+    &error_str,
+    [&opaque](&error_sz)
+  );
+
+  var cx : &CUctx_st
+  var cx_created = false
+
+  var r = DriverAPI.cuCtxGetCurrent(&cx)
+  base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
+  var device : int32
+  if cx ~= nil then
+    r = DriverAPI.cuCtxGetDevice(&device)
+    base.assert(r == 0, "CUDA error in cuCtxGetDevice")
+  else
+    r = DriverAPI.cuDeviceGet(&device, 0)
+    base.assert(r == 0, "CUDA error in cuDeviceGet")
+    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
+    base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
+    cx_created = true
+  end
+
+  r = DriverAPI.cuLinkCreate_v2(1, options, option_values, &linkState)
+  base.assert(r == 0, "CUDA error in cuLinkCreate_v2")
+  r = DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil)
+  base.assert(r == 0, "CUDA error in cuLinkAddData_v2")
+  r = DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize)
+  base.assert(r == 0, "CUDA error in cuLinkComplete")
+
+  -- Make a copy of the returned cubin before we destroy the linker and cuda context,
+  -- which may deallocate the cubin
+  var to_return : rawstring = [rawstring](c.malloc(cubinSize + 1))
+  to_return[cubinSize] = 0
+  c.memcpy([&opaque](to_return), cubin, cubinSize)
+
+  r = DriverAPI.cuLinkDestroy(linkState)
+  base.assert(r == 0, "CUDA error in cuLinkDestroy")
+  if cx_created then
+    DriverAPI.cuCtxDestroy(cx)
+  end
+
+  return cubin_t { to_return, cubinSize }
+end
+
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
   for k, v in pairs(kernels) do
@@ -308,10 +395,26 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   end
   local ptx = cudalib.toptx(module, nil, version)
 
-  local ptxc = terralib.constant(ptx)
+  local cubin = nil
+  local offline = config["offline"] or config["cuda-offline"]
+  if not offline and config["cuda-generate-cubin"] then
+    local result = ptx_to_cubin(ptx, ptx:len() + 1, version)
+    local ffi = require('ffi')
+    cubin = ffi.string(result.data, result.size)
+  end
+
   local handle = terralib.newsymbol(&&opaque, "handle")
-  local register = quote
-    var [handle] = register_ptx(ptxc, [ptx:len() + 1], [version])
+  local register = nil
+  if cubin == nil then
+    local ptxc = terralib.constant(ptx)
+    register = quote
+      var [handle] = register_ptx(ptxc)
+    end
+  else
+    local cubin = terralib.constant(cubin)
+    register = quote
+      var [handle] = register_cubin(cubin)
+    end
   end
 
   for k, v in pairs(kernels) do
