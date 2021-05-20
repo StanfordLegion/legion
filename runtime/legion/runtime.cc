@@ -909,6 +909,112 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance FutureImpl::get_instance(Memory::Kind memkind, 
+                              size_t extent_in_bytes, bool check_extent, 
+                              bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      Processor proc = implicit_context->get_executing_processor();
+      Memory memory = runtime->find_local_memory(proc, memkind);
+      if (!memory.exists())
+      {
+        if (memkind != Memory::SYSTEM_MEM)
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MEMORY_KIND,
+              "Unable to find a %s memory associated with processor " IDFMT
+              " in which to create a future buffer.", 
+              mem_names[memkind], proc.id)
+        }
+        else
+          memory = runtime->runtime_system_memory;
+      }
+      if (runtime->runtime_warnings && !silence_warnings && 
+          (implicit_context != NULL))
+      {
+        if (!implicit_context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+             "Waiting on a future to make an accessor in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance "
+             "degradation. Warning string: %s",
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
+      }
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
+      mark_sampled();
+      const RtEvent ready_event = subscribe();
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      FutureInstance *instance = find_or_create_instance(memory,
+          (implicit_context != NULL) ? implicit_context->owner_task : NULL,
+          (implicit_context != NULL) ? 
+           implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
+      // Wait to make sure that the future is complete first
+      bool poisoned = false;
+      if (!future_complete.has_triggered_faultaware(poisoned))
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          future_complete.wait_faultaware(poisoned);
+          context->end_task_wait();
+        }
+        else
+          future_complete.wait_faultaware(poisoned);
+      }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
+      if (empty)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+            "Accessing empty future when making an accessor! (UID %lld)",
+            (producer_op == NULL) ? 0 : producer_op->get_unique_op_id())
+      else if ((instance == NULL) || (instance->size == 0))
+        REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+          "Future size mismatch! Expected non-empty future for making an "
+          "accessor but future has a payload of 0 bytes. (UID %lld)", 
+          (producer_op == NULL) ? 0 : producer_op->get_unique_op_id())
+      if (check_extent && (instance->size != extent_in_bytes))
+        REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+            "Future size mismatch! Expected type of %zd bytes but "
+            "requested type is %zd bytes. (UID %lld)", 
+            instance->size, extent_in_bytes, (producer_op == NULL) ? 0 :
+            producer_op->get_unique_op_id())
+      if (!instance->ready_event.has_triggered_faultaware(poisoned))
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          instance->ready_event.wait_faultaware(poisoned);
+          context->end_task_wait();
+        }
+        else
+          instance->ready_event.wait_faultaware(poisoned);
+      }
+      if (poisoned && (implicit_context != NULL))
+        implicit_context->raise_poison_exception();
+      return instance->get_instance();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::report_incompatible_accessor(const char *accessor_kind,
+                                                  PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create Realm %s for future instance %llx in task %s",
+          accessor_kind, instance.id, implicit_context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
     bool FutureImpl::find_or_create_application_instance(Memory target,
                                                          UniqueID task_uid)
     //--------------------------------------------------------------------------

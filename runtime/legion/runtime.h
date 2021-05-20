@@ -264,6 +264,11 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
+      PhysicalInstance get_instance(Memory::Kind kind,
+                             size_t extent_in_bytes, bool check_extent,
+                             bool silence_warnings, const char *warning_string);
+      void report_incompatible_accessor(const char *accessor_kind,
+                                        PhysicalInstance instance);
       bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,

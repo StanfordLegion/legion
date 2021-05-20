@@ -2441,6 +2441,69 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds, offset);
       }
+      // Future accessor
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,N,T> transform;
+        for (int i = 0; i < N; i++)
+          transform[0][i] = 0;
+        Realm::Point<1,T> origin(0);
+        Realm::Rect<N,T> source_bounds;
+        // Anything in range works for these bounds since we're
+        // going to remap them to the origin
+        for (int i = 0; i < N; i++)
+        {
+          source_bounds.lo[i] = std::numeric_limits<T>::min();
+          source_bounds.hi[i] = std::numeric_limits<T>::max();
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+      }
+      // Future accessor with explicit bounds
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,N,T> transform;
+        for (int i = 0; i < N; i++)
+          transform[0][i] = 0;
+        Realm::Point<1,T> origin(0);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -2617,6 +2680,81 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
+      }
+      // Future accessor
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,N,T> transform;
+        for (int i = 0; i < N; i++)
+          transform[0][i] = 0;
+        Realm::Point<1,T> origin(0);
+        Realm::Rect<N,T> source_bounds;
+        // Anything in range works for these bounds since we're
+        // going to remap them to the origin
+        for (int i = 0; i < N; i++)
+        {
+          source_bounds.lo[i] = std::numeric_limits<T>::min();
+          source_bounds.hi[i] = std::numeric_limits<T>::max();
+        }
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+        DomainT<1,T> is;
+        is.bounds.lo[0] = 0;
+        is.bounds.hi[0] = 0;
+        is.sparsity.id = 0;
+        AffineTransform<1,N,T> affine(transform, origin);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds, affine);
+      }
+      // Future accessor with explicit bounds
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    const Rect<N,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,N,T> transform;
+        for (int i = 0; i < N; i++)
+          transform[0][i] = 0;
+        Realm::Point<1,T> origin(0);
+        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+        DomainT<1,T> is;
+        is.bounds.lo[0] = 0;
+        is.bounds.hi[0] = 0;
+        is.sparsity.id = 0;
+        AffineTransform<1,N,T> affine(transform, origin);
+        bounds = AffineBounds::Tester<N,T>(is, source_bounds, affine);
       }
     public:
       __CUDA_HD__
@@ -2821,6 +2959,64 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds, offset);
       }
+      // Future accessor
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,1,T> transform;
+        transform[0][0] = 0;
+        Realm::Point<1,T> origin(0);
+        Realm::Rect<1,T> source_bounds;
+        // Anything in range works for these bounds since we're
+        // going to remap them to the origin
+        source_bounds.lo[0] = std::numeric_limits<T>::min();
+        source_bounds.hi[0] = std::numeric_limits<T>::max();
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+      }
+      // Future accessor with explicit bounds
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,1,T> transform;
+        transform[0][0] = 0;
+        Realm::Point<1,T> origin(0);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
@@ -2985,6 +3181,76 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
+      }
+      // Future accessor
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,1,T> transform;
+        transform[0][0] = 0;
+        Realm::Point<1,T> origin(0);
+        Realm::Rect<1,T> source_bounds;
+        // Anything in range works for these bounds since we're
+        // going to remap them to the origin
+        source_bounds.lo[0] = std::numeric_limits<T>::min();
+        source_bounds.hi[0] = std::numeric_limits<T>::max();
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+        DomainT<1,T> is;
+        is.bounds.lo[0] = 0;
+        is.bounds.hi[0] = 0;
+        is.sparsity.id = 0;
+        AffineTransform<1,1,T> affine(transform, origin);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds, affine);
+      }
+      // Future accessor with explicit bounds
+      FieldAccessor(const Future &future, Memory::Kind memkind,
+                    const Rect<1,T> source_bounds,
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t offset = 0)
+      {
+        const Realm::RegionInstance instance = 
+          future.get_instance(memkind, actual_field_size, check_field_size,
+                              warning_string, silence_warnings);
+        // This mapping ignores the input points and sends 
+        // everything to the 1-D origin
+        Realm::Matrix<1,1,T> transform;
+        transform[0][0] = 0;
+        Realm::Point<1,T> origin(0);
+        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
+              transform, origin, 0/*field id*/, source_bounds))
+          future.report_incompatible_accessor("AffineAccessor", instance);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
+                                        0/*field id*/, source_bounds, offset);
+        DomainT<1,T> is;
+        is.bounds.lo[0] = 0;
+        is.bounds.hi[0] = 0;
+        is.sparsity.id = 0;
+        AffineTransform<1,1,T> affine(transform, origin);
+        bounds = AffineBounds::Tester<1,T>(is, source_bounds, affine);
       }
     public:
       __CUDA_HD__

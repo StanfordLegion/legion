@@ -1388,6 +1388,15 @@ namespace Legion {
           const void *buffer, size_t bytes, bool take_ownership = false,
           Memory::Kind mem = Memory::SYSTEM_MEM, 
           void (*freefunc)(void*,size_t) = NULL);
+    private:
+      // This should only be available for accessor classes
+      template<PrivilegeMode, typename, int, typename, typename, bool>
+      friend class FieldAccessor;
+      Realm::RegionInstance get_instance(Memory::Kind kind,
+          size_t field_size, bool check_field_size,
+          const char *warning_string, bool silence_warnings) const;
+      void report_incompatible_accessor(const char *accessor_kind,
+                             Realm::RegionInstance instance) const;
     };
 
     /**
@@ -2611,6 +2620,35 @@ namespace Legion {
       template<int M>
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     const AffineTransform<M,N,COORD_T> transform,
+                    const Rect<N,COORD_T> bounds,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // Create a field accessor for a Future 
+      // (only with READ-ONLY privileges and AffineAccessors)
+      FieldAccessor(const Future &future, Memory::Kind kind,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // Create a field accessor for a Future
+      // (only with READ-ONLY privileges and AffineAccessors)
+      FieldAccessor(const Future &future, Memory::Kind kind,
                     const Rect<N,COORD_T> bounds,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
