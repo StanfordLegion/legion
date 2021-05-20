@@ -46,7 +46,8 @@ namespace Realm {
   
   template <int N, typename T>
   /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<Point<N,T> >& points,
-							  bool always_create)
+							  bool always_create,
+                                                          bool disjoint)
   {
     HybridRectangleList<N,T> hrl;
     for(typename std::vector<Point<N,T> >::const_iterator it = points.begin();
@@ -67,13 +68,14 @@ namespace Realm {
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
-    impl->contribute_dense_rect_list(dense, false /*!disjoint*/);
+    impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
   }
 
   template <int N, typename T>
   /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<Rect<N,T> >& rects,
-							  bool always_create)
+							  bool always_create,
+                                                          bool disjoint)
   {
     HybridRectangleList<N,T> hrl;
     for(typename std::vector<Rect<N,T> >::const_iterator it = rects.begin();
@@ -94,7 +96,7 @@ namespace Realm {
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
-    impl->contribute_dense_rect_list(dense, false /*!disjoint*/);
+    impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
   }
 

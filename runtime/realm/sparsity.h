@@ -78,10 +78,10 @@ namespace Realm {
     //  bounding box, returns NO_SPACE (i.e. id == 0)
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Point<N,T> >& points,
-				      bool always_create);
+				      bool always_create, bool disjoint);
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Rect<N,T> >& rects,
-				      bool always_create);
+				      bool always_create, bool disjoint);
   };
 
   template <int N, typename T>
