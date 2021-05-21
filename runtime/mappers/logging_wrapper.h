@@ -62,6 +62,7 @@ class LoggingWrapper : public ForwardingMapper {
                                   const MapTaskInput& input,
                                   const MapTaskOutput& default_output,
                                   MapReplicateTaskOutput& output);
+  using ForwardingMapper::select_sharding_functor;
   virtual void select_sharding_functor(const MapperContext ctx,
                                        const Task& task,
                                        const SelectShardingFunctorInput& input,
