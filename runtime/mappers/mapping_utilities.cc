@@ -1305,12 +1305,13 @@ namespace Legion {
       //------------------------------------------------------------------------
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
-                            const Task& task)
+                            const Task& task,
+                            bool include_index_point)
       //------------------------------------------------------------------------
       {
         std::stringstream ss;
         ss << task.get_task_name();
-        if (task.is_index_space) {
+        if (include_index_point && task.is_index_space) {
           ss << "(index_point=" << task.index_point << ")";
         }
         return ss.str();
