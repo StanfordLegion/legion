@@ -53,6 +53,25 @@ namespace Realm {
     return id != 0;
   }
 
+  template <int N, typename T>
+  REALM_PUBLIC_API
+  inline std::ostream& operator<<(std::ostream& os, SparsityMap<N,T> s)
+  {
+    return os << std::hex << s.id << std::dec;
+  }
+
+  template <int N, typename T>
+  REALM_PUBLIC_API
+  inline std::ostream& operator<<(std::ostream& os, const SparsityMapEntry<N,T>& entry)
+  {
+    os << entry.bounds;
+    if(entry.sparsity.id)
+      os << ",sparsity=" << std::hex << entry.sparsity.id << std::dec;
+    if(entry.bitmap)
+      os << ",bitmap=" << entry.bitmap;
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

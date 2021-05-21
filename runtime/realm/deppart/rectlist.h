@@ -58,6 +58,7 @@ namespace Realm {
 
     std::vector<Rect<N,T> > rects;
     size_t max_rects;
+    int merge_dim;
   };
 
   template <int N, typename T>

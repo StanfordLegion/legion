@@ -1275,15 +1275,21 @@ namespace Realm {
   }
   
   template <int N, typename T>
-  static inline bool compare_bounds_lo(const SparsityMapEntry<N,T>& lhs,
-                                       const SparsityMapEntry<N,T>& rhs)
-  {
-    for(int i = 0; i < N; i++) {
-      if(lhs.bounds.lo[i] < rhs.bounds.lo[i]) return true;
-      if(lhs.bounds.lo[i] > rhs.bounds.lo[i]) return false;
+  struct CompareBoundsLow {
+    CompareBoundsLow(const int *_dim_order) : dim_order(_dim_order) {}
+
+    bool operator()(const SparsityMapEntry<N,T>& lhs,
+                    const SparsityMapEntry<N,T>& rhs) const
+    {
+      for(int i = 0; i < N; i++) {
+        if(lhs.bounds.lo[dim_order[i]] < rhs.bounds.lo[dim_order[i]]) return true;
+        if(lhs.bounds.lo[dim_order[i]] > rhs.bounds.lo[dim_order[i]]) return false;
+      }
+      return false;
     }
-    return false;
-  }
+
+    const int *dim_order;
+  };
 
   template <int N, typename T>
   static void compute_approximation(const std::vector<SparsityMapEntry<N,T> >& entries,
@@ -1360,8 +1366,127 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  bool sort_and_merge_entries(int merge_dim,
+                              std::vector<SparsityMapEntry<N,T> >& entries)
+  {
+    int dim_order[N];
+    for(int i = 0; i < N-1; i++)
+      dim_order[i] = (((N - 1 - i) == merge_dim) ? 0 : N - 1 - i);
+    dim_order[N - 1] = merge_dim;
+
+    std::sort(entries.begin(), entries.end(), CompareBoundsLow<N,T>(dim_order));
+
+    // merge with an in-place linear pass
+    size_t wpos = 0;
+    size_t rpos = 0;
+    while(rpos < entries.size()) {
+      if(wpos < rpos)
+        entries[wpos] = entries[rpos];
+      rpos++;
+
+      // see if we can absorb any more
+      if((entries[wpos].sparsity.id == 0) && (entries[wpos].bitmap == 0)) {
+        while(rpos < entries.size() &&
+              (entries[rpos].sparsity.id == 0) &&
+              (entries[rpos].bitmap == 0)) {
+          // has to match in all dimensions except for the merge dimension
+          bool merge_ok = true;
+          for(int i = 0; i < N; i++)
+            if((i != merge_dim) &&
+               ((entries[wpos].bounds.lo[i] != entries[rpos].bounds.lo[i]) ||
+                (entries[wpos].bounds.hi[i] != entries[rpos].bounds.hi[i]))) {
+              merge_ok = false;
+              break;
+            }
+          if(!merge_ok) break;
+
+#ifdef DEBUG_REALM
+          // should be no overlap here
+          assert(entries[wpos].bounds.hi[merge_dim] < entries[rpos].bounds.lo[merge_dim]);
+#endif
+
+          // if there's a gap, we can't merge
+          if((entries[wpos].bounds.hi[merge_dim] + 1) != entries[rpos].bounds.lo[merge_dim])
+            break;
+
+          // merge this in and keep going
+          entries[wpos].bounds.hi[merge_dim] = entries[rpos].bounds.hi[merge_dim];
+          rpos++;
+        }
+      }
+      wpos++;
+    }
+
+    if(wpos < rpos) {
+      // merging occurred
+      entries.resize(wpos);
+      return true;
+    } else
+      return false;
+  }
+
+  template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
+    // in order to organize the data a little better and handle common coalescing
+    //  cases, we do N sort/merging passes, with each dimension appearing last
+    //  in the sort order at least once (so that we can merge in that dimension)
+    // any successful merge in a given dimension should reattempt any previously
+    //  sorted/merged dimensions (TODO: some sort of limit for pathological cases?)
+    // we want to end with a sort order of { N-1, ... 0 }, so start from N-1
+    //  and work down
+    int merge_dim = N - 1;
+    int last_merged_dim = -1;
+
+    // as another heuristic tweak, scan the data first and see if it looks like
+    //  any existing rectangles have extent in only one dimension - if so, try
+    //  further merging in that dimension first
+    {
+      bool multiple_dims = false;
+      int nontrivial_dim = -1;
+      for(size_t i = 0; (i < this->entries.size()) && !multiple_dims; i++)
+        for(int j = 0; j < N; j++)
+          if(this->entries[i].bounds.lo[j] < this->entries[i].bounds.hi[j]) {
+            if(nontrivial_dim == -1) {
+              nontrivial_dim = j;
+            } else if(j != nontrivial_dim) {
+              multiple_dims = true;
+              break;
+            }
+          }
+      if((nontrivial_dim != -1) && !multiple_dims) {
+        if(sort_and_merge_entries(nontrivial_dim, this->entries))
+           last_merged_dim = nontrivial_dim;
+      }
+    }
+
+    while(merge_dim >= 0) {
+      // careful - can't skip sort of dim=0 for multi-dimensional cases, even
+      //   if it was the last successful merge, because unsuccessful merges
+      //   in other dimensions will have messed up the sort order
+      if((merge_dim == last_merged_dim) && ((N == 1) || (merge_dim != 0))) {
+        merge_dim--;
+        continue;
+      }
+
+      if(sort_and_merge_entries(merge_dim, this->entries)) {
+        last_merged_dim = merge_dim;
+        // start over if this wasn't already the first dim
+        if(merge_dim < (N - 1))
+          merge_dim = N - 1;
+        else
+          merge_dim--;
+      } else
+        merge_dim--;
+    }
+
+    // now that we've got our entries nice and tidy, build a bounded approximation of them
+    if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
+      assert(!this->approx_valid.load());
+      compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
+      this->approx_valid.store_release(true);
+    }
+
     {
       LoggerMessage msg = log_part.info();
       if(msg.is_active()) {
@@ -1372,45 +1497,6 @@ namespace Realm {
 	      << " sparsity=" << this->entries[i].sparsity
 	      << " bitmap=" << this->entries[i].bitmap;
       }
-    }
-
-    // first step is to organize the data a little better - for now, this means
-    //  sorting the entries lexicographically by their lo coordinates
-    //  the entries list
-    std::sort(this->entries.begin(), this->entries.end(), compare_bounds_lo<N,T>);
-    if(N == 1) {
-      // for 1-d, we'll also do a linear pass over the now-sorted entries and
-      //  merge adjacent ones
-      size_t wpos = 0;
-      size_t rpos = 0;
-      while(rpos < this->entries.size()) {
-        if(wpos < rpos)
-          this->entries[wpos] = this->entries[rpos];
-#ifdef DEBUG_REALM
-        if(wpos > 0)
-          assert((this->entries[wpos-1].bounds.hi.x + 1) < (this->entries[wpos].bounds.lo.x));
-#endif
-        rpos++;
-        if((this->entries[wpos].sparsity.id == 0) && (this->entries[wpos].bitmap == 0)) {
-          while((rpos < this->entries.size()) &&
-                ((this->entries[wpos].bounds.hi.x + 1) == (this->entries[rpos].bounds.lo.x)) &&
-                (this->entries[rpos].sparsity.id == 0) &&
-                (this->entries[rpos].bitmap == 0)) {
-            this->entries[wpos].bounds.hi.x = this->entries[rpos].bounds.hi.x;
-            rpos++;
-          }
-        }
-        wpos++;
-      }
-      if(wpos < rpos)
-        this->entries.resize(wpos);
-    }
-
-    // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
-      assert(!this->approx_valid.load());
-      compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
-      this->approx_valid.store_release(true);
     }
 
 #ifdef DEBUG_PARTITIONING
