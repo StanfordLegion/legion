@@ -610,7 +610,7 @@ namespace Realm {
       }
 
       if(it->first <= r.lo.x) {
-	assert(it->second >= r.lo.x); // it had better overlap
+	assert((it->second + 1) >= r.lo.x); // it had better overlap or just touch
 
 	if(it->second < r.hi.x)
 	  it->second = r.hi.x;

@@ -499,8 +499,12 @@ namespace Realm {
     for(int i = 0; i < N; i++)
       if(lo[i] > hi[i])
 	return 0;
-      else
-	v *= size_t(hi[i] - lo[i] + 1);
+      else {
+        // have to convert both 'hi' and 'lo' to size_t before subtracting
+        //  to avoid potential signed integer overflow
+	v *= (static_cast<size_t>(hi[i]) -
+              static_cast<size_t>(lo[i]) + 1);
+      }
     return v;
   }
 
