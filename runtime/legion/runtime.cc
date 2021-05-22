@@ -916,6 +916,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Processor proc = implicit_context->get_executing_processor();
+      // A heuristic to help out applications that are unsure of themselves
+      if (memkind == Memory::NO_MEMKIND)
+        memkind = (proc.kind() == Processor::TOC_PROC) ?
+          Memory::GPU_FB_MEM : Memory::SYSTEM_MEM;
       Memory memory = runtime->find_local_memory(proc, memkind);
       if (!memory.exists())
       {

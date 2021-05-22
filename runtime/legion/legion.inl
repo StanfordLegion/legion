@@ -2442,7 +2442,8 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
       // Future accessor
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -2477,8 +2478,9 @@ namespace Legion {
                                         0/*field id*/, source_bounds, offset);
       }
       // Future accessor with explicit bounds
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
                     const Rect<N,T> source_bounds,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -2682,7 +2684,8 @@ namespace Legion {
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
       // Future accessor
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -2723,8 +2726,9 @@ namespace Legion {
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, affine);
       }
       // Future accessor with explicit bounds
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
                     const Rect<N,T> source_bounds,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -2960,7 +2964,8 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
       // Future accessor
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -2991,8 +2996,9 @@ namespace Legion {
                                         0/*field id*/, source_bounds, offset);
       }
       // Future accessor with explicit bounds
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
                     const Rect<1,T> source_bounds,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -3183,7 +3189,8 @@ namespace Legion {
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
       // Future accessor
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,
@@ -3220,8 +3227,9 @@ namespace Legion {
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, affine);
       }
       // Future accessor with explicit bounds
-      FieldAccessor(const Future &future, Memory::Kind memkind,
+      FieldAccessor(const Future &future,
                     const Rect<1,T> source_bounds,
+                    Memory::Kind memkind = Memory::NO_MEMKIND,
                     size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
                     bool check_field_size = true,

@@ -2634,7 +2634,8 @@ namespace Legion {
                     size_t subfield_offset = 0) { }
       // Create a field accessor for a Future 
       // (only with READ-ONLY privileges and AffineAccessors)
-      FieldAccessor(const Future &future, Memory::Kind kind,
+      FieldAccessor(const Future &future,
+                    Memory::Kind kind = Memory::NO_MEMKIND,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -2648,8 +2649,9 @@ namespace Legion {
                     size_t subfield_offset = 0) { }
       // Create a field accessor for a Future
       // (only with READ-ONLY privileges and AffineAccessors)
-      FieldAccessor(const Future &future, Memory::Kind kind,
+      FieldAccessor(const Future &future,
                     const Rect<N,COORD_T> bounds,
+                    Memory::Kind kind = Memory::NO_MEMKIND,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
