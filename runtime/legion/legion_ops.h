@@ -985,7 +985,6 @@ namespace Legion {
       virtual Operation* get_operation(void) const = 0;
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
       // Return a trace local unique ID for this operation
-      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const = 0;
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void set_effects_postcondition(ApEvent postcondition) = 0;

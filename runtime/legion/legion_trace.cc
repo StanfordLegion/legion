@@ -5689,19 +5689,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_mapper_output(Memoizable *memo,
+    void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      const TraceLocalID op_key = memo->get_trace_local_id();
       AutoLock t_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
-      assert(cached_mappings.find(op_key) == cached_mappings.end());
+      assert(cached_mappings.find(tlid) == cached_mappings.end());
 #endif
-      CachedMapping &mapping = cached_mappings[op_key];
+      CachedMapping &mapping = cached_mappings[tlid];
       // If you change the things recorded from output here then
       // you also need to change RemoteTraceRecorder::record_mapper_output
       mapping.target_procs = output.target_procs;

@@ -918,14 +918,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_mapper_output(Memoizable *memo,
+    void RemoteTraceRecorder::record_mapper_output(const TraceLocalID &tlid,
                               const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
                               std::set<RtEvent> &external_applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(memoizable == memo);
+      assert(memoizable->get_trace_local_id() == tlid);
 #endif
       if (local_space != origin_space)
       {
@@ -936,7 +936,8 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_MAPPER_OUTPUT);
           rez.serialize(applied);
-          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(tlid.first);
+          rez.serialize(tlid.second);
           // We actually only need a few things here  
           rez.serialize<size_t>(output.target_procs.size());
           for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
@@ -957,7 +958,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_mapper_output(memo, output, 
+        remote_tpl->record_mapper_output(tlid, output, 
                 physical_instances, external_applied);
     }
 
@@ -1586,8 +1587,9 @@ namespace Legion {
           {
             RtUserEvent applied;
             derez.deserialize(applied);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            derez.deserialize(tlid.first);
+            derez.deserialize(tlid.second);
             size_t num_target_processors;
             derez.deserialize(num_target_processors);
             Mapper::MapTaskOutput output;
@@ -1619,15 +1621,13 @@ namespace Legion {
                 wait_on.wait();
             }
             std::set<RtEvent> applied_events;
-            tpl->record_mapper_output(memo, output, 
+            tpl->record_mapper_output(tlid, output, 
                 physical_instances, applied_events);
             if (!applied_events.empty())
               Runtime::trigger_event(applied, 
                   Runtime::merge_events(applied_events));
             else
               Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_EFFECTS:
