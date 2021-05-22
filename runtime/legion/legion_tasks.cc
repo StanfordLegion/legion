@@ -3533,11 +3533,12 @@ namespace Legion {
         assert((remote_trace_recorder != NULL) ||
                 ((tpl != NULL) && tpl->is_recording()));
 #endif
+        const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
-          remote_trace_recorder->record_mapper_output(this, output,
+          remote_trace_recorder->record_mapper_output(tlid, output,
               physical_instances, map_applied_conditions);
         else
-          tpl->record_mapper_output(this, output, 
+          tpl->record_mapper_output(tlid, output, 
               physical_instances, map_applied_conditions);
       }
     }

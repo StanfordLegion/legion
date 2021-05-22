@@ -519,8 +519,6 @@ namespace Legion {
       bool intermediate_execution_fence;
     };
 
-    typedef Memoizable::TraceLocalID TraceLocalID;
-
     /**
      * \class TraceViewSet
      */
@@ -727,7 +725,7 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez, 
           std::set<RtEvent> &applied, const AddressSpaceID target);
     public:
-      virtual void record_mapper_output(Memoizable *memo,
+      virtual void record_mapper_output(const TraceLocalID &tlid,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
                              std::set<RtEvent> &applied_events);

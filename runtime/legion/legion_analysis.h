@@ -204,7 +204,7 @@ namespace Legion {
                           const FieldMask &user_mask,
                           bool update_validity) = 0;
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo) = 0;
-      virtual void record_mapper_output(Memoizable *memo,
+      virtual void record_mapper_output(const TraceLocalID &tlid,
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
                          std::set<RtEvent> &applied_events) = 0;
@@ -328,7 +328,7 @@ namespace Legion {
                           const FieldMask &user_mask,
                           bool update_validity);
       virtual void record_set_op_sync_event(ApEvent &lhs, Memoizable *memo);
-      virtual void record_mapper_output(Memoizable *memo,
+      virtual void record_mapper_output(const TraceLocalID &tlid,
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
                           std::set<RtEvent> &applied_events);
@@ -410,13 +410,13 @@ namespace Legion {
           base_sanity_check();
           rec->record_set_op_sync_event(result, memo);
         }
-      inline void record_mapper_output(Memoizable *local, 
+      inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
                           std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(local, output, physical_instances, applied);
+          rec->record_mapper_output(tlid, output, physical_instances, applied);
         }
       inline void record_set_effects(Memoizable *memo, ApEvent &rhs) const
         {

@@ -1834,6 +1834,7 @@ namespace Legion {
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
     typedef unsigned long long IndexSpaceExprID;
+    typedef std::pair<unsigned, DomainPoint> TraceLocalID;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
