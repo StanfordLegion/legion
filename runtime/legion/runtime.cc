@@ -891,17 +891,18 @@ namespace Legion {
       }
       if (instance == NULL)
         return NULL;
-      if (!instance->ready_event.has_triggered_faultaware(poisoned))
+      const ApEvent inst_ready = instance->get_ready();
+      if (!inst_ready.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          instance->ready_event.wait_faultaware(poisoned);
+          inst_ready.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          instance->ready_event.wait_faultaware(poisoned);
+          inst_ready.wait_faultaware(poisoned);
       }
       if (poisoned && (implicit_context != NULL))
         implicit_context->raise_poison_exception();
@@ -987,21 +988,23 @@ namespace Legion {
             "requested type is %zd bytes. (UID %lld)", 
             instance->size, extent_in_bytes, (producer_op == NULL) ? 0 :
             producer_op->get_unique_op_id())
-      if (!instance->ready_event.has_triggered_faultaware(poisoned))
+      const PhysicalInstance result = instance->get_instance();
+      const ApEvent inst_ready = instance->get_ready();
+      if (!inst_ready.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          instance->ready_event.wait_faultaware(poisoned);
+          inst_ready.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          instance->ready_event.wait_faultaware(poisoned);
+          inst_ready.wait_faultaware(poisoned);
       }
       if (poisoned && (implicit_context != NULL))
         implicit_context->raise_poison_exception();
-      return instance->get_instance();
+      return result;
     }
 
     //--------------------------------------------------------------------------
