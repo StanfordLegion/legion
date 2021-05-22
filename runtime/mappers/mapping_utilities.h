@@ -322,7 +322,8 @@ namespace Legion {
 
       std::string to_string(MapperRuntime* runtime,
                             const MapperContext ctx,
-                            const Task& task);
+                            const Task& task,
+                            bool include_index_point = true);
 
       /** @} */
 

@@ -118,7 +118,8 @@ void LoggingWrapper::map_replicate_task(const MapperContext ctx,
                                         const MapTaskOutput& default_output,
                                         MapReplicateTaskOutput& output) {
   MessageBuffer buf(runtime, ctx);
-  buf.line() << "MAP_REPLICATE_TASK for " << to_string(runtime, ctx, task)
+  buf.line() << "MAP_REPLICATE_TASK for "
+             << to_string(runtime, ctx, task, false /*include_index_point*/)
              << " <" << task.get_unique_id() << ">";
   buf.line() << "  INPUT:";
   buf.report(task.regions, input.valid_instances);
@@ -133,6 +134,41 @@ void LoggingWrapper::map_replicate_task(const MapperContext ctx,
     buf.report(task, output.task_mappings[i]);
   }
 }
+
+void LoggingWrapper::select_sharding_functor(
+                              const MapperContext ctx,
+                              const Task& task,
+                              const SelectShardingFunctorInput& input,
+                              SelectShardingFunctorOutput& output) {
+  MessageBuffer buf(runtime, ctx);
+  buf.line() << "SELECT_SHARDING_FUNCTOR for "
+             << to_string(runtime, ctx, task, false /*include_index_point*/)
+             << " <" << task.get_unique_id() << ">";
+  mapper->select_sharding_functor(ctx, task, input, output);
+  ShardingFunctor* functor =
+    Runtime::get_sharding_functor(output.chosen_functor);
+  Domain point_space =
+    task.is_index_space
+    ? task.index_domain
+    : Domain(task.index_point, task.index_point);
+  Domain sharding_space =
+    (task.sharding_space != IndexSpace::NO_SPACE)
+    ? runtime->get_index_space_domain(ctx, task.sharding_space)
+    : point_space;
+  size_t num_shards = input.shard_mapping.size();
+  std::vector<std::vector<DomainPoint>> points_per_shard(num_shards);
+  for (Domain::DomainPointIterator it(point_space); it; ++it) {
+    ShardID shard = functor->shard(*it, sharding_space, num_shards);
+    points_per_shard[shard].push_back(*it);
+  }
+  for (size_t shard = 0; shard < num_shards; ++shard) {
+    std::stringstream& ss = buf.line();
+    ss << "  " << shard << " <-";
+    for (const DomainPoint& p : points_per_shard[shard]) {
+      ss << " " << p;
+    }
+  }
+}
 #endif // NO_LEGION_CONTROL_REPLICATION
 
 void LoggingWrapper::slice_task(const MapperContext ctx,
@@ -140,7 +176,8 @@ void LoggingWrapper::slice_task(const MapperContext ctx,
                                 const SliceTaskInput& input,
                                 SliceTaskOutput& output) {
   MessageBuffer buf(runtime, ctx);
-  buf.line() << "SLICE_TASK for " << to_string(runtime, ctx, task)
+  buf.line() << "SLICE_TASK for "
+             << to_string(runtime, ctx, task, false /*include_index_point*/)
              << " <" << task.get_unique_id() << ">";
   buf.line() << "  INPUT: " << to_string(runtime, ctx, input.domain);
   mapper->slice_task(ctx, task, input, output);
