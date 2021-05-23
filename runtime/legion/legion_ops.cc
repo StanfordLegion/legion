@@ -5352,6 +5352,7 @@ namespace Legion {
                       // Only check initialized if we don't have an indirection.
                       // If we have an indirection then it is impossible to know
                       // if we writing everything or not
+                                    (idx >= src_indirect_requirements.size()) &&
                                      (idx >= dst_indirect_requirements.size()));
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
