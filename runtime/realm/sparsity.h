@@ -78,15 +78,15 @@ namespace Realm {
     //  bounding box, returns NO_SPACE (i.e. id == 0)
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Point<N,T> >& points,
-				      bool always_create);
+				      bool always_create, bool disjoint);
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
     static SparsityMap<N,T> construct(const std::vector<Rect<N,T> >& rects,
-				      bool always_create);
+				      bool always_create, bool disjoint);
   };
 
   template <int N, typename T>
   REALM_PUBLIC_API
-  inline std::ostream& operator<<(std::ostream& os, SparsityMap<N,T> s) { return os << std::hex << s.id << std::dec; }
+  std::ostream& operator<<(std::ostream& os, SparsityMap<N,T> s);
 
   template <int N, typename T>
   struct SparsityMapEntry {
@@ -94,6 +94,10 @@ namespace Realm {
     SparsityMap<N,T> sparsity;
     HierarchicalBitMap<N,T> *bitmap;
   };
+
+  template <int N, typename T>
+  REALM_PUBLIC_API
+  std::ostream& operator<<(std::ostream& os, const SparsityMapEntry<N,T>& entry);
 
   template <int N, typename T>
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE SparsityMapPublicImpl {

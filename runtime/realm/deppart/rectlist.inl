@@ -57,6 +57,7 @@ namespace Realm {
   template <int N, typename T>
   inline DenseRectangleList<N,T>::DenseRectangleList(size_t _max_rects /*= 0*/)
     : max_rects(_max_rects)
+    , merge_dim(-1)
   {}
 
   template <int N, typename T>
@@ -210,6 +211,10 @@ namespace Realm {
   template <int N, typename T>
   inline void DenseRectangleList<N,T>::add_rect(const Rect<N,T>& _r)
   {
+    // never add an empty rectangle
+    if(_r.empty())
+      return;
+
     if(rects.empty()) {
       rects.push_back(_r);
       return;
@@ -281,9 +286,49 @@ namespace Realm {
 
     {
       Rect<N,T>& last = rects[rects.size() - 1];
-      if(can_merge(last, _r)) {
-        last = last.union_bbox(_r);
-        return;
+
+      if(merge_dim == -1) {
+        // no merging has occurred, so we're free to pick any dimension that is
+        //  possible
+        int candidate_dim = 0;
+        int matching_dims = 0;
+        for(int i = 0; i < N; i++)
+          if((last.lo[i] == _r.lo[i]) && (last.hi[i] == _r.hi[i]))
+            matching_dims++;
+          else
+            candidate_dim += i;  // if more than one adds here, matching count will be wrong
+        if(matching_dims == (N - 1)) {
+          if((last.hi[candidate_dim] + 1) == _r.lo[candidate_dim]) {
+            merge_dim = candidate_dim;
+            last.hi[candidate_dim] = _r.hi[candidate_dim];
+            return;
+          }
+          if((_r.hi[candidate_dim] + 1) == last.lo[candidate_dim]) {
+            merge_dim = candidate_dim;
+            last.lo[candidate_dim] = _r.lo[candidate_dim];
+            return;
+          }
+        }
+      } else {
+        // only merge in the same dimension as previous merges (and only if
+        //  possible)
+        bool ok = true;
+        for(int i = 0; i < N; i++)
+          if((i != merge_dim) &&
+             ((last.lo[i] != _r.lo[i]) || (last.hi[i] != _r.hi[i]))) {
+            ok = false;
+            break;
+          }
+        if(ok) {
+          if((last.hi[merge_dim] + 1) == _r.lo[merge_dim]) {
+            last.hi[merge_dim] = _r.hi[merge_dim];
+            return;
+          }
+          if((_r.hi[merge_dim] + 1) == last.lo[merge_dim]) {
+            last.lo[merge_dim] = _r.lo[merge_dim];
+            return;
+          }
+        }
       }
     }
 
@@ -581,6 +626,10 @@ namespace Realm {
   template <typename T>
   void HybridRectangleList<1,T>::add_rect(const Rect<1,T>& r)
   {
+    // never add an empty rectangle
+    if(r.empty())
+      return;
+
     if(is_vector) {
       DenseRectangleList<1,T>::add_rect(r);
       if(this->rects.size() > HIGH_WATER_MARK)
@@ -610,7 +659,7 @@ namespace Realm {
       }
 
       if(it->first <= r.lo.x) {
-	assert(it->second >= r.lo.x); // it had better overlap
+	assert((it->second + 1) >= r.lo.x); // it had better overlap or just touch
 
 	if(it->second < r.hi.x)
 	  it->second = r.hi.x;
