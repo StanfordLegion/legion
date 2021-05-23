@@ -941,7 +941,7 @@ namespace Realm {
       make_active();
   }
 
-  void PartitioningOpQueue::do_work(TimeLimit work_until)
+  bool PartitioningOpQueue::do_work(TimeLimit work_until)
   {
     // attempt to take one item off the work queue - readvertise work if
     //  more remains
@@ -991,6 +991,9 @@ namespace Realm {
       log_part.info() << "worker " << this << " finished uop " << uop;
       uop->mark_finished();
     }
+
+    // make_active was called above (if needed)
+    return false;
   }
 
   void PartitioningOpQueue::worker_thread_loop(void)

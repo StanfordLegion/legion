@@ -362,7 +362,7 @@ namespace Realm {
 
     void shutdown(void);
 
-    virtual void do_work(TimeLimit work_until);
+    virtual bool do_work(TimeLimit work_until);
 
     void handler_thread_loop(void);
 
@@ -403,7 +403,7 @@ namespace Realm {
     };
 
     int get_messages(Message *& head, Message **& tail, bool wait);
-    void return_messages(int sender, Message *head, Message **tail);
+    bool return_messages(int sender, Message *head, Message **tail);
 
     int nodes, dedicated_threads, sleeper_count;
     atomic<bool> bgwork_requested;

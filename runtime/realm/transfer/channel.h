@@ -927,7 +927,7 @@ namespace Realm {
 
       void enqueue_xd(XD *xd, bool at_front = false);
 
-      virtual void do_work(TimeLimit work_until);
+      virtual bool do_work(TimeLimit work_until);
 
     protected:
       LocalChannel *channel;

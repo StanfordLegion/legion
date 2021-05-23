@@ -626,7 +626,7 @@ namespace Realm {
     return sender;
   }
 
-  void IncomingMessageManager::return_messages(int sender,
+  bool IncomingMessageManager::return_messages(int sender,
 					       IncomingMessageManager::Message *head,
 					       IncomingMessageManager::Message **tail)
   {
@@ -652,6 +652,7 @@ namespace Realm {
       }
     }
 
+    bool now_active = false;
     if(enqueue_needed) {
       bool was_empty = todo_oldest == todo_newest;
 
@@ -665,7 +666,7 @@ namespace Realm {
 
       if(was_empty && !bgwork_requested.load()) {
 	bgwork_requested.store(true);
-	make_active();
+	now_active = true;
       }
     }
 
@@ -674,9 +675,11 @@ namespace Realm {
       drain_pending = false;
       drain_condvar.broadcast();
     }
+
+    return now_active;
   }
 
-  void IncomingMessageManager::do_work(TimeLimit work_until)
+  bool IncomingMessageManager::do_work(TimeLimit work_until)
   {
     // now that we've been called, our previous request for bgwork has been
     //  granted and we will need another one if/when more work comes
@@ -692,7 +695,7 @@ namespace Realm {
     //  there are also dedicated threads that might have grabbed it
     if(sender == -1) {
       assert(dedicated_threads > 0);
-      return;
+      return false;
     }
 
     ThreadLocal::in_message_handler = true;
@@ -788,8 +791,9 @@ namespace Realm {
       skipped_tail = current_tail;
     } else
       *skipped_tail = 0;
-    // put back whatever we had left, if anything - this'll requeue us if needed
-    return_messages(sender, skipped_messages, skipped_tail);
+
+    // put back whatever we had left, if anything - request requeue if needed
+    return return_messages(sender, skipped_messages, skipped_tail);
   }
 
   void IncomingMessageManager::handler_thread_loop(void)

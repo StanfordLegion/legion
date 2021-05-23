@@ -122,7 +122,7 @@ namespace Realm {
   }
 
   template <typename CHANNEL, typename XD>
-  void XDQueue<CHANNEL,XD>::do_work(TimeLimit work_until)
+  bool XDQueue<CHANNEL,XD>::do_work(TimeLimit work_until)
   {
     bool first_iteration = true;
     while(true) {
@@ -145,7 +145,7 @@ namespace Realm {
         assert(xd != 0);
 	first_iteration = false;
       }
-      if(!xd) return;  // nothing to do
+      if(!xd) return false;  // nothing to do
       if(still_more && !ordered_mode)
 	make_active();
 
@@ -193,9 +193,9 @@ namespace Realm {
 	    ready_xds.push_front(xd);
 	    in_ordered_worker = false;
 	  }
-	  if(was_empty)
-	    make_active();
-	  return;
+
+          // request bgwork requeuing if we made ourselves nonempty
+          return was_empty;
 	}
       }
 
@@ -204,6 +204,9 @@ namespace Realm {
       if(!ordered_mode)
 	break;
     }
+
+    // no work left (and/or somebody else is tracking it)
+    return false;
   }
 
 
