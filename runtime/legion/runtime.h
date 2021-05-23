@@ -332,7 +332,8 @@ namespace Legion {
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
                         UniqueID op_uid, bool eager, bool need_lock = true,
-                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT);
+                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
+                        bool create_instance = false);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             const bool need_lock);

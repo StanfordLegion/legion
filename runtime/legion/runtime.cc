@@ -960,7 +960,8 @@ namespace Legion {
       FutureInstance *instance = find_or_create_instance(memory,
           (implicit_context != NULL) ? implicit_context->owner_task : NULL,
           (implicit_context != NULL) ? 
-           implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
+           implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
+           true/*need lock*/,ApUserEvent::NO_AP_USER_EVENT,true/*create inst*/);
       // Wait to make sure that the future is complete first
       bool poisoned = false;
       if (!future_complete.has_triggered_faultaware(poisoned))
@@ -1509,7 +1510,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureInstance* FutureImpl::find_or_create_instance(Memory memory,
                 Operation *op, UniqueID creator_uid, bool eager,
-                bool need_lock, ApUserEvent ready_event)
+                bool need_lock, ApUserEvent ready_event, bool create_instance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1520,7 +1521,7 @@ namespace Legion {
       {
         AutoLock f_lock(future_lock);
         return find_or_create_instance(memory, op, creator_uid, eager,
-                                       false/*need lock*/, ready_event);
+                     false/*need lock*/, ready_event, create_instance);
       }
 #ifdef DEBUG_LEGION
       assert(!empty);
@@ -1539,6 +1540,9 @@ namespace Legion {
       {
         if (ready_event.exists())
           Runtime::trigger_event(NULL,ready_event,finder->second->ready_event);
+        // Instantiate the instance if we need to
+        if (create_instance)
+          finder->second->get_instance();
         return finder->second;
       }
       // Don't have it so we need to make it
@@ -1558,6 +1562,9 @@ namespace Legion {
       }
       // Add it to the set of instances
       instances[memory] = instance;
+      // Instantiate the instance if we need to
+      if (create_instance)
+        instance->get_instance();
       // Initialize the instance from one of the existing instances
       FutureInstance *local_instance = NULL;
       for (std::map<Memory,FutureInstance*>::const_iterator it =
@@ -2354,7 +2361,10 @@ namespace Legion {
         void (*func)(void*,size_t), Processor p, RtEvent use)
       : runtime(rt), data(d), size(s), memory(m), ready_event(r),freefunc(func),
         freeproc(p), eager_allocation(eager), external_allocation(external),
-        is_meta_visible(check_meta_visible(rt, m, (func != NULL))),
+        is_meta_visible(check_meta_visible(rt, m, 
+              // Be conservative with the definition of a freefunc
+              // Only helps in the case where the answer is 'false'
+              !external || !own || (func != NULL))),
         own_allocation(own), instance(inst), use_event(use), own_instance(false)
     //--------------------------------------------------------------------------
     {
