@@ -358,6 +358,24 @@ namespace Realm {
   //   inverting) the accumulator is left to the caller
   REALM_PUBLIC_API uint32_t crc32c_accumulate(uint32_t accum_in, const void *data, size_t len);
 
+  // helper class to make something non-copy/moveable
+  class noncopyable {
+  protected:
+    noncopyable() {}
+    ~noncopyable() {}
+  private:
+#if REALM_CXX_STANDARD >= 11
+    noncopyable(const noncopyable&) = delete;
+    noncopyable(noncopyable&&) = delete;
+    noncopyable& operator=(const noncopyable&) = delete;
+    noncopyable& operator=(noncopyable&&) = delete;
+#else
+    // pre C++-11 you have to define them, but they're private so can't be
+    //  called
+    noncopyable(const noncopyable&) {}
+    noncopyable& operator=(const noncopyable&) { return *this; }
+#endif
+  };
 
 }; // namespace Realm
 
