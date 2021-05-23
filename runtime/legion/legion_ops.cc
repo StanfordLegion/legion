@@ -4830,12 +4830,16 @@ namespace Legion {
                                           local_completion,
                                           dst_targets,
                                           dst_info,
-                                          local_applied_events
+                                          local_applied_events,
 #ifdef DEBUG_LEGION
-                                          , get_logging_name()
-                                          , unique_op_id
+                                          get_logging_name(),
+                                          unique_op_id,
 #endif
-                                          );
+                                          true/*record valid*/,
+                      // Only check initialized if we don't have an indirection.
+                      // If we have an indirection then it is impossible to know
+                      // if we writing everything or not
+                                     (idx >= dst_indirect_requirements.size()));
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
