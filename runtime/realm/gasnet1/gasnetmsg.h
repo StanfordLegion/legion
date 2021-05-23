@@ -497,7 +497,7 @@ public:
 public:
   size_t last_message_count;
   Realm::Mutex mutex;
-  Realm::CondVar condvar;
+  Realm::Mutex::CondVar condvar;
   int messages_received;
   bool is_quiescent;
 };

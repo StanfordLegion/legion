@@ -1009,7 +1009,7 @@ namespace Realm {
     , num_poisoned_generations(0)
     , merger(this)
     , has_external_waiters(false)
-    , external_waiter_condvar(mutex)
+    , external_waiter_condvar(external_waiter_mutex)
   {
     next_free = 0;
     poisoned_generations = 0;
@@ -1657,6 +1657,8 @@ namespace Realm {
       // external waiters need to be signalled inside the lock
       if(has_external_waiters) {
 	has_external_waiters = false;
+        // also need external waiter mutex
+        AutoLock<KernelMutex> al2(external_waiter_mutex);
 	external_waiter_condvar.broadcast();
       }
     }
@@ -1790,7 +1792,15 @@ namespace Realm {
 	// wait until the generation has advanced far enough
 	while(gen_needed > generation.load_acquire()) {
 	  has_external_waiters = true;
+          // must wait on external_waiter_condvar with external_waiter_mutex
+          //  but NOT with base mutex - hand-over-hand lock on the way in,
+          //  and then release external_waiter mutex before retaking main
+          //  mutex
+          external_waiter_mutex.lock();
+          mutex.unlock();
 	  external_waiter_condvar.wait();
+          external_waiter_mutex.unlock();
+          mutex.lock();
 	}
 
 	poisoned = is_generation_poisoned(gen_needed);
@@ -1812,7 +1822,15 @@ namespace Realm {
 	  has_external_waiters = true;
 	  // we don't actually care what timedwait returns - we'll recheck
 	  //  the generation ourselves
+          // must wait on external_waiter_condvar with external_waiter_mutex
+          //  but NOT with base mutex - hand-over-hand lock on the way in,
+          //  and then release external_waiter mutex before retaking main
+          //  mutex
+          external_waiter_mutex.lock();
+          mutex.unlock();
 	  external_waiter_condvar.timedwait(deadline - now);
+          external_waiter_mutex.unlock();
+          mutex.lock();
 	}
 
 	poisoned = is_generation_poisoned(gen_needed);
@@ -1888,6 +1906,8 @@ namespace Realm {
 	  // external waiters need to be signalled inside the lock
 	  if(has_external_waiters) {
 	    has_external_waiters = false;
+            // also need external waiter mutex
+            AutoLock<KernelMutex> al2(external_waiter_mutex);
 	    external_waiter_condvar.broadcast();
 	  }
 	}
@@ -1983,6 +2003,8 @@ namespace Realm {
 	  // external waiters need to be signalled inside the lock
 	  if(has_external_waiters) {
 	    has_external_waiters = false;
+            // also need external waiter mutex
+            AutoLock<KernelMutex> al2(external_waiter_mutex);
 	    external_waiter_condvar.broadcast();
 	  }
 	}
@@ -2073,7 +2095,7 @@ namespace Realm {
 
     BarrierImpl::BarrierImpl(void)
       : has_external_waiters(false)
-      , external_waiter_condvar(mutex)
+      , external_waiter_condvar(external_waiter_mutex)
     {
       generation = 0;
       gen_subscribed = 0;
@@ -2497,6 +2519,8 @@ static void *bytedup(const void *data, size_t datalen)
 	// external waiters need to be signalled inside the lock
 	if(generation_updated && has_external_waiters) {
 	  has_external_waiters = false;
+          // also need external waiter mutex
+          AutoLock<KernelMutex> al2(external_waiter_mutex);
 	  external_waiter_condvar.broadcast();
 	}
       } while(0);
@@ -2637,7 +2661,15 @@ static void *bytedup(const void *data, size_t datalen)
 	// wait until the generation has advanced far enough
 	while(gen_needed > generation) {
 	  has_external_waiters = true;
+          // must wait on external_waiter_condvar with external_waiter_mutex
+          //  but NOT with base mutex - hand-over-hand lock on the way in,
+          //  and then release external_waiter mutex before retaking main
+          //  mutex
+          external_waiter_mutex.lock();
+          mutex.unlock();
 	  external_waiter_condvar.wait();
+          external_waiter_mutex.unlock();
+          mutex.lock();
 	}
 
 	poisoned = POISON_FIXME;
@@ -2659,7 +2691,15 @@ static void *bytedup(const void *data, size_t datalen)
 	  has_external_waiters = true;
 	  // we don't actually care what timedwait returns - we'll recheck
 	  //  the generation ourselves
+          // must wait on external_waiter_condvar with external_waiter_mutex
+          //  but NOT with base mutex - hand-over-hand lock on the way in,
+          //  and then release external_waiter mutex before retaking main
+          //  mutex
+          external_waiter_mutex.lock();
+          mutex.unlock();
 	  external_waiter_condvar.timedwait(deadline - now);
+          external_waiter_mutex.unlock();
+          mutex.lock();
 	}
 
 	poisoned = POISON_FIXME;
@@ -2936,6 +2976,8 @@ static void *bytedup(const void *data, size_t datalen)
 	// external waiters need to be signalled inside the lock
 	if(generation_updated && impl->has_external_waiters) {
 	  impl->has_external_waiters = false;
+          // also need external waiter mutex
+          AutoLock<KernelMutex> al2(impl->external_waiter_mutex);
 	  impl->external_waiter_condvar.broadcast();
 	}
       }

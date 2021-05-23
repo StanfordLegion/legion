@@ -419,10 +419,10 @@ namespace Realm {
     bool drain_pending;
     size_t drain_min_count;
     size_t total_messages_handled;
-    Realm::Mutex mutex;
-    Realm::CondVar condvar, drain_condvar;
-    Realm::CoreReservation *core_rsrv;
-    std::vector<Realm::Thread *> handler_threads;
+    Mutex mutex;
+    Mutex::CondVar condvar, drain_condvar;
+    CoreReservation *core_rsrv;
+    std::vector<Thread *> handler_threads;
     MessageBlock *current_block;
     MessageBlock *available_blocks;
     size_t num_available_blocks;

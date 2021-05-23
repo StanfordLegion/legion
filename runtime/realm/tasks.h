@@ -387,8 +387,8 @@ namespace Realm {
       std::set<Thread *> all_workers;
       std::set<Thread *> active_workers;
       std::set<Thread *> terminating_workers;
-      std::map<Thread *, CondVar *> sleeping_threads;
-      CondVar shutdown_condvar;
+      std::map<Thread *, Mutex::CondVar *> sleeping_threads;
+      Mutex::CondVar shutdown_condvar;
     };
 
 #ifdef REALM_USE_USER_THREADS
@@ -437,7 +437,7 @@ namespace Realm {
       std::set<Thread *> all_workers;
 
       int host_startups_remaining;
-      CondVar host_startup_condvar;
+      Mutex::CondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

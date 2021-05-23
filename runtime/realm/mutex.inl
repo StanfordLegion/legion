@@ -155,6 +155,94 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class UnfairMutex
+  //
+
+  inline UnfairMutex::UnfairMutex()
+    : state(0)
+  {}
+
+  inline void UnfairMutex::lock()
+  {
+    // uncontended path is changing state from 0 to 1 - use atomic OR
+    uint32_t prev = state.fetch_or_acqrel(1);
+    if(REALM_LIKELY((prev & 1) == 0)) {
+      return;
+    } else {
+      // fall back to slow path
+      lock_slow();
+    }
+  }
+
+  inline bool UnfairMutex::trylock()
+  {
+    // uncontended path is changing state from 0 to 1 - use atomic OR
+    uint32_t prev = state.fetch_or_acqrel(1);
+    // no slow path here - either the bit wasn't set and we have the lock,
+    //  or it was and we don't
+    return ((prev & 1) == 0);
+  }
+
+  inline void UnfairMutex::unlock()
+  {
+    // fast case is transition from 1 to 0 - use CAS to avoid releasing
+    //  lock if there are waiters that we should give the lock to instead
+    uint32_t expected = 1;
+    if(REALM_LIKELY(state.compare_exchange(expected, 0))) {
+      return;
+    } else {
+      // fall back to slow path
+      unlock_slow();
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class FIFOMutex
+  //
+
+  inline FIFOMutex::FIFOMutex()
+    : state(0)
+  {}
+
+  inline void FIFOMutex::lock()
+  {
+    // uncontended path is changing state from 0 to 1 - use atomic OR
+    uint32_t prev = state.fetch_or_acqrel(1);
+    if(REALM_LIKELY((prev & 1) == 0)) {
+      return;
+    } else {
+      // fall back to slow path
+      lock_slow();
+    }
+  }
+
+  inline bool FIFOMutex::trylock()
+  {
+    // uncontended path is changing state from 0 to 1 - use atomic OR
+    uint32_t prev = state.fetch_or_acqrel(1);
+    // no slow path here - either the bit wasn't set and we have the lock,
+    //  or it was and we don't
+    return ((prev & 1) == 0);
+  }
+
+  inline void FIFOMutex::unlock()
+  {
+    // fast case is transition from 1 to 0 - use CAS to avoid releasing
+    //  lock if there are waiters that we should give the lock to instead
+    uint32_t expected = 1;
+    if(REALM_LIKELY(state.compare_exchange(expected, 0))) {
+      return;
+    } else {
+      // fall back to slow path
+      unlock_slow();
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class AutoLock<LT>
   //
 

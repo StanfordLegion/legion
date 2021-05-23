@@ -317,7 +317,7 @@ namespace Realm {
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
       Mutex shutdown_mutex;
-      CondVar shutdown_condvar;
+      Mutex::CondVar shutdown_condvar;
       bool shutdown_request_received;  // has a request for shutdown arrived
       Event shutdown_precondition;
       int shutdown_result_code;

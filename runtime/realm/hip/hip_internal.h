@@ -411,7 +411,7 @@ namespace Realm {
       bool process_streams(bool sleep_on_empty);
       
       Mutex lock;
-      CondVar condvar;
+      Mutex::CondVar condvar;
       
       typedef CircularQueue<GPUStream *, 16> ActiveStreamQueue;
       ActiveStreamQueue active_streams;
@@ -467,7 +467,7 @@ namespace Realm {
       int device_id;
       int max_threads;
       Mutex mutex;
-      CondVar condvar;
+      Mutex::CondVar condvar;
       bool shutdown_flag;
       GPUWorkFence::FenceList fences;
       int total_threads, sleeping_threads, syncing_threads;

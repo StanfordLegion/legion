@@ -89,7 +89,7 @@ namespace Realm {
 
       bool done;
       Mutex mutex;
-      CondVar condvar;
+      Mutex::CondVar condvar;
     };
 
 #ifdef KOKKOS_ENABLE_OPENMP

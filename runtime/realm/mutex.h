@@ -20,11 +20,43 @@
 
 #include "realm/realm_config.h"
 
+#include "realm/utils.h"
 #include "realm/atomics.h"
 
 #include <stdint.h>
 
 namespace Realm {
+
+  // Realm mutexes come in a few different flavors:
+  // a) UnfairMutex - provides mutual exclusion, using doorbells to pass the
+  //     mutex on to a waiting thread on release, favoring the most recent
+  //     waiters who are still spinning in order to avoid kernel-space
+  //     operations as much as possible.  This is wildly unfair, but if your
+  //     need is just to protect a short critical section with minimal
+  //     overhead, this should provide the best throughput
+  // b) FIFOMutex - also uses doorbells, but favors the oldest waiter, even if
+  //     they've gone to sleep (and therefore need kernel assistance to wake),
+  //     in order to preserve fairness
+  // c) KernelMutex - directly uses the system library/kernel mutex support
+  //     (e.g. pthread_mutex), and is at the mercy of whatever scheduling
+  //     algorithms those use (which are almost certainly not aware of which
+  //     Realm threads have dedicated cores) - use only as a last resort
+
+  class UnfairMutex;
+  class FIFOMutex;
+  class KernelMutex;
+
+  // each has a matching CondVar - we don't set a default, use
+  //  (whatever)Mutex::CondVar to get the right one
+  class UnfairCondVar;
+  class FIFOCondVar;
+  class KernelCondVar;
+
+#ifdef REALM_DEFAULT_MUTEX
+  typedef REALM_DEFAULT_MUTEX Mutex;
+#else
+  typedef UnfairMutex Mutex;
+#endif
 
   // a doorbell is used to notify a thread that whatever condition it has been
   //  waiting for has been satisfied - all operations are lock-free in user space,
@@ -123,6 +155,84 @@ namespace Realm {
     atomic<uintptr_t> head_or_count;
   };
 
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE UnfairMutex : public noncopyable {
+  public:
+    UnfairMutex();
+
+    typedef UnfairCondVar CondVar;
+
+    // these are all inlined and very fast in the non-contended case
+    void lock();
+    bool trylock();
+    void unlock();
+
+  protected:
+    // slower lock/unlock paths when contention exists
+    void lock_slow();
+    void unlock_slow();
+
+    friend class UnfairCondVar;
+
+    // internal state consists of an LSB indicating a lock and the rest of
+    //  the bits indicating how many waiters exist - the actual waiters are
+    //  (or will eventually be) in the doorbell list
+    atomic<uint32_t> state;
+    DoorbellList db_list;
+  };
+
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE FIFOMutex : public noncopyable {
+  public:
+    FIFOMutex();
+
+    typedef FIFOCondVar CondVar;
+
+    // these are all inlined and very fast in the non-contended case
+    void lock();
+    bool trylock();
+    void unlock();
+
+  protected:
+    // slower lock/unlock paths when contention exists
+    void lock_slow();
+    void unlock_slow();
+
+    friend class FIFOCondVar;
+
+    // internal state consists of an LSB indicating a lock and the rest of
+    //  the bits indicating how many waiters exist - the actual waiters are
+    //  (or will eventually be) in the doorbell list
+    atomic<uint32_t> state;
+    DoorbellList db_list;
+  };
+
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE KernelMutex : public noncopyable {
+  public:
+    KernelMutex();
+    ~KernelMutex();
+
+    typedef KernelCondVar CondVar;
+
+    // these call into libpthread (or the equivalent), so YMMV
+    void lock(void);
+    bool trylock(void);
+    void unlock(void);
+
+  protected:
+    friend class KernelCondVar;
+
+    // the actual implementation of the mutex is hidden
+    //  but if we don't define it here, we run afoul of
+    //  rules type-punning, so use macros to let mutex.cc's inclusion
+    //  of this file behave a little differently
+    union {
+      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
+#ifdef REALM_KERNEL_MUTEX_IMPL
+      REALM_KERNEL_MUTEX_IMPL;
+#endif
+    };
+  };
+
+
   // a delegating mutex allows lock-free mutual exclusion between threads that
   //  want to work on a shared resource - a lock attempt either succeeds
   //  immediately or delegates the intended work "units" to some other thread
@@ -153,53 +263,55 @@ namespace Realm {
     atomic<uint64_t> state;
   };
 
-  class REALM_INTERNAL_API_EXTERNAL_LINKAGE Mutex {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE UnfairCondVar : public noncopyable {
   public:
-    Mutex(void);
-    ~Mutex(void);
+    UnfairCondVar(UnfairMutex &_mutex);
 
-  private:
-    // Should never be copied
-    Mutex(const Mutex &rhs);
-    Mutex& operator=(const Mutex &rhs);
+    UnfairMutex &mutex;
 
-  public:
-    void lock(void);
-    void unlock(void);
-    bool trylock(void);
+    // these require that you hold the underlying mutex when you call
+    void signal();
+    void broadcast();
+    void wait();
 
   protected:
-    friend class CondVar;
-
-    // the actual implementation of the mutex is hidden
-    //  but if we don't define it here, we run afoul of
-    //  rules type-punning, so use macros to let mutex.cc's inclusion
-    //  of this file behave a little differently
-    union {
-      uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef REALM_MUTEX_IMPL
-      REALM_MUTEX_IMPL;
-#endif
-    };
+    // no need for atomics here - we're protected by the mutex
+    unsigned num_waiters;
+    DoorbellList db_list;
   };
 
-  class REALM_INTERNAL_API_EXTERNAL_LINKAGE CondVar {
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE FIFOCondVar : public noncopyable {
   public:
-    CondVar(Mutex &_mutex);
-    ~CondVar(void);
+    FIFOCondVar(FIFOMutex &_mutex);
 
-    // these require that you hold the lock when you call
+    FIFOMutex &mutex;
+
+    // these require that you hold the underlying mutex when you call
+    void signal();
+    void broadcast();
+    void wait();
+
+  protected:
+    // no need for atomics here - we're protected by the mutex
+    unsigned num_waiters;
+    DoorbellList db_list;
+  };
+
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE KernelCondVar : public noncopyable {
+  public:
+    KernelCondVar(KernelMutex &_mutex);
+    ~KernelCondVar(void);
+
+    KernelMutex &mutex;
+
+    // these require that you hold the underlying mutex when you call
     void signal(void);
-
     void broadcast(void);
-
     void wait(void);
 
     // wait with a timeout - returns true if awakened by a signal and
     //  false if the timeout expires first
     bool timedwait(long long max_nsec);
-
-    Mutex &mutex;
 
   protected:
     // the actual implementation of the condition variable is hidden
@@ -208,8 +320,8 @@ namespace Realm {
     //  of this file behave a little differently
     union {
       uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
-#ifdef REALM_CONDVAR_IMPL
-      REALM_CONDVAR_IMPL;
+#ifdef REALM_KERNEL_CONDVAR_IMPL
+      REALM_KERNEL_CONDVAR_IMPL;
 #endif
     };
   };

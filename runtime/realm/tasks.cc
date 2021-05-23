@@ -1289,7 +1289,7 @@ namespace Realm {
 
       if(active_workers.count(thread) == 0) {
 	// nope, sleep on a CV until we are
-	CondVar my_cv(lock);
+        Mutex::CondVar my_cv(lock);
 	sleeping_threads[thread] = &my_cv;
 
 	while(active_workers.count(thread) == 0)
@@ -1376,7 +1376,7 @@ namespace Realm {
       active_workers.erase(Thread::self());
     assert(count == 1);
 
-    CondVar my_cv(lock);
+    Mutex::CondVar my_cv(lock);
     sleeping_threads[Thread::self()] = &my_cv;
 
     // with kernel threads, sleeping and waking are separable actions
@@ -1398,7 +1398,7 @@ namespace Realm {
     active_workers.insert(to_wake);
 
     // if they have a CV (they might not yet), poke that
-    std::map<Thread *, CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
+    std::map<Thread *, Mutex::CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
     if(it != sleeping_threads.end())
       it->second->signal();
   }
