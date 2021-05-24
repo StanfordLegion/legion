@@ -377,6 +377,14 @@ namespace Realm {
 #endif
   };
 
+  // explicitly calls the destructor on an object, working around issues
+  //  with some compilers and typedefs
+  template <typename T>
+  void call_destructor(T *obj)
+  {
+    obj->~T();
+  }
+
 }; // namespace Realm
 
 #include "realm/utils.inl"
