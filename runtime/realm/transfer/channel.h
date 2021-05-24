@@ -442,6 +442,10 @@ namespace Realm {
 	  AutoLock<> al(available_req_mutex);
 	  available_reqs.push(req);
 	}
+        // update progress counter if iteration isn't completed yet - it might
+        //  have been waiting for another request object
+        if(!iteration_completed.load())
+          update_progress();
 	remove_reference();
       }
 
