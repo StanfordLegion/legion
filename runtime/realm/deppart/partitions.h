@@ -205,7 +205,7 @@ namespace Realm {
     void worker_thread_loop(void);
 
     // called by BackgroundWorkers
-    void do_work(TimeLimit work_until);
+    bool do_work(TimeLimit work_until);
 
   protected:
     atomic<bool> shutdown_flag;

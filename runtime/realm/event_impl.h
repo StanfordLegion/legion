@@ -76,7 +76,7 @@ namespace Realm {
 				 bool poisoned,
 				 TimeLimit trigger_until);
 
-      virtual void do_work(TimeLimit work_until);
+      virtual bool do_work(TimeLimit work_until);
 
     protected:
       Mutex mutex;

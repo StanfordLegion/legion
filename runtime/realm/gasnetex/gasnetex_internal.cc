@@ -485,7 +485,7 @@ namespace Realm {
       make_active();
   }
 
-  void OutbufManager::do_work(TimeLimit work_until)
+  bool OutbufManager::do_work(TimeLimit work_until)
   {
     // take the mutex and grab the first overflow and reserved realbuf -
     //  don't decrement the counts yet, because we don't want more than one
@@ -562,7 +562,7 @@ namespace Realm {
 	num_overflow -= 1;
 	num_reserved -= 1;
 	if(num_reserved == 0)
-	  return; // all done
+	  return false; // all done
 	if(is_expired)
 	  break;
 	// dequeue
@@ -577,7 +577,7 @@ namespace Realm {
 
     // if we fall out of the loop (rather than returning), there's still work
     //  for somebody to do
-    make_active();
+    return true;
   }
 
 
@@ -2248,7 +2248,7 @@ namespace Realm {
     return !ready_xpairs.empty();
   }
 
-  void GASNetEXInjector::do_work(TimeLimit work_until)
+  bool GASNetEXInjector::do_work(TimeLimit work_until)
   {
     // we're not supposed to end up handling AMs, but set this just in case
     //  we do
@@ -2274,6 +2274,9 @@ namespace Realm {
     xpair->push_packets(true /*immediate_mode*/, work_until);
 
     ThreadLocal::gex_work_until = nullptr;
+
+    // push_packets will have requeued us already if needed
+    return false;
   }
 
 
@@ -2331,7 +2334,7 @@ namespace Realm {
     return (!critical_xpairs.empty() || !pending_events.empty());
   }
 
-  void GASNetEXPoller::do_work(TimeLimit work_until)
+  bool GASNetEXPoller::do_work(TimeLimit work_until)
   {
     ThreadLocal::gex_work_until = &work_until;
 
@@ -2418,8 +2421,9 @@ namespace Realm {
       AutoLock<> al(mutex);
       shutdown_flag.store(false);
       shutdown_cond.broadcast();
+      return false;
     } else
-      make_active();
+      return true;
   }
 
 
@@ -2474,7 +2478,7 @@ namespace Realm {
     return (head != nullptr);
   }
 
-  void ReverseGetter::do_work(TimeLimit work_until)
+  bool ReverseGetter::do_work(TimeLimit work_until)
   {
     // we're not going to use immedate mode for rgets, so don't have more
     //  than one dequeuer at a time - do this by peeking at the head but
@@ -2524,8 +2528,7 @@ namespace Realm {
       if(next_rget) {
 	if(work_until.is_expired()) {
 	  // requeue ourselves and stop for now
-	  make_active();
-	  break;
+          return true;
 	} else {
 	  // keep going with the next one
 	  rget = next_rget;
@@ -2533,6 +2536,9 @@ namespace Realm {
       } else
 	break;
     }
+
+    // no work left
+    return false;
   }
 
   void ReverseGetter::reverse_get_complete(PendingReverseGet *rget)
