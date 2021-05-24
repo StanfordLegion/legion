@@ -6829,7 +6829,7 @@ namespace Legion {
       // forest has given us a reference back on it, see if we're the first
       // ones to write it, if not we can remove the reference now
       if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
-        expr->remove_expression_reference(1/*count*/, true/*tree*/);
+        expr->remove_canonical_reference();
       return expr;
     }
 

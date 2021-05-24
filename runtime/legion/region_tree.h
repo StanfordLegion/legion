@@ -1291,7 +1291,7 @@ namespace Legion {
       LocalLock &expr_lock;
     protected:
       std::set<IndexSpaceOperation*> parent_operations;
-      IndexSpaceExpression *canonical;
+      IndexSpaceExpression *volatile canonical;
       size_t volume;
       bool has_volume;
       bool empty, has_empty;
