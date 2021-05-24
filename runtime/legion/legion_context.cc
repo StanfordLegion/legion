@@ -41,14 +41,14 @@ namespace Legion {
     TaskContext::TaskContext(Runtime *rt, SingleTask *owner, int d,
                              const std::vector<RegionRequirement> &reqs,
                              const std::vector<RegionRequirement> &out_reqs,
-                             bool inline_t)
+                             bool inline_t, bool implicit_t)
       : runtime(rt), owner_task(owner), regions(reqs),
         output_reqs(out_reqs), depth(d),
         next_created_index(reqs.size()),executing_processor(Processor::NO_PROC),
         total_tunable_count(0), overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false),
-        inline_task(inline_t)
+        inline_task(inline_t), implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
     }
@@ -56,7 +56,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
       : runtime(NULL), owner_task(NULL), regions(rhs.regions),
-        output_reqs(rhs.output_reqs), depth(-1), inline_task(false)
+        output_reqs(rhs.output_reqs), depth(-1),
+        inline_task(false), implicit_task(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -172,7 +173,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
       // Set the future result
       RtEvent done;
       FutureInstance *instance = NULL;
@@ -214,7 +215,7 @@ namespace Legion {
     {
       // No need to do a match here, there is just one shard
       memcpy(output, input, num_elements * element_size);
-      Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
       result.impl->set_local(&num_elements, sizeof(num_elements));
       return result;
     }
@@ -2579,7 +2580,7 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
-      FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+      FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
         runtime->get_available_distributed_id(), 
         runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_result.get_size() > 0)
@@ -2689,7 +2690,7 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
-      FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
+      FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), 
         runtime->address_space, ApEvent::NO_AP_EVENT);
       if (launcher.predicate_false_result.get_size() > 0)
@@ -2730,7 +2731,7 @@ namespace Legion {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
-            result = TaskContext::create_index_space(domain, \
+            result = create_index_space(domain, \
               NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
             break; \
           }
@@ -2813,12 +2814,13 @@ namespace Legion {
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote,
-                               bool inline_task)
-      : TaskContext(rt, owner, d, reqs, out_reqs, inline_task),
+                               bool inline_task, bool implicit_task)
+      : TaskContext(rt, owner, d, reqs, out_reqs, inline_task, implicit_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(finner),
-        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
-        total_children_count(0), total_close_count(0), total_summary_count(0),
+        finished_execution(false), parent_req_indexes(parent_indexes),
+        virtual_mapped(virt_mapped), total_children_count(0),
+        total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
@@ -3185,14 +3187,15 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
                                             true/*skip dependence analysis*/);
-          op->set_execution_precondition(precondition);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->set_deletion_preconditions(precondition, dependences);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3267,14 +3270,15 @@ namespace Legion {
           op->initialize_field_deletions(this, it->first, it->second, 
              true/*unordered*/, allocator, false/*non owner shard*/,
              true/*skip dependence analysis*/);
-          op->set_execution_precondition(precondition);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->set_deletion_preconditions(precondition, dependences);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3440,14 +3444,15 @@ namespace Legion {
         {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
-          op->set_execution_precondition(precondition);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->set_deletion_preconditions(precondition, dependences);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3546,14 +3551,15 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->set_execution_precondition(precondition);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->set_deletion_preconditions(precondition, dependences);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -3653,14 +3659,15 @@ namespace Legion {
           DeletionOp *op = runtime->get_available_deletion_op();
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->set_execution_precondition(precondition);
-          preconditions.insert(
-              Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->set_deletion_preconditions(precondition, dependences);
+          if (!add_to_dependence_queue(op, true/*unordered*/))
+          {
+            // We're past the execution of the parent task so we need
+            // to run this manually and capture its effects ourselves
+            preconditions.insert(
+                Runtime::protect_event(op->get_completion_event()));
+            op->execute_dependence_analysis();
+          }
         }
       }
     }
@@ -4156,7 +4163,17 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4222,7 +4239,17 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index partition deletion performed after task %s"
+            " (UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -5526,9 +5553,10 @@ namespace Legion {
                (kind == LEGION_ALIASED_INCOMPLETE_KIND))
       {
         if (node->is_disjoint(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+          REPORT_LEGION_WARNING(LEGION_WARNING_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is disjoint.",
+              "partition was %s but the partition is disjoint. This could "
+              "lead to a performance bug.",
               function_name, get_task_name(), get_unique_id(),
               (kind == LEGION_ALIASED_KIND) ? "ALIASED_KIND" :
               (kind == LEGION_ALIASED_COMPLETE_KIND) ? "ALIASED_COMPLETE_KIND" :
@@ -5553,15 +5581,16 @@ namespace Legion {
                (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
       {
         if (node->is_complete(true/*from application*/))
-          REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+          REPORT_LEGION_WARNING(LEGION_WARNING_PARTITION_VERIFICATION,
               "Call to partitioning function %s in %s (UID %lld) specified "
-              "partition was %s but the partition is complete.",
+              "partition was %s but the partition is complete. This could "
+              "lead to a performance bug.",
               function_name, get_task_name(), get_unique_id(),
               (kind == LEGION_DISJOINT_INCOMPLETE_KIND) ? 
                 "DISJOINT_INCOMPLETE_KIND" :
               (kind == LEGION_ALIASED_INCOMPLETE_KIND) ? 
               "ALIASED_INCOMPLETE_KIND" : "COMPUTE_INCOMPLETE_KIND")
-      } 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5700,7 +5729,17 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -5945,7 +5984,17 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered, allocator,
                                     false/*non owner shard*/);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field free performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -5992,7 +6041,17 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered, 
                                      allocator, false/*non owner shard*/);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered free fields performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6085,7 +6144,17 @@ namespace Legion {
       }
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered logical region deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6305,7 +6374,7 @@ namespace Legion {
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
           runtime->address_space, ApEvent::NO_AP_EVENT);
         result->set_local(reduction_op->identity,
@@ -6344,7 +6413,7 @@ namespace Legion {
       if (future_map.impl == NULL)
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
           runtime->address_space, ApEvent::NO_AP_EVENT);
         result->set_local(reduction_op->identity,
@@ -6384,7 +6453,7 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
-        FutureImpl *future = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT);
         future->set_local(it->second.get_ptr(), it->second.get_size());
@@ -7109,7 +7178,17 @@ namespace Legion {
       }
       DetachOp *op = runtime->get_available_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -7123,7 +7202,17 @@ namespace Legion {
         return Future();
       IndexDetachOp *op = runtime->get_available_index_detach_op();
       Future result = resources.impl->detach(this, op, flush, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -7360,14 +7449,14 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
         result.impl->set_local(&value, sizeof(value));
         return result;
@@ -7501,8 +7590,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::add_to_dependence_queue(Operation *op, bool unordered, 
-                                                  bool outermost)
+    bool InnerContext::add_to_dependence_queue(Operation *op, bool unordered, 
+                                               bool outermost)
     //--------------------------------------------------------------------------
     {
       // Launch the task to perform the prepipeline stage for the operation
@@ -7539,10 +7628,12 @@ namespace Legion {
         AutoLock d_lock(dependence_lock);
         if (unordered)
         {
+          if (finished_execution)
+            return false;
           // If this is unordered, stick it on the list of 
           // unordered ops to be added later and then we're done
           unordered_ops.push_back(op);
-          return term_event;
+          return true;
         }
         // Put this in first to maintain context order
         dependence_queue.push_back(op);
@@ -7570,7 +7661,7 @@ namespace Legion {
           raise_poison_exception();
         end_task_wait();
       }
-      return term_event;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9506,7 +9597,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
             {
               const InstanceRef &src_ref = sources[idx2];
-              PhysicalManager *manager = src_ref.get_instance_manager();
+              PhysicalManager *manager = src_ref.get_physical_manager();
               const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
               assert(!(view_mask - user_mask)); // should be dominated
@@ -9538,7 +9629,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < sources.size(); idx2++)
             {
               const InstanceRef &src_ref = sources[idx2];
-              PhysicalManager *manager = src_ref.get_instance_manager();
+              PhysicalManager *manager = src_ref.get_physical_manager();
               const FieldMask &view_mask = src_ref.get_valid_fields();
 #ifdef DEBUG_LEGION
               assert(!(view_mask - user_mask)); // should be dominated
@@ -9884,7 +9975,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           // See if we can find it
-          PhysicalManager *manager = targets[idx].get_instance_manager();
+          PhysicalManager *manager = targets[idx].get_physical_manager();
           std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
             instance_top_views.find(manager);     
           if (finder != instance_top_views.end())
@@ -9899,7 +9990,7 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               still_needed.begin(); it != still_needed.end(); it++)
         {
-          PhysicalManager *manager = targets[*it].get_instance_manager();
+          PhysicalManager *manager = targets[*it].get_physical_manager();
           target_views[*it] = create_instance_top_view(manager, local_space);
         }
       }
@@ -10354,6 +10445,10 @@ namespace Legion {
       // Check to see if we have any unordered operations that we need to inject
       {
         AutoLock d_lock(dependence_lock);
+#ifdef DEBUG_LEGION
+        assert(!finished_execution);
+#endif
+        finished_execution = true;
         insert_unordered_ops(d_lock, true/*end task*/, false/*progress*/);
         if (!dependence_queue.empty() && !outstanding_dependence)
         {
@@ -10918,9 +11013,11 @@ namespace Legion {
                                  const std::vector<unsigned> &parent_indexes,
                                  const std::vector<bool> &virt_mapped,
                                  UniqueID ctx_uid, ApEvent exec_fence,
-                                 ShardManager *manager, bool inline_task)
+                                 ShardManager *manager, bool inline_task,
+                                 bool implicit_task)
       : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
-         virt_mapped, ctx_uid, exec_fence, false/*remote*/, inline_task),
+         virt_mapped, ctx_uid, exec_fence, false/*remote*/,
+         inline_task, implicit_task),
         owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
@@ -10942,7 +11039,8 @@ namespace Legion {
       deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
       deletion_execution_barrier = manager->get_deletion_execution_barrier();
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
-      external_resource_barrier = manager->get_external_resource_barrier();
+      attach_resource_barrier = manager->get_attach_resource_barrier();
+      detach_resource_barrier = manager->get_detach_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
@@ -11231,7 +11329,7 @@ namespace Legion {
         verify_replicable(hasher, "consensus_match");
       }
       ApUserEvent complete = Runtime::create_ap_user_event(NULL);
-      Future result = runtime->help_create_future(complete);
+      Future result = runtime->help_create_future(this, complete);
       switch (element_size)
       {
         case 1:
@@ -12754,11 +12852,19 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_space_deletion(this,handle,sub_partitions,unordered);
-      op->initialize_replication(this, deletion_ready_barrier,
-          deletion_mapping_barrier, deletion_execution_barrier, 
-          shard_manager->is_total_sharding(),
-          shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      op->initialize_replication(this, shard_manager->is_total_sharding(),
+                        shard_manager->is_first_local_shard(owner_shard));
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12863,11 +12969,19 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_index_part_deletion(this, handle, 
                                          sub_partitions, unordered);
-      op->initialize_replication(this, deletion_ready_barrier,
-          deletion_mapping_barrier, deletion_execution_barrier, 
-          shard_manager->is_total_sharding(),
-          shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      op->initialize_replication(this, shard_manager->is_total_sharding(),
+                        shard_manager->is_first_local_shard(owner_shard));
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index partition deletion performed after task %s"
+            " (UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15285,11 +15399,19 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_space_deletion(this, handle, unordered);
-      op->initialize_replication(this, deletion_ready_barrier,
-          deletion_mapping_barrier, deletion_execution_barrier, 
-          shard_manager->is_total_sharding(),
-          shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      op->initialize_replication(this, shard_manager->is_total_sharding(),
+                        shard_manager->is_first_local_shard(owner_shard));
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field space deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15553,11 +15675,19 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletion(this, space, fid, unordered, allocator,
                                     (owner_shard->shard_id != 0));
-      op->initialize_replication(this, deletion_ready_barrier,
-          deletion_mapping_barrier, deletion_execution_barrier, 
-          shard_manager->is_total_sharding(),
-          shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      op->initialize_replication(this, shard_manager->is_total_sharding(),
+                        shard_manager->is_first_local_shard(owner_shard));
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered field free performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15820,11 +15950,19 @@ namespace Legion {
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_field_deletions(this, space, free_now, unordered, 
                                      allocator, (owner_shard->shard_id != 0));
-      op->initialize_replication(this, deletion_ready_barrier,
-          deletion_mapping_barrier, deletion_execution_barrier, 
-          shard_manager->is_total_sharding(),
-          shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      op->initialize_replication(this, shard_manager->is_total_sharding(),
+                        shard_manager->is_first_local_shard(owner_shard));
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered free fields performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16066,11 +16204,19 @@ namespace Legion {
       }
       ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
       op->initialize_logical_region_deletion(this, handle, unordered);
-      op->initialize_replication(this, deletion_ready_barrier,
-          deletion_mapping_barrier, deletion_execution_barrier, 
-          shard_manager->is_total_sharding(),
-          shard_manager->is_first_local_shard(owner_shard));
-      add_to_dependence_queue(op, unordered);
+      op->initialize_replication(this, shard_manager->is_total_sharding(),
+                        shard_manager->is_first_local_shard(owner_shard));
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered logical region deletion performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16292,10 +16438,8 @@ namespace Legion {
         else
           unordered_ops_counter = 0;
       }
-      // If we're at the end of the task and we don't have any unordered ops
-      // then nobody else should have any either so we are done
-      else if (unordered_ops.empty())
-        return;
+      // else we always do a match at the end of the replicated task 
+
       // If we make it here then all the shards are agreed that they are
       // going to do the sync up and will exchange information 
       // We're going to release the lock so we need to grab a local copy
@@ -16382,6 +16526,11 @@ namespace Legion {
         assert(unordered_ops_epoch <= MAX_UNORDERED_OPS_EPOCH);
 #endif
       }
+      else if (!unordered_ops.empty())
+        REPORT_LEGION_WARNING(LEGION_WARNING_MISMATCHED_UNORDERED_OPERATIONS,
+            "Control replicated task %s (UID %lld) had %zd mismatched unordered"
+            " operations at the end of its execution that are now leaked.",
+            get_task_name(), get_unique_id(), unordered_ops.size())
     }
 
     //--------------------------------------------------------------------------
@@ -16531,7 +16680,7 @@ namespace Legion {
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
           runtime->address_space, ApEvent::NO_AP_EVENT);
         result->set_local(reduction_op->identity,
@@ -16585,7 +16734,7 @@ namespace Legion {
       if (future_map.impl == NULL)
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
-        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
           runtime->address_space, ApEvent::NO_AP_EVENT);
         result->set_local(reduction_op->identity,
@@ -16692,7 +16841,7 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
-        FutureImpl *future = new FutureImpl(runtime, true/*register*/,
+        FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT);
         future->set_local(it->second.get_ptr(), it->second.get_size());
@@ -17287,7 +17436,7 @@ namespace Legion {
             get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher);
-      attach_op->initialize_replication(this, external_resource_barrier,
+      attach_op->initialize_replication(this, attach_resource_barrier,
                         attach_broadcast_barrier, attach_reduce_barrier);
 
       bool parent_conflict = false, inline_conflict = false;
@@ -17470,14 +17619,23 @@ namespace Legion {
       }
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
-      op->initialize_replication(this, external_resource_barrier); 
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
         unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -17512,7 +17670,17 @@ namespace Legion {
         return Future();
       ReplIndexDetachOp *op = runtime->get_available_repl_index_detach_op();
       Future result = resources.impl->detach(this, op, flush, unordered);
-      add_to_dependence_queue(op, unordered);
+      if (!add_to_dependence_queue(op, unordered))
+      {
+#ifdef DEBUG_LEGION
+        assert(unordered);
+#endif
+        REPORT_LEGION_ERROR(ERROR_POST_EXECUTION_UNORDERED_OPERATION,
+            "Illegal unordered index detach operation performed after task %s "
+            "(UID %lld) has finished executing. All unordered operations must "
+            "be performed before the end of the execution of the parent task.",
+            get_task_name(), get_unique_id())
+      }
       return result;
     }
 
@@ -17936,7 +18104,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReplicateContext::add_to_dependence_queue(Operation *op,
+    bool ReplicateContext::add_to_dependence_queue(Operation *op,
                                                  bool unordered, bool outermost)
     //--------------------------------------------------------------------------
     {
@@ -17949,8 +18117,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(inorder_barrier.exists());
 #endif
-        ApEvent term_event = 
-         InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
+        ApEvent term_event = op->get_program_order_event();
+        InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
         Runtime::phase_barrier_arrive(inorder_barrier, 1/*count*/, term_event); 
         term_event = inorder_barrier;
         advance_replicate_barrier(inorder_barrier, total_shards);
@@ -17960,7 +18128,8 @@ namespace Legion {
           term_event.wait();
           end_task_wait();
         }
-        return term_event;
+        // Not unordered so it must have succeeded
+        return true;
       }
       else
         return InnerContext::add_to_dependence_queue(op, unordered, outermost);
@@ -18395,13 +18564,16 @@ namespace Legion {
         const RtEvent ready = Runtime::merge_events(ready_events);
         if (ready.exists() && !ready.has_triggered())
         {
-          DeferDisjointCompleteResponseArgs args(opid, target,
-                        target_space, result_info, done_event);
+          DeferDisjointCompleteResponseArgs args(opid, target, target_space,
+                                      result_info, done_event, &request_mask);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, ready);
           return;
         }
       }
+      // Need this for the terrible case where the region is empty and
+      // we might not find equivalence sets for all the fields
+      result_info->relax_valid_mask(request_mask);
       finalize_disjoint_complete_response(runtime, opid, target, target_space,
                                           result_info, done_event);
     }
@@ -18431,6 +18603,9 @@ namespace Legion {
         derez.deserialize(mask);
         version_info->record_equivalence_set(set, mask);
       }
+      FieldMask valid_mask;
+      derez.deserialize(valid_mask);
+      version_info->relax_valid_mask(valid_mask);
       UniqueID opid;
       derez.deserialize(opid);
       RtUserEvent done_event;
@@ -18454,9 +18629,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplicateContext::DeferDisjointCompleteResponseArgs::
       DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *t,
-                      AddressSpaceID s, VersionInfo *info, RtUserEvent d)
+      AddressSpaceID s, VersionInfo *info, RtUserEvent d, const FieldMask *mask)
       : LgTaskArgs<DeferDisjointCompleteResponseArgs>(opid), target(t),
-        target_space(s), version_info(info), done_event(d)
+        version_info(info), request_mask((mask == NULL) ? NULL :
+            new FieldMask(*mask)), done_event(d), target_space(s)
     //--------------------------------------------------------------------------
     {
     }
@@ -18468,6 +18644,12 @@ namespace Legion {
     {
       const DeferDisjointCompleteResponseArgs *dargs =
         (const DeferDisjointCompleteResponseArgs*)args;
+      if (dargs->request_mask != NULL)
+      {
+        // Handle nasty nasty cases for empty regions
+        dargs->version_info->relax_valid_mask(*(dargs->request_mask));
+        delete dargs->request_mask;
+      }
       finalize_disjoint_complete_response(runtime, dargs->provenance, 
        dargs->target,dargs->target_space,dargs->version_info,dargs->done_event);
     }
@@ -18483,12 +18665,25 @@ namespace Legion {
       if (target_space == runtime->address_space)
       {
         // local case
-        FieldMask dummy_parent;
+        FieldMask dummy_parent, covered_mask;
         std::set<RtEvent> applied_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               result_sets.begin(); it != result_sets.end(); it++)
+        {
+          covered_mask |= it->second;
           target->record_refinement(it->first, it->second, 
                                     dummy_parent, applied_events);
+        }
+        if (covered_mask != result_sets.get_valid_mask())
+        {
+#ifdef DEBUG_LEGION
+          // We should have an equivalence set for every field unless this
+          // region is empty in which case we might have fewer
+          assert(target->node->as_region_node()->row_source->is_empty());
+#endif
+          FieldMask empty_mask = result_sets.get_valid_mask() - covered_mask;
+          target->record_empty_refinement(empty_mask);
+        }
         if (!applied_events.empty())
           Runtime::trigger_event(done_event, 
               Runtime::merge_events(applied_events));
@@ -18509,6 +18704,7 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
+          rez.serialize(result_sets.get_valid_mask());
           rez.serialize(opid);
           rez.serialize(done_event);
         }
@@ -19096,17 +19292,13 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_logical_region_deletion(this, *it, true/*unordered*/,
                                             true/*skip dependence analysis*/);
-          op->initialize_replication(this, ready_barrier, mapped_barrier, 
-              execution_barrier, shard_manager->is_total_sharding(),
-              shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->initialize_replication(this, shard_manager->is_total_sharding(),
+                            shard_manager->is_first_local_shard(owner_shard),
+                            &ready_barrier,&mapped_barrier,&execution_barrier);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->execute_dependence_analysis();
         }
       }
     }
@@ -19159,17 +19351,13 @@ namespace Legion {
           op->initialize_field_deletions(this, it->first, it->second, 
               true/*unordered*/, allocator, (owner_shard->shard_id != 0),
               true/*skip dependence analysis*/);
-          op->initialize_replication(this, ready_barrier, mapped_barrier, 
-              execution_barrier, shard_manager->is_total_sharding(),
-              shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->initialize_replication(this, shard_manager->is_total_sharding(),
+                            shard_manager->is_first_local_shard(owner_shard),
+                            &ready_barrier,&mapped_barrier,&execution_barrier);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->execute_dependence_analysis();
         }
       }
     }
@@ -19248,17 +19436,13 @@ namespace Legion {
         {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_field_space_deletion(this, *it, true/*unordered*/);
-          op->initialize_replication(this, ready_barrier, mapped_barrier, 
-              execution_barrier, shard_manager->is_total_sharding(),
-              shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->initialize_replication(this, shard_manager->is_total_sharding(),
+                            shard_manager->is_first_local_shard(owner_shard),
+                            &ready_barrier,&mapped_barrier,&execution_barrier);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->execute_dependence_analysis();
         }
       }
     }
@@ -19337,17 +19521,13 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_index_space_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->initialize_replication(this, ready_barrier, mapped_barrier, 
-              execution_barrier, shard_manager->is_total_sharding(),
-              shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precondition);
+          op->initialize_replication(this, shard_manager->is_total_sharding(),
+                            shard_manager->is_first_local_shard(owner_shard),
+                            &ready_barrier,&mapped_barrier,&execution_barrier);
+          op->set_deletion_preconditions(precondition, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->execute_dependence_analysis();
         }
       }
     }
@@ -19427,17 +19607,13 @@ namespace Legion {
           ReplDeletionOp *op = runtime->get_available_repl_deletion_op();
           op->initialize_index_part_deletion(this, delete_now[idx], 
                             sub_partitions[idx], true/*unordered*/);
-          op->initialize_replication(this, ready_barrier, mapped_barrier, 
-              execution_barrier, shard_manager->is_total_sharding(),
-              shard_manager->is_first_local_shard(owner_shard));
-          op->set_execution_precondition(precond);
+          op->initialize_replication(this, shard_manager->is_total_sharding(),
+                            shard_manager->is_first_local_shard(owner_shard),
+                            &ready_barrier,&mapped_barrier,&execution_barrier);
+          op->set_deletion_preconditions(precond, dependences);
           preconditions.insert(
               Runtime::protect_event(op->get_completion_event()));
-          op->begin_dependence_analysis();
-          for (std::map<Operation*,GenerationID>::const_iterator dit = 
-                dependences.begin(); dit != dependences.end(); dit++)
-            op->register_dependence(dit->first, dit->second);
-          op->end_dependence_analysis();
+          op->execute_dependence_analysis();
         }
       }
     }
@@ -19930,6 +20106,42 @@ namespace Legion {
     {
       const RtBarrier result = summary_fence_barrier;
       advance_logical_barrier(summary_fence_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_deletion_ready_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtBarrier result = deletion_ready_barrier;
+      advance_logical_barrier(deletion_ready_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_deletion_mapping_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtBarrier result = deletion_mapping_barrier;
+      advance_logical_barrier(deletion_mapping_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_deletion_execution_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtBarrier result = deletion_execution_barrier;
+      advance_logical_barrier(deletion_execution_barrier, total_shards);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_detach_resource_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtBarrier result = detach_resource_barrier;
+      advance_logical_barrier(detach_resource_barrier, total_shards);
       return result;
     }
 
@@ -22232,14 +22444,14 @@ namespace Legion {
     {
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(ApEvent::NO_AP_EVENT);
+        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
         result.impl->set_local(&value, sizeof(value));
         return result;
@@ -22363,12 +22575,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent LeafContext::add_to_dependence_queue(Operation *op, 
-                                                 bool unordered, bool block)
+    bool LeafContext::add_to_dependence_queue(Operation *op, 
+                                              bool unordered, bool block)
     //--------------------------------------------------------------------------
     {
       assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return false;
     }
 
     //--------------------------------------------------------------------------

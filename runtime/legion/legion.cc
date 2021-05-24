@@ -1396,7 +1396,7 @@ namespace Legion {
           (valid_requirement != rhs.valid_requirement))
         return false;
       return static_cast<const RegionRequirement&>(*this) ==
-             static_cast<const OutputRequirement&>(rhs);
+             static_cast<const RegionRequirement&>(rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -1416,7 +1416,7 @@ namespace Legion {
       if (valid_requirement > rhs.valid_requirement)
         return false;
       return static_cast<const RegionRequirement&>(*this) <
-             static_cast<const OutputRequirement&>(rhs);
+             static_cast<const RegionRequirement&>(rhs);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2350,6 +2350,30 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for metadata from empty future");
       return impl->get_metadata(size);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::RegionInstance Future::get_instance(Memory::Kind memkind,
+                        size_t field_size, bool check_field_size,
+                        const char *warning_string, bool silence_warnings) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for accessor on an empty future");
+      return impl->get_instance(memkind, field_size, check_field_size,
+                                silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    void Future::report_incompatible_accessor(const char *accessor_kind,
+                                           Realm::RegionInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->report_incompatible_accessor(accessor_kind, instance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7095,6 +7119,10 @@ namespace Legion {
                        Memory::Kind memory_kind, void (*freefunc)(void*,size_t))
     //--------------------------------------------------------------------------
     {
+      if (Internal::implicit_context == NULL)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Creating Legion Future objects from a buffer is only permitted "
+            "to be performed inside of Legion tasks.")
       return Internal::implicit_context->from_value(value, value_size, owned,
                                                     memory_kind, freefunc); 
     }

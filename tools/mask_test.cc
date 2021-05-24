@@ -789,7 +789,7 @@ inline unsigned long long current_time_in_nanoseconds(void)
   mach_port_deallocate(mach_task_self(), cclock);
 #else
   struct timespec ts;
-  clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_MONOTONIC, &ts);
 #endif
   long long t = (1000000000LL * ts.tv_sec) + ts.tv_nsec;
   return t;
@@ -804,7 +804,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case EQ_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+                alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
         int counter = 0;
         start = current_time_in_nanoseconds();
@@ -818,7 +818,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case NEG_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+                alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -831,7 +831,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case OR_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+                alignof(BITMASK), false>(3*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -844,7 +844,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case AND_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+                alignof(BITMASK), false>(3*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -857,7 +857,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case XOR_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+                alignof(BITMASK), false>(3*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -870,7 +870,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case ORA_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE>(masks, 2*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -883,7 +883,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case ANDA_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE>(masks, 2*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -896,7 +896,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case XORA_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE>(masks, 2*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -909,7 +909,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case DIS_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
         int counter = 0;
         start = current_time_in_nanoseconds();
@@ -923,7 +923,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case DIFF_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+            alignof(BITMASK), false>(3*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -936,7 +936,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case DIFFA_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
         start = current_time_in_nanoseconds();
         for (int idx = 0; idx < num_iterations; idx++)
@@ -949,7 +949,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case EMPTY_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(num_iterations);
+            alignof(BITMASK), false>(num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, num_iterations);
         int counter = 0;
         start = current_time_in_nanoseconds();
@@ -963,7 +963,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case SL_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
         int *shift = (int*)malloc(num_iterations*sizeof(int));
         initialize_int_array<MAX>(shift, num_iterations);
@@ -979,7 +979,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case SR_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+            alignof(BITMASK), false>(2*num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
         int *shift = (int*)malloc(num_iterations*sizeof(int));
         initialize_int_array<MAX>(shift, num_iterations);
@@ -995,7 +995,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case SLA_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(num_iterations);
+            alignof(BITMASK), false>(num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, num_iterations);
         int *shift = (int*)malloc(num_iterations*sizeof(int));
         initialize_int_array<MAX>(shift, num_iterations);
@@ -1011,7 +1011,7 @@ void test_mask_operation(const int num_iterations, const char *mask_name)
     case SRA_OP:
       {
         BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
-            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(num_iterations);
+            alignof(BITMASK), false>(num_iterations);
         initialize_perf_masks<MAX,SCALE,BITMASK>(masks, num_iterations);
         int *shift = (int*)malloc(num_iterations*sizeof(int));
         initialize_int_array<MAX>(shift, num_iterations);

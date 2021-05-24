@@ -616,7 +616,12 @@ namespace Realm {
 						      size_t _bitsets_per_chunk,
 						      bool _use_twolevel)
   {
-    assert(max_node_id == -1);
+    // can't reconfigure with a different node count
+    if(max_node_id != -1) {
+      assert(max_node_id == _max_node_id);
+      return;
+    }
+
     max_node_id = _max_node_id;
     bitset_elements = 1 + (max_node_id / BITS_PER_ELEM);
 

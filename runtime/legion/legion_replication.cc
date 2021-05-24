@@ -3172,6 +3172,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplDeletionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call
+      DeletionOp::trigger_dependence_analysis();
+      // Then get any barriers that we need for our execution
+      // We might have already received our barriers
+      if (execution_barrier.exists())
+        return;
+#ifdef DEBUG_LEGION
+      assert(!mapping_barrier.exists());
+      assert(!execution_barrier.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Only field and region deletions need a ready barrier since they
+      // will be touching the physical states of the region tree
+      if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
+      {
+        ready_barrier = repl_ctx->get_next_deletion_ready_barrier();
+        // Only field deletions need a mapping barrier for downward facing
+        // dependences in other shards
+        if (kind == FIELD_DELETION)
+          mapping_barrier = repl_ctx->get_next_deletion_mapping_barrier();
+      }
+      // All deletion kinds need an execution barrier
+      execution_barrier = repl_ctx->get_next_deletion_execution_barrier();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplDeletionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -3466,11 +3498,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::initialize_replication(ReplicateContext *ctx,
-                                                RtBarrier &delready_barrier,
-                                                RtBarrier &delmap_barrier, 
-                                                RtBarrier &delexec_barrier,
                                                 bool is_total, bool is_first,
-                                                bool unordered/*=false*/)
+                                                RtBarrier *ready_bar,
+                                                RtBarrier *mapping_bar,
+                                                RtBarrier *execution_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3478,41 +3509,34 @@ namespace Legion {
       assert(!mapping_barrier.exists());
       assert(!execution_barrier.exists());
 #endif
-      // Only field and region deletions need a ready barrier since they
-      // will be touching the physical states of the region tree
-      if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
-      {
-        ready_barrier = delready_barrier;
-        if (unordered)
-          Runtime::advance_barrier(delready_barrier);
-        else
-          ctx->advance_replicate_barrier(delready_barrier, ctx->total_shards);
-        // Only field deletions need a mapping barrier for downward facing
-        // dependences in other shards
-        if (kind == FIELD_DELETION)
-        {
-          mapping_barrier = delmap_barrier;
-          if (unordered)
-            Runtime::advance_barrier(delmap_barrier);
-          else
-            ctx->advance_replicate_barrier(delmap_barrier, ctx->total_shards);
-        }
-      }
-      // All deletion kinds need an execution barrier
-      execution_barrier = delexec_barrier;
-      if (unordered)
-        Runtime::advance_barrier(delexec_barrier);
-      else
-        ctx->advance_replicate_barrier(delexec_barrier, ctx->total_shards);
       is_total_sharding = is_total;
       is_first_local_shard = is_first;
+      if (execution_bar != NULL)
+      {
+        // Get our barriers now
+        if ((kind == LOGICAL_REGION_DELETION) || (kind == FIELD_DELETION))
+        {
+          ready_barrier = *ready_bar;
+          Runtime::advance_barrier(*ready_bar);
+          // Only field deletions need a mapping barrier for downward facing
+          // dependences in other shards
+          if (kind == FIELD_DELETION)
+          {
+            mapping_barrier = *mapping_bar;
+            Runtime::advance_barrier(*mapping_bar);
+          }
+        }
+        // All deletion kinds need an execution barrier
+        execution_barrier = *execution_bar;
+        Runtime::advance_barrier(*execution_bar);
+      }
     }
 
     //--------------------------------------------------------------------------
     void ReplDeletionOp::record_unordered_kind(
        std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
        std::map<IndexPartition,ReplDeletionOp*> &index_partition_deletions,
-       std::map<FieldSpace,ReplDeletionOp*> field_space_deletions,
+       std::map<FieldSpace,ReplDeletionOp*> &field_space_deletions,
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
        std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions)
     //--------------------------------------------------------------------------
@@ -6311,7 +6335,7 @@ namespace Legion {
         // Once we're ready to map we can tell the memory manager that
         // this instance can be safely acquired for use
         IndividualManager *external_manager = 
-          external_instance.get_instance_manager()->as_individual_manager();
+          external_instance.get_physical_manager()->as_individual_manager();
         MemoryManager *memory_manager = external_manager->memory_manager;
         memory_manager->attach_external_instance(external_manager);
         RegionNode *node = runtime->forest->get_node(requirement.region);
@@ -6409,7 +6433,7 @@ namespace Legion {
           // Once we're ready to map we can tell the memory manager that
           // this instance can be safely acquired for use
           IndividualManager *external_manager = 
-            external_instance.get_instance_manager()->as_individual_manager();
+            external_instance.get_physical_manager()->as_individual_manager();
           MemoryManager *memory_manager = external_manager->memory_manager;
           memory_manager->attach_external_instance(external_manager);
           // We can't broadcast the DID until after doing the attach
@@ -6519,18 +6543,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
-                                              RtBarrier &resource_bar)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(resource_bar.exists());
-#endif
-      resource_barrier = resource_bar;
-      ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -6544,6 +6556,21 @@ namespace Legion {
     {
       deactivate_detach_op();
       runtime->free_repl_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call, then get our barrier
+      DetachOp::trigger_dependence_analysis();
+ #ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif     
+      resource_barrier = repl_ctx->get_next_detach_resource_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -6566,7 +6593,7 @@ namespace Legion {
 #endif
       InstanceRef reference = references[0];
       // Check that this is actually a file
-      PhysicalManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_physical_manager();
       if (!manager->is_external_instance())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation (ID %lld) performed in "
@@ -6642,7 +6669,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < sources.size(); idx++)
       {
         const InstanceRef &ref = sources[idx];
-        PhysicalManager *manager = ref.get_instance_manager();
+        PhysicalManager *manager = ref.get_physical_manager();
         if (manager->is_external_instance())
           continue;
         if (manager->owner_space == runtime->address_space)
@@ -8332,7 +8359,9 @@ namespace Legion {
         inline_mapping_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // External resource barrier for synchronizing attach/detach ops
-        external_resource_barrier = 
+        attach_resource_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        detach_resource_barrier =
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
@@ -8425,7 +8454,8 @@ namespace Legion {
           deletion_mapping_barrier.destroy_barrier();
           deletion_execution_barrier.destroy_barrier();
           inline_mapping_barrier.destroy_barrier();
-          external_resource_barrier.destroy_barrier();
+          attach_resource_barrier.destroy_barrier();
+          detach_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
           resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
@@ -8658,7 +8688,8 @@ namespace Legion {
           assert(deletion_mapping_barrier.exists());
           assert(deletion_execution_barrier.exists());
           assert(inline_mapping_barrier.exists());
-          assert(external_resource_barrier.exists());
+          assert(attach_resource_barrier.exists());
+          assert(detach_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
           assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
@@ -8677,7 +8708,8 @@ namespace Legion {
           rez.serialize(deletion_mapping_barrier);
           rez.serialize(deletion_execution_barrier);
           rez.serialize(inline_mapping_barrier);
-          rez.serialize(external_resource_barrier);
+          rez.serialize(attach_resource_barrier);
+          rez.serialize(detach_resource_barrier);
           rez.serialize(mapping_fence_barrier);
           rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
@@ -8766,7 +8798,8 @@ namespace Legion {
         derez.deserialize(deletion_mapping_barrier);
         derez.deserialize(deletion_execution_barrier);
         derez.deserialize(inline_mapping_barrier);
-        derez.deserialize(external_resource_barrier);
+        derez.deserialize(attach_resource_barrier);
+        derez.deserialize(detach_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);
@@ -12878,7 +12911,7 @@ namespace Legion {
         for (unsigned idx2 = 0; idx2 < dids.size(); idx2++)
         {
           const Mapping::PhysicalInstance &inst = mappings[idx1][idx2];
-          PhysicalManager *manager = inst.impl->as_instance_manager();
+          PhysicalManager *manager = inst.impl->as_physical_manager();
           dids[idx2] = manager->did;
           if (held_references.find(manager) != held_references.end())
             continue;
@@ -12942,7 +12975,7 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mapping.begin(); it != mapping.end(); it++)
         {
-          PhysicalManager *manager = it->impl->as_instance_manager();
+          PhysicalManager *manager = it->impl->as_physical_manager();
           // If we already had a reference to this instance
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())
@@ -13124,7 +13157,7 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mappings[idx].begin(); it != mappings[idx].end(); it++)
         {
-          PhysicalManager *manager = it->impl->as_instance_manager();
+          PhysicalManager *manager = it->impl->as_physical_manager();
           if (held_references.find(manager) != held_references.end())
             continue;
           manager->add_base_valid_ref(REPLICATION_REF, &mutator);
@@ -13226,7 +13259,7 @@ namespace Legion {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
               mapping.begin(); it != mapping.end(); it++)
         {
-          PhysicalManager *manager = it->impl->as_instance_manager();
+          PhysicalManager *manager = it->impl->as_physical_manager();
           // If we already had a reference to this instance
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())

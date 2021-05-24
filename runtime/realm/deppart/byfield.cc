@@ -191,7 +191,7 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->second);
       typename std::map<FT, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(it->first);
       if(it2 != rect_map.end()) {
-	impl->contribute_dense_rect_list(it2->second->rects);
+	impl->contribute_dense_rect_list(it2->second->rects, true /*disjoint*/);
 	delete it2->second;
       } else
 	impl->contribute_nothing();
@@ -249,6 +249,7 @@ namespace Realm {
 	       (s >> value_set) &&
 	       (s >> sparsity_outputs));
     assert(ok);
+    (void)ok;
   }
 
   template <int N, typename T, typename FT>

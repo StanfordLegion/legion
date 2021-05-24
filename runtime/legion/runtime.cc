@@ -635,12 +635,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
-            AddressSpaceID own_space, ApEvent complete, Operation *o /*= NULL*/,
-            bool compute_coordinates)
+    FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now,
+            DistributedID did, AddressSpaceID own_space, ApEvent complete,
+            Operation *o /*= NULL*/, bool compute_coordinates)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
-          own_space, register_now),
+          own_space, register_now), context(ctx),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -665,16 +665,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
-                       AddressSpaceID own_space, ApEvent complete,
-                       Operation *o, GenerationID gen,
+    FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now, 
+                           DistributedID did, AddressSpaceID own_space,
+                           ApEvent complete, Operation *o, GenerationID gen,
 #ifdef LEGION_SPY
-                       UniqueID uid,
+                           UniqueID uid,
 #endif
-                       int depth)
+                           int depth)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
-          own_space, register_now),
+          own_space, register_now), context(ctx),
         producer_op(o), op_gen(gen), producer_depth(depth),
 #ifdef LEGION_SPY
         producer_uid(uid),
@@ -695,8 +695,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
-      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0),
-        producer_depth(0)
+      : DistributedCollectable(NULL, 0, 0), context(NULL), producer_op(NULL),
+        op_gen(0), producer_depth(0)
 #ifdef LEGION_SPY
         , producer_uid(0)
 #endif
@@ -891,21 +891,135 @@ namespace Legion {
       }
       if (instance == NULL)
         return NULL;
-      if (!instance->ready_event.has_triggered_faultaware(poisoned))
+      const ApEvent inst_ready = instance->get_ready();
+      if (!inst_ready.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          instance->ready_event.wait_faultaware(poisoned);
+          inst_ready.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          instance->ready_event.wait_faultaware(poisoned);
+          inst_ready.wait_faultaware(poisoned);
       }
       if (poisoned && (implicit_context != NULL))
         implicit_context->raise_poison_exception();
       return instance->data;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance FutureImpl::get_instance(Memory::Kind memkind, 
+                              size_t extent_in_bytes, bool check_extent, 
+                              bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      Processor proc = implicit_context->get_executing_processor();
+      // A heuristic to help out applications that are unsure of themselves
+      if (memkind == Memory::NO_MEMKIND)
+        memkind = (proc.kind() == Processor::TOC_PROC) ?
+          Memory::GPU_FB_MEM : Memory::SYSTEM_MEM;
+      Memory memory = runtime->find_local_memory(proc, memkind);
+      if (!memory.exists())
+      {
+        if (memkind != Memory::SYSTEM_MEM)
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MEMORY_KIND,
+              "Unable to find a %s memory associated with processor " IDFMT
+              " in which to create a future buffer.", 
+              mem_names[memkind], proc.id)
+        }
+        else
+          memory = runtime->runtime_system_memory;
+      }
+      if (runtime->runtime_warnings && !silence_warnings && 
+          (implicit_context != NULL))
+      {
+        if (!implicit_context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
+             "Waiting on a future to make an accessor in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance "
+             "degradation. Warning string: %s",
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
+      }
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
+      mark_sampled();
+      const RtEvent ready_event = subscribe();
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      FutureInstance *instance = find_or_create_instance(memory,
+          (implicit_context != NULL) ? implicit_context->owner_task : NULL,
+          (implicit_context != NULL) ? 
+           implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
+           true/*need lock*/,ApUserEvent::NO_AP_USER_EVENT,true/*create inst*/);
+      // Wait to make sure that the future is complete first
+      bool poisoned = false;
+      if (!future_complete.has_triggered_faultaware(poisoned))
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          future_complete.wait_faultaware(poisoned);
+          context->end_task_wait();
+        }
+        else
+          future_complete.wait_faultaware(poisoned);
+      }
+      if (poisoned)
+        implicit_context->raise_poison_exception();
+      if (empty)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+            "Accessing empty future when making an accessor! (UID %lld)",
+            (producer_op == NULL) ? 0 : producer_op->get_unique_op_id())
+      else if ((instance == NULL) || (instance->size == 0))
+        REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+          "Future size mismatch! Expected non-empty future for making an "
+          "accessor but future has a payload of 0 bytes. (UID %lld)", 
+          (producer_op == NULL) ? 0 : producer_op->get_unique_op_id())
+      if (check_extent && (instance->size != extent_in_bytes))
+        REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
+            "Future size mismatch! Expected type of %zd bytes but "
+            "requested type is %zd bytes. (UID %lld)", 
+            instance->size, extent_in_bytes, (producer_op == NULL) ? 0 :
+            producer_op->get_unique_op_id())
+      const PhysicalInstance result = instance->get_instance();
+      const ApEvent inst_ready = instance->get_ready();
+      if (!inst_ready.has_triggered_faultaware(poisoned))
+      {
+        TaskContext *context = implicit_context;
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          inst_ready.wait_faultaware(poisoned);
+          context->end_task_wait();
+        }
+        else
+          inst_ready.wait_faultaware(poisoned);
+      }
+      if (poisoned && (implicit_context != NULL))
+        implicit_context->raise_poison_exception();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::report_incompatible_accessor(const char *accessor_kind,
+                                                  PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_COMPATIBILITY_CHECK,
+          "Unable to create Realm %s for future instance %llx in task %s",
+          accessor_kind, instance.id, implicit_context->get_task_name())
     }
 
     //--------------------------------------------------------------------------
@@ -1396,7 +1510,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureInstance* FutureImpl::find_or_create_instance(Memory memory,
                 Operation *op, UniqueID creator_uid, bool eager,
-                bool need_lock, ApUserEvent ready_event)
+                bool need_lock, ApUserEvent ready_event, bool create_instance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1407,7 +1521,7 @@ namespace Legion {
       {
         AutoLock f_lock(future_lock);
         return find_or_create_instance(memory, op, creator_uid, eager,
-                                       false/*need lock*/, ready_event);
+                     false/*need lock*/, ready_event, create_instance);
       }
 #ifdef DEBUG_LEGION
       assert(!empty);
@@ -1426,6 +1540,9 @@ namespace Legion {
       {
         if (ready_event.exists())
           Runtime::trigger_event(NULL,ready_event,finder->second->ready_event);
+        // Instantiate the instance if we need to
+        if (create_instance)
+          finder->second->get_instance();
         return finder->second;
       }
       // Don't have it so we need to make it
@@ -1445,6 +1562,9 @@ namespace Legion {
       }
       // Add it to the set of instances
       instances[memory] = instance;
+      // Instantiate the instance if we need to
+      if (create_instance)
+        instance->get_instance();
       // Initialize the instance from one of the existing instances
       FutureInstance *local_instance = NULL;
       for (std::map<Memory,FutureInstance*>::const_iterator it =
@@ -1759,6 +1879,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<DistributedID>(did);
+      rez.serialize(context->get_unique_id());
       if (runtime->safe_control_replication)
       {
         rez.serialize<size_t>(coordinates.size());
@@ -1785,6 +1906,8 @@ namespace Legion {
       derez.deserialize(future_did);
       if (future_did == 0)
         return NULL;
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
       std::vector<std::pair<size_t,DomainPoint> > coordinates;
       if (runtime->safe_control_replication)
       {
@@ -1798,8 +1921,8 @@ namespace Legion {
           derez.deserialize(coord.second);
         }
       }
-      return runtime->find_or_create_future(future_did, mutator, coordinates,
-                                            op, op_gen,
+      return runtime->find_or_create_future(future_did, context_uid, mutator,
+                                            coordinates, op, op_gen,
 #ifdef LEGION_SPY
                                             op_uid,
 #endif
@@ -2238,7 +2361,10 @@ namespace Legion {
         void (*func)(void*,size_t), Processor p, RtEvent use)
       : runtime(rt), data(d), size(s), memory(m), ready_event(r),freefunc(func),
         freeproc(p), eager_allocation(eager), external_allocation(external),
-        is_meta_visible(check_meta_visible(rt, m, (func != NULL))),
+        is_meta_visible(check_meta_visible(rt, m, 
+              // Be conservative with the definition of a freefunc
+              // Only helps in the case where the answer is 'false'
+              !external || !own || (func != NULL))),
         own_allocation(own), instance(inst), use_event(use), own_instance(false)
     //--------------------------------------------------------------------------
     {
@@ -2909,7 +3035,7 @@ namespace Legion {
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
         Future result = 
-          runtime->help_create_future(ApEvent::NO_AP_EVENT, op);
+          runtime->help_create_future(context, ApEvent::NO_AP_EVENT, op);
         if (runtime->safe_control_replication)
         {
           std::vector<std::pair<size_t,DomainPoint> > new_coords(coordinates);
@@ -4155,7 +4281,7 @@ namespace Legion {
         const InstanceRef &ref = references[idx];
         if (ref.is_field_set(fid))
         {
-          PhysicalManager *manager = ref.get_instance_manager();
+          PhysicalManager *manager = ref.get_physical_manager();
           if (privilege_only)
           {
             IndexSpaceNode *privilege_node =
@@ -4319,7 +4445,7 @@ namespace Legion {
         const InstanceRef &ref = references[idx];
         if (ref.is_field_set(fid))
         {
-          PhysicalManager *manager = ref.get_instance_manager();
+          PhysicalManager *manager = ref.get_physical_manager();
           if (check_field_size)
           {
             const size_t actual_size = 
@@ -5006,8 +5132,7 @@ namespace Legion {
         const InstanceRef &instance = instance_set[idx];
         if (!!(instance.get_valid_fields() & mask))
         {
-          manager =
-            instance.get_instance_manager()->as_individual_manager();
+          manager = instance.get_physical_manager()->as_individual_manager();
           break;
         }
       }
@@ -18613,7 +18738,7 @@ namespace Legion {
                     ctx->get_unique_id());
 #endif
       const ApUserEvent to_trigger = Runtime::create_ap_user_event(NULL);
-      FutureImpl *result = new FutureImpl(this, true/*register*/,
+      FutureImpl *result = new FutureImpl(ctx, this, true/*register*/,
                               get_available_distributed_id(),
                               address_space, to_trigger,
                               ctx->get_owner_task());
@@ -25617,7 +25742,7 @@ namespace Legion {
         dc = find_or_request_distributed_collectable<
           CollectiveManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
-      else if (InstanceManager::is_instance_did(did))
+      else if (InstanceManager::is_physical_did(did))
         dc = find_or_request_distributed_collectable<
           IndividualManager, SEND_MANAGER_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);
@@ -25692,6 +25817,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
+                                               UniqueID context_uid,
                                                ReferenceMutator *mutator,
                        std::vector<std::pair<size_t,DomainPoint> > &coordinates,
                                                Operation *op, GenerationID gen,
@@ -25721,10 +25847,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(owner_space != address_space);
 #endif
+      InnerContext *context = find_context(context_uid);
       FutureImpl *result = (op == NULL) ? 
-        new FutureImpl(this, false/*register*/, did, owner_space,
+        new FutureImpl(context, this, false/*register*/, did, owner_space,
                        ApEvent::NO_AP_EVENT) : 
-        new FutureImpl(this, false/*register*/, did, owner_space, 
+        new FutureImpl(context, this, false/*register*/, did, owner_space, 
                        ApEvent::NO_AP_EVENT, op, gen,
 #ifdef LEGION_SPY
                        op_uid,
@@ -27906,11 +28033,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::help_create_future(ApEvent complete_event, 
+    Future Runtime::help_create_future(TaskContext *ctx, ApEvent complete_event, 
                                        Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(new FutureImpl(this, true/*register*/,
+      return Future(new FutureImpl(ctx, this, true/*register*/,
                                    get_available_distributed_id(),address_space, 
                                    complete_event,op,false/*get coordinates*/));
     }
@@ -29148,29 +29275,32 @@ namespace Legion {
                                          int shard_id)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime_started);
-#endif
-      // Check that we're on an external thread
-      const Processor p = Processor::get_executing_processor();
-      if (p.exists())
+      if (!runtime_started)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
-            "Implicit top-level tasks are not allowed to be started on "
-            "processors managed by Legion. They can only be started on "
-            "external threads that Legion does not control.")
-#ifdef DEBUG_LEGION
-      assert(!local_procs.empty());
-#endif 
-      // Find a proxy processor, we'll prefer a CPU processor for
-      // backwards compatibility, but will take anything we get
-      Processor proxy = Processor::NO_PROC;
-      for (std::set<Processor>::const_iterator it =
-            local_procs.begin(); it != local_procs.end(); it++)
+            "Implicit top-level tasks are not allowed to be started before "
+            "the Legion runtime is started.")
+      // Check that we're not inside a task
+      if (implicit_context != NULL)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+            "Implicit top-level tasks are not allowed to be started inside "
+            "of Legion tasks. Only external computations are permitted "
+            "to create new implicit top-level tasks.")
+      // Find a proxy processor for us to use for this task 
+      // We might already even be on a Realm processor
+      Processor proxy = Processor::get_executing_processor();
+      if (!proxy.exists())
       {
-        if (it->kind() == proc_kind)
+#ifdef DEBUG_LEGION
+        assert(!local_procs.empty());
+#endif
+        for (std::set<Processor>::const_iterator it =
+              local_procs.begin(); it != local_procs.end(); it++)
         {
-          proxy = *it;
-          break;
+          if (it->kind() == proc_kind)
+          {
+            proxy = *it;
+            break;
+          }
         }
       }
 #ifdef DEBUG_LEGION
@@ -29219,24 +29349,22 @@ namespace Legion {
     void Runtime::unbind_implicit_task_from_external_thread(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (Processor::get_executing_processor().exists())
+      if (!ctx->implicit_task)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
-            "Illegal call to unbind an implicit task from an external thread "
-            "for task %s (UID %lld) from an internal Realm task thread.",
+            "Illegal call to unbind a context for task %s (UID %lld) that "
+            "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      implicit_runtime = NULL;
       implicit_context = NULL;
-      implicit_provenance = 0;
     }
 
     //--------------------------------------------------------------------------
     void Runtime::bind_implicit_task_to_external_thread(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (Processor::get_executing_processor().exists())
+      if (!ctx->implicit_task)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
-            "Illegal call to bind an implicit task to an external thread "
-            "for task %s (UID %lld) from an internal Realm task thread.",
+            "Illegal call to bind a context for task %s (UID %lld) that "
+            "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
       implicit_runtime = this;
       implicit_context = ctx;
@@ -29247,13 +29375,15 @@ namespace Legion {
     void Runtime::finish_implicit_task(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
+      if (!ctx->implicit_task)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Illegal call to finish an implicit task for task %s (UID %lld) "
+            "that is not an implicit top-level task",
+            ctx->get_task_name(), ctx->get_unique_id())
       // this is just a normal finish operation
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
           NULL/*callback functor*/, Memory::SYSTEM_MEM, NULL/*freefunc*/,
           NULL/*metadataptr*/, 0/*metadatasize*/);
-      // Record that this is no longer an implicit external task
-      implicit_runtime = NULL;
-      implicit_context = NULL;
     }
 
     //--------------------------------------------------------------------------

@@ -430,12 +430,20 @@ namespace Legion {
       inline pointer address(reference r) { return &r; }
       inline const_pointer address(const_reference r) { return &r; }
     public:
+#if __cplusplus > 201703L
+      inline pointer allocate(std::size_t cnt)
+      {
+        void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        return reinterpret_cast<pointer>(result);
+      }
+#else
       inline pointer allocate(size_type cnt,
                               typename std::allocator<void>::const_pointer = 0)
       {
         void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         return reinterpret_cast<pointer>(result);
       }
+#endif
       inline void deallocate(pointer p, size_type size) {
         free(p);
       }
@@ -444,7 +452,7 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
-#if __cplusplus >= 202002L
+#if __cplusplus > 201703L
       template<class U, class... Args>
       inline constexpr U* construct_at( U* p, Args&&... args ) 
         { return ::new (const_cast<void*>(static_cast<const volatile void*>(p)))
@@ -455,10 +463,10 @@ namespace Legion {
       inline void construct(U* p, Args&&... args) 
         { ::new((void*)p) U(std::forward<Args>(args)...); }
 #endif
-#if __cplusplus >= 202002L
+#if __cplusplus > 201703L
       template<class U>
       inline constexpr void destroy_at(U* p) { p->~U(); }
-#elif __cplusplus >= 201703L
+#elif __cplusplus == 201703L
       template<class U>
       inline void destroy_at(U* p) { p->~U(); }
 #else

@@ -46,7 +46,8 @@ namespace Realm {
   
   template <int N, typename T>
   /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<Point<N,T> >& points,
-							  bool always_create)
+							  bool always_create,
+                                                          bool disjoint)
   {
     HybridRectangleList<N,T> hrl;
     for(typename std::vector<Point<N,T> >::const_iterator it = points.begin();
@@ -67,13 +68,14 @@ namespace Realm {
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
-    impl->contribute_dense_rect_list(dense);
+    impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
   }
 
   template <int N, typename T>
   /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<Rect<N,T> >& rects,
-							  bool always_create)
+							  bool always_create,
+                                                          bool disjoint)
   {
     HybridRectangleList<N,T> hrl;
     for(typename std::vector<Rect<N,T> >::const_iterator it = rects.begin();
@@ -94,7 +96,7 @@ namespace Realm {
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
-    impl->contribute_dense_rect_list(dense);
+    impl->contribute_dense_rect_list(dense, disjoint);
     return sparsity;
   }
 
@@ -366,7 +368,8 @@ namespace Realm {
 						    int max_overhead,
 						    std::vector<Rect<N,T> >& covering)
   {
-    assert(entries_valid);
+    if(!entries_valid.load_acquire())
+      assert(false);
 
     // start with a scan over all of our pieces see which ones are within
     //  the given bounds
@@ -688,7 +691,8 @@ namespace Realm {
   Event SparsityMapImpl<N,T>::make_valid(bool precise /*= true*/)
   {
     // early out
-    if(precise ? this->entries_valid : this->approx_valid)
+    if(precise ? this->entries_valid.load_acquire() :
+                 this->approx_valid.load_acquire())
       return Event::NO_EVENT;
 
     // take lock to get/create event cleanly
@@ -699,13 +703,14 @@ namespace Realm {
       AutoLock<> al(mutex);
 
       if(precise) {
-	if(!this->entries_valid) {
+	if(!this->entries_valid.load()) {
 	  // do we need to request the data?
 	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
-	    request_approx = !(this->approx_valid || approx_requested);
+	    request_approx = !(this->approx_valid.load() ||
+                               approx_requested);
 	    approx_requested = true;
 	    // can't use set_contributor_count, so directly set
 	    //  remaining_contributor_count to the 1 contribution we expect
@@ -722,7 +727,7 @@ namespace Realm {
 	  }
 	}
       } else {
-	if(!this->approx_valid) {
+	if(!this->approx_valid.load()) {
 	  // do we need to request the data?
 	  if((NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) && !approx_requested) {
 	    request_approx = true;
@@ -794,6 +799,8 @@ namespace Realm {
       ActiveMessage<RemoteSparsityContrib> amsg(owner);
       amsg->sparsity = me;
       amsg->piece_count = 1;
+      amsg->disjoint = false;
+      amsg->total_count = 0;
       amsg.commit();
 
       return;
@@ -815,13 +822,16 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects)
+  void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects,
+                                                        bool disjoint)
   {
     NodeID owner = ID(me).sparsity_creator_node();
 
     if(owner != Network::my_node_id) {
       // send the data to the owner to collect
-      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
+      size_t max_bytes_per_packet = ActiveMessage<RemoteSparsityContrib>::recommended_max_payload(owner, false /*!with_congestion*/);
+      const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N,T>);
+      assert(max_to_send > 0);
       const Rect<N,T> *rdata = (rects.empty() ? 0 : &rects[0]);
       size_t num_pieces = 0;
       size_t remaining = rects.size();
@@ -831,6 +841,8 @@ namespace Realm {
 	ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
 	amsg->sparsity = me;
 	amsg->piece_count = 0;
+        amsg->disjoint = disjoint;
+        amsg->total_count = 0;
 	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
 	amsg.commit();
 
@@ -844,6 +856,8 @@ namespace Realm {
       ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
       amsg->sparsity = me;
       amsg->piece_count = num_pieces + 1;
+      amsg->disjoint = disjoint;
+      amsg->total_count = 0;
       amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
       amsg.commit();
 
@@ -851,18 +865,35 @@ namespace Realm {
     }
 
     // local contribution is done as a single piece
-    contribute_raw_rects((rects.empty() ? 0 : &rects[0]), rects.size(), 1);
+    contribute_raw_rects((rects.empty() ? 0 : &rects[0]), rects.size(), 1,
+                         disjoint, 0);
   }
 
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_raw_rects(const Rect<N,T>* rects,
 						  size_t count,
-						  size_t piece_count)
+						  size_t piece_count,
+                                                  bool disjoint,
+                                                  size_t total_count)
   {
     if(count > 0) {
       AutoLock<> al(mutex);
 
-      if(N == 1) {
+      if(total_count > 0)
+        this->entries.reserve(total_count);
+
+      if(disjoint) {
+        // provider promises that all the pieces we will see are disjoint, so
+        //  just stick them on the end of the list and we'll sort in finalize()
+        size_t cur_size = this->entries.size();
+        this->entries.resize(cur_size + count);
+        for(unsigned i = 0; i < count; i++) {
+          this->entries[cur_size + i].bounds = rects[i];
+          this->entries[cur_size + i].sparsity.id = 0;
+          this->entries[cur_size + i].bitmap = 0;
+        }
+      }
+      else if(N == 1) {
 	// demand that our input data is sorted
 	for(size_t i = 1; i < count; i++)
 	  assert(rects[i-1].hi.x < (rects[i].lo.x - 1));
@@ -956,17 +987,18 @@ namespace Realm {
 	  }
 	}
       } else {
-	// each new rectangle has to be tested against existing ones for containment, overlap,
-	//  or mergeability
-	// can't use iterators on entry list, since push_back invalidates end()
-	size_t orig_count = this->entries.size();
+	// each new rectangle has to be tested against existing ones for
+        //  containment, overlap (which can cause splitting), or mergeability
+        std::vector<Rect<N,T> > to_add(rects, rects + count);
 
-	for(size_t i = 0; i < count; i++) {
-	  const Rect<N,T>& r = rects[i];
+        while(!to_add.empty()) {
+          Rect<N,T> r = to_add.back();
+          to_add.pop_back();
 
 	  // index is declared outside for loop so we can detect early exits
 	  size_t idx;
-	  for(idx = 0; idx < orig_count; idx++) {
+          std::vector<size_t> absorbed;
+	  for(idx = 0; idx < this->entries.size(); idx++) {
 	    SparsityMapEntry<N,T>& e = this->entries[idx];
 	    if(e.bounds.contains(r)) {
 	      // existing entry contains us - still three cases though
@@ -979,24 +1011,69 @@ namespace Realm {
 		break;
 	      }
 	    }
+
+            if(r.contains(e.bounds)) {
+              // we contain the old rectangle, so absorb it and continue
+              absorbed.push_back(idx);
+              continue;
+            }
+
+            if(!e.sparsity.exists() && (e.bitmap == 0) && can_merge(e.bounds, r)) {
+              // we can absorb an adjacent rectangle
+              r = r.union_bbox(e.bounds);
+              absorbed.push_back(idx);
+              continue;
+            }
+
 	    if(e.bounds.overlaps(r)) {
-	      assert(0);
-	      break;
-	    }
-	    // only worth merging against a dense rectangle
-	    if(can_merge(e.bounds, r) && !e.sparsity.exists() && (e.bitmap == 0)) {
-	      e.bounds = e.bounds.union_bbox(r);
-	      break;
+              // partial overlap requires splitting the current rectangle into
+              //  up to 2N-1 pieces that need to be rescanned
+              for(int j = 0; j < N; j++) {
+                if(r.lo[j] < e.bounds.lo[j]) {
+                  // leftover "below"
+                  Rect<N,T> subr = r;
+                  subr.hi[j] = e.bounds.lo[j] - 1;
+                  r.lo[j] = e.bounds.lo[j];
+                  to_add.push_back(subr);
+                }
+                if(r.hi[j] > e.bounds.hi[j]) {
+                  // leftover "above"
+                  Rect<N,T> subr = r;
+                  subr.lo[j] = e.bounds.hi[j] + 1;
+                  r.hi[j] = e.bounds.hi[j];
+                  to_add.push_back(subr);
+                }
+              }
+              break;
 	    }
 	  }
-	  if(idx == orig_count) {
+
+	  if(idx == this->entries.size()) {
 	    // no matches against existing stuff, so add a new entry
-	    idx = this->entries.size();
-	    this->entries.resize(idx + 1);
+            if(absorbed.empty()) {
+              this->entries.resize(idx + 1);
+            } else {
+              // reuse one of the absorbed entries
+              idx = absorbed.back();
+              absorbed.pop_back();
+            }
 	    this->entries[idx].bounds = r;
 	    this->entries[idx].sparsity.id = 0; //SparsityMap<N,T>::NO_SPACE;
 	    this->entries[idx].bitmap = 0;
 	  }
+
+          // compact out any remaining holes from absorbed entries
+          if(!absorbed.empty()) {
+            size_t new_size = this->entries.size();
+            while(!absorbed.empty()) {
+              size_t reuse = absorbed.back();
+              absorbed.pop_back();
+              --new_size;
+              if(reuse < new_size)
+                this->entries[reuse] = this->entries[new_size];
+            }
+            this->entries.resize(new_size);
+          }
 	}
       }
     }
@@ -1045,7 +1122,8 @@ namespace Realm {
   bool SparsityMapImpl<N,T>::add_waiter(PartitioningMicroOp *uop, bool precise)
   {
     // early out
-    if(precise ? this->entries_valid : this->approx_valid)
+    if(precise ? this->entries_valid.load_acquire() :
+                 this->approx_valid.load_acquire())
       return false;
 
     // take lock and retest, and register if not ready
@@ -1056,7 +1134,7 @@ namespace Realm {
       AutoLock<> al(mutex);
 
       if(precise) {
-	if(!this->entries_valid) {
+	if(!this->entries_valid.load()) {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
@@ -1064,7 +1142,8 @@ namespace Realm {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
-	    request_approx = !(this->approx_valid || approx_requested);
+	    request_approx = !(this->approx_valid.load() ||
+                               approx_requested);
 	    approx_requested = true;
 	    // can't use set_contributor_count, so directly set
 	    //  remaining_contributor_count to the 1 contribution we expect
@@ -1074,7 +1153,7 @@ namespace Realm {
 	  }
 	}
       } else {
-	if(!this->approx_valid) {
+	if(!this->approx_valid.load()) {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
@@ -1113,14 +1192,14 @@ namespace Realm {
       remote_sharers.add(requestor);
 
       if(send_precise) {
-	if(this->entries_valid)
+	if(this->entries_valid.load())
 	  reply_precise = true;
 	else
 	  remote_precise_waiters.add(requestor);
       }
 
       if(send_approx) {
-	if(this->approx_valid)
+	if(this->approx_valid.load())
 	  reply_approx = true;
 	else
 	  remote_approx_waiters.add(requestor);
@@ -1136,12 +1215,15 @@ namespace Realm {
   {
     if(reply_approx) {
       // TODO
-      assert(this->approx_valid);
+      if(!this->approx_valid.load_acquire())
+        assert(false);
     }
 
     if(reply_precise) {
       log_part.info() << "sending precise data: sparsity=" << me << " target=" << requestor;
       
+      if(!this->entries_valid.load_acquire())
+        assert(false);
       // scan the entry list, sending bitmaps first and making a list of rects
       std::vector<Rect<N,T> > rects;
       for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = this->entries.begin();
@@ -1160,16 +1242,20 @@ namespace Realm {
       }
 	
       const Rect<N,T> *rdata = &rects[0];
-      size_t remaining = rects.size();
-      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
+      size_t total_count = rects.size();
+      size_t remaining = total_count;
+      size_t max_bytes_per_packet = ActiveMessage<RemoteSparsityContrib>::recommended_max_payload(requestor, false /*!with_congestion*/);
+      const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N,T>);
+      assert(max_to_send > 0);
       size_t num_pieces = 0;
       // send partial messages first
       while(remaining > max_to_send) {
 	size_t bytes = max_to_send * sizeof(Rect<N,T>);
-	ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+	ActiveMessage<RemoteSparsityContrib> amsg(requestor, rdata, bytes);
 	amsg->sparsity = me;
 	amsg->piece_count = 0;
-	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+        amsg->disjoint = true; // we've already de-overlapped everything
+        amsg->total_count = total_count;
 	amsg.commit();
 
 	num_pieces++;
@@ -1179,20 +1265,31 @@ namespace Realm {
 
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N,T>);
-      ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+      ActiveMessage<RemoteSparsityContrib> amsg(requestor, rdata, bytes);
       amsg->sparsity = me;
       amsg->piece_count = num_pieces + 1;
-      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+      amsg->disjoint = true; // we've already de-overlapped everything
+      amsg->total_count = total_count;
       amsg.commit();
     }
   }
   
   template <int N, typename T>
-  static inline bool non_overlapping_bounds_1d_comp(const SparsityMapEntry<N,T>& lhs,
-						    const SparsityMapEntry<N,T>& rhs)
-  {
-    return lhs.bounds.lo.x < rhs.bounds.lo.x;
-  }
+  struct CompareBoundsLow {
+    CompareBoundsLow(const int *_dim_order) : dim_order(_dim_order) {}
+
+    bool operator()(const SparsityMapEntry<N,T>& lhs,
+                    const SparsityMapEntry<N,T>& rhs) const
+    {
+      for(int i = 0; i < N; i++) {
+        if(lhs.bounds.lo[dim_order[i]] < rhs.bounds.lo[dim_order[i]]) return true;
+        if(lhs.bounds.lo[dim_order[i]] > rhs.bounds.lo[dim_order[i]]) return false;
+      }
+      return false;
+    }
+
+    const int *dim_order;
+  };
 
   template <int N, typename T>
   static void compute_approximation(const std::vector<SparsityMapEntry<N,T> >& entries,
@@ -1269,8 +1366,127 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  bool sort_and_merge_entries(int merge_dim,
+                              std::vector<SparsityMapEntry<N,T> >& entries)
+  {
+    int dim_order[N];
+    for(int i = 0; i < N-1; i++)
+      dim_order[i] = (((N - 1 - i) == merge_dim) ? 0 : N - 1 - i);
+    dim_order[N - 1] = merge_dim;
+
+    std::sort(entries.begin(), entries.end(), CompareBoundsLow<N,T>(dim_order));
+
+    // merge with an in-place linear pass
+    size_t wpos = 0;
+    size_t rpos = 0;
+    while(rpos < entries.size()) {
+      if(wpos < rpos)
+        entries[wpos] = entries[rpos];
+      rpos++;
+
+      // see if we can absorb any more
+      if((entries[wpos].sparsity.id == 0) && (entries[wpos].bitmap == 0)) {
+        while(rpos < entries.size() &&
+              (entries[rpos].sparsity.id == 0) &&
+              (entries[rpos].bitmap == 0)) {
+          // has to match in all dimensions except for the merge dimension
+          bool merge_ok = true;
+          for(int i = 0; i < N; i++)
+            if((i != merge_dim) &&
+               ((entries[wpos].bounds.lo[i] != entries[rpos].bounds.lo[i]) ||
+                (entries[wpos].bounds.hi[i] != entries[rpos].bounds.hi[i]))) {
+              merge_ok = false;
+              break;
+            }
+          if(!merge_ok) break;
+
+#ifdef DEBUG_REALM
+          // should be no overlap here
+          assert(entries[wpos].bounds.hi[merge_dim] < entries[rpos].bounds.lo[merge_dim]);
+#endif
+
+          // if there's a gap, we can't merge
+          if((entries[wpos].bounds.hi[merge_dim] + 1) != entries[rpos].bounds.lo[merge_dim])
+            break;
+
+          // merge this in and keep going
+          entries[wpos].bounds.hi[merge_dim] = entries[rpos].bounds.hi[merge_dim];
+          rpos++;
+        }
+      }
+      wpos++;
+    }
+
+    if(wpos < rpos) {
+      // merging occurred
+      entries.resize(wpos);
+      return true;
+    } else
+      return false;
+  }
+
+  template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
+    // in order to organize the data a little better and handle common coalescing
+    //  cases, we do N sort/merging passes, with each dimension appearing last
+    //  in the sort order at least once (so that we can merge in that dimension)
+    // any successful merge in a given dimension should reattempt any previously
+    //  sorted/merged dimensions (TODO: some sort of limit for pathological cases?)
+    // we want to end with a sort order of { N-1, ... 0 }, so start from N-1
+    //  and work down
+    int merge_dim = N - 1;
+    int last_merged_dim = -1;
+
+    // as another heuristic tweak, scan the data first and see if it looks like
+    //  any existing rectangles have extent in only one dimension - if so, try
+    //  further merging in that dimension first
+    {
+      bool multiple_dims = false;
+      int nontrivial_dim = -1;
+      for(size_t i = 0; (i < this->entries.size()) && !multiple_dims; i++)
+        for(int j = 0; j < N; j++)
+          if(this->entries[i].bounds.lo[j] < this->entries[i].bounds.hi[j]) {
+            if(nontrivial_dim == -1) {
+              nontrivial_dim = j;
+            } else if(j != nontrivial_dim) {
+              multiple_dims = true;
+              break;
+            }
+          }
+      if((nontrivial_dim != -1) && !multiple_dims) {
+        if(sort_and_merge_entries(nontrivial_dim, this->entries))
+           last_merged_dim = nontrivial_dim;
+      }
+    }
+
+    while(merge_dim >= 0) {
+      // careful - can't skip sort of dim=0 for multi-dimensional cases, even
+      //   if it was the last successful merge, because unsuccessful merges
+      //   in other dimensions will have messed up the sort order
+      if((merge_dim == last_merged_dim) && ((N == 1) || (merge_dim != 0))) {
+        merge_dim--;
+        continue;
+      }
+
+      if(sort_and_merge_entries(merge_dim, this->entries)) {
+        last_merged_dim = merge_dim;
+        // start over if this wasn't already the first dim
+        if(merge_dim < (N - 1))
+          merge_dim = N - 1;
+        else
+          merge_dim--;
+      } else
+        merge_dim--;
+    }
+
+    // now that we've got our entries nice and tidy, build a bounded approximation of them
+    if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
+      assert(!this->approx_valid.load());
+      compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
+      this->approx_valid.store_release(true);
+    }
+
     {
       LoggerMessage msg = log_part.info();
       if(msg.is_active()) {
@@ -1281,21 +1497,6 @@ namespace Realm {
 	      << " sparsity=" << this->entries[i].sparsity
 	      << " bitmap=" << this->entries[i].bitmap;
       }
-    }
-
-    // first step is to organize the data a little better - for N=1, this means sorting
-    //  the entries list
-    if(N == 1) {
-      std::sort(this->entries.begin(), this->entries.end(), non_overlapping_bounds_1d_comp<N,T>);
-      for(size_t i = 1; i < this->entries.size(); i++)
-	assert(this->entries[i-1].bounds.hi.x < (this->entries[i].bounds.lo.x - 1));
-    }
-
-    // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).sparsity_creator_node() == Network::my_node_id*/) {
-      assert(!this->approx_valid);
-      compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
-      this->approx_valid = true;
     }
 
 #ifdef DEBUG_PARTITIONING
@@ -1315,8 +1516,8 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
 
-      assert(!this->entries_valid);
-      this->entries_valid = true;
+      assert(!this->entries_valid.load());
+      this->entries_valid.store_release(true);
       precise_requested = false;
       if(precise_ready_event.exists()) {
 	trigger_precise = precise_ready_event;
@@ -1404,7 +1605,9 @@ namespace Realm {
     assert((datalen % sizeof(Rect<N,T>)) == 0);
     SparsityMapImpl<N,T>::lookup(msg.sparsity)->contribute_raw_rects((const Rect<N,T> *)data,
 								     count,
-								     msg.piece_count);
+								     msg.piece_count,
+                                                                     msg.disjoint,
+                                                                     msg.total_count);
   }
 
 

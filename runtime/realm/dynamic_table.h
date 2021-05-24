@@ -101,8 +101,8 @@ namespace Realm {
       DynamicTable<ALLOCATOR>& table;
       int owner;
       LT lock;
-      ET * volatile first_free;
-      IT volatile next_alloc;
+      atomic<ET *> first_free;
+      IT next_alloc;
     };
 	
 }; // namespace Realm

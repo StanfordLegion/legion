@@ -1937,7 +1937,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
-        PhysicalManager *manager = ref.get_instance_manager();
+        PhysicalManager *manager = ref.get_physical_manager();
         if (!manager->has_visible_from(visible_filter))
           continue;
         input_valid.resize(next_index+1);
@@ -2696,7 +2696,7 @@ namespace Legion {
       if (result_future.impl == NULL)
       {
         Future temp = Future(
-              new FutureImpl(runtime, true/*register*/,
+              new FutureImpl(parent_ctx, runtime, true/*register*/,
                 runtime->get_available_distributed_id(),
                 runtime->address_space, get_completion_event(), this));
         AutoLock o_lock(op_lock);
@@ -4074,7 +4074,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        PhysicalManager *manager = chosen_instances[idx].get_instance_manager();
+        PhysicalManager *manager = chosen_instances[idx].get_physical_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_inline' "
@@ -4103,7 +4103,7 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          if (!chosen_instances[idx].get_manager()->is_instance_manager())
+          if (chosen_instances[idx].get_manager()->is_reduction_manager())
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of "
                           "'map_inline' on mapper %s. Mapper selected an "
@@ -4962,7 +4962,8 @@ namespace Legion {
       if (!dst_indirect_requirements.empty())
       {
         scatter_versions.resize(dst_indirect_requirements.size());
-        const size_t offset = src_requirements.size() + dst_requirements.size();
+        const size_t offset = src_requirements.size() +
+          dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
@@ -5078,18 +5079,18 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
       }
+      offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
       {
-        offset += dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  src_indirect_requirements[idx],
                                                  gather_versions[idx],
                                                  preconditions);
+        offset += src_indirect_requirements.size();
       }
       if (!dst_indirect_requirements.empty())
       {
-        offset += src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  dst_indirect_requirements[idx],
@@ -5342,12 +5343,17 @@ namespace Legion {
                                           dst_targets,
                                           dst_sources,
                                           dst_info,
-                                          local_applied_events
+                                          local_applied_events,
 #ifdef DEBUG_LEGION
-                                          , get_logging_name()
-                                          , unique_op_id
+                                          get_logging_name(),
+                                          unique_op_id,
 #endif
-                                          );
+                                          true/*record valid*/,
+                      // Only check initialized if we don't have an indirection.
+                      // If we have an indirection then it is impossible to know
+                      // if we writing everything or not
+                                    (idx >= src_indirect_requirements.size()) &&
+                                     (idx >= dst_indirect_requirements.size()));
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
@@ -6587,7 +6593,7 @@ namespace Legion {
         InstanceManager *man = ref.get_manager();
         if (man->is_virtual_manager())
           continue;
-        PhysicalManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_physical_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
@@ -6622,7 +6628,7 @@ namespace Legion {
       {
         if ((REQ_TYPE == SRC_REQ) && (int(idx) == composite_idx))
           continue;
-        if (!targets[idx].get_manager()->is_instance_manager())
+        if (!targets[idx].get_manager()->is_physical_manager())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper specified an illegal "
@@ -7381,9 +7387,9 @@ namespace Legion {
                                  dst_requirements[idx], runtime, 
                                  index_domain, projection_points);
       }
+      offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
       {
-        offset += dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           if (src_indirect_requirements[idx].handle_type == 
@@ -7396,10 +7402,10 @@ namespace Legion {
                                    src_indirect_requirements[idx], runtime,
                                    index_domain, projection_points);
         }
+        offset += src_indirect_requirements.size();
       }
       if (!dst_indirect_requirements.empty())
       {
-        offset += src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           if (dst_indirect_requirements[idx].handle_type == 
@@ -8041,7 +8047,7 @@ namespace Legion {
       fence_kind = kind;
       if (need_future)
       {
-        result = Future(new FutureImpl(runtime, true/*register*/,
+        result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
               runtime->address_space, completion_event, track ? this : NULL));
         // We can set the future result right now because we know that it
@@ -8710,6 +8716,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DeletionOp::set_deletion_preconditions(ApEvent precondition,
+                                  const std::map<Operation*,GenerationID> &deps)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!has_preconditions);
+#endif
+      dependences = deps;
+      execution_precondition = precondition;
+      has_preconditions = true;
+    }
+
+    //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_space_deletion(InnerContext *ctx,
                            IndexSpace handle, std::vector<IndexPartition> &subs,
                            const bool unordered)
@@ -8868,6 +8887,7 @@ namespace Legion {
     {
       activate_operation();
       allocator = NULL;
+      has_preconditions = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8900,6 +8920,7 @@ namespace Legion {
       version_infos.clear();
       map_applied_conditions.clear();
       to_release.clear();
+      dependences.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -8920,6 +8941,13 @@ namespace Legion {
     void DeletionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (has_preconditions)
+      {
+        for (std::map<Operation*,GenerationID>::const_iterator dit = 
+              dependences.begin(); dit != dependences.end(); dit++)
+          register_dependence(dit->first, dit->second);
+        return;
+      }
       switch (kind)
       {
         // These cases do not need any kind of analysis to construct
@@ -13036,7 +13064,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       initialize_memoizable();
-      future = Future(new FutureImpl(runtime, true/*register*/,
+      future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       collective = dc;
@@ -16327,7 +16355,7 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
-        PhysicalManager *manager = mapped_instances[idx].get_instance_manager();
+        PhysicalManager *manager = mapped_instances[idx].get_physical_manager();
         if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
@@ -18862,7 +18890,7 @@ namespace Legion {
               false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
+                                        unique_op_id, restricted);
       return region;
     }
 
@@ -19023,7 +19051,7 @@ namespace Legion {
       }
       // Register this instance with the memory manager
       PhysicalManager *external_manager = 
-        external_instance.get_instance_manager();
+        external_instance.get_physical_manager();
       const RtEvent attached = external_manager->attach_external_instance();
       if (attached.exists())
         attached.wait();
@@ -19595,7 +19623,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
+                                        unique_op_id, false/*restricted*/);
         if (launch_space != NULL)
           runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
@@ -20197,7 +20225,7 @@ namespace Legion {
       requirement.privilege = LEGION_READ_WRITE;
       requirement.prop = LEGION_EXCLUSIVE;
       // Create the future result that we will complete when we're done
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
@@ -20339,7 +20367,7 @@ namespace Legion {
       // them valid through the end of mapping them, we'll release the valid
       // references when we are done mapping
       WrapperReferenceMutator mutator(map_applied_conditions);
-      PhysicalManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_physical_manager();
       if (!manager->is_external_instance())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation (ID %lld) performed in "
@@ -20442,7 +20470,7 @@ namespace Legion {
       assert(references.size() == 1);
 #endif
       const InstanceRef &reference = references[0];
-      PhysicalManager *manager = reference.get_instance_manager();
+      PhysicalManager *manager = reference.get_physical_manager();
       // We can remove the acquire reference that we added after we're mapped
       if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
         delete manager;
@@ -20640,7 +20668,7 @@ namespace Legion {
         points.push_back(point);
       }
       // Create the future result that we will complete when we're done
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
@@ -20989,7 +21017,7 @@ namespace Legion {
           if (it->impl != NULL)
             preconditions.insert(*it);
       }
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       if (runtime->legion_spy_enabled)
@@ -21174,7 +21202,7 @@ namespace Legion {
       redop_id = redid;
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
                   runtime->address_space, get_completion_event(), this));
       mapper_id = map_id;

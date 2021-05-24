@@ -1156,7 +1156,7 @@ namespace Realm {
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
   namespace {
-    atomic<int> uswitch_test_check_flag(1);
+    atomic<int> uswitch_test_check_flag;
     ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
 
     void uswitch_test_entry(int arg)
@@ -1195,6 +1195,8 @@ namespace Realm {
     makecontext(&uswitch_test_ctx2,
 		reinterpret_cast<void(*)()>(uswitch_test_entry),
 		1, 66);
+
+    uswitch_test_check_flag.store(1);
 
     // now try to swap and back
     errno = 0;

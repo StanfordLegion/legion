@@ -1017,6 +1017,15 @@ namespace Realm {
       // multiple concurrent memreduces ok
       static const bool is_ordered = false;
 
+      // override because we don't want to claim non-reduction copies
+      virtual bool supports_path(Memory src_mem, Memory dst_mem,
+				 CustomSerdezID src_serdez_id,
+				 CustomSerdezID dst_serdez_id,
+				 ReductionOpID redop_id,
+				 XferDesKind *kind_ret = 0,
+				 unsigned *bw_ret = 0,
+				 unsigned *lat_ret = 0);
+
       virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
 				       XferDesID guid,

@@ -619,7 +619,7 @@ namespace Legion {
       DynamicTableNode& operator=(const DynamicTableNode &rhs)
         { assert(false); return *this; }
     public:
-      ET *elems[SIZE];
+      ET*volatile elems[SIZE];
     };
 
     template<typename ET, size_t _SIZE, typename IT>
@@ -648,7 +648,7 @@ namespace Legion {
       LeafTableNode& operator=(const LeafTableNode &rhs)
         { assert(false); return *this; }
     public:
-      ET *elems[SIZE];
+      ET*volatile elems[SIZE];
     };
 
     template<typename ALLOCATOR>
@@ -1962,7 +1962,12 @@ namespace Legion {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = new ET();
+        {
+          ET *elem = new ET();
+          // Enforce total store ordering
+          __sync_synchronize();
+          leaf->elems[offset] = elem;
+        }
         result = leaf->elems[offset];
       }
 #ifdef DEBUG_LEGION
@@ -1988,7 +1993,12 @@ namespace Legion {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = new ET(arg);
+        {
+          ET *elem = new ET(arg);
+          // Enforce total store ordering
+          __sync_synchronize();
+          leaf->elems[offset] = elem;
+        }
         result = leaf->elems[offset];
       }
 #ifdef DEBUG_LEGION
@@ -2015,7 +2025,12 @@ namespace Legion {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = new ET(arg1, arg2);
+        {
+          ET *elem = new ET(arg1, arg2);
+          // Enforce total store ordering
+          __sync_synchronize();
+          leaf->elems[offset] = elem;
+        }
         result = leaf->elems[offset];
       }
 #ifdef DEBUG_LEGION
@@ -2058,6 +2073,7 @@ namespace Legion {
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
+            __sync_synchronize();
             inner->elems[0] = root;
             root = parent;
           }
@@ -2097,8 +2113,10 @@ namespace Legion {
             IT child_first = inner->first_index + (i << child_shift);
             IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
 
-            inner->elems[i] = new_tree_node(child_level, 
-                                            child_first, child_last);
+            NodeBase *next = new_tree_node(child_level, 
+                                           child_first, child_last);
+            __sync_synchronize();
+            inner->elems[i] = next;
           }
           child = inner->elems[i];
         }

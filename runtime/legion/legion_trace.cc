@@ -2172,37 +2172,50 @@ namespace Legion {
                                                          TaskContext *ctx) const
     //--------------------------------------------------------------------------
     {
-      const char *mem_names[] = {
-#define MEM_NAMES(name, desc) #name,
-          REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-        };
-      IndividualManager *manager = view->get_manager()->as_individual_manager();
-      FieldSpaceNode *field_space = manager->field_space_node;
-      Memory memory = manager->memory_manager->memory;
-      char *m = mask.to_string();
-      std::vector<FieldID> fields;
-      field_space->get_field_set(mask, ctx, fields);
-
       std::stringstream ss;
-      ss << "view: " << view << " in " << mem_names[memory.kind()]
-         << " memory " << std::hex << memory.id << std::dec
-         << ", Index expr: " << expr->expr_id
-         << ", Field Mask: " << m << ", Fields: ";
-      for (std::vector<FieldID>::const_iterator it =
-            fields.begin(); it != fields.end(); it++)
+      char *m = mask.to_string();
+      if (view->is_fill_view())
       {
-        if (it != fields.begin())
-          ss << ", ";
-        const void *name = NULL;
-        size_t name_size = 0;
-        if (field_space->retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG,
-              name, name_size, true/*can fail*/, false/*wait until*/))
+        ss << "fill view: " << view
+           << ", Index expr: " << expr->expr_id
+           << ", Field Mask: " << m;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(view->is_instance_view());
+#endif
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+        IndividualManager *manager =
+          view->get_manager()->as_individual_manager();
+        FieldSpaceNode *field_space = manager->field_space_node;
+        Memory memory = manager->memory_manager->memory;
+
+        std::vector<FieldID> fields;
+        field_space->get_field_set(mask, ctx, fields);
+
+        ss << "view: " << view << " in " << mem_names[memory.kind()]
+           << " memory " << std::hex << memory.id << std::dec
+           << ", Index expr: " << expr->expr_id
+           << ", Field Mask: " << m << ", Fields: ";
+        for (std::vector<FieldID>::const_iterator it =
+              fields.begin(); it != fields.end(); it++)
         {
-          ss << ((const char*)name) << " (" << *it << ")";
+          if (it != fields.begin())
+            ss << ", ";
+          const void *name = NULL;
+          size_t name_size = 0;
+          if (field_space->retrieve_semantic_information(
+                LEGION_NAME_SEMANTIC_TAG, name, name_size,
+                true/*can fail*/, false/*wait until*/))
+            ss << ((const char*)name) << " (" << *it << ")";
+          else
+            ss << *it;
         }
-        else
-          ss << *it;
       }
       return ss.str();
     }
@@ -2765,31 +2778,48 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); ++it)
         {
-          FieldMask mask = it->second;
-          if (!set.dominates(vit->first, it->first, mask))
+          if (allow_independent)
           {
-            if (allow_independent)
+            // If we're allowing independent views, that means the set
+            // does not need to dominate the view as long as there are no
+            // views in the set that overlap logically with the test view
+            // This allows us to handle the read-only precondition case
+            // where we have read-only views that show up in the preconditions
+            // but do not appear logically anywhere in the postconditions
+            FieldMaskSet<IndexSpaceExpression> non_dominated;
+            set.dominates(vit->first, it->first, it->second, non_dominated);
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
+                  non_dominated.begin(); nit != non_dominated.end(); nit++)
             {
-              // If we're allowing independent views, that means the set
-              // does not need to dominate the view as long as there are no
-              // views in the set that overlap logically with the test view
-              // This allows us to handle the read-only precondition case
-              // where we have read-only views that show up in the preconditions
-              // but do not appear logically anywhere in the postconditions
-              set.filter_independent_fields(it->first, mask);
               // If all the fields are independent from anything that was
               // written in the postcondition then we know this is a
               // read-only precondition that does not need to be subsumed
+              FieldMask mask = nit->second;
+              set.filter_independent_fields(nit->first, mask);
               if (!mask)
                 continue;
+              if (condition != NULL)
+              {
+                condition->view = vit->first;
+                condition->expr = nit->first;
+                condition->mask = mask;
+              }
+              return false;
             }
-            if (condition != NULL)
+          }
+          else
+          {
+            FieldMask mask = it->second;
+            if (!set.dominates(vit->first, it->first, mask))
             {
-              condition->view = vit->first;
-              condition->expr = it->first;
-              condition->mask = mask;
+              if (condition != NULL)
+              {
+                condition->view = vit->first;
+                condition->expr = it->first;
+                condition->mask = mask;
+              }
+              return false;
             }
-            return false;
           }
         }
 
@@ -4193,7 +4223,6 @@ namespace Legion {
       events.clear();
       events.resize(num_events);
       event_map.clear();
-      operations.pop_front();
       if (!remote_memos.empty())
         release_remote_memos();
       // Defer performing the transitive reduction because it might
@@ -4207,6 +4236,9 @@ namespace Legion {
       // Can dump now if we're not deferring the transitive reduction
       else if (trace->runtime->dump_physical_traces)
         dump_template();
+      // Can't pop the operations since we might still need them
+      // for when we dump the template
+      operations.pop_front();
     }
 
     //--------------------------------------------------------------------------
@@ -5657,19 +5689,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_mapper_output(Memoizable *memo,
+    void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      const TraceLocalID op_key = memo->get_trace_local_id();
       AutoLock t_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
-      assert(cached_mappings.find(op_key) == cached_mappings.end());
+      assert(cached_mappings.find(tlid) == cached_mappings.end());
 #endif
-      CachedMapping &mapping = cached_mappings[op_key];
+      CachedMapping &mapping = cached_mappings[tlid];
       // If you change the things recorded from output here then
       // you also need to change RemoteTraceRecorder::record_mapper_output
       mapping.target_procs = output.target_procs;

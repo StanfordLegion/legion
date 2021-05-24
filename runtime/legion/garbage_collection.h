@@ -18,6 +18,7 @@
 #define __LEGION_GARBAGE_COLLECTION__
 
 #include "legion/legion_types.h"
+#include "legion/bitmask.h"
 
 // This is a macro for enabling the use of remote references
 // on distributed collectable objects. Remote references 
@@ -36,7 +37,7 @@ namespace Legion {
   namespace Internal {
 
     enum DistCollectableType {
-      INSTANCE_MANAGER_DC = 0x1,
+      PHYSICAL_MANAGER_DC = 0x1,
       //= 0x2,
       //= 0x3,
       MATERIALIZED_VIEW_DC = 0x4,

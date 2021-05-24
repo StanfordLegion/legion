@@ -97,10 +97,11 @@ namespace Legion {
       }
 
       static inline void log_index_partition(IDType parent_id, 
-                IDType unique_id, bool disjoint, LegionColor point)
+                IDType unique_id, int disjoint, int complete, LegionColor point)
       {
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %u %lld",
-		      parent_id, unique_id, disjoint, point); 
+        // Convert ints from -1,0,1 to 0,1,2
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld",
+		      parent_id, unique_id, disjoint+1, complete+1, point); 
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -636,10 +637,10 @@ namespace Legion {
       }
 
       static inline void log_attach_operation(UniqueID context,
-                                              UniqueID attach)
+                                              UniqueID attach, bool restricted)
       {
-        log_spy.print("Attach Operation %llu %llu", 
-                      context, attach);
+        log_spy.print("Attach Operation %llu %llu %u", 
+                      context, attach, restricted ? 1 : 0);
       }
 
       static inline void log_detach_operation(UniqueID context,

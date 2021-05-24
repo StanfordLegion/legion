@@ -528,8 +528,6 @@ namespace Legion {
       bool intermediate_execution_fence;
     };
 
-    typedef Memoizable::TraceLocalID TraceLocalID;
-
     /**
      * \class TraceViewSet
      */
@@ -888,7 +886,7 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events);
       void get_premap_output(IndexTask *task,
                              std::vector<Memory> &future_locations);     
-      virtual void record_mapper_output(Memoizable *memo,
+      virtual void record_mapper_output(const TraceLocalID &tlid,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
                              std::set<RtEvent> &applied_events);

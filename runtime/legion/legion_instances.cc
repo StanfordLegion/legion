@@ -629,70 +629,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceManager::meets_regions(
-      const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tree_id > 0); // only happens with VirtualManager
-      assert(!regions.empty());
-#endif
-      std::set<IndexSpaceExpression*> region_exprs;
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++)
-      {
-        // If the region tree IDs don't match that is bad
-        if (it->get_tree_id() != tree_id)
-          return false;
-        RegionNode *node = context->get_node(*it);
-        region_exprs.insert(node->row_source);
-      }
-      IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
-        *(region_exprs.begin()) : context->union_index_spaces(region_exprs);
-      return meets_expression(space_expr, tight_region_bounds);
-    }
-
-    //--------------------------------------------------------------------------
-    bool InstanceManager::meets_expression(IndexSpaceExpression *space_expr,
-                                           bool tight_bounds) const
-    //--------------------------------------------------------------------------
-    {
-      // Early exit case where the given expression is identical to
-      // the instance domain
-      if (instance_domain == space_expr)
-        return true;
-
-      const size_t expr_volume = space_expr->get_volume();
-      // If the space we need is empty then we're done for any instance
-      if (expr_volume == 0)
-        return true;
-      const size_t inst_volume = instance_domain->get_volume();
-      // If we don't even have enough volume there is now way to satisfy it
-      if (inst_volume < expr_volume)
-        return false;
-      // Check to see if we have enough space in this instance
-      IndexSpaceExpression *cover_expr = 
-        context->subtract_index_spaces(space_expr, instance_domain);
-      // If it's not empty then we don't have enough space
-      if (!cover_expr->is_empty())
-        return false;
-      // We have enough space, if it's tight, then see if it is identical
-      if (tight_bounds)
-      {
-        // We know we cover, so the only way we're tight are is if
-        // we have exactly the same set of points which requires 
-        // that the number of points be the same
-        if (expr_volume == inst_volume)
-          return true;
-        else
-          return false;
-      }
-      else
-        // If we make it here then we have satisfied the expression 
-        return true;
-    }
-
-    //--------------------------------------------------------------------------
     bool InstanceManager::entails(LayoutConstraints *constraints,
                                   const DomainPoint &key,
                                const LayoutConstraint **failed_constraint) const
@@ -802,9 +738,14 @@ namespace Legion {
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id, ApEvent u_event,
-                                     bool register_now, bool shadow)
-      : InstanceManager(ctx, owner_space, did, layout, node, index_domain,
-                        tree_id, register_now), 
+                                     bool register_now, bool shadow,bool output)
+      : InstanceManager(ctx, owner_space, did, layout, node,
+          // If we're on the owner node we need to produce the expression
+          // that actually describes this points in this space
+          // On remote nodes we'll already have it from the owner
+          (owner_space == ctx->runtime->address_space) && !output ?
+             index_domain->create_layout_expression(pl, pl_size) : index_domain,
+          tree_id, register_now), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size), 
         shadow_instance(shadow)
@@ -1037,6 +978,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalManager::meets_regions(
+      const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(tree_id > 0); // only happens with VirtualManager
+      assert(!regions.empty());
+#endif
+      std::set<IndexSpaceExpression*> region_exprs;
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+      {
+        // If the region tree IDs don't match that is bad
+        if (it->get_tree_id() != tree_id)
+          return false;
+        RegionNode *node = context->get_node(*it);
+        region_exprs.insert(node->row_source);
+      }
+      IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+        *(region_exprs.begin()) : context->union_index_spaces(region_exprs);
+      return meets_expression(space_expr, tight_region_bounds);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::meets_expression(IndexSpaceExpression *space_expr,
+                                           bool tight_bounds) const
+    //--------------------------------------------------------------------------
+    {
+      return instance_domain->meets_layout_expression(space_expr, tight_bounds,
+                                                  piece_list, piece_list_size);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::prune_gc_events(void)
     //--------------------------------------------------------------------------
     {
@@ -1213,8 +1187,8 @@ namespace Legion {
            (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
-          instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow),
-        memory_manager(memory), instance(inst),
+          instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow,
+          (k == UNBOUND_INSTANCE_KIND)), memory_manager(memory), instance(inst),
         use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),

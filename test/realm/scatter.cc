@@ -148,7 +148,7 @@ protected:
   struct Piece {
     IndexSpace<N,T> space;
     Processor proc;
-    RegionInstance inst;
+    RegionInstance inst, cpu_inst;
   };
   std::vector<Piece> pieces;
 
@@ -209,15 +209,37 @@ Event DistributedData<N,T>::create_instances(const FieldMap& fields, LAMBDA mem_
   for(size_t i = 0; i < pieces.size(); i++) {
     Memory m = mem_picker(i, pieces[i].space);
     Processor p = Machine::ProcessorQuery(Machine::get_machine()).only_kind(Processor::LOC_PROC).has_affinity_to(m).first();
-    assert(p.exists());
+
+    // if no processor has affinity, at least pick one in same address space
+    Memory cpu_mem = Memory::NO_MEMORY;
+    if(!p.exists()) {
+      p = Machine::ProcessorQuery(Machine::get_machine()).only_kind(Processor::LOC_PROC).same_address_space_as(m).first();
+      assert(p.exists());
+      cpu_mem = Machine::MemoryQuery(Machine::get_machine()).only_kind(Memory::SYSTEM_MEM).has_affinity_to(p).first();
+      assert(cpu_mem.exists());
+    }
+
     pieces[i].proc = p;
-    Event e = RegionInstance::create_instance(pieces[i].inst,
-					      m,
-					      pieces[i].space,
-					      fields,
-					      0 /* SOA */,
-					      ProfilingRequestSet());
-    events.push_back(e);
+    {
+      Event e = RegionInstance::create_instance(pieces[i].inst,
+                                                m,
+                                                pieces[i].space,
+                                                fields,
+                                                0 /* SOA */,
+                                                ProfilingRequestSet());
+      events.push_back(e);
+    }
+
+    if(cpu_mem.exists()) {
+      Event e = RegionInstance::create_instance(pieces[i].cpu_inst,
+                                                cpu_mem,
+                                                pieces[i].space,
+                                                fields,
+                                                0 /* SOA */,
+                                                ProfilingRequestSet());
+      events.push_back(e);
+    } else
+      pieces[i].cpu_inst = RegionInstance::NO_INST;
   }
   return Event::merge_events(events);
 }
@@ -230,6 +252,10 @@ void DistributedData<N,T>::destroy_instances(Event wait_on)
       ++it) {
     it->inst.destroy(wait_on);
     it->inst = RegionInstance::NO_INST;
+    if(it->cpu_inst.exists()) {
+      it->cpu_inst.destroy(wait_on);
+      it->cpu_inst = RegionInstance::NO_INST;
+    }
     it->proc = Processor::NO_PROC;
   }
 }
@@ -342,8 +368,17 @@ Event DistributedData<N,T>::fill(IndexSpace<N,T> is, FieldID fid, LAMBDA filler,
     IndexSpace<N,T> isect;
     IndexSpace<N,T>::compute_intersection(is, it->space, isect, ProfilingRequestSet()).wait();
     args.space = isect;
-    args.inst = it->inst;
+    args.inst = it->cpu_inst.exists() ? it->cpu_inst : it->inst;
     Event e = it->proc.spawn(id, &args, sizeof(args), ProfilingRequestSet(), wait_on);
+
+    // do a copy if we're using a proxy cpu instance
+    if(it->cpu_inst.exists()) {
+      std::vector<CopySrcDstField> srcs(1), dsts(1);
+      srcs[0].set_field(it->cpu_inst, fid, sizeof(FT));
+      dsts[0].set_field(it->inst, fid, sizeof(FT));
+      e = isect.copy(srcs, dsts, ProfilingRequestSet(), e);
+    }
+
     events.push_back(e);
   }
 
@@ -680,7 +715,8 @@ bool DistributedData<N,T>::verify(IndexSpace<N,T> is, FieldID fid, Event wait_on
 
     AffineAccessor<FT,N,T> acc;
     RegionInstance tmp_inst = RegionInstance::NO_INST;
-    if(acc.is_compatible(it->inst, fid)) {
+    if(Machine::get_machine().has_affinity(Processor::get_executing_processor(),
+                                           it->inst.get_location())) {
       // good, access this instance directly
       acc.reset(it->inst, fid);
     } else {
@@ -1119,13 +1155,24 @@ void top_level_task(const void *args, size_t arglen,
   log_app.print() << "Realm scatter/gather test";
 
   std::vector<Memory> mems;
+  bool do_serdez = false;
+
+  // first try: use fb memories, if available
   Machine::MemoryQuery mq(Machine::get_machine());
-  mq.only_kind(Memory::SYSTEM_MEM);
-  for(Machine::MemoryQuery::iterator it = mq.begin(); it != mq.end(); ++it)
-    mems.push_back(*it);
-  if(TestConfig::skipfirst)
+  mq.only_kind(Memory::GPU_FB_MEM);
+  mems.assign(mq.begin(), mq.end());
+
+  // second try: system memories
+  if(mems.empty()) {
+    Machine::MemoryQuery mq(Machine::get_machine());
+    mq.only_kind(Memory::SYSTEM_MEM);
+    mems.assign(mq.begin(), mq.end());
+    assert(!mems.empty());
+    do_serdez = true;
+  }
+
+  if(TestConfig::skipfirst && (mems.size() > 1))
     mems.erase(mems.begin());
-  assert(!mems.empty());
 
   bool ok = true;
 
@@ -1147,7 +1194,8 @@ void top_level_task(const void *args, size_t arglen,
     ok = false;
 
   // serdez
-  if(!scatter_gather_test<1, int, 2, int, float>(mems,
+  if(do_serdez &&
+     !scatter_gather_test<1, int, 2, int, float>(mems,
 						 TestConfig::size1,
 						 TestConfig::size2,
 						 TestConfig::pieces1,

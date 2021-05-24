@@ -51,7 +51,7 @@ namespace Legion {
       TaskContext(Runtime *runtime, SingleTask *owner, int depth,
                   const std::vector<RegionRequirement> &reqs,
                   const std::vector<RegionRequirement> &output_reqs,
-                  bool inline_task);
+                  bool inline_task, bool implicit_ctx = false);
       TaskContext(const TaskContext &rhs);
       virtual ~TaskContext(void);
     public:
@@ -445,9 +445,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true) = 0;
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true) = 0;
       virtual void register_executing_child(Operation *op) = 0;
       virtual void register_child_executed(Operation *op) = 0;
       virtual void register_child_complete(Operation *op) = 0;
@@ -724,6 +724,7 @@ namespace Legion {
       bool children_commit_invoked;
     public:
       const bool inline_task;
+      const bool implicit_task; 
 #ifdef LEGION_SPY
     protected:
       UniqueID current_fence_uid;
@@ -890,7 +891,7 @@ namespace Legion {
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped, UniqueID context_uid, 
                    ApEvent execution_fence, bool remote = false, 
-                   bool inline_task = false);
+                   bool inline_task = false, bool implicit_task = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:
@@ -1313,9 +1314,9 @@ namespace Legion {
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true);
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true);
       void process_dependence_stage(void);
       void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                                   FutureInstance *instance,
@@ -1474,6 +1475,8 @@ namespace Legion {
       const UniqueID context_uid;
       const bool remote_context;
       const bool full_inner_context;
+    protected:
+      bool finished_execution;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
       std::vector<std::pair<size_t,DomainPoint> > context_coordinates;
@@ -1716,12 +1719,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_DISJOINT_COMPLETE_TASK_ID;
       public:
         DeferDisjointCompleteResponseArgs(UniqueID opid, VersionManager *target,
-             AddressSpaceID space, VersionInfo *version_info, RtUserEvent done);
+                               AddressSpaceID space, VersionInfo *version_info,
+                               RtUserEvent done, const FieldMask *mask = NULL);
       public:
         VersionManager *const target;
-        const AddressSpaceID target_space;
         VersionInfo *const version_info;
+        FieldMask *const request_mask;
         const RtUserEvent done_event;
+        const AddressSpaceID target_space;
       };
     public:
       enum ReplicateAPICall {
@@ -1814,7 +1819,8 @@ namespace Legion {
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
                        UniqueID context_uid, ApEvent execution_fence_event,
-                       ShardManager *manager, bool inline_task);
+                       ShardManager *manager, bool inline_task, 
+                       bool implicit_task = false);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:
@@ -2231,9 +2237,9 @@ namespace Legion {
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor);
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true);
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -2349,6 +2355,10 @@ namespace Legion {
       RtBarrier get_next_refinement_barrier(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
+      RtBarrier get_next_deletion_ready_barrier(void);
+      RtBarrier get_next_deletion_mapping_barrier(void);
+      RtBarrier get_next_deletion_execution_barrier(void);
+      RtBarrier get_next_detach_resource_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);
@@ -2454,7 +2464,8 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier inline_mapping_barrier;
-      RtBarrier external_resource_barrier;
+      RtBarrier attach_resource_barrier;
+      RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
@@ -3016,9 +3027,9 @@ namespace Legion {
       virtual void register_new_internal_operation(InternalOp *op);
       virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
-      virtual ApEvent add_to_dependence_queue(Operation *op, 
-                                              bool unordered = false,
-                                              bool outermost = true);
+      virtual bool add_to_dependence_queue(Operation *op, 
+                                           bool unordered = false,
+                                           bool outermost = true);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);

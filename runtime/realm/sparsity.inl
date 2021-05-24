@@ -53,6 +53,25 @@ namespace Realm {
     return id != 0;
   }
 
+  template <int N, typename T>
+  REALM_PUBLIC_API
+  inline std::ostream& operator<<(std::ostream& os, SparsityMap<N,T> s)
+  {
+    return os << std::hex << s.id << std::dec;
+  }
+
+  template <int N, typename T>
+  REALM_PUBLIC_API
+  inline std::ostream& operator<<(std::ostream& os, const SparsityMapEntry<N,T>& entry)
+  {
+    os << entry.bounds;
+    if(entry.sparsity.id)
+      os << ",sparsity=" << std::hex << entry.sparsity.id << std::dec;
+    if(entry.bitmap)
+      os << ",bitmap=" << entry.bitmap;
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -61,22 +80,25 @@ namespace Realm {
   template <int N, typename T>
   inline bool SparsityMapPublicImpl<N,T>::is_valid(bool precise /*= true*/)
   {
-    return (precise ? entries_valid : approx_valid);
+    return (precise ? entries_valid.load_acquire() :
+                      approx_valid.load_acquire());
   }
 
   template <int N, typename T>
   inline const std::vector<SparsityMapEntry<N,T> >& SparsityMapPublicImpl<N,T>::get_entries(void)
   {
-    REALM_ASSERT(entries_valid,
-		 "get_entries called on sparsity map without valid data");
+    if(!entries_valid.load_acquire())
+      REALM_ASSERT(0,
+                   "get_entries called on sparsity map without valid data");
     return entries;
   }
     
   template <int N, typename T>
   inline const std::vector<Rect<N,T> >& SparsityMapPublicImpl<N,T>::get_approx_rects(void)
   {
-    REALM_ASSERT(approx_valid,
-		 "get_approx_rects called on sparsity map without valid data");
+    if(!approx_valid.load_acquire())
+      REALM_ASSERT(0,
+                   "get_approx_rects called on sparsity map without valid data");
     return approx_rects;
   }
 

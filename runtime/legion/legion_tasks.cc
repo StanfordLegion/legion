@@ -1674,7 +1674,8 @@ namespace Legion {
           {
             std::vector<LogicalRegion> regions_to_check(1, 
                                 regions[it->first].region);
-            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+            PhysicalManager *phy = manager->as_physical_manager();
+            if (!phy->meets_regions(regions_to_check,true/*tight*/))
             {
               conflict_constraint = &constraints->specialized_constraint;
               break;
@@ -3142,8 +3143,7 @@ namespace Legion {
           std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
-            PhysicalManager *manager = 
-              result[idx2].get_manager()->as_instance_manager();
+            PhysicalManager *manager = result[idx2].get_physical_manager();
             if (!manager->meets_regions(regions_to_check))
               // Doesn't satisfy the region requirement
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3192,7 +3192,7 @@ namespace Legion {
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
-              PhysicalManager *manager = result[idx2].get_instance_manager();
+              PhysicalManager *manager = result[idx2].get_physical_manager();
               if (!manager->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -3218,7 +3218,7 @@ namespace Legion {
           else
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
-              if (!result[idx2].get_manager()->is_instance_manager())
+              if (result[idx2].get_manager()->is_reduction_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper selected illegal "
@@ -3500,8 +3500,8 @@ namespace Legion {
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, unique_op_id,
-          ApEvent::NO_AP_EVENT);
+          parent_req_indexes, virtual_mapped, unique_op_id,ApEvent::NO_AP_EVENT,
+          false/*remote*/, false/*inline*/, true/*implicit*/);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
@@ -3595,11 +3595,12 @@ namespace Legion {
         // here if we're going to record it
         if (!futures.empty())
           output.future_locations = future_memories;
+        const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
-          remote_trace_recorder->record_mapper_output(this, output,
+          remote_trace_recorder->record_mapper_output(tlid, output,
               physical_instances, map_applied_conditions);
         else
-          tpl->record_mapper_output(this, output, 
+          tpl->record_mapper_output(tlid, output, 
               physical_instances, map_applied_conditions);
       }
     }
@@ -4292,8 +4293,8 @@ namespace Legion {
                                         regions[idx].region);
           for (unsigned check_idx = 0; check_idx < result.size(); check_idx++)
           {
-            if (!result[check_idx].get_manager()->meets_regions(
-                                                      regions_to_check))
+            PhysicalManager *manager = result[check_idx].get_physical_manager();
+            if (!manager->meets_regions(regions_to_check))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
                             "'postmap_task' on mapper %s. Mapper specified an "
@@ -5706,7 +5707,7 @@ namespace Legion {
         local_function = true;
       }
       // Get a future from the parent context to use as the result
-      result = Future(new FutureImpl(runtime, true/*register*/,
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements(); 
@@ -7658,7 +7659,8 @@ namespace Legion {
       ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, unique_op_id,
-          execution_fence_event, shard_manager, false/*inline task*/);
+          execution_fence_event, shard_manager,
+          false/*inline task*/, true/*implicit*/);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       repl_ctx->configure_context(mapper, task_priority);
@@ -8310,7 +8312,7 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      reduction_future = Future(new FutureImpl(runtime,
+      reduction_future = Future(new FutureImpl(parent_ctx, runtime,
             true/*register*/, runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements();
@@ -8636,6 +8638,23 @@ namespace Legion {
       assert(idx < privilege_paths.size());
 #endif
       return privilege_paths[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do a quick test for empty index space launches
+      if (launch_space->is_empty())
+      {
+        // Clean up this task execution if there are no points
+        complete_mapping();
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
+      }
+      else
+        Operation::trigger_ready();
     }
 
     //--------------------------------------------------------------------------
@@ -9056,7 +9075,7 @@ namespace Legion {
                 check_idx < chosen_instances.size(); check_idx++)
           {
             PhysicalManager *manager = 
-              chosen_instances[check_idx].get_manager()->as_instance_manager();
+              chosen_instances[check_idx].get_physical_manager();
             if (!manager->meets_regions(regions_to_check))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
@@ -9824,6 +9843,10 @@ namespace Legion {
         assert(!serdez_redop_targets.empty());
 #endif
         reduction_instances.reserve(serdez_redop_targets.size());
+        // Make a wrapper future instance for the serdez buffer for copies
+        FutureInstance src_inst(serdez_redop_state, serdez_redop_state_size,
+            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT, runtime,
+            false/*eager*/, true/*external*/, false/*own allocation*/);
         for (std::vector<Memory>::const_iterator it =
               serdez_redop_targets.begin(); it !=
               serdez_redop_targets.end(); it++)
@@ -9832,6 +9855,9 @@ namespace Legion {
           reduction_instances.push_back(
               manager->create_future_instance(this, unique_op_id,
                 completion_event, serdez_redop_state_size, false/*eager*/));
+          ApEvent done = reduction_instances.back()->copy_from(&src_inst, this);
+          if (done.exists())
+            complete_effects.insert(done);
         }
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen

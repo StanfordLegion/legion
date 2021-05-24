@@ -1,4 +1,4 @@
--- Copyright 2021 Stanford University
+-- Copyright 2020 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,17 +12,19 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_dynamic_cast3.rg:26: type mismatch in dynamic_cast: expected a pointer to int32, got float
---   var y = dynamic_cast(ptr(int, r), x)
---                      ^
-
 import "regent"
 
-task f()
-  var r = region(ispace(ptr, 5), int)
-  var s = region(ispace(ptr, 5), float)
-  var x = dynamic_cast(ptr(float, s), 0)
-  var y = dynamic_cast(ptr(int, r), x)
+task main()
+  -- Case 1. unstructured partitioned by 3D
+  var r = region(ispace(ptr, 10), int)
+  var p = partition(equal, r, ispace(int3d, {5, 5, 5}))
+
+  -- Case 2. 1D partitioned by 3D
+  var s = region(ispace(int1d, 10), int)
+  var q = partition(equal, s, ispace(int3d, {5, 5, 5}))
+
+  -- Case 3. 2D partitioned by 3D
+  var t = region(ispace(int2d, {4, 4}), int)
+  var u = partition(equal, s, ispace(int3d, {5, 5, 5}))
 end
-f:compile()
+regentlib.start(main)

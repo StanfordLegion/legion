@@ -2066,25 +2066,25 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       if not (terralib.types.istype(bound) and
               (bound == std.wild_type or std.is_ispace(bound) or std.is_region(bound)))
       then
-        --report.error(nil, tostring(self.index_type) ..
-        --            " expected an ispace or region as argument " ..
-        --            tostring(i+1) .. ", got " .. tostring(bound))
         return nil, tostring(self.index_type) ..
                     " expected an ispace or region as argument " ..
                     tostring(i+1) .. ", got " .. tostring(bound)
       end
-      if std.is_region(bound) and
-        not (std.type_eq(bound.fspace_type, self.points_to_type) or
-             (self.points_to_type:isvector() and
-              std.type_eq(bound.fspace_type, self.points_to_type.type)) or
-             std.is_unpack_result(self.points_to_type))
-      then
-        --report.error(nil, tostring(self.index_type) .. " expected region(" ..
-        --            tostring(self.points_to_type) .. ") as argument " ..
-        --            tostring(i+1) .. ", got " .. tostring(bound))
-        return nil, tostring(self.index_type) .. " expected region(" ..
-                    tostring(self.points_to_type) .. ") as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound)
+      if std.is_region(bound) then
+        if not std.type_eq(bound:ispace().index_type, self.index_type) or
+          not (std.type_eq(bound:fspace(), self.points_to_type) or
+                 (self.points_to_type:isvector() and
+                    std.type_eq(bound:fspace(), self.points_to_type.type)) or
+                 std.is_unpack_result(self.points_to_type))
+        then
+          local index_message = ""
+          if not std.type_eq(self.index_type, std.ptr) then
+            index_message = tostring(self.index_type) .. ", "
+          end
+          return nil, tostring(self.index_type) .. " expected region(" ..
+                      index_message .. tostring(self.points_to_type) .. ") as argument " ..
+                      tostring(i+1) .. ", got " .. tostring(bound)
+        end
       end
       if std.is_ispace(bound) then is_ispace = true end
       if std.is_region(bound) then is_region = true end

@@ -213,7 +213,7 @@ namespace Realm {
 
     // in the common case, we won't need to add levels to the tree - grab the root (no lock)
     // and see if it covers the range that includes our index
-    intptr_t rlval = root_and_level.load();
+    intptr_t rlval = root_and_level.load_acquire();
     NodeBase *n = extract_root(rlval);
     int n_level = extract_level(rlval);
 #ifdef DEBUG_REALM
@@ -333,35 +333,59 @@ namespace Realm {
 
     // if the free list is empty, we can fill it up by referencing the next entry to be allocated -
     // this uses the existing dynamic-filling code to avoid race conditions
-    while(!first_free) {
+    // we are the only popper, but we need to use cmpxchg's to play nice
+    //  with pushers that don't take the lock
+    while(true) {
+      ET *old_first = first_free.load_acquire();
+
+      while(old_first) {
+        // look ahead one in the list (we have exclusive access to anything
+        //  already on the list) and try to swap that in place of the old
+        //  head
+        ET *new_first = old_first->next_free;
+        if(first_free.compare_exchange(old_first, new_first)) {
+          typename DynamicTable<ALLOCATOR>::ET *entry = old_first;
+          lock.unlock();
+          entry->next_free = 0;
+          return entry;
+        } else {
+          // somebody pushed onto the list while were popping - try again
+          //  without releasing the lock
+          continue;
+        }
+      }
+
+      // list appears to be empty - drop the lock and do a lookup that has
+      //  the likely side-effect of pushing a bunch of new entries onto
+      //  the free list
       IT to_lookup = next_alloc;
       next_alloc += ((IT)1) << ALLOCATOR::LEAF_BITS; // do this before letting go of lock
       lock.unlock();
-#ifndef NDEBUG
       typename DynamicTable<ALLOCATOR>::ET *dummy =
-#endif
         table.lookup_entry(to_lookup, owner, this);
       assert(dummy != 0);
-      // can't actually use dummy because we let go of lock - retake lock and hopefully find non-empty
-      //  list next time
+      // can't actually use dummy because we let go of lock - retake lock
+      //  and hopefully find non-empty list next time
+      (void)dummy;
       lock.lock();
     }
-
-    typename DynamicTable<ALLOCATOR>::ET *entry = first_free;
-    first_free = entry->next_free;
-    lock.unlock();
-
-    return entry;
   }
 
   template <typename ALLOCATOR>
   void DynamicTableFreeList<ALLOCATOR>::free_entry(ET *entry)
   {
-    // just stick ourselves on front of free list
-    lock.lock();
-    entry->next_free = first_free;
-    first_free = entry;
-    lock.unlock();
+#ifdef DEBUG_REALM
+    assert(entry->next_free == 0);
+#endif
+
+    // no need for lock - use compare and swap to push item onto front of
+    //  free list (no ABA problem because the popper is mutex'd)
+    ET *old_free = first_free.load();
+    while(true) {
+      entry->next_free = old_free;
+      if(first_free.compare_exchange(old_free, entry))
+        return;
+    }
   }
 
   // allocates a range of IDs that can be given to a remote node for remote allocation

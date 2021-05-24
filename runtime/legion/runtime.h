@@ -237,12 +237,12 @@ namespace Legion {
         bool eager;
       };
     public:
-      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, ApEvent complete,
+      FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
+                 DistributedID did, AddressSpaceID owner_space,ApEvent complete,
                  Operation *op = NULL, bool compute_coordinates = true);
-      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, ApEvent complete, 
-                 Operation *op, GenerationID gen,
+      FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
+                 DistributedID did, AddressSpaceID owner_space,
+                 ApEvent complete, Operation *op, GenerationID gen,
 #ifdef LEGION_SPY
                  UniqueID op_uid,
 #endif
@@ -264,6 +264,11 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false, 
                              const char *warning_string = NULL);
+      PhysicalInstance get_instance(Memory::Kind kind,
+                             size_t extent_in_bytes, bool check_extent,
+                             bool silence_warnings, const char *warning_string);
+      void report_incompatible_accessor(const char *accessor_kind,
+                                        PhysicalInstance instance);
       bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,
@@ -327,7 +332,8 @@ namespace Legion {
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
                         UniqueID op_uid, bool eager, bool need_lock = true,
-                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT);
+                        ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
+                        bool create_instance = false);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             const bool need_lock);
@@ -355,6 +361,7 @@ namespace Legion {
       static void handle_callback(const void *args);
       static void handle_release(const void *args);
     public:
+      TaskContext *const context;
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
@@ -3705,7 +3712,7 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did,
+      FutureImpl* find_or_create_future(DistributedID did, UniqueID uid,
                                         ReferenceMutator *mutator,
                       std::vector<std::pair<size_t,DomainPoint> > &coordinates,
                                         Operation *op = NULL,
@@ -3937,7 +3944,8 @@ namespace Legion {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(ApEvent complete, Operation *op = NULL);
+      Future help_create_future(TaskContext *ctx, ApEvent complete,
+                                Operation *op = NULL);
       bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:

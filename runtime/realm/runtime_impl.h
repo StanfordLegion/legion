@@ -89,18 +89,26 @@ namespace Realm {
 	  //leaf->elems[i].init(ID(ET::ID_TYPE, owner, first_index + i).convert<typeof(leaf->elems[0].me)>(), owner);
 
 	if(free_list) {
-	  // stitch all the new elements into the free list
-	  free_list->lock.lock();
+	  // stitch all the new elements into the free list - we can do this
+          //  with a single cmpxchg if we link up all of our new entries
+          //  first
 
-	  for(IT i = 0; i <= last_ofs; i++)
-	    leaf->elems[i].next_free = ((i < last_ofs) ? 
-					  &(leaf->elems[i+1]) :
-					  free_list->first_free);
+          // special case - if the first_index == 0, don't actually enqueue
+          //  our first element, which would be global index 0
+          IT first_ofs = ((first_index > 0) ? 0 : 1);
+          ET *new_head = &leaf->elems[first_ofs];
+          ET **tailp = &(leaf->elems[last_ofs].next_free);
 
-	  free_list->first_free = &(leaf->elems[first_index ? 0 : 1]);
+          for(IT i = first_ofs; i < last_ofs; i++)
+            leaf->elems[i].next_free = &leaf->elems[i+1];
 
-	  free_list->lock.unlock();
-	}
+          ET *old_head = free_list->first_free.load_acquire();
+          while(true) {
+            *tailp = old_head;
+            if(free_list->first_free.compare_exchange(old_head, new_head))
+              break;
+          }
+        }
 
 	return leaf;
       }

@@ -1361,7 +1361,7 @@ namespace Legion {
           if (overlap_volume == user_volume)
           {
             // Check for the cases where we dominated perfectly
-            if (overlap_volume == it->first->view_expr->get_volume())
+            if (overlap_volume == it->first->view_volume)
             {
 #ifdef ENABLE_VIEW_REPLICATION
               PhysicalUser *dominate_user = new PhysicalUser(usage,
@@ -3836,9 +3836,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(manager->is_instance_manager());
+      assert(manager->is_physical_manager());
 #endif
-      PhysicalManager *inst_manager = manager->as_instance_manager();
+      PhysicalManager *inst_manager = manager->as_physical_manager();
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -4552,7 +4552,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < local_insts.size(); idx++)
       {
         const InstanceRef &inst = local_insts[idx];
-        PhysicalManager *manager = inst.get_instance_manager();
+        PhysicalManager *manager = inst.get_physical_manager();
         std::pair<std::set<PhysicalManager*>::iterator,bool> result = 
           local_instances.insert(manager);
         if (result.second)

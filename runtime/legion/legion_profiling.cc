@@ -1831,7 +1831,7 @@ namespace Legion {
       // Don't increment here, we'll increment on the remote side since we
       // that is where we know the profiler is going to handle the results
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
-      info.id = LG_MESSAGE_ID + k;
+      info.id = LG_MESSAGE_ID + (int)k;
       info.op_id = implicit_provenance;
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);

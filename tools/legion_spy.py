@@ -2871,6 +2871,9 @@ class IndexPartition(object):
     def set_disjoint(self, disjoint):
         self.disjoint = disjoint
 
+    def set_complete(self, complete):
+        self.complete = complete
+
     def set_name(self, name):
         self.name = name
 
@@ -2900,28 +2903,45 @@ class IndexPartition(object):
             # Recurse down the tree too
             child.check_partition_properties()
         # Check disjointness
-        if self.disjoint:
-            previous = PointSet()
-            for child in itervalues(self.children):
-                child_shape = child.get_point_set()
-                if not (child_shape & previous).empty():
-                    print(('WARNING: %s was logged disjoint '+
+        # We always compute disjointness and fill it in if
+        # it wasnt' computed previously
+        previous = PointSet()
+        aliased = False
+        for child in itervalues(self.children):
+            child_shape = child.get_point_set()
+            if not (child_shape & previous).empty():
+                aliased = True
+                if self.disjoint:
+                    print(('ERROR: %s was labelled disjoint '+
                             'but there are overlapping children. This '+
                             'is definitely an application bug.') % self)
-                    if self.state.assert_on_warning:
+                    if self.state.assert_on_error:
                         assert False
-                    break
-                previous |= child_shape
-        if self.complete:
+                break
+            previous |= child_shape
+        if self.disjoint is not None:
+            if not self.disjoint and not aliased:
+                print(('WARNING: %s was labelled aliased '+
+                        'but there are no overlapping children. This '+
+                        'could lead to a performance bug.') % self)
+        else:
+            self.disjoint = not aliased
+        if self.complete is not None:
             total = PointSet()
             for child in itervalues(self.children):
                 total |= child.get_point_set()
-            if len(total) != len(self.parent.get_point_set()):
-                print(('WARNING: %s was logged complete '+
-                        'but there are missing points. This '+
-                        'is definitely an application bug.') % self)
-                if self.state.assert_on_warning:
-                    assert False
+            if self.complete:
+                if len(total) != len(self.parent.get_point_set()):
+                    print(('ERROR: %s was labelled complete '+
+                            'but there are missing points. This '+
+                            'is definitely an application bug.') % self)
+                    if self.state.assert_on_error:
+                        assert False
+            else:
+                if len(total) == len(self.parent.get_point_set()):
+                    print(('WARNING: %s was labelled incomplete '+
+                            'but actually covers all points. This '+
+                            'could lead to a performance bug.') % self)
 
     def update_index_sets(self, index_sets, done, total_spaces):
         for child in itervalues(self.children):
@@ -5703,7 +5723,7 @@ class Operation(object):
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
-                 'intra_space_dependences', 'merged', 'replayed']
+                 'intra_space_dependences', 'merged', 'replayed', 'restricted']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5772,6 +5792,8 @@ class Operation(object):
         self.merged = False
         # Check if this operation was physical replayed
         self.replayed = False
+        # For attach ops only - whether we should add a restriction
+        self.restricted = False
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -7398,7 +7420,7 @@ class Operation(object):
                 else:
                     copy = self.find_or_create_indirection_copy(src_field,
                             src_inst, src_req, dst_field, dst_inst, dst_req,
-                            idx_field, idx_inst, idx_req, None, None, None, copy_redop)
+                            None, None, None, idx_field, idx_inst, idx_req, copy_redop)
                 local_copies.add(copy)
                 if self.index_owner is not None and self.index_owner.collective_dst:
                     global_copies = self.index_owner.find_collective_copies(copy_idx,
@@ -7411,7 +7433,7 @@ class Operation(object):
                         src_depth, src_field, src_req, src_inst, src_versions):
                     return False
                 if not dst_req.logical_node.perform_indirect_copy_verification(self,
-                        copy_redop, perform_checks, global_copies, dst_point,
+                        copy_redop, perform_checks, global_copies, dst_points,
                         dst_depth, dst_field, dst_req, dst_inst, dst_versions):
                     return False
             for copy in local_copies:
@@ -7766,7 +7788,8 @@ class Operation(object):
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
             # Add any restrictions for different kinds of ops
-            if self.kind == RELEASE_OP_KIND or self.kind == ATTACH_OP_KIND:
+            if self.kind == RELEASE_OP_KIND or \
+                    (self.kind == ATTACH_OP_KIND and self.restricted):
                 for index,req in iteritems(self.reqs):
                     if not self.add_restriction(index, req, perform_checks):
                         return False
@@ -10806,8 +10829,8 @@ top_index_pat            = re.compile(
 index_name_pat           = re.compile(
     prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_part_pat           = re.compile(
-    prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) "+
-           "(?P<color>[0-9]+)")
+    prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-2]) "+
+           "(?P<complete>[0-2]) (?P<color>[0-9]+)")
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>.+)")
 index_subspace_pat       = re.compile(
@@ -10885,7 +10908,7 @@ creation_pat             = re.compile(
 deletion_pat             = re.compile(
     prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 attach_pat               = re.compile(
-    prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<restriction>[0-1])")
 detach_pat               = re.compile(
     prefix+"Detach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 dynamic_collective_pat   = re.compile(
@@ -11604,6 +11627,7 @@ def parse_legion_spy_line(line, state):
         op.set_name("Attach Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
+        op.restricted = True if int(m.group('restriction')) == 1 else False
         return True
     m = detach_pat.match(line)
     if m is not None:
@@ -11781,7 +11805,12 @@ def parse_legion_spy_line(line, state):
         color= Point(1)
         color.vals[0] = int(m.group('color'))
         part.set_parent(parent, color)
-        part.set_disjoint(True if int(m.group('disjoint')) == 1 else False)
+        disjoint = int(m.group('disjoint'))
+        if disjoint > 0:
+            part.set_disjoint(True if disjoint == 2 else False)
+        complete = int(m.group('complete'))
+        if complete > 0:
+            part.set_complete(True if complete == 2 else False)
         return True
     m = index_part_name_pat.match(line)
     if m is not None:

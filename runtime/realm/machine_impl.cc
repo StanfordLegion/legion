@@ -429,8 +429,7 @@ namespace Realm {
   }
 #endif
 
-    void MachineImpl::parse_node_announce_data(int node_id, unsigned num_procs,
-					       unsigned num_memories, unsigned num_ib_memories,
+    void MachineImpl::parse_node_announce_data(int node_id,
 					       const void *args, size_t arglen,
 					       bool remote)
     {
@@ -441,15 +440,12 @@ namespace Realm {
 
       Serialization::FixedBufferDeserializer fbd(args, arglen);
       bool ok = true;
-      while(ok) {
+      while(ok && (fbd.bytes_left() > 0)) {
 	NodeAnnounceTag tag;
 	if(!(fbd >> tag)) {
 	  log_annc.fatal() << "unexpected end of input";
 	  assert(0);
 	}
-
-	if(tag == NODE_ANNOUNCE_DONE)
-	  break;
 
 	switch(tag) {
 	case NODE_ANNOUNCE_PROC:
@@ -463,11 +459,12 @@ namespace Realm {
 		  (fbd >> num_cores));
 	    if(ok) {
 	      assert(NodeID(ID(p).proc_owner_node()) == node_id);
-	      assert(ID(p).proc_proc_idx() < num_procs);
 	      log_annc.debug() << "adding proc " << p << " (kind = " << kind
 			       << " num_cores = " << num_cores << ")";
 	      if(remote) {
 		RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
+                if(n.processors.size() <= ID(p).proc_proc_idx())
+                  n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
 		n.processors[ID(p).proc_proc_idx()] = proc;
 	      }
 	    }
@@ -490,7 +487,6 @@ namespace Realm {
 	      ok = ok && (fbd >> rdma_info);
 	    if(ok) {
 	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
-	      assert(ID(m).memory_mem_idx() < num_memories);
 	      log_annc.debug() << "adding memory " << m << " (kind = " << kind
 			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
@@ -503,6 +499,8 @@ namespace Realm {
 		} else {
 		  mem = new RemoteMemory(m, size, kind);
 		}
+                if(n.memories.size() >= ID(m).memory_mem_idx())
+                  n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
 		n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
@@ -578,7 +576,6 @@ namespace Realm {
 	      ok = ok && (fbd >> rdma_info);
 	    if(ok) {
 	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
-	      assert(ID(m).memory_mem_idx() < num_ib_memories);
 	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
 			       << ", size = " << size << ", has_rdma = " << has_rdma_info << ")";
 	      if(remote) {
@@ -591,6 +588,9 @@ namespace Realm {
 		} else {
 		  ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
 		}
+
+                if(n.ib_memories.size() >= ID(m).memory_mem_idx())
+                  n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
 		n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
 	      }
 	    }
@@ -1741,7 +1741,7 @@ namespace Realm {
           is_valid = true;
           switch (q) {
           case QUERY_FIRST:
-            pval = (*clist)[0];
+            pval = clist->empty() ? Processor::NO_PROC : (*clist)[0];
             break;
           case QUERY_RANDOM:
             pval =  (*clist)[lrand48() % clist->size()];
@@ -2574,7 +2574,7 @@ namespace Realm {
           is_valid = true;
           switch (q) {
           case QUERY_FIRST:
-            mval = (*clist)[0];
+            mval = clist->empty() ? Memory::NO_MEMORY : (*clist)[0];
             break;
           case QUERY_RANDOM:
             mval =  (*clist)[lrand48() % clist->size()];
@@ -3057,40 +3057,44 @@ namespace Realm {
   //
 
   static atomic<int> announcements_received(0);
+  static atomic<int> announce_fragments_expected(0);
 
   /*static*/ void NodeAnnounceMessage::handle_message(NodeID sender, const NodeAnnounceMessage &args,
 						      const void *data, size_t datalen)
 
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    log_annc.info("%d: received announce from %d (%d procs, %d memories)\n",
-		  Network::my_node_id,
-		  sender,
-		  args.num_procs,
-		  args.num_memories);
+    log_annc.info() << "received fragment from " << sender
+                    << ": num_fragments=" << args.num_fragments;
     
-    Node *n = &(get_runtime()->nodes[sender]);
-    n->processors.resize(args.num_procs);
-    n->memories.resize(args.num_memories);
-    n->ib_memories.resize(args.num_ib_memories);
-
-    // do the parsing of this data inside a mutex because it touches common
-    //  data structures
-    {
-      get_machine()->parse_node_announce_data(sender, args.num_procs,
-					      args.num_memories, args.num_ib_memories,
-					      data, datalen, true);
-
-      announcements_received.fetch_add(1);
+    if(args.num_fragments > 0) {
+      // update the remaining fragment count and then mark that we've got
+      //  this sender's contribution
+      announce_fragments_expected.fetch_add(args.num_fragments);
+      announcements_received.fetch_add_acqrel(1);
     }
+
+    get_machine()->parse_node_announce_data(sender,
+                                            data, datalen, true);
+
+    // this fragment has been handled
+    announce_fragments_expected.fetch_sub_acqrel(1);
   }
 
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
   {
-    // wait until we hear from everyone else?
+    // two steps:
+
+    // 1) wait until we've got the fragment-count-bearing message from every
+    //  other node
     while(announcements_received.load() < Network::max_node_id) {
       Thread::yield();
       //do_some_polling();
+    }
+
+    // 2) then wait for the expected fragment count to drop to zero
+    while(announce_fragments_expected.load_acquire() > 0) {
+      Thread::yield();
     }
 
     log_annc.info("node %d has received all of its announcements", Network::my_node_id);

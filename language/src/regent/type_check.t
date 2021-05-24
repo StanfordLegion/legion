@@ -1361,7 +1361,7 @@ end
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer)
-  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer() or pointer_type == niltype) then
     report.error(node, "isnull requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Isnull {
@@ -1400,7 +1400,7 @@ end
 
 function type_check.expr_null(cx, node)
   local pointer_type = node.pointer_type
-  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer() or pointer_type == niltype) then
     report.error(node, "null requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Null {
@@ -1415,20 +1415,31 @@ function type_check.expr_dynamic_cast(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not (std.is_bounded_type(node.expr_type) or std.is_partition(node.expr_type)) then
+  if std.is_bounded_type(node.expr_type) then
+    if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
+      report.error(node, "type mismatch in dynamic_cast: expected " .. tostring(node.expr_type.index_type) .. ", got " .. tostring(value_type))
+    end
+
+    if not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
+      report.error(node, "type mismatch in dynamic_cast: expected a pointer to " .. tostring(node.expr_type.points_to_type) .. ", got " .. tostring(value_type.points_to_type))
+    end
+
+    local ok, message = node.expr_type:bounds() -- check bounds validity
+    if not ok then
+      report.error(node, message)
+    end
+
+  elseif std.is_partition(node.expr_type) then
+    if not std.is_partition(value_type) then
+      report.error(node, "type mismatch in dynamic_cast: expected a partition, got " .. tostring(value_type))
+    end
+
+    if not (std.type_eq(node.expr_type:colors(), value_type:colors()) and
+            node.expr_type.parent_region_symbol == value_type.parent_region_symbol) then
+      report.error(node, "incompatible partitions for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
+    end
+  else
     report.error(node, "dynamic_cast requires ptr type or partition type as argument 1, got " .. tostring(node.expr_type))
-  end
-  if not (std.validate_implicit_cast(value_type, node.expr_type.index_type) or
-          std.is_partition(value_type)) then
-    report.error(node, "dynamic_cast requires ptr or partition as argument 2, got " .. tostring(value_type))
-  end
-  if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
-    report.error(node, "incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
-  end
-  if std.is_partition(value_type) and
-     not (std.type_eq(node.expr_type:colors(), value_type:colors()) and
-          node.expr_type.parent_region_symbol == value_type.parent_region_symbol) then
-    report.error(node, "incompatible partitions for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
   end
 
   return ast.typed.expr.DynamicCast {
@@ -4162,6 +4173,12 @@ function type_check.stat_var(cx, node)
     end
     if not value and std.type_supports_constraints(var_type) then
       report.error(node, "variable of type " .. tostring(var_type) .. " must be initialized")
+    end
+    if std.is_bounded_type(var_type) then
+      local ok, message = var_type:bounds() -- check bounds validity
+      if not ok then
+        report.error(node, message)
+      end
     end
   else
     if not value then

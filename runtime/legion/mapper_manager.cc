@@ -1898,11 +1898,13 @@ namespace Legion {
               conflicts = true;
               break;
             }
-            if (constraints->specialized_constraint.is_exact())
+            if (constraints->specialized_constraint.is_exact() &&
+                !constraints->specialized_constraint.is_virtual())
             {
               std::vector<LogicalRegion> regions_to_check(1,
                         task.regions[lay_it->first].region);
-              if (!manager->meets_regions(regions_to_check, true/*exact*/))
+              PhysicalManager *phy = manager->as_physical_manager();
+              if (!phy->meets_regions(regions_to_check, true/*exact*/))
               {
                 conflicts = true;
                 break;
@@ -1953,11 +1955,13 @@ namespace Legion {
             InstanceManager *manager = it->impl;
             if (manager->conflicts(constraints, DomainPoint(), NULL))
               it = instances.erase(it);
-            else if (constraints->specialized_constraint.is_exact())
+            else if (constraints->specialized_constraint.is_exact() && 
+                    !constraints->specialized_constraint.is_virtual())
             {
               std::vector<LogicalRegion> regions_to_check(1,
                         task.regions[lay_it->first].region);
-              if (!manager->meets_regions(regions_to_check,true/*tight*/))
+              PhysicalManager *phy = manager->as_physical_manager();
+              if (!phy->meets_regions(regions_to_check,true/*tight*/))
                 it = instances.erase(it);
               else
                 it++;
@@ -2010,11 +2014,13 @@ namespace Legion {
           InstanceManager *manager = it->impl;
           if (manager->conflicts(constraints, DomainPoint(), NULL))
             it = instances.erase(it);
-          else if (constraints->specialized_constraint.is_exact())
+          else if (constraints->specialized_constraint.is_exact() &&
+                  !constraints->specialized_constraint.is_virtual())
           {
             std::vector<LogicalRegion> regions_to_check(1,
                       task.regions[lay_it->first].region);
-            if (!manager->meets_regions(regions_to_check,true/*tight*/))
+            PhysicalManager *phy = manager->as_physical_manager();
+            if (!phy->meets_regions(regions_to_check,true/*tight*/))
               it = instances.erase(it);
             else
               it++;
@@ -2685,7 +2691,7 @@ namespace Legion {
       if (man->is_virtual_manager())
         return;
       pause_mapper_call(ctx);
-      PhysicalManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_physical_manager();
       manager->set_garbage_collection_priority(mapper_id, processor, priority);
       resume_mapper_call(ctx);
     }
@@ -2707,7 +2713,7 @@ namespace Legion {
       // virtual instances are easy
       if (man->is_virtual_manager())
         return true;
-      PhysicalManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_physical_manager();
       // See if we already acquired it
       if (ctx->acquired_instances->find(manager) !=
           ctx->acquired_instances->end())
@@ -2831,7 +2837,7 @@ namespace Legion {
           InstanceManager *manager = instances[idx].impl;
           if (manager->is_virtual_manager())
             continue;
-          if (already_acquired.find(manager->as_instance_manager()) ==
+          if (already_acquired.find(manager->as_physical_manager()) ==
               already_acquired.end())
           {
             if (!filter_acquired_instances)
@@ -2941,7 +2947,7 @@ namespace Legion {
             InstanceManager *manager = current[idx].impl;
             if (manager->is_virtual_manager())
               continue;
-            if (already_acquired.find(manager->as_instance_manager()) ==
+            if (already_acquired.find(manager->as_physical_manager()) ==
                 already_acquired.end())
             {
               if (!filter_acquired_instances)
@@ -2986,7 +2992,7 @@ namespace Legion {
         InstanceManager *man = inst.impl;
         if (man->is_virtual_manager())
           continue;
-        PhysicalManager *manager = man->as_instance_manager();
+        PhysicalManager *manager = man->as_physical_manager();
         if (already_acquired.find(manager) != already_acquired.end())
         {
           if ((to_erase != NULL) && filter_acquired_instances)
@@ -3149,7 +3155,7 @@ namespace Legion {
     {
       if (man->is_virtual_manager())
         return;
-      PhysicalManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_physical_manager();
 #ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
@@ -3170,7 +3176,7 @@ namespace Legion {
     {
       if (man->is_virtual_manager())
         return;
-      PhysicalManager *manager = man->as_instance_manager();
+      PhysicalManager *manager = man->as_physical_manager();
 #ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif

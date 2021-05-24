@@ -985,7 +985,6 @@ namespace Legion {
       virtual Operation* get_operation(void) const = 0;
       virtual Operation::OpKind get_memoizable_kind(void) const = 0;
       // Return a trace local unique ID for this operation
-      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
       virtual TraceLocalID get_trace_local_id(void) const = 0;
       virtual ApEvent compute_sync_precondition(const TraceInfo *in) const = 0;
       virtual void set_effects_postcondition(ApEvent postcondition) = 0;
@@ -1735,8 +1734,8 @@ namespace Legion {
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
-      inline void set_execution_precondition(ApEvent precondition)
-        { execution_precondition = precondition; }
+      void set_deletion_preconditions(ApEvent precondition,
+          const std::map<Operation*,GenerationID> &dependences);
     public:
       void initialize_index_space_deletion(InnerContext *ctx, IndexSpace handle,
                                    std::vector<IndexPartition> &sub_partitions,
@@ -1798,6 +1797,8 @@ namespace Legion {
       LegionVector<VersionInfo>::aligned version_infos;
       std::set<RtEvent> map_applied_conditions;
       std::vector<EquivalenceSet*> to_release;
+      std::map<Operation*,GenerationID> dependences;
+      bool has_preconditions;
     }; 
 
     /**

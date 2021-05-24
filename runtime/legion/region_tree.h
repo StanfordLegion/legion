@@ -1082,10 +1082,10 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
       virtual bool try_add_canonical_reference(void) = 0;
       virtual bool remove_canonical_reference(void) = 0;
-      virtual void add_expression_reference(bool expr_tree = false,
-                                            unsigned cnt = 1) = 0;
-      virtual bool remove_expression_reference(bool expr_tree = false,
-                                               unsigned cnt = 1) = 0;
+      virtual void add_expression_reference(unsigned cnt = 1,
+                                            bool expr_tree = false) = 0;
+      virtual bool remove_expression_reference(unsigned cnt = 1,
+                                               bool expr_tree = false) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
@@ -1155,6 +1155,10 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL,
                            size_t *piece_list_size = NULL) = 0;
+      virtual IndexSpaceExpression* create_layout_expression(
+                           const void *piece_list, size_t piece_list_size) = 0;
+      virtual bool meets_layout_expression(IndexSpaceExpression *expr,
+         bool tight_bounds, const void *piece_list, size_t piece_list_size) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions) = 0;
@@ -1257,6 +1261,15 @@ namespace Legion {
                                bool compact, LayoutConstraintKind *unsat_kind,
                                unsigned *unsat_index, void **piece_list = NULL,
                                size_t *piece_list_size = NULL) const;
+      template<int DIM, typename T>
+      inline IndexSpaceExpression* create_layout_expression_internal(
+                               RegionTreeForest *context,
+                               const Realm::IndexSpace<DIM,T> &space,
+                               const Rect<DIM,T> *rects, size_t num_rects);
+      template<int DIM, typename T>
+      inline bool meets_layout_expression_internal(
+                         IndexSpaceExpression *space_expr, bool tight_bounds,
+                         const Rect<DIM,T> *piece_list, size_t piece_list_size);
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
@@ -1278,7 +1291,7 @@ namespace Legion {
       LocalLock &expr_lock;
     protected:
       std::set<IndexSpaceOperation*> parent_operations;
-      IndexSpaceExpression *canonical;
+      IndexSpaceExpression *volatile canonical;
       size_t volume;
       bool has_volume;
       bool empty, has_empty;
@@ -1291,6 +1304,7 @@ namespace Legion {
         INTERSECT_OP_KIND,
         DIFFERENCE_OP_KIND,
         REMOTE_EXPRESSION_KIND,
+        INSTANCE_EXPRESSION_KIND,
       };
     public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
@@ -1310,10 +1324,10 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(bool expr_tree = false,
-                                            unsigned cnt = 1);
-      virtual bool remove_expression_reference(bool expr_tree = false,
-                                               unsigned cnt = 1);
+      virtual void add_expression_reference(unsigned cnt = 1,
+                                            bool expr_tree = false);
+      virtual bool remove_expression_reference(unsigned cnt = 1,
+                                               bool expr_tree = false);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
@@ -1430,6 +1444,10 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+      virtual IndexSpaceExpression* create_layout_expression(
+                           const void *piece_list, size_t piece_list_size);
+      virtual bool meets_layout_expression(IndexSpaceExpression *expr,
+         bool tight_bounds, const void *piece_list, size_t piece_list_size);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
@@ -1560,6 +1578,25 @@ namespace Legion {
       const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
+    };
+
+    /**
+     * \class InstanceExpression 
+     * This class stores an expression corresponding to the
+     * rectangles that represent a physical instance
+     */
+    template<int DIM, typename T>
+    class InstanceExpression : public IndexSpaceOperationT<DIM,T> {
+    public:
+      InstanceExpression(const Rect<DIM,T> *rects, size_t num_rects,
+                         RegionTreeForest *context);
+      InstanceExpression(const InstanceExpression<DIM,T> &rhs);
+      virtual ~InstanceExpression(void);
+    public:
+      InstanceExpression& operator=(const InstanceExpression &rhs);
+    public:
+      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+      virtual bool remove_operation(RegionTreeForest *forest);
     };
 
     /**
@@ -1872,10 +1909,10 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(bool expr_tree = false, 
-                                            unsigned cnt = 1);
-      virtual bool remove_expression_reference(bool expr_tree = false,
-                                               unsigned cnt = 1);
+      virtual void add_expression_reference(unsigned cnt = 1,
+                                            bool expr_tree = false); 
+      virtual bool remove_expression_reference(unsigned cntx = 1,
+                                               bool expr_tree = false);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
@@ -2383,6 +2420,10 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL, 
                            size_t *piece_list_size = NULL);
+      virtual IndexSpaceExpression* create_layout_expression(
+                           const void *piece_list, size_t piece_list_size);
+      virtual bool meets_layout_expression(IndexSpaceExpression *expr,
+         bool tight_bounds, const void *piece_list, size_t piece_list_size);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
@@ -3552,6 +3593,7 @@ namespace Legion {
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
                                  FieldMask &disjoint_complete_below,
+                                 FieldMask &first_touch_refinement,
                                  FieldMaskSet<RefinementOp> &refinements,
                                  RefinementTracker &refinement_tracker,
                                  std::set<RtEvent> &applied_events,

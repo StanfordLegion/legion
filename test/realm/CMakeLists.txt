@@ -45,6 +45,8 @@ list(APPEND REALM_TESTS
   coverings
   alltoall
   simple_reduce
+  realm_reinit
+  sparse_construct
   )
 
 if(Legion_USE_CUDA)
@@ -78,6 +80,7 @@ set(TESTARGS_event_subscribe   -ll:cpu 4)
 set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
 set(TESTARGS_simple_reduce     -all)
+set(TESTARGS_sparse_construct  -verbose)
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)

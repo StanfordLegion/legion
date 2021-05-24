@@ -44,7 +44,7 @@ struct ArrayReduction {
       ELEM_REDOP::template fold<EXCL>((&rhs1)[i], (&rhs2)[i]);
   }
 
-#ifdef __NVCC__
+#ifdef __CUDACC__
   template <bool EXCL>
   __device__ void apply_cuda(LHS& lhs, const RHS& rhs) const
   {
@@ -85,7 +85,7 @@ protected:
     cpu_apply_nonexcl_fn = &Realm::ReductionKernels::cpu_apply_wrapper<ArrayReduction<ELEM_REDOP>, false>;
     cpu_fold_excl_fn = &Realm::ReductionKernels::cpu_fold_wrapper<ArrayReduction<ELEM_REDOP>, true>;
     cpu_fold_nonexcl_fn = &Realm::ReductionKernels::cpu_fold_wrapper<ArrayReduction<ELEM_REDOP>, false>;
-#if defined(LEGION_USE_CUDA) && defined(__NVCC__)
+#if defined(LEGION_USE_CUDA) && defined(__CUDACC__)
     Realm::Cuda::add_cuda_redop_kernels<ArrayReduction<ELEM_REDOP> >(this);
 #endif
   }

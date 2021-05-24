@@ -289,7 +289,8 @@ namespace Realm {
 
   // construct an index space from a list of points or rects
   template <int N, typename T>
-  inline IndexSpace<N,T>::IndexSpace(const std::vector<Point<N,T> >& points)
+  inline IndexSpace<N,T>::IndexSpace(const std::vector<Point<N,T> >& points,
+                                     bool disjoint /*= false*/)
   {
     if(points.empty()) {
       sparsity.id = 0;
@@ -307,14 +308,16 @@ namespace Realm {
 	// more than one point may need a sparsity mask
 	for(size_t i = 1; i < points.size(); i++)
 	  bounds = bounds.union_bbox(Rect<N,T>(points[i], points[i]));
-	sparsity = SparsityMap<N,T>::construct(points, false /*!always_create*/);
+	sparsity = SparsityMap<N,T>::construct(points, false /*!always_create*/,
+                                               disjoint);
       }
     }
     log_dpops.info() << "construct: " << *this;
   }
 
   template <int N, typename T>
-  inline IndexSpace<N,T>::IndexSpace(const std::vector<Rect<N,T> >& rects)
+  inline IndexSpace<N,T>::IndexSpace(const std::vector<Rect<N,T> >& rects,
+                                     bool disjoint /*= false*/)
   {
     if(rects.empty()) {
       sparsity.id = 0;
@@ -331,7 +334,8 @@ namespace Realm {
 	// more than one rect may need a sparsity mask
 	for(size_t i = 1; i < rects.size(); i++)
 	  bounds = bounds.union_bbox(rects[i]);
-	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/);
+	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/,
+                                               disjoint);
       }
     }
     log_dpops.info() << "construct: " << *this;
@@ -416,21 +420,26 @@ namespace Realm {
 	} else
 
 	// 3) anything else - walk rectangles and count/union those that
-	//   overlap our bounds - if only 1, we can drop the sparsity map
+	//   overlap our bounds - if only 1 or if the volume inside the
+        //   tightened bounds equals the bounds themselves, we can drop
+        //   the sparsity map
 	{
 	  size_t overlap_count = 0;
+          size_t volume_sum = 0;
 	  bool need_sparsity = false;
 	  result = IndexSpace<N,T>::make_empty();
 	  for(size_t i = 0; i < entries.size(); i++) {
 	    Rect<N,T> isect = bounds.intersection(entries[i].bounds);
 	    if(!isect.empty()) {
 	      overlap_count++;
+              volume_sum += isect.volume();
 	      result.bounds = result.bounds.union_bbox(isect);
 	      if(entries[i].sparsity.exists() || (entries[i].bitmap != 0))
 		need_sparsity = true;
 	    }
 	  }
-	  if((overlap_count > 1) || need_sparsity)
+	  if(need_sparsity ||
+             ((overlap_count > 1) && (result.bounds.volume() > volume_sum)))
 	    result.sparsity = sparsity;
 	}
 
