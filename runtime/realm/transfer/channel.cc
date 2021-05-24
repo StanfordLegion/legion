@@ -2421,9 +2421,13 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if our oldest write was ack'd, update progress in case the xd
+	// if our _last_ write was ack'd, update progress in case the xd
 	//  is just waiting for all writes to complete
-	if(inc_amt > 0) update_progress();
+	if(inc_amt > 0) {
+          if(iteration_completed.load_acquire() &&
+             ((offset + inc_amt) == out_port->local_bytes_total))
+            update_progress();
+        }
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // update bytes total if needed (and available)
 	  if(out_port->needs_pbt_update.load() &&
@@ -2520,8 +2524,9 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_remote.add_span(offset, size);
 	log_xd.info() << "next_read: "  << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if we got new room at the current pointer, update progress
-	if(inc_amt > 0) update_progress();
+	// if we got new room at the current pointer (and we're still
+        //  iterating), update progress
+	if((inc_amt > 0) && !iteration_completed.load()) update_progress();
       }
 
       void XferDes::notify_request_read_done(Request* req)
@@ -3871,9 +3876,13 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if our oldest write was ack'd, update progress in case the xd
+	// if our _last_ write was ack'd, update progress in case the xd
 	//  is just waiting for all writes to complete
-	if(inc_amt > 0) update_progress();
+	if(inc_amt > 0) {
+          if(iteration_completed.load_acquire() &&
+             ((offset + inc_amt) == out_port->local_bytes_total))
+            update_progress();
+        }
 	// pre_bytes_write update was handled in the remote AM handler
       }
 
