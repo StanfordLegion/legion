@@ -96,6 +96,8 @@ Processor CircuitMapper::default_policy_select_initial_processor(
   assert(task.index_point.dim == 1);
   coord_t index = task.index_point[0];
 
+  VariantInfo info =
+    default_find_preferred_variant(task, ctx, false/*needs tight*/);
   switch (info.proc_kind)
   {
     case Processor::LOC_PROC:
