@@ -39,6 +39,8 @@ public:
   CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
                 std::vector<Processor>* procs_list);
+  virtual Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
@@ -82,6 +84,35 @@ LogicalRegion CircuitMapper::default_policy_select_instance_region(
                               bool meets_constraints)
 {
   return req.region;
+}
+
+Processor CircuitMapper::default_policy_select_initial_processor(
+                                            MapperContext ctx, const Task &task)
+{
+  if (same_address_space || task.is_index_space || task.index_point.is_null()) {
+    return DefaultMapper::default_policy_select_initial_processor(ctx, task);
+  }
+
+  assert(task.index_point.dim == 1);
+  coord_t index = task.index_point[0];
+
+  switch (info.proc_kind)
+  {
+    case Processor::LOC_PROC:
+      return remote_cpus[index % remote_cpus.size()];
+    case Processor::TOC_PROC:
+      return remote_gpus[index % remote_gpus.size()];
+    case Processor::IO_PROC:
+      return remote_ios[index % remote_ios.size()];
+    case Processor::OMP_PROC:
+      return remote_omps[index % remote_omps.size()];
+    case Processor::PY_PROC:
+      return remote_pys[index % remote_pys.size()];
+    default: // make warnings go away
+      break;
+  }
+
+  assert(false);
 }
 
 void CircuitMapper::default_policy_select_target_processors(
