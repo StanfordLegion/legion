@@ -12344,6 +12344,13 @@ namespace Legion {
       }
       if (!task_local_instances.empty())
         release_task_local_instances(deferred_result_instance);
+      if (!index_launch_spaces.empty())
+      {
+        for (std::map<Domain,IndexSpace>::const_iterator it = 
+              index_launch_spaces.begin(); it != 
+              index_launch_spaces.end(); it++)
+          destroy_index_space(it->second, false/*unordered*/, true/*recurse*/);
+      }
       // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())
       {
