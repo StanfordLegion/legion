@@ -1,4 +1,0 @@
-#cmakedefine INST_N1 @INST_N1@
-#cmakedefine INST_N2 @INST_N2@
-#include "@SRCFILE@_tmpl.cc"
-
