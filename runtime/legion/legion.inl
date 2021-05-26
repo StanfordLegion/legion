@@ -5743,7 +5743,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
@@ -5922,7 +5922,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -5946,7 +5946,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -6093,7 +6094,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
@@ -6113,7 +6114,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
@@ -6261,7 +6263,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -6284,7 +6286,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -9022,7 +9025,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[N];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9055,7 +9058,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -9184,7 +9188,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[N];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9221,7 +9225,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -9339,7 +9344,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[1];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9372,7 +9377,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -9490,7 +9496,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[1];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9526,7 +9532,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
