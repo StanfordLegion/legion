@@ -622,6 +622,11 @@ namespace Legion {
      */
     class MultiTask : public TaskOp {
     public:
+      struct FutureHandles : public Collectable {
+      public:
+        std::map<DomainPoint,DistributedID> handles;
+      };
+    public:
       MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
     protected:
@@ -664,9 +669,9 @@ namespace Legion {
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
-      virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner,
-                                 FutureFunctor *functor, Processor proc) = 0;
+      virtual void handle_future(const DomainPoint &point, UniqueID uid,
+                           const void *result, size_t result_size, bool owner,
+                           FutureFunctor *functor, Processor proc) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -688,6 +693,7 @@ namespace Legion {
       IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
       FutureMap future_map;
+      FutureHandles *future_handles;
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
@@ -989,9 +995,9 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
     public:
-      virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner,
-                                 FutureFunctor *functor, Processor future_proc);
+      virtual void handle_future(const DomainPoint &point, UniqueID uid,
+                           const void *result, size_t result_size, bool owner,
+                           FutureFunctor *functor, Processor future_proc);
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
@@ -1030,6 +1036,8 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
+    protected:
+      void enumerate_futures(const Domain &domain);
     public:
       static void process_slice_mapped(Deserializer &derez,
                                        AddressSpaceID source);
@@ -1132,9 +1140,9 @@ namespace Legion {
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
-      virtual void handle_future(const DomainPoint &point, const void *result,
-                                 size_t result_size, bool owner,
-                                 FutureFunctor *functor, Processor future_proc);
+      virtual void handle_future(const DomainPoint &point, UniqueID uid,
+                            const void *result, size_t result_size, bool owner,
+                            FutureFunctor *functor, Processor future_proc);
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point);

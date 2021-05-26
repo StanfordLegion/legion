@@ -4620,6 +4620,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       activate_task();
       launch_space = NULL;
+      future_handles = NULL;
       internal_space = IndexSpace::NO_SPACE;
       sliced = false;
       redop = 0;
@@ -4645,6 +4646,8 @@ namespace Legion {
       deactivate_task();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      if ((future_handles != NULL) && future_handles->remove_reference())
+        delete future_handles;
       // Remove our reference to the future map
       future_map = FutureMap();
       if (reduction_state != NULL)
@@ -4851,11 +4854,14 @@ namespace Legion {
       DETAILED_PROFILER(runtime, CLONE_MULTI_CALL);
 #ifdef DEBUG_LEGION
       assert(this->launch_space == NULL);
+      assert(this->future_handles == NULL);
 #endif
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);
+      this->future_handles = rhs->future_handles;
+      this->future_handles->add_reference();
       this->internal_space = is;
       this->future_map = rhs->future_map;
       this->must_epoch_task = rhs->must_epoch_task;
@@ -4981,6 +4987,28 @@ namespace Legion {
       rez.serialize(redop);
       if (redop > 0)
         rez.serialize<bool>(deterministic_redop);
+      if (future_handles != NULL)
+      {
+        // Only pack the IDs for our local points
+        IndexSpaceNode *node = runtime->forest->get_node(internal_space);
+        Domain local_domain;
+        node->get_launch_space_domain(local_domain);
+        rez.serialize<size_t>(local_domain.get_volume());
+        const std::map<DomainPoint,DistributedID> &handles =
+          future_handles->handles;
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+        {
+          std::map<DomainPoint,DistributedID>::const_iterator finder = 
+            handles.find(itr.p);
+#ifdef DEBUG_LEGION
+          assert(finder != handles.end());
+#endif
+          rez.serialize(finder->first);
+          rez.serialize(finder->second);
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -5011,6 +5039,23 @@ namespace Legion {
           reduction_op = Runtime::get_reduction_op(redop);
           serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
           initialize_reduction_state();
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(future_handles == NULL);
+#endif
+      size_t num_handles;
+      derez.deserialize(num_handles);
+      if (num_handles > 0)
+      {
+        future_handles = new FutureHandles;
+        future_handles->add_reference();
+        std::map<DomainPoint,DistributedID> &handles = future_handles->handles;
+        for (unsigned idx = 0; idx < num_handles; idx++)
+        {
+          DomainPoint point;
+          derez.deserialize(point);
+          derez.deserialize(handles[point]);
         }
       }
     }
@@ -6526,8 +6571,8 @@ namespace Legion {
                       bool owner, FutureFunctor *functor, Processor future_proc)
     //--------------------------------------------------------------------------
     {
-      slice_owner->handle_future(index_point, res, res_size, owner, 
-                                 functor, future_proc);
+      slice_owner->handle_future(index_point, unique_op_id, res, res_size,
+                                 owner, functor, future_proc);
     }
 
     //--------------------------------------------------------------------------
@@ -7310,7 +7355,28 @@ namespace Legion {
         trigger_children_committed();
       }
       else
+      {
+        // Enumerate the futures in the future map
+        enumerate_futures(index_domain);
         Operation::trigger_ready();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::enumerate_futures(const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_handles == NULL);
+#endif
+      future_handles = new FutureHandles;
+      future_handles->add_reference();
+      std::map<DomainPoint,DistributedID> &handles = future_handles->handles;
+      for (Domain::DomainPointIterator itr(domain); itr; itr++)
+      {
+        Future f = future_map.impl->get_future(itr.p);
+        handles[itr.p] = f.impl->did;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7986,9 +8052,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::handle_future(const DomainPoint &point, const void *result,
-                                  size_t result_size, bool owner, 
-                                  FutureFunctor *functor, Processor future_proc)
+    void IndexTask::handle_future(const DomainPoint &point, UniqueID uid,
+                            const void *result, size_t result_size, bool owner, 
+                            FutureFunctor *functor, Processor future_proc)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_HANDLE_FUTURE);
@@ -8358,7 +8424,7 @@ namespace Legion {
             size_t size;
             derez.deserialize(size);
             const void *ptr = derez.get_current_pointer();
-            handle_future(p, ptr, size, false/*owner*/, 
+            handle_future(p, unique_op_id, ptr, size, false/*owner*/, 
                           NULL/*functor*/, Processor::NO_PROC);
             derez.advance_pointer(size);
           }
@@ -9281,9 +9347,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::handle_future(const DomainPoint &point, const void *result,
-                                  size_t result_size, bool owner, 
-                                  FutureFunctor *functor, Processor future_proc)
+    void SliceTask::handle_future(const DomainPoint &point, UniqueID uid,
+                             const void *result, size_t result_size, bool owner, 
+                             FutureFunctor *functor, Processor future_proc)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_HANDLE_FUTURE_CALL);
@@ -9327,16 +9393,32 @@ namespace Legion {
             fold_reduction_future(result, result_size,owner,false/*exclusive*/);
         }
         else
-          index_owner->handle_future(point, result, result_size, owner,
-                                     functor, future_proc);
+          index_owner->handle_future(point, unique_op_id, result, result_size,
+                                     owner, functor, future_proc);
       }
       else
       {
-        Future f = future_map.impl->get_future(point);
+#ifdef DEBUG_LEGION
+        assert(future_handles != NULL);
+#endif
+        std::map<DomainPoint,DistributedID>::const_iterator finder = 
+          future_handles->handles.find(point);
+#ifdef DEBUG_LEGION
+        assert(finder != future_handles->handles.end());
+#endif
+        LocalReferenceMutator mutator;
+        FutureImpl *impl = 
+          runtime->find_or_create_future(finder->second, uid, &mutator);
         if (functor != NULL)
-          f.impl->set_result(functor, owner, future_proc);
+          impl->set_result(functor, owner, future_proc);
         else
-          f.impl->set_result(result, result_size, owner);
+          impl->set_result(result, result_size, owner);
+        const RtEvent applied = mutator.get_done_event();
+        if (applied.exists() && !applied.has_triggered())
+        {
+          AutoLock o_lock(op_lock);
+          complete_preconditions.insert(applied);
+        }
       }
     }
 
@@ -9403,13 +9485,10 @@ namespace Legion {
       {
         if (regions[idx].handle_type == LEGION_SINGULAR_PROJECTION)
           continue;
-        else 
-        {
-          ProjectionFunction *function = 
-            runtime->find_projection_function(regions[idx].projection);
-          function->project_points(regions[idx], idx, runtime, 
-                                   points, launch_space);
-        }
+        ProjectionFunction *function = 
+          runtime->find_projection_function(regions[idx].projection);
+        function->project_points(regions[idx], idx, runtime, 
+                                 points, launch_space);
       }
       // Update the no access regions
       for (unsigned idx = 0; idx < points.size(); idx++)
