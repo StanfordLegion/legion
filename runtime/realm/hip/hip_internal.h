@@ -395,7 +395,7 @@ namespace Realm {
 				   size_t stack_size);
       void shutdown_background_thread(void);
       
-      void do_work(TimeLimit work_until);
+      bool do_work(TimeLimit work_until);
 
     public:
       void thread_main(void);

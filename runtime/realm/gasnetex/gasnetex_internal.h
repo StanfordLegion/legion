@@ -186,7 +186,7 @@ namespace Realm {
 				 bool overflow_ok);
     void free_outbuf(OutbufMetadata *md);
 
-    virtual void do_work(TimeLimit work_until);
+    virtual bool do_work(TimeLimit work_until);
 
   protected:
     OutbufMetadata *metadatas;
@@ -507,7 +507,7 @@ namespace Realm {
 
     bool has_work_remaining();
 
-    virtual void do_work(TimeLimit work_until);
+    virtual bool do_work(TimeLimit work_until);
 
   protected:
     GASNetEXInternal *internal;
@@ -528,7 +528,7 @@ namespace Realm {
 
     bool has_work_remaining();
 
-    virtual void do_work(TimeLimit work_until);
+    virtual bool do_work(TimeLimit work_until);
 
   protected:
     GASNetEXInternal *internal;
@@ -579,7 +579,7 @@ namespace Realm {
 
     bool has_work_remaining();
 
-    virtual void do_work(TimeLimit work_until);
+    virtual bool do_work(TimeLimit work_until);
 
   protected:
     friend class GASNetEXEvent;

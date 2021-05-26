@@ -2077,7 +2077,7 @@ namespace Realm {
       	make_active();
     }
 
-    void GPUWorker::do_work(TimeLimit work_until)
+    bool GPUWorker::do_work(TimeLimit work_until)
     {
       // pop the first stream off the list and immediately become re-active
       //  if more streams remain
@@ -2116,9 +2116,8 @@ namespace Realm {
         was_empty = active_streams.empty();
         active_streams.push_back(stream);
       }
-      // note that this can happen even if we called make_active above!
-      if(was_empty)
-        make_active();
+      // note that we can need requeueing even if we called make_active above!
+      return was_empty;
     }
     
     bool GPUWorker::process_streams(bool sleep_on_empty)

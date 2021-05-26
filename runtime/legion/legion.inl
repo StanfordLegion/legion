@@ -5763,7 +5763,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N], size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / field_size;

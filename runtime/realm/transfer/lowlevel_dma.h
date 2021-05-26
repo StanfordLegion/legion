@@ -119,7 +119,7 @@ namespace Realm {
 
       static AsyncFileIOContext* get_singleton(void);
 
-      virtual void do_work(TimeLimit work_until);
+      virtual bool do_work(TimeLimit work_until);
 
       class AIOOperation {
       public:

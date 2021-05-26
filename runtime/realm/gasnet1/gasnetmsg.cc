@@ -2375,7 +2375,7 @@ public:
 
   void stop_threads(void);
 
-  virtual void do_work(TimeLimit work_until);
+  virtual bool do_work(TimeLimit work_until);
 
 protected:
   // runs in a separate thread
@@ -2810,7 +2810,7 @@ void EndpointManager::stop_threads(void)
 #endif
 }
 
-void EndpointManager::do_work(TimeLimit work_until)
+bool EndpointManager::do_work(TimeLimit work_until)
 {
   // make sure nested active mesage calls respect the time limit
   ThreadLocal::gasnet_work_until = &work_until;
@@ -2821,16 +2821,17 @@ void EndpointManager::do_work(TimeLimit work_until)
   if(!work_until.is_expired())
     CHECK_GASNET( gasnet_AMPoll() );
 
+  // relax the time limit again
+  ThreadLocal::gasnet_work_until = 0;
+
   // always re-activate ourselves unless we're shutting down
   if(shutdown_flag) {
     AutoLock<> al(mutex);
     bgworker_active = false;
     condvar.broadcast();
+    return false;
   } else
-    make_active();
-
-  // relax the time limit again
-  ThreadLocal::gasnet_work_until = 0;
+    return true;
 }
 
 void EndpointManager::polling_worker_loop(void)
