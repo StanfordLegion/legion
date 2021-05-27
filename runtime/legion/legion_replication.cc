@@ -715,6 +715,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(total_points > 0);
 #endif
+        Domain shard_domain;
+        node->get_launch_space_domain(shard_domain);
+        enumerate_futures(shard_domain);
         enqueue_ready_operation();
       }
     }

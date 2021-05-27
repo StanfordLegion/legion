@@ -625,6 +625,10 @@ namespace Legion {
       private:
         unsigned char store;
       };
+      struct FutureHandles : public Collectable {
+      public:
+        std::map<DomainPoint,DistributedID> handles;
+      };
     public:
       MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
@@ -692,6 +696,7 @@ namespace Legion {
       IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
       FutureMap future_map;
+      FutureHandles *future_handles;
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
@@ -1173,6 +1178,8 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
+    protected:
+      void enumerate_futures(const Domain &domain);
     public:
       static void process_slice_mapped(Deserializer &derez,
                                        AddressSpaceID source);
@@ -1288,9 +1295,10 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance);
-      void handle_future(const DomainPoint &point, FutureInstance *instance,
-                        void *metadata, size_t metasize, FutureFunctor *functor,
-                        Processor future_proc, bool own_functor); 
+      void handle_future(const DomainPoint &point, UniqueID uid,
+                         FutureInstance *instance, void *metadata, 
+                         size_t metasize, FutureFunctor *functor,
+                         Processor future_proc, bool own_functor); 
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point,

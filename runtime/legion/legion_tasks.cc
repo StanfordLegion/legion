@@ -5015,6 +5015,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       activate_task();
       launch_space = NULL;
+      future_handles = NULL;
       internal_space = IndexSpace::NO_SPACE;
       sliced = false;
       redop = 0;
@@ -5043,6 +5044,8 @@ namespace Legion {
       deactivate_task();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      if ((future_handles != NULL) && future_handles->remove_reference())
+        delete future_handles;
       // Remove our reference to the future map
       future_map = FutureMap();
       if (reduction_instance != NULL)
@@ -5252,11 +5255,14 @@ namespace Legion {
       DETAILED_PROFILER(runtime, CLONE_MULTI_CALL);
 #ifdef DEBUG_LEGION
       assert(this->launch_space == NULL);
+      assert(this->future_handles == NULL);
 #endif
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);
+      this->future_handles = rhs->future_handles;
+      this->future_handles->add_reference();
       this->internal_space = is;
       this->future_map = rhs->future_map;
       this->must_epoch_task = rhs->must_epoch_task;
@@ -5382,6 +5388,28 @@ namespace Legion {
       rez.serialize(redop);
       if (redop > 0)
         rez.serialize<bool>(deterministic_redop);
+      if (future_handles != NULL)
+      {
+        // Only pack the IDs for our local points
+        IndexSpaceNode *node = runtime->forest->get_node(internal_space);
+        Domain local_domain;
+        node->get_launch_space_domain(local_domain);
+        rez.serialize<size_t>(local_domain.get_volume());
+        const std::map<DomainPoint,DistributedID> &handles =
+          future_handles->handles;
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+        {
+          std::map<DomainPoint,DistributedID>::const_iterator finder = 
+            handles.find(itr.p);
+#ifdef DEBUG_LEGION
+          assert(finder != handles.end());
+#endif
+          rez.serialize(finder->first);
+          rez.serialize(finder->second);
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
       if (!output_region_options.empty())
       {
         rez.serialize<size_t>(output_region_options.size());
@@ -5389,7 +5417,7 @@ namespace Legion {
           rez.serialize(output_region_options[idx]);
       }
       else
-        rez.serialize<size_t>(0);
+        rez.serialize<size_t>(0); 
     }
 
     //--------------------------------------------------------------------------
@@ -5419,6 +5447,23 @@ namespace Legion {
         {
           reduction_op = Runtime::get_reduction_op(redop);
           serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(future_handles == NULL);
+#endif
+      size_t num_handles;
+      derez.deserialize(num_handles);
+      if (num_handles > 0)
+      {
+        future_handles = new FutureHandles;
+        future_handles->add_reference();
+        std::map<DomainPoint,DistributedID> &handles = future_handles->handles;
+        for (unsigned idx = 0; idx < num_handles; idx++)
+        {
+          DomainPoint point;
+          derez.deserialize(point);
+          derez.deserialize(handles[point]);
         }
       }
       size_t num_globals;
@@ -7026,8 +7071,8 @@ namespace Legion {
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
-      slice_owner->handle_future(index_point, instance, metadata, metasize,
-                                 functor, future_proc, own_functor); 
+      slice_owner->handle_future(index_point, unique_op_id, instance,
+              metadata, metasize, functor, future_proc, own_functor); 
     }
 
     //--------------------------------------------------------------------------
@@ -8654,7 +8699,28 @@ namespace Legion {
         trigger_children_committed();
       }
       else
+      {
+        // Enumerate the futures in the future map
+        enumerate_futures(index_domain);
         Operation::trigger_ready();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::enumerate_futures(const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_handles == NULL);
+#endif
+      future_handles = new FutureHandles;
+      future_handles->add_reference();
+      std::map<DomainPoint,DistributedID> &handles = future_handles->handles;
+      for (Domain::DomainPointIterator itr(domain); itr; itr++)
+      {
+        Future f = future_map.impl->get_future(itr.p, true/*internal only*/);
+        handles[itr.p] = f.impl->did;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11016,7 +11082,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::handle_future(const DomainPoint &point, 
+    void SliceTask::handle_future(const DomainPoint &point, UniqueID uid, 
                                   FutureInstance *instance, 
                                   void *metadata, size_t metasize,
                                   FutureFunctor *functor,
@@ -11044,19 +11110,38 @@ namespace Legion {
       }
       else
       {
-        Future f = future_map.impl->get_future(point, true/*internal only*/);
+#ifdef DEBUG_LEGION
+        assert(future_handles != NULL);
+#endif
+        std::map<DomainPoint,DistributedID>::const_iterator finder = 
+          future_handles->handles.find(point);
+#ifdef DEBUG_LEGION
+        assert(finder != future_handles->handles.end());
+#endif
+        std::vector<std::pair<size_t,DomainPoint> > coordinates;
+        parent_ctx->compute_task_tree_coordinates(coordinates);
+        coordinates.push_back(std::make_pair(context_index, point));
+        LocalReferenceMutator mutator;
+        FutureImpl *impl = runtime->find_or_create_future(finder->second, 
+                                              uid, &mutator, coordinates);
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
           assert(instance == NULL);
           assert(metadata == NULL);
 #endif
-          f.impl->set_result(functor, own_functor, future_proc);
+          impl->set_result(functor, own_functor, future_proc);
         }
         else
         {
-          f.impl->set_result(instance, metadata, metasize);
+          impl->set_result(instance, metadata, metasize);
           metadata = NULL; // no longer own the allocation
+        }
+        const RtEvent applied = mutator.get_done_event();
+        if (applied.exists() && !applied.has_triggered())
+        {
+          AutoLock o_lock(op_lock);
+          complete_preconditions.insert(applied);
         }
       }
       if (metadata != NULL)
