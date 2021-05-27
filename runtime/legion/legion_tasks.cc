@@ -7092,8 +7092,8 @@ namespace Legion {
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
-      slice_owner->handle_future(index_point, unique_op_id, instance,
-              metadata, metasize, functor, future_proc, own_functor); 
+      slice_owner->handle_future(index_point, instance, metadata, metasize,
+                                 functor, future_proc, own_functor); 
     }
 
     //--------------------------------------------------------------------------
@@ -11110,8 +11110,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::handle_future(const DomainPoint &point, UniqueID uid, 
-                                  FutureInstance *instance, 
+    void SliceTask::handle_future(const DomainPoint &point,
+                                  FutureInstance *instance,
                                   void *metadata, size_t metasize,
                                   FutureFunctor *functor,
                                   Processor future_proc, bool own_functor)
@@ -11151,7 +11151,7 @@ namespace Legion {
         coordinates.push_back(std::make_pair(context_index, point));
         LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-                                              uid, &mutator, coordinates);
+                    parent_ctx->get_context_uid(), &mutator, coordinates);
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -11530,10 +11530,6 @@ namespace Legion {
       // that we hold on the version state objects
       if (is_remote())
       {
-#ifdef DEBUG_LEGION
-        // Should have no resource return preconditions
-        assert(complete_preconditions.empty());
-#endif
         // Send back the message saying that this slice is complete
         Serializer rez;
         pack_remote_complete(rez, complete_precondition);

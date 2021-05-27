@@ -1295,7 +1295,7 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance);
-      void handle_future(const DomainPoint &point, UniqueID uid,
+      void handle_future(const DomainPoint &point,
                          FutureInstance *instance, void *metadata, 
                          size_t metasize, FutureFunctor *functor,
                          Processor future_proc, bool own_functor); 
