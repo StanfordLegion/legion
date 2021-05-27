@@ -1643,6 +1643,10 @@ namespace Legion {
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
     public:
+      // Instruct the runtime that it does not need to produce
+      // a future or future map result for this index task
+      bool                               elide_future_return;
+    public:
       bool                               silence_warnings;
     };
 
@@ -1741,6 +1745,10 @@ namespace Legion {
       // means that either field sets are independent or region
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
+    public:
+      // Instruct the runtime that it does not need to produce
+      // a future or future map result for this index task
+      bool                               elide_future_return;
     public:
       bool                               silence_warnings;
     };

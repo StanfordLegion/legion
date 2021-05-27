@@ -316,6 +316,7 @@ namespace Legion {
       bool memoize_selected;
       bool map_origin;
       bool request_valid_instances;
+      bool elide_future_return;
       bool replicate;
     protected:
       // For managing predication

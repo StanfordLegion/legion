@@ -3657,6 +3657,15 @@ legion_task_launcher_set_local_function_task(legion_task_launcher_t launcher_,
   launcher->local_function_task = local_function_task;
 }
 
+void
+legion_task_launcher_set_elide_future_return(legion_task_launcher_t launcher_,
+                                             bool elide_future_return)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->elide_future_return = elide_future_return;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -4110,6 +4119,15 @@ legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher_,
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->tag = tag;
+}
+
+void
+legion_index_launcher_set_elide_future_return(legion_index_launcher_t launcher_,
+                                              bool elide_future_return)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->elide_future_return = elide_future_return;
 }
 
 // -----------------------------------------------------------------------

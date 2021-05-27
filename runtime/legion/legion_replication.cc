@@ -437,7 +437,7 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
       complete_mapping(mapped_precondition);
-      if ((must_epoch == NULL) && 
+      if ((must_epoch == NULL) && !elide_future_return &&
           ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
       {
 #ifdef DEBUG_LEGION
@@ -474,7 +474,7 @@ namespace Legion {
       // Before doing the normal thing we have to exchange broadcast/receive
       // the future result, can skip this though if we're part of a must epoch
       // We should also skip this if we were predicated false
-      if ((must_epoch == NULL) && 
+      if ((must_epoch == NULL) && !elide_future_return &&
           ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()) 
           && (owner_shard == repl_ctx->owner_shard->shard_id))
       {
@@ -494,8 +494,9 @@ namespace Legion {
     {
       mapped_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_0);
-      future_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_1);
+      if (!elide_future_return)
+        future_collective_id = 
+          ctx->get_next_collective_index(COLLECTIVE_LOC_1);
     }
 
     //--------------------------------------------------------------------------
@@ -640,7 +641,7 @@ namespace Legion {
                       parent_ctx->get_unique_id())
 #endif
       // If we have a future map then set the sharding function
-      if ((redop == 0) && (must_epoch == NULL))
+      if ((redop == 0) && !elide_future_return && (must_epoch == NULL))
       {
 #ifdef DEBUG_LEGION
         assert(future_map.impl != NULL);
@@ -738,7 +739,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(total_points > 0);
 #endif
-        if (redop == 0)
+        if ((redop == 0) && !elide_future_return)
         {
           Domain shard_domain;
           node->get_launch_space_domain(shard_domain);
@@ -758,7 +759,7 @@ namespace Legion {
       sharding_collective->elide_collective();
 #endif
       internal_space = tpl->find_local_space(trace_local_id);
-      if (redop == 0)
+      if ((redop == 0) && !elide_future_return)
       {
         sharding_function = tpl->find_sharding_function(trace_local_id);
 #ifdef DEBUG_LEGION
