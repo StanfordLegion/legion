@@ -18687,7 +18687,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             // We should only be sending equivalence sets that we
             // know we are the owners of
-            assert(it->first->region_node == node);
+            // This used to be a valid assertion, but is no longer a valid
+            // assertion if we have virtual-mapped parent region with
+            // read-only privileges because then we have equivalence sets
+            // which only overlap our region here
+            //assert(it->first->region_node == node);
 #endif
             to_send.insert(it->first, overlap);
             mask -= overlap;
@@ -18725,7 +18729,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             // We should only be sending equivalence sets that we
             // know we are the owners of
-            assert(it->first->region_node == node);
+            // This used to be a valid assertion, but is no longer a valid
+            // assertion if we have virtual-mapped parent region with
+            // read-only privileges because then we have equivalence sets
+            // which only overlap our region here
+            //assert(it->first->region_node == node);
 #endif
             to_record.insert(it->first, overlap);
             mask -= overlap;
