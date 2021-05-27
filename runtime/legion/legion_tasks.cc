@@ -8459,9 +8459,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       set_must_epoch(epoch, index, do_registration);
-      future_map = epoch->get_future_map();
-      // Enumerate the futures in the future map
-      enumerate_futures(index_domain);
+      future_map = epoch->get_future_map(); 
     }
 
     //--------------------------------------------------------------------------
@@ -10167,7 +10165,12 @@ namespace Legion {
         create_future_instances(reduction_futures); 
       }
       else
-        enumerate_futures(index_domain);
+      {
+        Domain internal_domain;
+        runtime->forest->find_launch_space_domain(internal_space,
+                                                  internal_domain);
+        enumerate_futures(internal_domain);
+      }
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;

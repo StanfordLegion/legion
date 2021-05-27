@@ -715,9 +715,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(total_points > 0);
 #endif
-        Domain shard_domain;
-        node->get_launch_space_domain(shard_domain);
-        enumerate_futures(shard_domain);
+        if (redop == 0)
+        {
+          Domain shard_domain;
+          node->get_launch_space_domain(shard_domain);
+          enumerate_futures(shard_domain);
+        }
         enqueue_ready_operation();
       }
     }
@@ -1010,9 +1013,23 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(must_epoch != NULL);
       assert(sharding_function == NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       sharding_functor = functor;
       sharding_function = function;
+      // Compute the local index space of points for this shard
+      const IndexSpace local_space = sharding_space.exists() ?
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space, sharding_space) :
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                          launch_space, launch_space->handle);
+      // Figure out which points to enumerate
+      Domain local_domain;
+      runtime->forest->find_launch_space_domain(local_space, local_domain);
+      enumerate_futures(local_domain);
     }
 
     //--------------------------------------------------------------------------

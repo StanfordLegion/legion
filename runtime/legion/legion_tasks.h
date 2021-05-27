@@ -1178,7 +1178,7 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
-    protected:
+    public:
       void enumerate_futures(const Domain &domain);
     public:
       static void process_slice_mapped(Deserializer &derez,
