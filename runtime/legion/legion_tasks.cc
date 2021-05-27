@@ -8141,6 +8141,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::enumerate_must_epoch_futures(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+#endif
+      enumerate_futures(index_domain);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {

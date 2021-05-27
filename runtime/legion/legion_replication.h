@@ -1271,6 +1271,7 @@ namespace Legion {
       // Have to override this too for doing output in the
       // case that we misspeculate
       virtual void resolve_false(bool speculated, bool launched);
+      virtual void enumerate_must_epoch_futures(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);

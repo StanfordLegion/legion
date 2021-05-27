@@ -590,6 +590,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndexTask::enumerate_must_epoch_futures(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(must_epoch != NULL);
+      assert(sharding_function != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const IndexSpace local_space = sharding_space.exists() ?
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                              launch_space, sharding_space) :
+          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                          launch_space, launch_space->handle);
+      // Figure out which points to enumerate
+      Domain local_domain;
+      runtime->forest->find_launch_space_domain(local_space, local_domain);
+      enumerate_futures(local_domain);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -617,7 +640,7 @@ namespace Legion {
                       parent_ctx->get_unique_id())
 #endif
       // If we have a future map then set the sharding function
-      if (redop == 0)
+      if ((redop == 0) && (must_epoch == NULL))
       {
 #ifdef DEBUG_LEGION
         assert(future_map.impl != NULL);
@@ -1012,24 +1035,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(must_epoch != NULL);
-      assert(sharding_function == NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      assert(sharding_function == NULL); 
 #endif
       sharding_functor = functor;
       sharding_function = function;
-      // Compute the local index space of points for this shard
-      const IndexSpace local_space = sharding_space.exists() ?
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space, sharding_space) :
-          sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                          launch_space, launch_space->handle);
-      // Figure out which points to enumerate
-      Domain local_domain;
-      runtime->forest->find_launch_space_domain(local_space, local_domain);
-      enumerate_futures(local_domain);
     }
 
     //--------------------------------------------------------------------------
@@ -1054,13 +1063,12 @@ namespace Legion {
       return new ReplFutureMapImpl(repl_ctx, this,future_map_ready,index_domain, 
           shard_domain, runtime, runtime->get_available_distributed_id(), 
           runtime->address_space);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     RtEvent ReplIndexTask::find_intra_space_dependence(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-
       AutoLock o_lock(op_lock);
       // Check to see if we already have it
       std::map<DomainPoint,RtEvent>::const_iterator finder = 
@@ -4575,7 +4583,7 @@ namespace Legion {
         ReplIndividualTask *task = 
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx], false/*track*/);
-        task->set_must_epoch(this, idx, true/*register*/);
+        task->initialize_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           task->set_trace(trace, NULL);
@@ -4600,8 +4608,8 @@ namespace Legion {
         ReplIndexTask *task = runtime->get_available_repl_index_task();
         task->initialize_task(ctx, launcher.index_tasks[idx],
                               launch_space, false/*track*/);
-        task->set_must_epoch(this, indiv_tasks.size()+idx, 
-                                         true/*register*/);
+        task->initialize_must_epoch(this, indiv_tasks.size()+idx, 
+                                    true/*register*/);
         if (trace != NULL)
           task->set_trace(trace, NULL);
         task->must_epoch_task = true;
@@ -4636,7 +4644,7 @@ namespace Legion {
           Runtime::protect_event(get_completion_event()), domain, shard_domain,
           runtime, runtime->get_available_distributed_id(), 
           runtime->address_space);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     MapperManager* ReplMustEpochOp::invoke_mapper(void)

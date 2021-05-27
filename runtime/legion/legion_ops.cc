@@ -14119,9 +14119,8 @@ namespace Legion {
         indiv_tasks[idx]->set_origin_mapped(true);
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
       {
-        IndexTask *task = index_tasks[idx];
-        task->set_origin_mapped(true);
-        task->enumerate_futures(task->index_domain);
+        index_tasks[idx]->set_origin_mapped(true);
+        index_tasks[idx]->enumerate_must_epoch_futures();
       }
       // Call trigger execution on each of our sub-operations, since they
       // each have marked that they have a must_epoch owner, they will

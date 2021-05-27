@@ -1089,6 +1089,8 @@ namespace Legion {
     protected:
       void activate_index_task(void);
       void deactivate_index_task(void);
+    public:
+      virtual void enumerate_must_epoch_futures(void);
     protected:
       virtual void finalize_output_regions(void);
     public:
