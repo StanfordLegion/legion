@@ -9515,6 +9515,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
       total_points = launch_space->get_volume();
+      if (redop == 0)
+        enumerate_futures(index_domain);
       SliceTask *slice = clone_as_slice_task(launch_space->handle,
                 current_proc, false/*recurse*/, false/*stealable*/);
       complete_effects.insert(slice->get_completion_event());
