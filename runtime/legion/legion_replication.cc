@@ -462,6 +462,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndividualTask::prepare_map_must_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(must_epoch != NULL);
+      assert(sharding_function != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      set_origin_mapped(true);
+      // See if we're going to be a local point or not
+      Domain shard_domain = index_domain;
+      if (sharding_space.exists())
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+      ShardID owner = sharding_function->find_owner(index_point, shard_domain);
+      if (owner == repl_ctx->owner_shard->shard_id)
+      {
+        FutureMap map = must_epoch->get_future_map();
+        result = map.impl->get_future(index_point, true/*internal only*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndividualTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -591,7 +616,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::enumerate_must_epoch_futures(void)
+    void ReplIndexTask::prepare_map_must_epoch(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -602,6 +627,8 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      set_origin_mapped(true);
+      future_map = must_epoch->get_future_map();
       const IndexSpace local_space = sharding_space.exists() ?
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
                                               launch_space, sharding_space) :

@@ -758,8 +758,6 @@ namespace Legion {
                              bool track = true, bool top_level=false,
                              bool implicit_top_level = false,
                              std::vector<OutputRequirement> *outputs = NULL);
-      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
-                                 bool do_registration);
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs);
@@ -795,6 +793,7 @@ namespace Legion {
       virtual void handle_post_mapped(bool deferral, 
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
+      virtual void prepare_map_must_epoch(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -1078,8 +1077,6 @@ namespace Legion {
                              std::vector<OutputRequirement> *outputs = NULL);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
-      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
-                                 bool do_registration);
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs,
@@ -1091,7 +1088,7 @@ namespace Legion {
       void activate_index_task(void);
       void deactivate_index_task(void);
     public:
-      virtual void enumerate_must_epoch_futures(void);
+      virtual void prepare_map_must_epoch(void);
     protected:
       virtual void finalize_output_regions(void);
     public:
