@@ -4861,7 +4861,8 @@ namespace Legion {
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);
       this->future_handles = rhs->future_handles;
-      this->future_handles->add_reference();
+      if (this->future_handles != NULL)
+        this->future_handles->add_reference();
       this->internal_space = is;
       this->future_map = rhs->future_map;
       this->must_epoch_task = rhs->must_epoch_task;
@@ -4987,24 +4988,40 @@ namespace Legion {
       rez.serialize(redop);
       if (redop > 0)
         rez.serialize<bool>(deterministic_redop);
-      if (future_handles != NULL)
+      else if (future_handles != NULL)
       {
         // Only pack the IDs for our local points
         IndexSpaceNode *node = runtime->forest->get_node(internal_space);
         Domain local_domain;
         node->get_launch_space_domain(local_domain);
-        rez.serialize<size_t>(local_domain.get_volume());
+        size_t local_size = local_domain.get_volume();
+        rez.serialize(local_size);
         const std::map<DomainPoint,DistributedID> &handles =
           future_handles->handles;
-        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
-        {
-          std::map<DomainPoint,DistributedID>::const_iterator finder = 
-            handles.find(itr.p);
 #ifdef DEBUG_LEGION
-          assert(finder != handles.end());
+        assert(local_size <= handles.size());
 #endif
-          rez.serialize(finder->first);
-          rez.serialize(finder->second);
+        if (local_size < handles.size())
+        {
+          for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+          {
+            std::map<DomainPoint,DistributedID>::const_iterator finder = 
+              handles.find(itr.p);
+#ifdef DEBUG_LEGION
+            assert(finder != handles.end());
+#endif
+            rez.serialize(finder->first);
+            rez.serialize(finder->second);
+          }
+        }
+        else
+        {
+          for (std::map<DomainPoint,DistributedID>::const_iterator it =
+                handles.begin(); it != handles.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
         }
       }
       else
@@ -5041,21 +5058,25 @@ namespace Legion {
           initialize_reduction_state();
         }
       }
-#ifdef DEBUG_LEGION
-      assert(future_handles == NULL);
-#endif
-      size_t num_handles;
-      derez.deserialize(num_handles);
-      if (num_handles > 0)
+      else
       {
-        future_handles = new FutureHandles;
-        future_handles->add_reference();
-        std::map<DomainPoint,DistributedID> &handles = future_handles->handles;
-        for (unsigned idx = 0; idx < num_handles; idx++)
+#ifdef DEBUG_LEGION
+        assert(future_handles == NULL);
+#endif
+        size_t num_handles;
+        derez.deserialize(num_handles);
+        if (num_handles > 0)
         {
-          DomainPoint point;
-          derez.deserialize(point);
-          derez.deserialize(handles[point]);
+          future_handles = new FutureHandles;
+          future_handles->add_reference();
+          std::map<DomainPoint,DistributedID> &handles = 
+            future_handles->handles;
+          for (unsigned idx = 0; idx < num_handles; idx++)
+          {
+            DomainPoint point;
+            derez.deserialize(point);
+            derez.deserialize(handles[point]);
+          }
         }
       }
     }
@@ -7198,6 +7219,8 @@ namespace Legion {
       launch_space->get_launch_space_domain(launch_domain);
       future_map.impl->add_valid_domain(launch_domain);
 #endif
+      // Enumerate the futures in the future map
+      enumerate_futures(index_domain);
     }
 
     //--------------------------------------------------------------------------
@@ -7357,7 +7380,8 @@ namespace Legion {
       else
       {
         // Enumerate the futures in the future map
-        enumerate_futures(index_domain);
+        if (redop == 0)
+          enumerate_futures(index_domain);
         Operation::trigger_ready();
       }
     }
@@ -8486,6 +8510,8 @@ namespace Legion {
       }
       // Count how many total points we need for this index space task
       total_points = index_domain.get_volume();
+      if (redop == 0)
+        enumerate_futures(index_domain);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
