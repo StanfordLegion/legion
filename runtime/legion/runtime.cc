@@ -27793,6 +27793,22 @@ namespace Legion {
       else
         visible_memories.best_affinity_to(proc);
       visible_memories.only_kind(mem_kind);
+      if (visible_memories.count() == 0)
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        const char *proc_names[] = {
+#define PROC_NAMES(name, desc) desc,
+          REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+        };
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "%s Processor " IDFMT " has no %s memory",
+            proc_names[proc.kind()], proc.id, mem_names[mem_kind])
+      }
       return visible_memories.first();
     }
 

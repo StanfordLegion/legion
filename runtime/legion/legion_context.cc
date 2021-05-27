@@ -179,7 +179,9 @@ namespace Legion {
       FutureInstance *instance = NULL;
       if (size > 0)
       {
-        Memory memory = runtime->find_local_memory(executing_processor, kind);
+        Memory memory = (kind == Memory::SYSTEM_MEM) || 
+          (kind == Memory::NO_MEMKIND) ? runtime->runtime_system_memory :
+          runtime->find_local_memory(executing_processor, kind);
         if (owned)
           instance = new FutureInstance(value, size, memory,
               ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
