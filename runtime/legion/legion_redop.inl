@@ -575,13 +575,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&lhs;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&lhs;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) + 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) +
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -610,13 +613,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&rhs1;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) + 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) +
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -1413,13 +1419,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&lhs;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&lhs;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) - 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) -
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -1448,13 +1457,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&rhs1;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) + 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) +
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -2346,13 +2358,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&lhs;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&lhs;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) * 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) *
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -2381,13 +2396,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&rhs1;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) * 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) *
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -3218,13 +3236,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&lhs;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&lhs;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) / 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) /
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -3253,13 +3274,16 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&rhs1;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(
-          __convert_halfint_to_float(oldval.as_short) * 
+      newval.as_short[offset] = __convert_float_to_halfint(
+          __convert_halfint_to_float(oldval.as_short[offset]) *
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2)));
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -4241,15 +4265,18 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&lhs;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&lhs;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(__MAX__(
-          __convert_halfint_to_float(oldval.as_short),
+      newval.as_short[offset] = __convert_float_to_halfint(__MAX__(
+          __convert_halfint_to_float(oldval.as_short[offset]),
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs))));
-      if (newval.as_short == oldval.as_short)
+      if (newval.as_short[offset] == oldval.as_short[offset])
         break;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -4285,15 +4312,18 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&rhs1;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(__MAX__(
-          __convert_halfint_to_float(oldval.as_short),
+      newval.as_short[offset] = __convert_float_to_halfint(__MAX__(
+          __convert_halfint_to_float(oldval.as_short[offset]),
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2))));
-      if (newval.as_short == oldval.as_short)
+      if (newval.as_short[offset] == oldval.as_short[offset])
         break;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -5304,15 +5334,18 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_int != newval.as_int);
 #else
-    // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&lhs;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    // No atomic floating point operations so use compare and swap
+    char *ptr = (char*)&lhs;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(__MIN__(
-          __convert_halfint_to_float(oldval.as_short),
+      newval.as_short[offset] = __convert_float_to_halfint(__MIN__(
+          __convert_halfint_to_float(oldval.as_short[offset]),
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs))));
-      if (newval.as_short == oldval.as_short)
+      if (newval.as_short[offset] == oldval.as_short[offset])
         break;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
@@ -5348,14 +5381,17 @@ namespace Legion {
     } while (oldval.as_int != newval.as_int);
 #else
     // No atomic floating point operations so use compare and swap 
-    volatile int *target = (volatile int*)&rhs1;
-    union { int as_int; uint16_t as_short; } oldval, newval;
+    char *ptr = (char*)&rhs1;
+    const unsigned offset = (((unsigned long long)ptr) % 4) / sizeof(__half);
+    union { int as_int; short as_short[2]; } oldval, newval;
+    int *target = (int *)(ptr - (offset * sizeof(__half)));
+    newval.as_int = *(volatile int*)target;
     do {
       oldval.as_int = *target;
-      newval.as_short = __convert_float_to_halfint(__MIN__(
-          __convert_halfint_to_float(oldval.as_short),
+      newval.as_short[offset] = __convert_float_to_halfint(__MIN__(
+          __convert_halfint_to_float(oldval.as_short[offset]),
           __convert_halfint_to_float(*reinterpret_cast<uint16_t*>(&rhs2))));
-      if (newval.as_short == oldval.as_short)
+      if (newval.as_short[offset] == oldval.as_short[offset])
         break;
     } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
 #endif
