@@ -1676,6 +1676,7 @@ namespace Realm {
 	  }
 	}
 
+        bool batch_attempted = false;
 	if(batch_size > 1) {
 	  // the minimum size we want is to send one packet - max is all
 	  //  of them (watch out for INLINE_SHORT at end)
@@ -1712,7 +1713,8 @@ namespace Realm {
 
 	  gex_AM_SrcDesc_t sd = GEX_AM_SRCDESC_NO_OP;
 	  // double-check that our size is acceptable for a GASNet-allocated
-	  //  message
+	  //  message - messages on the very limit of fitting into a medium
+          //  payload may not work as a batch
 	  size_t max_payload =
 	    GASNetEXHandlers::max_request_medium(internal->eps[src_ep_index],
 						 tgt_rank,
@@ -1721,6 +1723,8 @@ namespace Realm {
 						 lc_opt,
 						 GEX_FLAG_AM_PREPARE_LEAST_CLIENT);
 	  if(min_size <= max_payload) {
+            batch_attempted = true;
+
 	    sd = GASNetEXHandlers::prepare_request_batch(internal->eps[src_ep_index],
 							 tgt_rank,
 							 tgt_ep_index,
@@ -1729,42 +1733,46 @@ namespace Realm {
 							 max_size,
 							 lc_opt,
 							 flags);
-	  }
 
-	  if(sd != GEX_AM_SRCDESC_NO_OP) {
-	    // success - let's see how much space we were given
-	    size_t act_size = gex_AM_SrcDescSize(sd);
-	    if(act_size < max_size) {
-	      // not as much as we asked for - have to reduce batch size
-	      int reduced_count = 1;
-	      while(head->pktbuf_pkt_ends[first_idx + reduced_count] <=
-		    (batch_startofs + act_size)) {
-		reduced_count++;
-		assert(reduced_count < batch_size);
-	      }
-	      last_idx = first_idx + reduced_count - 1;
-	      max_size = (head->pktbuf_pkt_ends[last_idx] - batch_startofs);
-	      batch_size = reduced_count;
-	    }
-	    GASNetEXHandlers::commit_request_batch(sd, batch_size, max_size);
+            if(sd != GEX_AM_SRCDESC_NO_OP) {
+              // success - let's see how much space we were given
+              size_t act_size = gex_AM_SrcDescSize(sd);
+              if(act_size < max_size) {
+                // not as much as we asked for - have to reduce batch size
+                int reduced_count = 1;
+                while(head->pktbuf_pkt_ends[first_idx + reduced_count] <=
+                      (batch_startofs + act_size)) {
+                  reduced_count++;
+                  assert(reduced_count < batch_size);
+                }
+                last_idx = first_idx + reduced_count - 1;
+                max_size = (head->pktbuf_pkt_ends[last_idx] - batch_startofs);
+                batch_size = reduced_count;
+              }
+              GASNetEXHandlers::commit_request_batch(sd, batch_size, max_size);
 
-	    pkt_sent = true;
-	    for(int i = 0; i < batch_size; i++)
-	      realbuf->pktbuf_pkt_types[first_idx + i].store(OutbufMetadata::PKTTYPE_INVALID);
-	    head->pktbuf_sent_offset = head->pktbuf_pkt_ends[last_idx];
-	    head->pktbuf_sent_packets += batch_size;
-	    head->pktbuf_use_count++;  // expect decrement on local comp
-	    packets_sent.fetch_add(batch_size);
+              pkt_sent = true;
+              for(int i = 0; i < batch_size; i++)
+                realbuf->pktbuf_pkt_types[first_idx + i].store(OutbufMetadata::PKTTYPE_INVALID);
+              head->pktbuf_sent_offset = head->pktbuf_pkt_ends[last_idx];
+              head->pktbuf_sent_packets += batch_size;
+              head->pktbuf_use_count++;  // expect decrement on local comp
+              packets_sent.fetch_add(batch_size);
 
-	    GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
-	    ev->set_event(done);
-	    ev->set_pktbuf(realbuf);
-	    internal->poller.add_pending_event(ev);
-	  } else {
-	    assert(immediate_mode);  // should not happen without immediate
-	    log_gex_xpair.info() << "xpair retry: xpair=" << this;
-	  }
-	} else {
+              GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
+              ev->set_event(done);
+              ev->set_pktbuf(realbuf);
+              internal->poller.add_pending_event(ev);
+            } else {
+              assert(immediate_mode);  // should not happen without immediate
+              log_gex_xpair.info() << "xpair retry: xpair=" << this;
+            }
+          }
+        }
+
+        // if we didn't have multiple packets to batch up, or they couldn't
+        //  fit in a batch, try sending just the first packet
+        if(!batch_attempted) {
 	  switch(pkttype) {
 	  case OutbufMetadata::PKTTYPE_INLINE:
 	  case OutbufMetadata::PKTTYPE_INLINE_SHORT:
