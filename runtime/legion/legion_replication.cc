@@ -4583,7 +4583,7 @@ namespace Legion {
         ReplIndividualTask *task = 
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx], false/*track*/);
-        task->initialize_must_epoch(this, idx, true/*register*/);
+        task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           task->set_trace(trace, NULL);
@@ -4608,8 +4608,7 @@ namespace Legion {
         ReplIndexTask *task = runtime->get_available_repl_index_task();
         task->initialize_task(ctx, launcher.index_tasks[idx],
                               launch_space, false/*track*/);
-        task->initialize_must_epoch(this, indiv_tasks.size()+idx, 
-                                    true/*register*/);
+        task->set_must_epoch(this, indiv_tasks.size()+idx, true/*register*/);
         if (trace != NULL)
           task->set_trace(trace, NULL);
         task->must_epoch_task = true;
