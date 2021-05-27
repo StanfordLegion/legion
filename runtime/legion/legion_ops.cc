@@ -13940,7 +13940,7 @@ namespace Legion {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           false/*track*/);
-        indiv_tasks[idx]->initialize_must_epoch(this, idx, true/*register*/);
+        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, NULL);
@@ -13956,7 +13956,7 @@ namespace Legion {
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           launch_space, false/*track*/);
-        index_tasks[idx]->initialize_must_epoch(this, 
+        index_tasks[idx]->set_must_epoch(this, 
             indiv_tasks.size() + idx, true/*register*/);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, NULL);
@@ -14116,12 +14116,9 @@ namespace Legion {
     {
       // First mark that each of the tasks will be origin mapped
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        indiv_tasks[idx]->set_origin_mapped(true);
+        indiv_tasks[idx]->prepare_map_must_epoch();
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        index_tasks[idx]->set_origin_mapped(true);
-        index_tasks[idx]->enumerate_must_epoch_futures();
-      }
+        index_tasks[idx]->prepare_map_must_epoch();
       // Call trigger execution on each of our sub-operations, since they
       // each have marked that they have a must_epoch owner, they will
       // not actually map and launch, but instead will register all the base

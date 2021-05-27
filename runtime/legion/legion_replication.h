@@ -1220,6 +1220,7 @@ namespace Legion {
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
+      virtual void prepare_map_must_epoch(void);
     public:
       // Override these so we can broadcast the future result
       virtual void trigger_task_complete(void);
@@ -1271,7 +1272,7 @@ namespace Legion {
       // Have to override this too for doing output in the
       // case that we misspeculate
       virtual void resolve_false(bool speculated, bool launched);
-      virtual void enumerate_must_epoch_futures(void);
+      virtual void prepare_map_must_epoch(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);

@@ -5808,12 +5808,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::initialize_must_epoch(MustEpochOp *epoch, 
-                                           unsigned index, bool do_registration)
+    void IndividualTask::prepare_map_must_epoch(void)
     //--------------------------------------------------------------------------
     {
-      set_must_epoch(epoch, index, do_registration);
-      FutureMap map = epoch->get_future_map();
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+#endif
+      set_origin_mapped(true);
+      FutureMap map = must_epoch->get_future_map();
       result = map.impl->get_future(index_point, true/*internal only*/);
     }
 
@@ -8141,16 +8143,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::enumerate_must_epoch_futures(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(must_epoch != NULL);
-#endif
-      enumerate_futures(index_domain);
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
@@ -8464,12 +8456,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::initialize_must_epoch(MustEpochOp *epoch, 
-                                          unsigned index, bool do_registration)
+    void IndexTask::prepare_map_must_epoch(void)
     //--------------------------------------------------------------------------
     {
-      set_must_epoch(epoch, index, do_registration);
-      future_map = epoch->get_future_map(); 
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+#endif
+      set_origin_mapped(true);
+      future_map = must_epoch->get_future_map(); 
+      enumerate_futures(index_domain);
     }
 
     //--------------------------------------------------------------------------
