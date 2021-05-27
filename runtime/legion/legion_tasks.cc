@@ -6592,7 +6592,7 @@ namespace Legion {
                       bool owner, FutureFunctor *functor, Processor future_proc)
     //--------------------------------------------------------------------------
     {
-      slice_owner->handle_future(index_point, unique_op_id, res, res_size,
+      slice_owner->handle_future(index_point, res, res_size,
                                  owner, functor, future_proc);
     }
 
@@ -8078,7 +8078,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::handle_future(const DomainPoint &point, UniqueID uid,
+    void IndexTask::handle_future(const DomainPoint &point,
                             const void *result, size_t result_size, bool owner, 
                             FutureFunctor *functor, Processor future_proc)
     //--------------------------------------------------------------------------
@@ -8450,7 +8450,7 @@ namespace Legion {
             size_t size;
             derez.deserialize(size);
             const void *ptr = derez.get_current_pointer();
-            handle_future(p, unique_op_id, ptr, size, false/*owner*/, 
+            handle_future(p, ptr, size, false/*owner*/, 
                           NULL/*functor*/, Processor::NO_PROC);
             derez.advance_pointer(size);
           }
@@ -9375,7 +9375,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::handle_future(const DomainPoint &point, UniqueID uid,
+    void SliceTask::handle_future(const DomainPoint &point,
                              const void *result, size_t result_size, bool owner, 
                              FutureFunctor *functor, Processor future_proc)
     //--------------------------------------------------------------------------
@@ -9421,7 +9421,7 @@ namespace Legion {
             fold_reduction_future(result, result_size,owner,false/*exclusive*/);
         }
         else
-          index_owner->handle_future(point, unique_op_id, result, result_size,
+          index_owner->handle_future(point, result, result_size,
                                      owner, functor, future_proc);
       }
       else
@@ -9435,8 +9435,8 @@ namespace Legion {
         assert(finder != future_handles->handles.end());
 #endif
         LocalReferenceMutator mutator;
-        FutureImpl *impl = 
-          runtime->find_or_create_future(finder->second, uid, &mutator);
+        FutureImpl *impl = runtime->find_or_create_future(finder->second, 
+                                parent_ctx->get_context_uid(), &mutator);
         if (functor != NULL)
           impl->set_result(functor, owner, future_proc);
         else
@@ -9758,10 +9758,6 @@ namespace Legion {
       // that we hold on the version state objects
       if (is_remote())
       {
-#ifdef DEBUG_LEGION
-        // Should have no resource return preconditions
-        assert(complete_preconditions.empty());
-#endif
         // Send back the message saying that this slice is complete
         Serializer rez;
         pack_remote_complete(rez, complete_precondition);

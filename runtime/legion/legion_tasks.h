@@ -669,7 +669,7 @@ namespace Legion {
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                       Processor p, bool recurse, bool stealable) = 0;
-      virtual void handle_future(const DomainPoint &point, UniqueID uid,
+      virtual void handle_future(const DomainPoint &point,
                            const void *result, size_t result_size, bool owner,
                            FutureFunctor *functor, Processor proc) = 0;
       virtual void register_must_epoch(void) = 0;
@@ -995,7 +995,7 @@ namespace Legion {
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
     public:
-      virtual void handle_future(const DomainPoint &point, UniqueID uid,
+      virtual void handle_future(const DomainPoint &point,
                            const void *result, size_t result_size, bool owner,
                            FutureFunctor *functor, Processor future_proc);
     public:
@@ -1140,7 +1140,7 @@ namespace Legion {
     public:
       virtual SliceTask* clone_as_slice_task(IndexSpace is,
                   Processor p, bool recurse, bool stealable);
-      virtual void handle_future(const DomainPoint &point, UniqueID uid,
+      virtual void handle_future(const DomainPoint &point,
                             const void *result, size_t result_size, bool owner,
                             FutureFunctor *functor, Processor future_proc);
     public:
