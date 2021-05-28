@@ -369,7 +369,7 @@ namespace Legion {
       struct ReturnSize {
         static constexpr size_t value = 
           std::conditional<IsSerdezType<T>::value,
-            SerdezBound<T,HasSerdezBound<T>::value>, SizeBound<T> >::value;
+           SerdezBound<T,HasSerdezBound<T>::value>, SizeBound<T> >::type::value;
       };
 
     }; // Serialization namespace
