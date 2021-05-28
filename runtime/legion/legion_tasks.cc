@@ -968,21 +968,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      const size_t result_size = impl->get_untyped_size(true);
-      // TODO: figure out a way to put this check back in with dynamic task
-      // registration where we might not know the return size until later
-#ifdef PERFORM_PREDICATE_SIZE_CHECKS
-      if (result_size != variants->return_size)
-        REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH,
-                      "Predicated task launch for task %s "
-                      "in parent task %s (UID %lld) has predicated "
-                      "false future of size %ld bytes, but the "
-                      "expected return size is %ld bytes.",
-                      get_task_name(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id(),
-                      result_size, variants->return_size)
-#endif
-      return result_size;
+      return impl->get_untyped_size(true);
     }
 
     //--------------------------------------------------------------------------
@@ -5266,37 +5252,8 @@ namespace Legion {
         else
         {
           predicate_false_size = launcher.predicate_false_result.get_size();
-          if (predicate_false_size == 0)
+          if (predicate_false_size > 0)
           {
-            // TODO: Put this check back in
-#if 0
-            if (variants->return_size > 0)
-              log_run.error("Predicated task launch for task %s "
-                                  "in parent task %s (UID %lld) has non-void "
-                                  "return type but no default value for its "
-                                  "future if the task predicate evaluates to "
-                                  "false.  Please set either the "
-                                  "'predicate_false_result' or "
-                                  "'predicate_false_future' fields of the "
-                                  "TaskLauncher struct.",
-                                  get_task_name(), ctx->get_task_name(),
-                                  ctx->get_unique_id())
-#endif
-          }
-          else
-          {
-            // TODO: Put this check back in
-#ifdef PERFORM_PREDICATE_SIZE_CHECKS
-            if (predicate_false_size != variants->return_size)
-              REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH,
-                            "Predicated task launch for task %s "
-                                 "in parent task %s (UID %lld) has predicated "
-                                 "false return type of size %ld bytes, but the "
-                                 "expected return size is %ld bytes.",
-                                 get_task_name(), parent_ctx->get_task_name(),
-                                 parent_ctx->get_unique_id(),
-                                 predicate_false_size, variants->return_size)
-#endif
 #ifdef DEBUG_LEGION
             assert(predicate_false_result == NULL);
 #endif
@@ -7164,38 +7121,8 @@ namespace Legion {
       else
       {
         predicate_false_size = pred_arg.get_size();
-        if (predicate_false_size == 0)
+        if (predicate_false_size > 0)
         {
-          // TODO: Reenable this error if we want to track predicate defaults
-#if 0
-          if (variants->return_size > 0)
-            log_run.error("Predicated index task launch for task %s "
-                          "in parent task %s (UID %lld) has non-void "
-                          "return type but no default value for its "
-                          "future if the task predicate evaluates to "
-                          "false.  Please set either the "
-                          "'predicate_false_result' or "
-                          "'predicate_false_future' fields of the "
-                          "IndexTaskLauncher struct.",
-                          get_task_name(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-          }
-#endif
-        }
-        else
-        {
-          // TODO: Reenable this error if we want to track predicate defaults
-#ifdef PERFORM_PREDICATE_SIZE_CHECKS
-          if (predicate_false_size != variants->return_size)
-            REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK,
-                          "Predicated index task launch for task %s "
-                          "in parent task %s (UID %lld) has predicated "
-                          "false return type of size %ld bytes, but the "
-                          "expected return size is %ld bytes.",
-                          get_task_name(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id(),
-                          predicate_false_size, variants->return_size)
-#endif
 #ifdef DEBUG_LEGION
           assert(predicate_false_result == NULL);
 #endif
