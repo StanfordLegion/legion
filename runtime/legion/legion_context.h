@@ -221,7 +221,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color, 
+                                            bool skip_check = false) = 0;
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
@@ -1092,7 +1093,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            bool skip_check = false);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
@@ -2051,7 +2053,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            bool skip_check = false);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,
@@ -2824,7 +2827,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             bool perform_intersections,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            bool skip_check = false);
       virtual IndexPartition create_partition_by_field(
                                             LogicalRegion handle,
                                             LogicalRegion parent_priv,

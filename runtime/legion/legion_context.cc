@@ -4815,7 +4815,7 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool skip_check)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -13930,7 +13930,7 @@ namespace Legion {
       }
       future_map.impl->set_all_futures(shard_futures);
       return create_partition_by_domain(parent, future_map, color_space, 
-                                        perform_intersections, part_kind,color);
+            perform_intersections, part_kind, color, true/*skip check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13940,11 +13940,11 @@ namespace Legion {
                                                     IndexSpace color_space,
                                                     bool perform_intersections,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,bool skip_check)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication &&
+      if (runtime->safe_control_replication && !skip_check &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
@@ -21529,7 +21529,7 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool skip_check)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
