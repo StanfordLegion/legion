@@ -191,7 +191,6 @@ namespace Legion {
             const std::vector<StaticDependence> *dependences,
             const Predicate &p, Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
-      void check_future_size(size_t future_size);
     public:
       bool select_task_options(bool prioritize);
     public:

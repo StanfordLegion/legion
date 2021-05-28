@@ -2589,22 +2589,7 @@ namespace Legion {
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
-      {
-        // We need to check to make sure that the task actually
-        // does expect to have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK,
-            "Predicated task launch for task %s in parent "
-                        "task %s (UID %lld) has non-void return type "
-                        "but no default value for its future if the task "
-                        "predicate evaluates to false.  Please set either "
-                        "the 'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "TaskLauncher struct.", impl->get_name(), 
-                        get_task_name(), get_unique_id())
         result->set_result(NULL);
-      }
       return Future(result);
     }
 
@@ -2648,20 +2633,6 @@ namespace Legion {
       }
       if (launcher.predicate_false_result.get_size() == 0)
       {
-        // Check to make sure the task actually does expect to
-        // have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-            "Predicated index task launch for task %s "
-                        "in parent task %s (UID %lld) has non-void "
-                        "return type but no default value for its "
-                        "future if the task predicate evaluates to "
-                        "false.  Please set either the "
-                        "'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(),
-                        get_task_name(), get_unique_id())
         // Just initialize all the futures
         for (Domain::DomainPointIterator itr(launcher.launch_domain);
               itr; itr++)
@@ -2699,23 +2670,7 @@ namespace Legion {
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
-      {
-        // We need to check to make sure that the task actually
-        // does expect to have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-                        "Predicated index task launch for task %s "
-                        "in parent task %s (UID %lld) has non-void "
-                        "return type but no default value for its "
-                        "future if the task predicate evaluates to "
-                        "false.  Please set either the "
-                        "'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(), 
-                        get_task_name(), get_unique_id())
         result->set_result(NULL);
-      }
       return Future(result);
     }
 

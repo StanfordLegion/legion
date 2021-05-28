@@ -8787,7 +8787,8 @@ namespace Legion {
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
 				      size_t user_len = 0,
-                                      bool has_return_type = false,
+                                      size_t return_type_size = 
+                                                      LEGION_MAX_RETURN_SIZE,
                                       VariantID vid = LEGION_AUTO_GENERATE_ID);
 
       /**
@@ -8887,7 +8888,7 @@ namespace Legion {
 	      size_t user_len = 0,
 	      const char *task_name = NULL,
               VariantID vid = LEGION_AUTO_GENERATE_ID,
-              bool has_return_type = false,
+              size_t return_type_size = LEGION_MAX_RETURN_SIZE,
               bool check_task_id = true);
 
       /**

@@ -13029,11 +13029,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
-                                  bool has_ret, const TaskVariantRegistrar &reg,
+                                  size_t return_size, 
+                                  const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
                                   const CodeDescriptor &realm, 
                                   const char *task_name)
-      : vid(v), has_return(has_ret), registrar(reg), 
+      : vid(v), return_type_size(return_size), registrar(reg), 
         realm_desc(realm), logical_task_name(NULL)
     //--------------------------------------------------------------------------
     {
@@ -13102,7 +13103,7 @@ namespace Legion {
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
       runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, has_return, vid, false/*check task*/,
+                    realm_desc, return_type_size, vid, false/*check task*/,
                     true/*check context*/, true/*preregistered*/);
     }
 
@@ -13114,7 +13115,7 @@ namespace Legion {
     TaskImpl::TaskImpl(TaskID tid, Runtime *rt, const char *name/*=NULL*/)
       : task_id(tid), runtime(rt), initial_name(static_cast<char*>(
           malloc(((name == NULL) ? 64 : strlen(name) + 1) * sizeof(char)))),
-        has_return_type(false), all_idempotent(false)
+        all_idempotent(false)
     //--------------------------------------------------------------------------
     {
       // Always fill in semantic info 0 with a name for the task
@@ -13208,14 +13209,6 @@ namespace Legion {
       AutoLock t_lock(task_lock);
       if (!variants.empty())
       {
-        // Make sure that all the variants agree whether there is 
-        // a return type or not
-        if (has_return_type != impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_RETURN_SIZE_MISMATCH, 
-                        "Variants of task %s (ID %d) disagree on whether "
-                        "there is a return type or not. All variants "
-                        "of a task must agree on whether there is a "
-                        "return type.", get_name(false/*need lock*/), task_id)
         if (all_idempotent != impl->is_idempotent())
           REPORT_LEGION_ERROR(ERROR_IDEMPOTENT_MISMATCH, 
                         "Variants of task %s (ID %d) have different idempotent "
@@ -13224,10 +13217,7 @@ namespace Legion {
                         get_name(false/*need lock*/), task_id)
       }
       else
-      {
-        has_return_type = impl->returns_value();
         all_idempotent  = impl->is_idempotent();
-      }
       // Check to see if this variant has already been registered
       if (variants.find(impl->vid) != variants.end())
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_VARIANT_REGISTRATION,
@@ -13650,11 +13640,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Runtime *rt, VariantID v, TaskImpl *own, 
-                           const TaskVariantRegistrar &registrar, bool ret,
-                           const CodeDescriptor &realm,
-                           const void *udata /*=NULL*/, size_t udata_size/*=0*/)
+                             const TaskVariantRegistrar &registrar,
+                             size_t return_size, const CodeDescriptor &realm,
+                             const void *udata/*=NULL*/,size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        has_return_value(ret), 
+        return_type_size(return_size), 
         descriptor_id(runtime->get_unique_code_descriptor_id()),
         realm_descriptor(realm),
         execution_constraints(registrar.execution_constraints),
@@ -13765,7 +13755,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), has_return_value(rhs.has_return_value),
+        global(rhs.global), return_type_size(rhs.return_type_size),
         descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
     //--------------------------------------------------------------------------
     {
@@ -13918,12 +13908,6 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(owner->task_id);
-            rez.serialize(vid);
-            // Extra padding to fix a realm bug for now
-            rez.serialize(vid);
-            rez.serialize(next_done);
-            rez.serialize(has_return_value);
             // pack the code descriptors 
             Realm::Serialization::ByteCountSerializer counter;
             realm_descriptor.serialize(counter, true/*portable*/);
@@ -13934,6 +13918,12 @@ namespace Legion {
                 serializer(rez.reserve_bytes(impl_size), impl_size);
               realm_descriptor.serialize(serializer, true/*portable*/);
             }
+            rez.serialize(owner->task_id);
+            rez.serialize(vid);
+            // Extra padding to fix a realm bug for now
+            rez.serialize(vid);
+            rez.serialize(next_done);
+            rez.serialize(return_type_size);
             rez.serialize(user_data_size);
             if (user_data_size > 0)
               rez.serialize(user_data, user_data_size);
@@ -13964,17 +13954,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      TaskID task_id;
-      derez.deserialize(task_id);
-      TaskVariantRegistrar registrar(task_id, false/*global*/);
-      VariantID variant_id;
-      derez.deserialize(variant_id);
-      // Extra padding to fix a realm bug for now
-      derez.deserialize(variant_id); 
-      RtUserEvent done;
-      derez.deserialize(done);
-      bool has_return;
-      derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
       CodeDescriptor realm_desc;
@@ -14001,6 +13980,17 @@ namespace Legion {
 #endif
         free(impl_buffer);
       }
+      TaskID task_id;
+      derez.deserialize(task_id);
+      TaskVariantRegistrar registrar(task_id, false/*global*/);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      // Extra padding to fix a realm bug for now
+      derez.deserialize(variant_id); 
+      RtUserEvent done;
+      derez.deserialize(done);
+      size_t return_type_size;
+      derez.deserialize(return_type_size);
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -14020,7 +14010,7 @@ namespace Legion {
       // Can lie about preregistration since the user would already have
       // gotten there error message on the owner node
       runtime->register_variant(registrar, user_data, user_data_size,
-              realm_desc, has_return, variant_id, false/*check task*/,
+              realm_desc, return_type_size, variant_id, false/*check task*/,
               false/*check context*/, true/*preregistered*/);
       AddressSpaceID origin;
       derez.deserialize(origin);
@@ -20099,7 +20089,8 @@ namespace Legion {
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   const CodeDescriptor &realm_code_desc,
-                                  bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
+                                  size_t return_type_size,
+                                  VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/,
                                   bool check_context /*= true*/,
                                   bool preregistered /*= false*/)
@@ -20107,7 +20098,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->register_variant(registrar, user_data,
-            user_data_size, realm_code_desc, ret, vid, check_task_id);
+         user_data_size, realm_code_desc, return_type_size, vid, check_task_id);
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
       if (check_task_id && 
@@ -20130,8 +20121,8 @@ namespace Legion {
                       "variant ID 0. Variant ID 0 is reserved for task "
                       "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
-      VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
-                                          registrar, ret, realm_code_desc,
+      VariantImpl *impl = new VariantImpl(this, vid, task_impl, registrar,
+                                          return_type_size, realm_code_desc,
                                           user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
@@ -30475,7 +30466,7 @@ namespace Legion {
     /*static*/ VariantID Runtime::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          const CodeDescriptor &code_desc, bool has_ret, 
+                          const CodeDescriptor &code_desc, size_t return_size, 
                           const char *task_name, VariantID vid, bool check_id)
     //--------------------------------------------------------------------------
     {
@@ -30502,7 +30493,7 @@ namespace Legion {
                       "variant ID 0. Variant ID 0 is reserved for task "
                       "generators.", registrar.task_id)
       // Offset by the runtime tasks
-      pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
+      pending_table.push_back(new PendingVariantRegistration(vid, return_size,
                               registrar, user_data, user_data_size, 
                               code_desc, task_name));
       return vid;

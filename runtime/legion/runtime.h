@@ -1818,7 +1818,7 @@ namespace Legion {
      */
     class PendingVariantRegistration {
     public:
-      PendingVariantRegistration(VariantID vid, bool has_return,
+      PendingVariantRegistration(VariantID vid, size_t return_type_size,
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc, 
@@ -1832,7 +1832,7 @@ namespace Legion {
       void perform_registration(Runtime *runtime);
     private:
       VariantID vid;
-      bool has_return;
+      size_t return_type_size;
       TaskVariantRegistrar registrar;
       void *user_data;
       size_t user_data_size;
@@ -1867,8 +1867,6 @@ namespace Legion {
       ~TaskImpl(void);
     public:
       TaskImpl& operator=(const TaskImpl &rhs);
-    public:
-      inline bool returns_value(void) const { return has_return_type; }
     public:
       VariantID get_unique_variant_id(void);
       void add_variant(VariantImpl *impl);
@@ -1910,8 +1908,6 @@ namespace Legion {
       // VariantIDs that we've handed out but haven't registered yet
       std::set<VariantID> pending_variants;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
-      // Track whether all these variants have a return type or not
-      bool has_return_type;
       // Track whether all these variants are idempotent or not
       bool all_idempotent;
     };
@@ -1926,8 +1922,8 @@ namespace Legion {
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
       VariantImpl(Runtime *runtime, VariantID vid, TaskImpl *owner, 
-                  const TaskVariantRegistrar &registrar, bool ret_val, 
-                  const CodeDescriptor &realm_desc,
+                  const TaskVariantRegistrar &registrar, 
+                  size_t return_type_size, const CodeDescriptor &realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
       ~VariantImpl(void);
@@ -1938,7 +1934,6 @@ namespace Legion {
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool is_replicable(void) const { return replicable_variant; }
-      inline bool returns_value(void) const { return has_return_value; }
       inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&
         get_execution_constraints(void) const { return execution_constraints; }
@@ -1964,7 +1959,7 @@ namespace Legion {
       TaskImpl *const owner;
       Runtime *const runtime;
       const bool global; // globally valid variant
-      const bool has_return_value; // has a return value
+      const size_t return_type_size;
     public:
       const CodeDescriptorID descriptor_id;
       CodeDescriptor realm_descriptor;
@@ -2919,8 +2914,8 @@ namespace Legion {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc,
-                                 bool ret, VariantID vid = 
-                                                      LEGION_AUTO_GENERATE_ID,
+                                 size_t return_type_size,
+                                 VariantID vid = LEGION_AUTO_GENERATE_ID,
                                  bool check_task_id = true,
                                  bool check_context = true,
                                  bool preregistered = false);
@@ -4472,7 +4467,7 @@ namespace Legion {
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      const CodeDescriptor &realm_desc, bool has_ret, 
+                      const CodeDescriptor &realm_desc, size_t return_type_size,
                       const char *task_name,VariantID vid,bool check_id = true);
     public:
       static ReductionOpID& get_current_static_reduction_id(void);
