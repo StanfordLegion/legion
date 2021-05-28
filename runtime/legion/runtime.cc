@@ -10326,12 +10326,6 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(owner->task_id);
-            rez.serialize(vid);
-            // Extra padding to fix a realm bug for now
-            rez.serialize(vid);
-            rez.serialize(next_done);
-            rez.serialize(return_type_size);
             // pack the code descriptors 
             Realm::Serialization::ByteCountSerializer counter;
             realm_descriptor.serialize(counter, true/*portable*/);
@@ -10342,6 +10336,12 @@ namespace Legion {
                 serializer(rez.reserve_bytes(impl_size), impl_size);
               realm_descriptor.serialize(serializer, true/*portable*/);
             }
+            rez.serialize(owner->task_id);
+            rez.serialize(vid);
+            // Extra padding to fix a realm bug for now
+            rez.serialize(vid);
+            rez.serialize(next_done);
+            rez.serialize(return_type_size);
             rez.serialize(user_data_size);
             if (user_data_size > 0)
               rez.serialize(user_data, user_data_size);
@@ -10371,17 +10371,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      TaskID task_id;
-      derez.deserialize(task_id);
-      TaskVariantRegistrar registrar(task_id, false/*global*/);
-      VariantID variant_id;
-      derez.deserialize(variant_id);
-      // Extra padding to fix a realm bug for now
-      derez.deserialize(variant_id); 
-      RtUserEvent done;
-      derez.deserialize(done);
-      size_t return_type_size;
-      derez.deserialize(return_type_size);
       size_t impl_size;
       derez.deserialize(impl_size);
       CodeDescriptor realm_desc;
@@ -10408,6 +10397,17 @@ namespace Legion {
 #endif
         free(impl_buffer);
       }
+      TaskID task_id;
+      derez.deserialize(task_id);
+      TaskVariantRegistrar registrar(task_id, false/*global*/);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      // Extra padding to fix a realm bug for now
+      derez.deserialize(variant_id); 
+      RtUserEvent done;
+      derez.deserialize(done);
+      size_t return_type_size;
+      derez.deserialize(return_type_size);
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
