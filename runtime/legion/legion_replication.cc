@@ -3706,7 +3706,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplPendingPartitionOp::request_future_buffers(
-                                                std::set<RtEvent> &ready_events)
+              std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3717,8 +3717,11 @@ namespace Legion {
       for (std::map<DomainPoint,Future>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent ready =
+        const RtEvent mapped =
           it->second.impl->request_internal_buffer(this, false/*eager*/);
+        if (mapped.exists())
+          mapped_events.insert(mapped);
+        const RtEvent ready = it->second.impl->subscribe();
         if (ready.exists())
           ready_events.insert(ready);
       } 

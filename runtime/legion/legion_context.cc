@@ -173,7 +173,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+      Future result = 
+        runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
       // Set the future result
       RtEvent done;
       FutureInstance *instance = NULL;
@@ -216,8 +217,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to do a match here, there is just one shard
-      memcpy(output, input, num_elements * element_size);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+      const size_t future_size = num_elements * element_size;
+      memcpy(output, input, future_size);
+      Future result = 
+        runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &future_size);
       result.impl->set_local(&num_elements, sizeof(num_elements));
       return result;
     }
@@ -2582,10 +2585,11 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
+      const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
         runtime->get_available_distributed_id(), 
-        runtime->address_space, ApEvent::NO_AP_EVENT);
-      if (launcher.predicate_false_result.get_size() > 0)
+        runtime->address_space, ApEvent::NO_AP_EVENT, &future_size);
+      if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
@@ -2663,10 +2667,11 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
+      const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), 
-        runtime->address_space, ApEvent::NO_AP_EVENT);
-      if (launcher.predicate_false_result.get_size() > 0)
+        runtime->address_space, ApEvent::NO_AP_EVENT, &future_size);
+      if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
@@ -6333,7 +6338,8 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT,
+          &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6372,7 +6378,8 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT,
+          &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6410,10 +6417,11 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
+        const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
-            ApEvent::NO_AP_EVENT);
-        future->set_local(it->second.get_ptr(), it->second.get_size());
+            ApEvent::NO_AP_EVENT, &future_size);
+        future->set_local(it->second.get_ptr(), future_size);
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
@@ -7406,15 +7414,19 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
+        const size_t size = sizeof(value);
+        Future result = 
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
+        const size_t size = sizeof(value);
+        Future result =
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
@@ -16638,8 +16650,8 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->get_available_distributed_id(), runtime->address_space,
+          ApEvent::NO_AP_EVENT, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -16693,7 +16705,8 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT,
+          &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -16798,10 +16811,11 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
+        const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
-            ApEvent::NO_AP_EVENT);
-        future->set_local(it->second.get_ptr(), it->second.get_size());
+            ApEvent::NO_AP_EVENT, &future_size);
+        future->set_local(it->second.get_ptr(), future_size);
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
@@ -22323,8 +22337,8 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
-      const RtEvent ready = 
-        f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      const RtEvent ready = f.impl->subscribe(); 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       // Always eagerly evaluate predicates in leaf contexts
@@ -22401,15 +22415,19 @@ namespace Legion {
     {
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
+        const size_t size = sizeof(value);
+        Future result =
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
+        const size_t size = sizeof(value);
+        Future result =
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }

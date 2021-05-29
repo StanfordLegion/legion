@@ -2458,8 +2458,8 @@ namespace Legion {
       OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
     protected:
       Future future;
     };
@@ -3141,7 +3141,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
+      virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
+                                          std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;

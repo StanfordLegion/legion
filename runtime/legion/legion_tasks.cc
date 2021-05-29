@@ -2875,6 +2875,8 @@ namespace Legion {
                       "implementation of task %s (ID %lld).",
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
+      // Record the future output size
+      record_future_result_size(variant_impl->return_type_size);
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -5727,7 +5729,8 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), this));
+            runtime->address_space, get_completion_event(), 
+            NULL/*unknown size at this point*/, this));
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -6078,6 +6081,13 @@ namespace Legion {
                           applied_condition, acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_future_result_size(size_t future_size)
+    //--------------------------------------------------------------------------
+    {
+      result.impl->set_future_result_size(future_size, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -6883,6 +6893,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::record_future_result_size(size_t future_size)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_future_result_size(future_size, index_point, 
+                                             map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
@@ -7153,7 +7171,10 @@ namespace Legion {
         Future f = point_arguments.impl->get_future(point, true/*internal*/);
         if (f.impl != NULL)
         {
-          const RtEvent ready = f.impl->request_internal_buffer(this, eager);
+          // Request the local buffer
+          f.impl->request_internal_buffer(this, eager);
+          // Make sure that it is ready
+          const RtEvent ready = f.impl->subscribe();
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
           const void *buffer =
@@ -7430,6 +7451,13 @@ namespace Legion {
     {
       assert(false);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::record_future_result_size(size_t future_size)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
     }
     
     //--------------------------------------------------------------------------
@@ -8333,8 +8361,9 @@ namespace Legion {
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
       reduction_future = Future(new FutureImpl(parent_ctx, runtime,
-            true/*register*/, runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), this));
+          true/*register*/, runtime->get_available_distributed_id(), 
+          runtime->address_space, get_completion_event(),
+          (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
       if (runtime->legion_spy_enabled)
       {
@@ -11366,6 +11395,32 @@ namespace Legion {
       }
       if (needs_trigger)
         trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::record_future_result_size(size_t future_size,
+                const DomainPoint &point, std::set<RtEvent> &applied_conditions)
+    //--------------------------------------------------------------------------
+    {
+      if (redop > 0)
+        return;
+#ifdef DEBUG_LEGION
+      assert(future_handles != NULL);
+#endif
+      const std::map<DomainPoint,DistributedID> &handles = 
+        future_handles->handles;
+      std::map<DomainPoint,DistributedID>::const_iterator finder = 
+        handles.find(point);
+#ifdef DEBUG_LEGION
+      assert(finder != handles.end());
+#endif
+      std::vector<std::pair<size_t,DomainPoint> > coordinates;
+      parent_ctx->compute_task_tree_coordinates(coordinates);
+      coordinates.push_back(std::make_pair(context_index, point));
+      WrapperReferenceMutator mutator(applied_conditions);
+      FutureImpl *impl = runtime->find_or_create_future(finder->second, 
+                    parent_ctx->get_context_uid(), &mutator, coordinates);
+      impl->set_future_result_size(future_size, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------

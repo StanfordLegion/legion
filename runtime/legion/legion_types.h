@@ -814,6 +814,7 @@ namespace Legion {
       SEND_VIEW_REPLICATION_REMOVAL,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
+      SEND_FUTURE_RESULT_SIZE,
       SEND_FUTURE_SUBSCRIPTION,
       SEND_FUTURE_NOTIFICATION,
       SEND_FUTURE_BROADCAST,
@@ -1033,6 +1034,7 @@ namespace Legion {
         "Send View Replication Removal",                              \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
+        "Send Future Result Size",                                    \
         "Send Future Subscription",                                   \
         "Send Future Notification",                                   \
         "Send Future Broadcast",                                      \

@@ -2695,10 +2695,12 @@ namespace Legion {
       bool set_future = false;
       if (result_future.impl == NULL)
       {
+        const size_t future_size = sizeof(bool);
         Future temp = Future(
               new FutureImpl(parent_ctx, runtime, true/*register*/,
                 runtime->get_available_distributed_id(),
-                runtime->address_space, get_completion_event(), this));
+                runtime->address_space, get_completion_event(), 
+                &future_size, this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
         if (result_future.impl == NULL)
@@ -8047,9 +8049,11 @@ namespace Legion {
       fence_kind = kind;
       if (need_future)
       {
+        const size_t future_size = 0;
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
-              runtime->address_space, completion_event, track ? this : NULL));
+              runtime->address_space, completion_event, &future_size,
+              track ? this : NULL));
         // We can set the future result right now because we know that it
         // will not be complete until we are complete ourselves
         result.impl->set_result(NULL);
@@ -8564,52 +8568,62 @@ namespace Legion {
 #endif
             // Have to request internal buffers before completing mapping
             // in case we have to make an instance as part of it
-            const RtEvent ready = 
-              futures[0].impl->request_internal_buffer(this, false/*eager*/);
-            if (ready.exists())
+            FutureImpl *impl = futures[0].impl;
+            const RtEvent mapped = 
+              impl->request_internal_buffer(this, false/*eager*/);
+            if (mapped.exists())
             {
               if (mapping_precondition.exists())
                 complete_mapping(
-                    Runtime::merge_events(ready, mapping_precondition));
+                    Runtime::merge_events(mapped, mapping_precondition));
               else
-                complete_mapping(ready);
+                complete_mapping(mapped);
             }
             else
               complete_mapping(mapping_precondition);
+            complete_execution(impl->subscribe());
             break;
           }
         case FIELD_ALLOCATION:
           {
-            std::set<RtEvent> ready_events;
+            std::set<RtEvent> mapped_events, ready_events;
             // Have to request internal buffers before completing mapping
             // in case we have to make an instance as part of it
             for (unsigned idx = 0; idx < futures.size(); idx++)
             {
-              const RtEvent ready =
-                futures[idx].impl->request_internal_buffer(this,false/*eager*/);
-              if (ready.exists())
-                ready_events.insert(ready);
+              FutureImpl *impl = futures[idx].impl;
+              const RtEvent mapped =
+                impl->request_internal_buffer(this,false/*eager*/);
+              if (mapped.exists())
+                mapped_events.insert(mapped);
+              const RtEvent subscribed = impl->subscribe();
+              if (subscribed.exists())
+                ready_events.insert(subscribed);
             }
-            if (!ready_events.empty())
+            if (!mapped_events.empty())
             {
               if (mapping_precondition.exists())
-                ready_events.insert(mapping_precondition);
-              complete_mapping(Runtime::merge_events(ready_events));
+                mapped_events.insert(mapping_precondition);
+              complete_mapping(Runtime::merge_events(mapped_events));
             }
             else
               complete_mapping(mapping_precondition);
+            if (!ready_events.empty())
+              complete_execution(Runtime::merge_events(ready_events));
+            else
+              complete_execution();
             break;
           }
         case FENCE_CREATION:
         case FUTURE_MAP_CREATION:
           {
             complete_mapping(mapping_precondition);
+            complete_execution();
             break;
           }
         default:
           assert(false);
       }
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -13066,7 +13080,8 @@ namespace Legion {
       initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), this));
+            runtime->address_space, get_completion_event(), 
+            NULL/*no known future size*/, this));
       collective = dc;
       if (runtime->legion_spy_enabled)
       {
@@ -13287,19 +13302,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      enqueue_ready_operation(
-          future.impl->request_internal_buffer(this, false/*eager*/)); 
-    }
-
-    //--------------------------------------------------------------------------
     void FuturePredOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Mark that we completed mapping this operation
-      complete_mapping();
+      complete_mapping(
+          future.impl->request_internal_buffer(this, false/*eager*/));
+      const RtEvent ready = future.impl->subscribe();
+      if (ready.exists() && !ready.has_triggered())
+      {
+        DeferredExecuteArgs deferred_execute_args(this);
+        runtime->issue_runtime_meta_task(deferred_execute_args,
+                        LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
+      }
+      else
+        deferred_execute();
+    }
+
+    //--------------------------------------------------------------------------
+    void FuturePredOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
       // See if we have a value
       bool value = future.impl->get_boolean_value(parent_ctx);
 #ifdef LEGION_SPY
@@ -15406,7 +15429,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::request_future_buffers(
-                                                std::set<RtEvent> &ready_events)
+              std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15417,8 +15440,11 @@ namespace Legion {
       for (std::map<DomainPoint,Future>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent ready =
+        const RtEvent mapped =
           it->second.impl->request_internal_buffer(this, false/*eager*/);
+        if (mapped.exists())
+          mapped_events.insert(mapped);
+        const RtEvent ready = it->second.impl->subscribe();
         if (ready.exists())
           ready_events.insert(ready);
       }
@@ -15428,17 +15454,20 @@ namespace Legion {
     void PendingPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> ready_events;
+      std::set<RtEvent> mapped_events, ready_events;
       if (future_map.impl != NULL)
-        request_future_buffers(ready_events);
+        request_future_buffers(mapped_events, ready_events);
       // Can only marked that that this is mapped after we've requested
       // buffers for any futures in the future map we need which may
       // require performing allocations
-      if (!ready_events.empty())
-        complete_mapping(Runtime::merge_events(ready_events));
+      if (!mapped_events.empty())
+        complete_mapping(Runtime::merge_events(mapped_events));
       else
         complete_mapping();
-      complete_execution();
+      if (!ready_events.empty())
+        complete_execution(Runtime::merge_events(ready_events));
+      else
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -17753,9 +17782,10 @@ namespace Legion {
       }
       else
       {
+        // This will make sure we have a mapping locally
+        future.impl->request_internal_buffer(this, false/*eager*/);
         // If we have a future value see if its event has triggered
-        RtEvent future_ready_event = 
-          future.impl->request_internal_buffer(this, false/*eager*/);
+        const RtEvent future_ready_event = future.impl->subscribe(); 
         if (!future_ready_event.has_triggered())
         {
           // Launch a task to handle the deferred complete
@@ -20225,9 +20255,11 @@ namespace Legion {
       requirement.privilege = LEGION_READ_WRITE;
       requirement.prop = LEGION_EXCLUSIVE;
       // Create the future result that we will complete when we're done
+      const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(), this));
+                  runtime->address_space, get_completion_event(),
+                  &future_size, this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
@@ -20668,9 +20700,11 @@ namespace Legion {
         points.push_back(point);
       }
       // Create the future result that we will complete when we're done
+      const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(), this));
+                  runtime->address_space, get_completion_event(),
+                  &future_size, this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
@@ -21017,9 +21051,12 @@ namespace Legion {
           if (it->impl != NULL)
             preconditions.insert(*it);
       }
+      const size_t future_size = (measurement == LEGION_MEASURE_SECONDS) ?
+        sizeof(double) : sizeof(long long);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                   runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(), this));
+                  runtime->address_space, get_completion_event(), 
+                  &future_size, this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
@@ -21203,8 +21240,9 @@ namespace Legion {
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(), this));
+                runtime->get_available_distributed_id(),
+                runtime->address_space, get_completion_event(), 
+                (serdez_redop_fns == NULL) ? &redop->sizeof_rhs : NULL, this));
       mapper_id = map_id;
       tag = t;
       deterministic = is_deterministic;
@@ -21333,8 +21371,8 @@ namespace Legion {
         for (std::map<DomainPoint,Future>::const_iterator it = 
               sources.begin(); it != sources.end(); it++)
         {
-          const RtEvent ready = 
-            it->second.impl->request_internal_buffer(this, true/*eager*/);
+          it->second.impl->request_internal_buffer(this, false/*eager*/);
+          const RtEvent ready = it->second.impl->subscribe();
           if (ready.exists())
             ready_events.insert(ready);
         }
