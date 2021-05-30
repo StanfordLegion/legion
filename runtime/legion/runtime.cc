@@ -1122,7 +1122,8 @@ namespace Legion {
                   inst_ready = Runtime::create_ap_user_event(NULL);
                 FutureInstance *instance = manager->create_future_instance(task,
                     task_uid, inst_ready, future_size, false/*eager*/);
-                pending_instances[target] = PendingInstance(instance);
+                pending_instances[target] =
+                  PendingInstance(instance, inst_ready);
               }
               else
               {
@@ -1220,9 +1221,11 @@ namespace Legion {
           {
             MemoryManager *manager = 
               runtime->find_memory_manager(runtime->runtime_system_memory); 
+            const ApUserEvent inst_ready = Runtime::create_ap_user_event(NULL);
             FutureInstance *instance = manager->create_future_instance(op,
-              op->get_unique_op_id(), ApEvent::NO_AP_EVENT, future_size, eager);
-            pending_instances[local_sysmem] = PendingInstance(instance);
+              op->get_unique_op_id(), inst_ready, future_size, eager);
+            pending_instances[local_sysmem] = 
+              PendingInstance(instance, inst_ready);
           }
           else
           {
@@ -1509,7 +1512,7 @@ namespace Legion {
           for (std::set<AddressSpaceID>::const_iterator it =
                 subscribers.begin(); it != subscribers.end(); it++)
           {
-            if ((*it) == source)
+            if (((*it) == source) || ((*it) == local_space))
               continue;
             runtime->send_future_result_size(*it, rez);
           }
@@ -1567,6 +1570,9 @@ namespace Legion {
     void FutureImpl::finish_set_future(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!future_size_set || (future_size <= canonical_instance->size));
+#endif
       // must be called while we are already holding the lock
       future_size = (canonical_instance == NULL) ? 0 : canonical_instance->size;
       future_size_set = true;

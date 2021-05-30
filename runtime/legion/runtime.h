@@ -225,8 +225,8 @@ namespace Legion {
       public:
         PendingInstance(void)
           : instance(NULL), op(NULL), uid(0), eager(false) { }
-        PendingInstance(FutureInstance *i)
-          : instance(i), op(NULL), uid(0), eager(false) { }
+        PendingInstance(FutureInstance *i, ApUserEvent r)
+          : instance(i), op(NULL), uid(0), inst_ready(r), eager(false) { }
         PendingInstance(Operation *o, UniqueID id, ApUserEvent r, 
                         RtUserEvent a, bool e)
           : instance(NULL), op(o), uid(id), inst_ready(r),
@@ -279,6 +279,8 @@ namespace Legion {
                        UniqueID uid, AddressSpaceID source,
                        ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
+      // The return event for this method indicates when the resources have
+      // been allocated for the instance and we can consider it mapped
       RtEvent request_internal_buffer(Operation *op, bool eager);
       const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
       FutureInstance* get_canonical_instance(void);
@@ -310,6 +312,8 @@ namespace Legion {
       // computation for resiliency reasons
       bool reset_future(void);
       // Request that we get meta data for the future on this node
+      // The return event here will indicate when we have local data
+      // that is valid to access for this particular future
       RtEvent subscribe(void);
       // Set the task tree coordinates for this future
       void set_future_coordinates(
