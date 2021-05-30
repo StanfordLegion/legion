@@ -1571,8 +1571,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!future_size_set || (future_size <= 
-            ((canonical_instance == NULL) ? 0 : canonical_instance->size)));
+      assert(!future_size_set || (((canonical_instance == NULL) ? 
+                  0 : canonical_instance->size) <= future_size));
 #endif
       // must be called while we are already holding the lock
       future_size = (canonical_instance == NULL) ? 0 : canonical_instance->size;

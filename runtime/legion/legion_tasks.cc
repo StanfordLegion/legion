@@ -3653,11 +3653,12 @@ namespace Legion {
                           get_task_name(), get_unique_id())
           else
             shard_manager->set_shard_mapping(output.control_replication_map);
+          VariantImpl *var_impl = NULL;
+          VariantID chosen_variant = output.task_mappings[0].chosen_variant;
           if (!runtime->unsafe_mapper)
           {
             // Check to make sure that they all picked the same variant
             // and that it is a replicable variant
-            VariantID chosen_variant = output.task_mappings[0].chosen_variant;
             for (unsigned idx = 1; idx < total_shards; idx++)
             {
               if (output.task_mappings[idx].chosen_variant != chosen_variant)
@@ -3671,8 +3672,8 @@ namespace Legion {
                               output.task_mappings[idx].chosen_variant,
                               get_task_name(), get_unique_id())
             }
-            VariantImpl *var_impl = runtime->find_variant_impl(task_id,
-                                      chosen_variant, true/*can_fail*/);
+            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+                                                  true/*can_fail*/);
             // If it's NULL we'll catch it later in the checks
             if ((var_impl != NULL) && !var_impl->is_replicable())
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3683,6 +3684,10 @@ namespace Legion {
                             mapper->get_mapper_name(), get_task_name(),
                             get_unique_id())
           }
+          else
+            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+                                                  true/*can_fail*/);
+          record_future_result_size(var_impl->return_type_size);
         }
         else
         {
@@ -3714,6 +3719,10 @@ namespace Legion {
                               get_unique_id())
             }
           }
+          VariantID chosen_variant = output.task_mappings[0].chosen_variant;
+          VariantImpl *var_impl = 
+            runtime->find_variant_impl(task_id,chosen_variant,true/*can_fail*/);
+          record_future_result_size(var_impl->return_type_size);
         }
         // We're going to store the needed instances locally so we can
         // do the mapping when we return on behalf of all the shards
@@ -7457,7 +7466,7 @@ namespace Legion {
     void ShardTask::record_future_result_size(size_t future_size)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // do nothing 
     }
     
     //--------------------------------------------------------------------------
