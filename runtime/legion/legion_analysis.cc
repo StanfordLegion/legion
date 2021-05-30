@@ -18675,6 +18675,9 @@ namespace Legion {
             if (!(mask * it->second))
               ready_events.insert(it->first); 
         }
+#ifdef DEBUG_LEGION
+        FieldMask observed_sets;
+#endif
         if (target_space != runtime->address_space)
         {
           FieldMaskSet<EquivalenceSet> to_send;
@@ -18692,11 +18695,9 @@ namespace Legion {
             // read-only privileges because then we have equivalence sets
             // which only overlap our region here
             //assert(it->first->region_node == node);
+            observed_sets |= overlap;
 #endif
             to_send.insert(it->first, overlap);
-            mask -= overlap;
-            if (!mask)
-              break;
           }
           if (!to_send.empty())
           {
@@ -18734,17 +18735,15 @@ namespace Legion {
             // read-only privileges because then we have equivalence sets
             // which only overlap our region here
             //assert(it->first->region_node == node);
+            observed_sets |= overlap;
 #endif
             to_record.insert(it->first, overlap);
-            mask -= overlap;
-            if (!mask)
-              break;
           }
         }
 #ifdef DEBUG_LEGION
         else
-          mask.clear();
-        assert(!mask);
+          observed_sets = mask;
+        assert(observed_sets == mask);
 #endif
       }
       if (!to_record.empty())
