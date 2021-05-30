@@ -109,7 +109,7 @@ namespace Legion {
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  const CodeDescriptor &desc, bool ret, 
+                                  const CodeDescriptor &desc, size_t ret_size,
                                   VariantID vid, bool check_task_id);
       virtual TraceID generate_dynamic_trace_id(void);
       virtual MapperID generate_dynamic_mapper_id(void);
@@ -1926,7 +1926,7 @@ namespace Legion {
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  const CodeDescriptor &desc, bool ret, 
+                                  const CodeDescriptor &desc, size_t ret_size,
                                   VariantID vid, bool check_task_id);
       virtual VariantImpl* select_inline_variant(TaskOp *child,
                 const std::vector<PhysicalRegion> &parent_regions,

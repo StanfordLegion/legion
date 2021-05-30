@@ -228,12 +228,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID TaskContext::register_variant(
             const TaskVariantRegistrar &registrar, const void *user_data,
-            size_t user_data_size, const CodeDescriptor &desc, bool ret,
+            size_t user_data_size, const CodeDescriptor &desc, size_t ret_size,
             VariantID vid, bool check_task_id)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_data_size,
-          desc, ret, vid, check_task_id, false/*check context*/);
+          desc, ret_size, vid, check_task_id, false/*check context*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11348,14 +11348,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantID ReplicateContext::register_variant(
                 const TaskVariantRegistrar &registrar, const void *user_data,
-                size_t user_data_size, const CodeDescriptor &desc, bool ret,
-                VariantID vid, bool check_task_id)
+                size_t user_data_size, const CodeDescriptor &desc, 
+                size_t ret_size, VariantID vid, bool check_task_id)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::register_variant(registrar, user_data, 
-            user_data_size, desc, ret, vid, check_task_id);
+            user_data_size, desc, ret_size, vid, check_task_id);
       if (runtime->safe_control_replication &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
@@ -11390,7 +11390,7 @@ namespace Legion {
         // Have this shard do the registration, and then broadcast the
         // resulting variant to all the other shards
         result = runtime->register_variant(registrar, user_data, user_data_size,
-                         desc, ret, vid, check_task_id, false/*check context*/);
+                    desc, ret_size, vid, check_task_id, false/*check context*/);
         collective.broadcast(result);
       }
       else
