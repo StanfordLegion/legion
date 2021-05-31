@@ -11859,6 +11859,11 @@ namespace Legion {
               runtime->handle_logical_region_destruction(derez); 
               break;
             }
+          case INDIVIDUAL_REMOTE_FUTURE_SIZE:
+            {
+              runtime->handle_individual_remote_future_size(derez);
+              break;
+            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -21666,6 +21671,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_individual_remote_future_size(Processor target,
+                                                     Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_FUTURE_SIZE,
+                        TASK_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23724,6 +23738,13 @@ namespace Legion {
         else
           Runtime::trigger_event(done);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_individual_remote_future_size(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::process_unpack_remote_future_size(derez);
     }
 
     //--------------------------------------------------------------------------

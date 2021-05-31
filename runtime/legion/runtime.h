@@ -3067,6 +3067,7 @@ namespace Legion {
       void send_logical_region_destruction(LogicalRegion handle, 
                                            AddressSpaceID target,
                                            std::set<RtEvent> &applied);
+      void send_individual_remote_future_size(Processor target,Serializer &rez);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -3387,6 +3388,7 @@ namespace Legion {
       void handle_index_partition_destruction(Deserializer &derez);
       void handle_field_space_destruction(Deserializer &derez);
       void handle_logical_region_destruction(Deserializer &derez);
+      void handle_individual_remote_future_size(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 

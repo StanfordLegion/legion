@@ -380,13 +380,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::handle_future_size(VariantImpl *variant_impl)
+    void ReplIndividualTask::handle_future_size(size_t return_type_size,
+                   bool has_return_type_size, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((mapped_collective != NULL) || (must_epoch != NULL));
+#endif
       // Signal that we are done with our mapping with the future size
-      mapped_collective->broadcast_future_size(mapped_event,
-          variant_impl->return_type_size, variant_impl->has_return_type_size);
-      IndividualTask::handle_future_size(variant_impl);
+      if (mapped_collective != NULL)
+        mapped_collective->broadcast_future_size(mapped_event,
+                      return_type_size, has_return_type_size);
+      IndividualTask::handle_future_size(return_type_size, 
+                      has_return_type_size, applied_events);
     }
 
     //--------------------------------------------------------------------------

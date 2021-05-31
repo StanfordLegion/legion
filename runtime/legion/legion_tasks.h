@@ -492,7 +492,9 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
-      virtual void handle_future_size(VariantImpl *impl) = 0;
+      virtual void handle_future_size(size_t return_type_size,
+                                      bool has_return_type_size,
+                                      std::set<RtEvent> &applied_events) = 0;
       virtual void trigger_replay(void);
       // For tasks that are sharded off by control replication
       virtual void shard_off(RtEvent mapped_precondition);
@@ -772,7 +774,9 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void handle_future_size(VariantImpl *impl);
+      virtual void handle_future_size(size_t return_type_size,
+                                      bool has_return_type_size,
+                                      std::set<RtEvent> &applied_events);
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
@@ -816,6 +820,7 @@ namespace Legion {
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent completion_event);
     public:
+      static void process_unpack_remote_future_size(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
     protected: 
@@ -872,7 +877,9 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void handle_future_size(VariantImpl *impl);
+      virtual void handle_future_size(size_t return_type_size,
+                                      bool has_return_type_size,
+                                      std::set<RtEvent> &applied_events);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const;
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -977,7 +984,9 @@ namespace Legion {
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void handle_future_size(VariantImpl *impl);
+      virtual void handle_future_size(size_t return_type_size,
+                                      bool has_return_type_size,
+                                      std::set<RtEvent> &applied_events);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual std::map<PhysicalManager*,unsigned>*

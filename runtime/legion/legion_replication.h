@@ -1248,7 +1248,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual void prepare_map_must_epoch(void);
-      virtual void handle_future_size(VariantImpl *impl);
+      virtual void handle_future_size(size_t return_type_size,
+          bool has_return_type_size, std::set<RtEvent> &applied_events);
     public:
       // Override these so we can broadcast the future result
       virtual void trigger_task_complete(void);
