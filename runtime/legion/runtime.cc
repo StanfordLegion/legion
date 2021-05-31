@@ -637,8 +637,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now,
             DistributedID did, AddressSpaceID own_space, ApEvent complete,
-            const size_t *fsize /*=NULL*/, Operation *o /*= NULL*/, 
-            bool compute_coordinates)
+            const size_t *fsize /*=NULL*/, Operation *o /*= NULL*/) 
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           own_space, register_now), context(ctx),
@@ -647,6 +646,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
+        producer_context_index((o == NULL) ? SIZE_MAX : o->get_ctx_index()),
         future_complete(complete), result_set_space(local_space),
         canonical_instance(NULL), metadata(NULL), metasize(0),
         future_size((fsize == NULL) ? 0 : *fsize), callback_functor(NULL), 
@@ -655,11 +655,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
-      {
         producer_op->add_mapping_reference(op_gen);
-        if (compute_coordinates && runtime->safe_control_replication)
-          producer_op->compute_future_coordinates(coordinates);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Future %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -670,6 +666,7 @@ namespace Legion {
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now, 
                            DistributedID did, AddressSpaceID own_space,
                            ApEvent complete, Operation *o, GenerationID gen,
+                           size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
                            UniqueID uid,
 #endif
@@ -681,6 +678,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid(uid),
 #endif
+        producer_context_index(op_ctx_index), producer_point(op_point),
         future_complete(complete), result_set_space(local_space),
         canonical_instance(NULL), metadata(NULL), metasize(0), future_size(0),
         callback_functor(NULL), own_callback_functor(false),
@@ -698,10 +696,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
       : DistributedCollectable(NULL, 0, 0), context(NULL), producer_op(NULL),
-        op_gen(0), producer_depth(0)
+        op_gen(0), producer_depth(0),
 #ifdef LEGION_SPY
-        , producer_uid(0)
+        producer_uid(0),
 #endif
+        producer_context_index(0), producer_point(DomainPoint())
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2017,22 +2016,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_future_coordinates(
-                            std::vector<std::pair<size_t,DomainPoint> > &coords)
+    void FutureImpl::get_future_coordinates(
+                 std::vector<std::pair<size_t,DomainPoint> > &coordinates) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(coordinates.empty());
-#endif
-      coordinates.swap(coords);
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<std::pair<size_t,DomainPoint> >& 
-                                  FutureImpl::get_future_coordinates(void) const
-    //--------------------------------------------------------------------------
-    {
-      return coordinates;
+      // No coordinates if we are an application-generated future
+      if (producer_context_index == SIZE_MAX)
+        return;
+      context->compute_task_tree_coordinates(coordinates);
+      coordinates.push_back(
+          std::make_pair(producer_context_index, producer_point));
     }
 
     //--------------------------------------------------------------------------
@@ -2041,16 +2034,8 @@ namespace Legion {
     {
       rez.serialize<DistributedID>(did);
       rez.serialize(context->get_unique_id());
-      if (runtime->safe_control_replication)
-      {
-        rez.serialize<size_t>(coordinates.size());
-        for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
-              coordinates.begin(); it != coordinates.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
+      rez.serialize(producer_context_index);
+      rez.serialize(producer_point);
     }
 
     //--------------------------------------------------------------------------
@@ -2069,21 +2054,12 @@ namespace Legion {
         return NULL;
       UniqueID context_uid;
       derez.deserialize(context_uid);
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
-      if (runtime->safe_control_replication)
-      {
-        size_t num_coordinates;
-        derez.deserialize(num_coordinates);
-        coordinates.resize(num_coordinates);
-        for (unsigned idx = 0; idx < num_coordinates; idx++)
-        {
-          std::pair<size_t,DomainPoint> &coord = coordinates[idx]; 
-          derez.deserialize(coord.first);
-          derez.deserialize(coord.second);
-        }
-      }
+      size_t op_ctx_index;
+      derez.deserialize(op_ctx_index);
+      DomainPoint point;
+      derez.deserialize(point);
       return runtime->find_or_create_future(future_did, context_uid, mutator,
-                                            coordinates, op, op_gen,
+                                            op_ctx_index, point, op, op_gen,
 #ifdef LEGION_SPY
                                             op_uid,
 #endif
@@ -3227,14 +3203,13 @@ namespace Legion {
           return finder->second;
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
-        Future result = runtime->help_create_future(context, 
-                    ApEvent::NO_AP_EVENT, NULL/*size*/, op);
-        if (runtime->safe_control_replication)
-        {
-          std::vector<std::pair<size_t,DomainPoint> > new_coords(coordinates);
-          new_coords.push_back(std::make_pair(op_ctx_index, point));
-          result.impl->set_future_coordinates(new_coords);
-        }
+        Future result(new FutureImpl(context, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), runtime->address_space,
+              ApEvent::NO_AP_EVENT, op, op_gen, op_ctx_index, point,
+#ifdef LEGION_SPY
+            op_uid,
+#endif
+            op_depth));
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
@@ -26035,7 +26010,8 @@ namespace Legion {
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
                                                UniqueID context_uid,
                                                ReferenceMutator *mutator,
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates,
+                                               size_t op_ctx_index,
+                                               const DomainPoint &op_point,
                                                Operation *op, GenerationID gen,
 #ifdef LEGION_SPY
                                                UniqueID op_uid,
@@ -26064,15 +26040,12 @@ namespace Legion {
       assert(owner_space != address_space);
 #endif
       InnerContext *context = find_context(context_uid);
-      FutureImpl *result = (op == NULL) ? 
-        new FutureImpl(context, this, false/*register*/, did, owner_space,
-                       ApEvent::NO_AP_EVENT) : 
-        new FutureImpl(context, this, false/*register*/, did, owner_space, 
-                       ApEvent::NO_AP_EVENT, op, gen,
+      FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
+             owner_space, ApEvent::NO_AP_EVENT, op, gen, op_ctx_index, op_point,
 #ifdef LEGION_SPY
-                       op_uid,
+             op_uid,
 #endif
-                       op_depth);
+             op_depth);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -26093,8 +26066,6 @@ namespace Legion {
           return result;
         }
         result->record_future_registered(mutator);
-        if (!coordinates.empty())
-          result->set_future_coordinates(coordinates);
         dist_collectables[did] = result;
       }
       return result;
@@ -28271,8 +28242,7 @@ namespace Legion {
     {
       return Future(new FutureImpl(ctx, this, true/*register*/,
                                    get_available_distributed_id(),address_space, 
-                                   complete_event, future_size, op,
-                                   false/*get coordinates*/));
+                                   complete_event, future_size, op));
     }
 
     //--------------------------------------------------------------------------

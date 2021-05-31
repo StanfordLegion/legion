@@ -244,10 +244,11 @@ namespace Legion {
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
                  DistributedID did, AddressSpaceID owner_space,
                  ApEvent complete, const size_t *future_size = NULL,
-                 Operation *op = NULL, bool compute_coordinates = true);
+                 Operation *op = NULL);
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
                  DistributedID did, AddressSpaceID owner_space,
                  ApEvent complete, Operation *op, GenerationID gen,
+                 size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
                  UniqueID op_uid,
 #endif
@@ -315,11 +316,8 @@ namespace Legion {
       // The return event here will indicate when we have local data
       // that is valid to access for this particular future
       RtEvent subscribe(void);
-      // Set the task tree coordinates for this future
-      void set_future_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
-      const std::vector<std::pair<size_t,DomainPoint> >&
-        get_future_coordinates(void) const;
+      void get_future_coordinates(
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates) const;
       void pack_future(Serializer &rez) const;
       static FutureImpl* unpack_future(Runtime *runtime, 
           Deserializer &derez, ReferenceMutator *mutator, 
@@ -383,6 +381,8 @@ namespace Legion {
 #ifdef LEGION_SPY
       const UniqueID producer_uid;
 #endif
+      const size_t producer_context_index;
+      const DomainPoint producer_point;
       const ApEvent future_complete;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -390,10 +390,6 @@ namespace Legion {
       RtUserEvent subscription_event;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
-      // These are the coordinates in the task tree for the operation
-      // that produced this future. Currently it is only valid if we
-      // are running with -lg:safe_ctrlrepl but we could relax that
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
       AddressSpaceID result_set_space; // space on which the result was set
       std::map<Memory,FutureInstance*> instances;
       FutureInstance *canonical_instance;
@@ -3733,9 +3729,10 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did, UniqueID uid,
+      FutureImpl* find_or_create_future(DistributedID did, UniqueID ctx_uid,
                                         ReferenceMutator *mutator,
-                      std::vector<std::pair<size_t,DomainPoint> > &coordinates,
+                                        size_t op_ctx_index,
+                                        const DomainPoint &point,
                                         Operation *op = NULL,
                                         GenerationID op_gen = 0, 
 #ifdef LEGION_SPY

@@ -4022,9 +4022,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::compute_task_tree_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+                 std::vector<std::pair<size_t,DomainPoint> > &coordinates) const
     //--------------------------------------------------------------------------
     {
+      // Reserve an extra level for the common case
+      coordinates.reserve(context_coordinates.size() + 1);
       coordinates = context_coordinates;
     } 
 
@@ -11721,8 +11723,8 @@ namespace Legion {
     {
       if (future.impl == NULL)
         return;
-      const std::vector<std::pair<size_t,DomainPoint> > &coordinates =
-        future.impl->get_future_coordinates();
+      std::vector<std::pair<size_t,DomainPoint> > coordinates;
+      future.impl->get_future_coordinates(coordinates);
       if (!coordinates.empty())
       {
         for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
@@ -21075,7 +21077,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::compute_task_tree_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+                 std::vector<std::pair<size_t,DomainPoint> > &coordinates) const
     //--------------------------------------------------------------------------
     {
       TaskContext *owner_ctx = owner_task->get_context();

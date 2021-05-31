@@ -84,7 +84,7 @@ namespace Legion {
                                        AddressSpaceID target,
                                        bool replicate = false) = 0;
       virtual void compute_task_tree_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates) = 0;
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates) const = 0;
       virtual bool attempt_children_complete(void) = 0;
       virtual bool attempt_children_commit(void) = 0;
       virtual VariantImpl* select_inline_variant(TaskOp *child,
@@ -987,7 +987,7 @@ namespace Legion {
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
       virtual void compute_task_tree_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates) const;
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
@@ -2735,7 +2735,7 @@ namespace Legion {
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
       virtual void compute_task_tree_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+          std::vector<std::pair<size_t,DomainPoint> > &coordinates) const;
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       void inline_child_task(TaskOp *child);

@@ -5739,7 +5739,11 @@ namespace Legion {
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), 
-            NULL/*unknown size at this point*/, this));
+            this, gen, context_index, index_point,
+#ifdef LEGION_SPY
+            unique_op_id,
+#endif
+            parent_ctx->get_depth()));
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -11117,12 +11121,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != future_handles->handles.end());
 #endif
-        std::vector<std::pair<size_t,DomainPoint> > coordinates;
-        parent_ctx->compute_task_tree_coordinates(coordinates);
-        coordinates.push_back(std::make_pair(context_index, point));
         LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-                    parent_ctx->get_context_uid(), &mutator, coordinates);
+            parent_ctx->get_context_uid(), &mutator, context_index, point);
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -11426,12 +11427,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != handles.end());
 #endif
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
-      parent_ctx->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(std::make_pair(context_index, point));
       WrapperReferenceMutator mutator(applied_conditions);
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-                    parent_ctx->get_context_uid(), &mutator, coordinates);
+        parent_ctx->get_context_uid(), &mutator, context_index, point);
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 
