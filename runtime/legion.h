@@ -8779,8 +8779,14 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean if this has a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
        * @param vid optional variant ID to use
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @return variant ID for the task
        */
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
@@ -8789,7 +8795,8 @@ namespace Legion {
 				      size_t user_len = 0,
                                       size_t return_type_size = 
                                                       LEGION_MAX_RETURN_SIZE,
-                                      VariantID vid = LEGION_AUTO_GENERATE_ID);
+                                      VariantID vid = LEGION_AUTO_GENERATE_ID,
+                                      bool has_return_type_size = true);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -8877,7 +8884,13 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean indicating a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @param check_task_id verify validity of the task ID
        * @return variant ID for the task
        */
@@ -8889,6 +8902,7 @@ namespace Legion {
 	      const char *task_name = NULL,
               VariantID vid = LEGION_AUTO_GENERATE_ID,
               size_t return_type_size = LEGION_MAX_RETURN_SIZE,
+              bool has_return_type_size = true,
               bool check_task_id = true);
 
       /**

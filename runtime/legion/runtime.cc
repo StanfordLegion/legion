@@ -13227,12 +13227,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
-                                  size_t return_size, 
+                                  size_t return_size, bool has_return_size, 
                                   const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
                                   const CodeDescriptor &realm, 
                                   const char *task_name)
-      : vid(v), return_type_size(return_size), registrar(reg), 
+      : vid(v), return_type_size(return_size),
+        has_return_type_size(has_return_size), registrar(reg), 
         realm_desc(realm), logical_task_name(NULL)
     //--------------------------------------------------------------------------
     {
@@ -13301,8 +13302,8 @@ namespace Legion {
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
       runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, return_type_size, vid, false/*check task*/,
-                    true/*check context*/, true/*preregistered*/);
+            realm_desc, return_type_size, has_return_type_size, vid, 
+            false/*check task*/, true/*check context*/, true/*preregistered*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -13839,10 +13840,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Runtime *rt, VariantID v, TaskImpl *own, 
                              const TaskVariantRegistrar &registrar,
-                             size_t return_size, const CodeDescriptor &realm,
+                             size_t return_size, bool has_return_size,
+                             const CodeDescriptor &realm,
                              const void *udata/*=NULL*/,size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        return_type_size(return_size), 
+        has_return_type_size(has_return_size), return_type_size(return_size),
         descriptor_id(runtime->get_unique_code_descriptor_id()),
         realm_descriptor(realm),
         execution_constraints(registrar.execution_constraints),
@@ -13953,7 +13955,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), return_type_size(rhs.return_type_size),
+        global(rhs.global), has_return_type_size(rhs.has_return_type_size),
+        return_type_size(rhs.return_type_size),
         descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
     //--------------------------------------------------------------------------
     {
@@ -14122,6 +14125,7 @@ namespace Legion {
             rez.serialize(vid);
             rez.serialize(next_done);
             rez.serialize(return_type_size);
+            rez.serialize(has_return_type_size);
             rez.serialize(user_data_size);
             if (user_data_size > 0)
               rez.serialize(user_data, user_data_size);
@@ -14189,6 +14193,8 @@ namespace Legion {
       derez.deserialize(done);
       size_t return_type_size;
       derez.deserialize(return_type_size);
+      bool has_return_type_size;
+      derez.deserialize(has_return_type_size);
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -14208,8 +14214,8 @@ namespace Legion {
       // Can lie about preregistration since the user would already have
       // gotten there error message on the owner node
       runtime->register_variant(registrar, user_data, user_data_size,
-              realm_desc, return_type_size, variant_id, false/*check task*/,
-              false/*check context*/, true/*preregistered*/);
+            realm_desc, return_type_size, has_return_type_size, variant_id,
+            false/*check task*/, false/*check context*/, true/*preregistered*/);
       AddressSpaceID origin;
       derez.deserialize(origin);
       AddressSpaceID local;
@@ -20287,7 +20293,7 @@ namespace Legion {
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   const CodeDescriptor &realm_code_desc,
-                                  size_t return_type_size,
+                                  size_t return_type_size, bool has_return_size,
                                   VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/,
                                   bool check_context /*= true*/,
@@ -20296,7 +20302,8 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->register_variant(registrar, user_data,
-         user_data_size, realm_code_desc, return_type_size, vid, check_task_id);
+         user_data_size, realm_code_desc, return_type_size, has_return_size,
+         vid, check_task_id);
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
       if (check_task_id && 
@@ -20320,8 +20327,9 @@ namespace Legion {
                       "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, registrar,
-                                          return_type_size, realm_code_desc,
-                                          user_data, user_data_size);
+                                          return_type_size, has_return_size,
+                                          realm_code_desc, user_data, 
+                                          user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
       {
@@ -30684,7 +30692,8 @@ namespace Legion {
     /*static*/ VariantID Runtime::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          const CodeDescriptor &code_desc, size_t return_size, 
+                          const CodeDescriptor &code_desc, 
+                          size_t return_size, bool has_return_size, 
                           const char *task_name, VariantID vid, bool check_id)
     //--------------------------------------------------------------------------
     {
@@ -30712,8 +30721,8 @@ namespace Legion {
                       "generators.", registrar.task_id)
       // Offset by the runtime tasks
       pending_table.push_back(new PendingVariantRegistration(vid, return_size,
-                              registrar, user_data, user_data_size, 
-                              code_desc, task_name));
+                              has_return_size, registrar, user_data,
+                              user_data_size, code_desc, task_name));
       return vid;
     }
 

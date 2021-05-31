@@ -1839,15 +1839,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VariantID MapperManager::register_task_variant(MappingCallInfo *ctx,
-                                      const TaskVariantRegistrar &registrar,
-				      const CodeDescriptor &realm_desc,
-				      const void *user_data, size_t user_len,
-                                      bool has_return_type)
+                                  const TaskVariantRegistrar &registrar,
+                                  const CodeDescriptor &realm_desc,
+                                  const void *user_data, size_t user_len,
+                                  size_t return_type_size, bool has_return_type)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       VariantID result = runtime->register_variant(registrar, user_data,
-                                    user_len, realm_desc, has_return_type);
+                user_len, realm_desc, return_type_size, has_return_type);
       resume_mapper_call(ctx);
       return result;
     }

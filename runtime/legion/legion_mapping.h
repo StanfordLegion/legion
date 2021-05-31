@@ -2091,6 +2091,8 @@ namespace Legion {
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
 				      size_t user_len = 0,
+                                      size_t return_type_size =
+                                              LEGION_MAX_RETURN_SIZE,
                                       bool has_return_type = false);
     public:
       //------------------------------------------------------------------------

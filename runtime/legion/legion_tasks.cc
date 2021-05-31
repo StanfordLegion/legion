@@ -2876,7 +2876,8 @@ namespace Legion {
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
       // Record the future output size
-      record_future_result_size(variant_impl->return_type_size);
+      if (variant_impl->has_return_type_size)
+        record_future_result_size(variant_impl->return_type_size);
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -3687,7 +3688,8 @@ namespace Legion {
           else
             var_impl = runtime->find_variant_impl(task_id, chosen_variant,
                                                   true/*can_fail*/);
-          record_future_result_size(var_impl->return_type_size);
+          if (var_impl->has_return_type_size)
+            record_future_result_size(var_impl->return_type_size);
         }
         else
         {
@@ -3722,7 +3724,8 @@ namespace Legion {
           VariantID chosen_variant = output.task_mappings[0].chosen_variant;
           VariantImpl *var_impl = 
             runtime->find_variant_impl(task_id,chosen_variant,true/*can_fail*/);
-          record_future_result_size(var_impl->return_type_size);
+          if (var_impl->has_return_type_size)
+            record_future_result_size(var_impl->return_type_size);
         }
         // We're going to store the needed instances locally so we can
         // do the mapping when we return on behalf of all the shards

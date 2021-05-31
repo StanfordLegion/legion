@@ -7479,11 +7479,12 @@ namespace Legion {
                                     const void *user_data /*= NULL*/,
                                     size_t user_len /*= 0*/,
                                     size_t return_type_size/*=MAX_RETURN_SIZE*/,
-                                    VariantID vid /*= AUTO_GENERATE_ID*/)
+                                    VariantID vid /*= AUTO_GENERATE_ID*/,
+                                    bool has_return_type_size /*= true*/)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_len, 
-                                       realm_desc, return_type_size, vid);
+             realm_desc, return_type_size, has_return_type_size, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -7495,12 +7496,14 @@ namespace Legion {
 	      const char *task_name /*= NULL*/,
               VariantID vid /*=AUTO_GENERATE_ID*/,
               size_t return_type_size /*=MAX_RETURN_SIZE*/,
+              bool has_return_type_size /*=true*/,
               bool check_task_id/*=true*/)
     //--------------------------------------------------------------------------
     {
       // Make a copy of the descriptor here
       return Internal::Runtime::preregister_variant(registrar, user_data, 
-         user_len, realm_desc, return_type_size, task_name, vid, check_task_id);
+             user_len, realm_desc, return_type_size, has_return_type_size,
+             task_name, vid, check_task_id);
     }
 
     //--------------------------------------------------------------------------
