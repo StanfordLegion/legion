@@ -353,8 +353,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_collective == NULL);
 #endif
-      mapped_collective = 
-        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
+      mapped_collective = new SingleTaskTree(repl_ctx, owner_shard,
+                                mapped_collective_id, result.impl);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -372,11 +372,21 @@ namespace Legion {
       }
       else // We own it, so it goes on the ready queue
       {
-        // Signal the tree when we are done our mapping
-        mapped_collective->signal_tree(mapped_event);
+        // Don't signal the tree yet, we need to wait to see how big
+        // the result future size is first
         // Then we can do the normal analysis
         IndividualTask::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::handle_future_size(VariantImpl *variant_impl)
+    //--------------------------------------------------------------------------
+    {
+      // Signal that we are done with our mapping with the future size
+      mapped_collective->broadcast_future_size(mapped_event,
+          variant_impl->return_type_size, variant_impl->has_return_type_size);
+      IndividualTask::handle_future_size(variant_impl);
     }
 
     //--------------------------------------------------------------------------
@@ -11900,6 +11910,61 @@ namespace Legion {
       RtEvent precondition;
       derez.deserialize(precondition);
       Runtime::trigger_event(local_event, precondition);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Single Task Tree 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    SingleTaskTree::SingleTaskTree(ReplicateContext *ctx, ShardID origin, 
+                                   CollectiveID id, FutureImpl *impl)
+      : ShardEventTree(ctx, origin, id), future(impl), future_size(0),
+        has_future_size(false)
+    //--------------------------------------------------------------------------
+    {
+      if (future != NULL)
+        future->add_base_gc_ref(PENDING_COLLECTIVE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTaskTree::~SingleTaskTree(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((future != NULL) && 
+          future->remove_base_gc_ref(PENDING_COLLECTIVE_REF))
+        delete future;
+    }
+    
+    //--------------------------------------------------------------------------
+    void SingleTaskTree::broadcast_future_size(RtEvent precondition,
+                                               size_t size, bool has_size)
+    //--------------------------------------------------------------------------
+    {
+      future_size = size;
+      has_future_size = has_size;
+      signal_tree(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTaskTree::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      ShardEventTree::pack_collective(rez);
+      rez.serialize(future_size);
+      rez.serialize(has_future_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTaskTree::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardEventTree::unpack_collective(derez);
+      derez.deserialize(future_size);
+      derez.deserialize(has_future_size);
+      if ((future != NULL) && has_future_size)
+        future->set_future_result_size(future_size, 
+                  context->runtime->address_space);
     }
 
     /////////////////////////////////////////////////////////////

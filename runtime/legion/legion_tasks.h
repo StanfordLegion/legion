@@ -492,7 +492,7 @@ namespace Legion {
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
-      virtual void record_future_result_size(size_t future_size) = 0;
+      virtual void handle_future_size(VariantImpl *impl) = 0;
       virtual void trigger_replay(void);
       // For tasks that are sharded off by control replication
       virtual void shard_off(RtEvent mapped_precondition);
@@ -772,7 +772,7 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void record_future_result_size(size_t future_size);
+      virtual void handle_future_size(VariantImpl *impl);
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
       virtual bool is_stealable(void) const;
@@ -872,7 +872,7 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void record_future_result_size(size_t future_size);
+      virtual void handle_future_size(VariantImpl *impl);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const;
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -977,7 +977,7 @@ namespace Legion {
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
-      virtual void record_future_result_size(size_t future_size);
+      virtual void handle_future_size(VariantImpl *impl);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual std::map<PhysicalManager*,unsigned>*
@@ -1328,8 +1328,8 @@ namespace Legion {
       void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
     public:
-      void record_future_result_size(size_t future_size, const DomainPoint &p,
-                                     std::set<RtEvent> &applied_conditions);
+      void handle_future_size(size_t future_size, const DomainPoint &p,
+                              std::set<RtEvent> &applied_conditions);
       void record_output_sizes(const DomainPoint &point,
                                const std::vector<OutputRegion> &output_regions);
     protected:

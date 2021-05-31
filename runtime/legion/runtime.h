@@ -336,8 +336,8 @@ namespace Legion {
     public:
       void register_dependence(Operation *consumer_op);
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
-    protected:
       void set_future_result_size(size_t size, AddressSpaceID source);
+    protected:
       void finish_set_future(void); // must be holding lock
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,

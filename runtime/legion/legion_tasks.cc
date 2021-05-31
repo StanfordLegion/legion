@@ -2876,8 +2876,7 @@ namespace Legion {
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
       // Record the future output size
-      if (variant_impl->has_return_type_size)
-        record_future_result_size(variant_impl->return_type_size);
+      handle_future_size(variant_impl);
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -3688,8 +3687,7 @@ namespace Legion {
           else
             var_impl = runtime->find_variant_impl(task_id, chosen_variant,
                                                   true/*can_fail*/);
-          if (var_impl->has_return_type_size)
-            record_future_result_size(var_impl->return_type_size);
+          handle_future_size(var_impl);
         }
         else
         {
@@ -3724,8 +3722,7 @@ namespace Legion {
           VariantID chosen_variant = output.task_mappings[0].chosen_variant;
           VariantImpl *var_impl = 
             runtime->find_variant_impl(task_id,chosen_variant,true/*can_fail*/);
-          if (var_impl->has_return_type_size)
-            record_future_result_size(var_impl->return_type_size);
+          handle_future_size(var_impl);
         }
         // We're going to store the needed instances locally so we can
         // do the mapping when we return on behalf of all the shards
@@ -6096,10 +6093,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_future_result_size(size_t future_size)
+    void IndividualTask::handle_future_size(VariantImpl *variant_impl)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_future_result_size(future_size, runtime->address_space);
+      if (variant_impl->has_return_type_size)
+        result.impl->set_future_result_size(variant_impl->return_type_size,
+                                            runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -6905,11 +6904,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::record_future_result_size(size_t future_size)
+    void PointTask::handle_future_size(VariantImpl *variant_impl)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_future_result_size(future_size, index_point, 
-                                             map_applied_conditions);
+      if (variant_impl->has_return_type_size)
+        slice_owner->handle_future_size(variant_impl->return_type_size,
+                                        index_point, map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -7466,7 +7466,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::record_future_result_size(size_t future_size)
+    void ShardTask::handle_future_size(VariantImpl *variant_impl)
     //--------------------------------------------------------------------------
     {
       // do nothing 
@@ -11410,7 +11410,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_future_result_size(size_t future_size,
+    void SliceTask::handle_future_size(size_t future_size,
                 const DomainPoint &point, std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
