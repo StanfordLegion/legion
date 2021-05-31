@@ -217,11 +217,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to do a match here, there is just one shard
-      const size_t future_size = num_elements * element_size;
-      memcpy(output, input, future_size);
+      const size_t future_size = sizeof(num_elements);
+      memcpy(output, input, num_elements*future_size);
       Future result = 
         runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &future_size);
-      result.impl->set_local(&num_elements, sizeof(num_elements));
+      result.impl->set_local(&num_elements, future_size);
       return result;
     }
 
@@ -11298,7 +11298,8 @@ namespace Legion {
         verify_replicable(hasher, "consensus_match");
       }
       ApUserEvent complete = Runtime::create_ap_user_event(NULL);
-      Future result = runtime->help_create_future(this, complete);
+      const size_t future_size = sizeof(num_elements);
+      Future result = runtime->help_create_future(this, complete, &future_size);
       switch (element_size)
       {
         case 1:
