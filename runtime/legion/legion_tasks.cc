@@ -6609,6 +6609,7 @@ namespace Legion {
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       IndividualTask *task;
       derez.deserialize(task);
       size_t return_type_size;
