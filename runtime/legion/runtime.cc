@@ -881,15 +881,15 @@ namespace Legion {
                 *extent_in_bytes, (producer_op == NULL) ? 0 :
                 producer_op->get_unique_op_id())
           }
-          else if (instance->size != *extent_in_bytes)
+          else if (future_size != *extent_in_bytes)
             REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
                 "Future size mismatch! Expected type of %zd bytes but "
                 "requested type is %zd bytes. (UID %lld)", 
-                instance->size, *extent_in_bytes, (producer_op == NULL) ? 0 :
+                future_size, *extent_in_bytes, (producer_op == NULL) ? 0 :
                 producer_op->get_unique_op_id())
         }
         else
-          (*extent_in_bytes) = (instance != NULL) ? instance->size : 0;
+          (*extent_in_bytes) = future_size;
       }
       if (instance == NULL)
         return NULL;
@@ -989,11 +989,11 @@ namespace Legion {
           "Future size mismatch! Expected non-empty future for making an "
           "accessor but future has a payload of 0 bytes. (UID %lld)", 
           (producer_op == NULL) ? 0 : producer_op->get_unique_op_id())
-      if (check_extent && (instance->size != extent_in_bytes))
+      if (check_extent && (future_size != extent_in_bytes))
         REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_MISMATCH,
             "Future size mismatch! Expected type of %zd bytes but "
             "requested type is %zd bytes. (UID %lld)", 
-            instance->size, extent_in_bytes, (producer_op == NULL) ? 0 :
+            future_size, extent_in_bytes, (producer_op == NULL) ? 0 :
             producer_op->get_unique_op_id())
       const PhysicalInstance result = instance->get_instance();
       const ApEvent inst_ready = instance->get_ready();
@@ -1180,7 +1180,7 @@ namespace Legion {
         return send_event;
       }
       else if (need_subscribe)
-        return subscribe();
+        subscribe();
       return ready_event;
     }
 
@@ -1317,7 +1317,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance != NULL);
 #endif
-      size = instance->size;
+      size = future_size;
       // Make sure the instance is safe to use
       if (instance->ready_event.exists())
       {
@@ -1337,10 +1337,7 @@ namespace Legion {
       const RtEvent ready_event = subscribe();
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      if (canonical_instance != NULL)
-        return canonical_instance->size;
-      else
-        return 0;
+      return future_size;
     }
 
     //--------------------------------------------------------------------------
@@ -2687,7 +2684,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(size == source->size);
+      assert(source->size <= size);
 #endif
       if (!is_meta_visible || !source->is_meta_visible || 
           (use_event.exists() && !use_event.has_triggered()) ||
@@ -2696,7 +2693,7 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, source->size);
         dst.set_field(get_instance(), 0/*field id*/, size);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
@@ -2720,7 +2717,7 @@ namespace Legion {
       else
       {
         // We can do this as a straight memcpy, no need to offload to realm
-        memcpy(const_cast<void*>(data), source->data, size);
+        memcpy(const_cast<void*>(data), source->data, source->size);
         return ApEvent::NO_AP_EVENT;
       }
     } 
@@ -2732,7 +2729,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(size == source->size);
+      assert(source->size <= size);
 #endif
       if (!is_meta_visible || !source->is_meta_visible || 
           (use_event.exists() && !use_event.has_triggered()) ||
@@ -2741,7 +2738,7 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, source->size);
         dst.set_field(get_instance(), 0/*field id*/, size);
         dst.set_redop(redop_id, true/*fold*/);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
