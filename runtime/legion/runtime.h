@@ -397,8 +397,12 @@ namespace Legion {
       void *metadata;
       size_t metasize;
     private:
-      // Whether this future has a size set yet
+      // The determined size of this future to this point
+      // This is only an upper bound until it is solidifed
       size_t future_size;
+      // This is the upper bound size prior to being refined
+      // down to a precise size when the future is finally set
+      size_t upper_bound_size; 
     private:
       // Instances that need to be made once canonical instance is set
       std::map<Memory,PendingInstance> pending_instances;
@@ -410,6 +414,7 @@ namespace Legion {
       FutureFunctor *callback_functor;
       bool own_callback_functor;
     private:
+      // Whether this future has a size set yet
       bool future_size_set;
     private:
       volatile bool empty;

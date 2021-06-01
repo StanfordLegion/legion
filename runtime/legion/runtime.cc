@@ -649,9 +649,10 @@ namespace Legion {
         producer_context_index((o == NULL) ? SIZE_MAX : o->get_ctx_index()),
         future_complete(complete), result_set_space(local_space),
         canonical_instance(NULL), metadata(NULL), metasize(0),
-        future_size((fsize == NULL) ? 0 : *fsize), callback_functor(NULL), 
-        own_callback_functor(false), future_size_set(fsize != NULL), 
-        empty(true), sampled(false)
+        future_size((fsize == NULL) ? 0 : *fsize), 
+        upper_bound_size((fsize == NULL) ? SIZE_MAX : *fsize),
+        callback_functor(NULL), own_callback_functor(false),
+        future_size_set(fsize != NULL), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -681,8 +682,9 @@ namespace Legion {
         producer_context_index(op_ctx_index), producer_point(op_point),
         future_complete(complete), result_set_space(local_space),
         canonical_instance(NULL), metadata(NULL), metasize(0), future_size(0),
-        callback_functor(NULL), own_callback_functor(false),
-        future_size_set(false), empty(true), sampled(false)
+        upper_bound_size(SIZE_MAX), callback_functor(NULL),
+        own_callback_functor(false), future_size_set(false), empty(true),
+        sampled(false)
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
@@ -1492,6 +1494,7 @@ namespace Legion {
       AutoLock f_lock(future_lock);
       if (!empty || future_size_set)
         return;
+      upper_bound_size = size;
       future_size = size;
       __sync_synchronize();
       future_size_set = true;
@@ -1905,6 +1908,7 @@ namespace Legion {
         memcpy(metadata, derez.get_current_pointer(), metasize);
         derez.advance_pointer(metasize);
       }
+      derez.deserialize(upper_bound_size);
       __sync_synchronize();
       empty = false;
       if (!pending_instances.empty())
@@ -2281,6 +2285,7 @@ namespace Legion {
       rez.serialize(metasize);
       if (metasize > 0)
         rez.serialize(metadata, metasize);
+      rez.serialize(upper_bound_size);
     }
 
     //--------------------------------------------------------------------------
