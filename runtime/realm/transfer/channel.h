@@ -934,6 +934,8 @@ namespace Realm {
       virtual bool do_work(TimeLimit work_until);
 
     protected:
+      friend CHANNEL;
+
       LocalChannel *channel;
       bool ordered_mode, in_ordered_worker;
       Mutex mutex;
