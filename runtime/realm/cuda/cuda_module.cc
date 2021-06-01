@@ -3094,71 +3094,7 @@ namespace Realm {
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
-
-      // before we do anything, make sure there's a CUDA driver and GPUs to talk to
-      std::vector<GPUInfo *> infos;
-      {
-	int num_devices;
-	CUresult ret = cuInit(0);
-	if(ret == CUDA_ERROR_NO_DEVICE) {
-	  // continue on so that we recognize things like -ll:gpu, but there
-	  //  are no devices to be found
-	  num_devices = 0;
-	  log_gpu.info() << "cuInit reports no devices found";
-	} else if(ret != CUDA_SUCCESS) {
-	  log_gpu.warning() << "cuInit(0) returned " << ret << " - module not loaded";
-	  return 0;
-	} else {
-	  CHECK_CU( cuDeviceGetCount(&num_devices) );
-	  for(int i = 0; i < num_devices; i++) {
-	    GPUInfo *info = new GPUInfo;
-
-	    info->index = i;
-	    CHECK_CU( cuDeviceGet(&info->device, i) );
-	    CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
-	    CHECK_CU( cuDeviceGetAttribute(&info->compute_major,
-					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
-	    CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
-					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
-	    CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
-
-	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
-			   << info->compute_major << '.' << info->compute_minor
-			   << ") " << (info->total_mem >> 20) << " MB";
-
-	    infos.push_back(info);
-	  }
-	}
-
-	if(infos.empty()) {
-	  log_gpu.warning() << "no CUDA-capable GPUs found - module not loaded";
-	  return 0;
-	}
-
-	// query peer-to-peer access (all pairs)
-	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
-	    it1 != infos.end();
-	    it1++)
-	  for(std::vector<GPUInfo *>::iterator it2 = infos.begin();
-	      it2 != infos.end();
-	      it2++)
-	    if(it1 != it2) {
-	      int can_access;
-	      CHECK_CU( cuDeviceCanAccessPeer(&can_access,
-					      (*it1)->device,
-					      (*it2)->device) );
-	      if(can_access) {
-		log_gpu.info() << "p2p access from device " << (*it1)->index
-			       << " to device " << (*it2)->index;
-		(*it1)->peers.insert((*it2)->device);
-	      }
-	    }
-      }
-
       CudaModule *m = new CudaModule;
-
-      // give the gpu info we assembled to the module
-      m->gpu_info.swap(infos);
 
       // first order of business - read command line parameters
       {
@@ -3192,6 +3128,73 @@ namespace Realm {
 	  exit(1);
 	}
       }
+
+      std::vector<GPUInfo *> infos;
+      {
+	int num_devices;
+	CUresult ret = cuInit(0);
+        if(ret != CUDA_SUCCESS) {
+          // failure to initialize the driver is a fatal error if we know gpus
+          //  have been requested
+          if(m->cfg_num_gpus > 0) {
+            const char *err_name, *err_str;
+            cuGetErrorName(ret, &err_name);
+            cuGetErrorString(ret, &err_str);
+            log_gpu.fatal() << "gpus requested, but cuInit(0) returned "
+                            << ret << " (" << err_name << "): " << err_str;
+            abort();
+          } else if(ret == CUDA_ERROR_NO_DEVICE) {
+            num_devices = 0;
+            log_gpu.info() << "cuInit reports no devices found";
+          } else if(ret != CUDA_SUCCESS) {
+            log_gpu.warning() << "cuInit(0) returned " << ret << " - module not loaded";
+            delete m;
+            return 0;
+          }
+	} else {
+	  CHECK_CU( cuDeviceGetCount(&num_devices) );
+	  for(int i = 0; i < num_devices; i++) {
+	    GPUInfo *info = new GPUInfo;
+
+	    info->index = i;
+	    CHECK_CU( cuDeviceGet(&info->device, i) );
+	    CHECK_CU( cuDeviceGetName(info->name, GPUInfo::MAX_NAME_LEN, info->device) );
+	    CHECK_CU( cuDeviceGetAttribute(&info->compute_major,
+					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
+	    CHECK_CU( cuDeviceGetAttribute(&info->compute_minor,
+					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
+	    CHECK_CU( cuDeviceTotalMem(&info->total_mem, info->device) );
+
+	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
+			   << info->compute_major << '.' << info->compute_minor
+			   << ") " << (info->total_mem >> 20) << " MB";
+
+	    infos.push_back(info);
+	  }
+	}
+
+	// query peer-to-peer access (all pairs)
+	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
+	    it1 != infos.end();
+	    it1++)
+	  for(std::vector<GPUInfo *>::iterator it2 = infos.begin();
+	      it2 != infos.end();
+	      it2++)
+	    if(it1 != it2) {
+	      int can_access;
+	      CHECK_CU( cuDeviceCanAccessPeer(&can_access,
+					      (*it1)->device,
+					      (*it2)->device) );
+	      if(can_access) {
+		log_gpu.info() << "p2p access from device " << (*it1)->index
+			       << " to device " << (*it2)->index;
+		(*it1)->peers.insert((*it2)->device);
+	      }
+	    }
+      }
+
+      // give the gpu info we assembled to the module
+      m->gpu_info.swap(infos);
 
       return m;
     }
