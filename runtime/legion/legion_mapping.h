@@ -1397,6 +1397,7 @@ namespace Legion {
       struct SelectTunableInput {
         TunableID                               tunable_id;
         MappingTagID                            mapping_tag;
+        std::vector<Future>                     futures;
         const void*                             args;
         size_t                                  size;
       };

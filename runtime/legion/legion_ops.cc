@@ -19303,6 +19303,7 @@ namespace Legion {
       Mapper::SelectTunableOutput output;
       input.tunable_id = tunable_id;
       input.mapping_tag = tag;
+      input.futures = futures;
       input.args = arg;
       input.size = argsize;
       output.value = NULL;
