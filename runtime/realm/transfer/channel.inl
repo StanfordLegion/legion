@@ -280,11 +280,12 @@ namespace Realm {
   template <typename CHANNEL, typename XD>
   SingleXDQChannel<CHANNEL,XD>::SingleXDQChannel(BackgroundWorkManager *bgwork,
 						 XferDesKind _kind,
-						 const std::string &_name)
+						 const std::string &_name,
+                                                 int _numa_domain /*= -1*/)
     : LocalChannel(_kind)
     , xdq(this, _name, CHANNEL::is_ordered)
   {
-    xdq.add_to_manager(bgwork);
+    xdq.add_to_manager(bgwork, _numa_domain);
   }
 
   template <typename CHANNEL, typename XD>

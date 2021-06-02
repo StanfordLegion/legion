@@ -947,7 +947,8 @@ namespace Realm {
     public:
       SingleXDQChannel(BackgroundWorkManager *bgwork,
 		       XferDesKind _kind,
-		       const std::string& _name);
+		       const std::string& _name,
+                       int _numa_domain = -1);
 
       virtual void shutdown();
 
