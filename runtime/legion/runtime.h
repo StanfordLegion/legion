@@ -1766,28 +1766,6 @@ namespace Legion {
         const ApEvent event;
         TopLevelContext *const ctx;
       }; 
-      struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
-      public:
-        SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
-                          TunableID tune, const void *arg, size_t size,
-                          TaskContext *c, FutureImpl *f, ApUserEvent trig)
-          : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
-            tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
-            argsize(size), ctx(c), result(f), to_trigger(trig)
-            { if (argsize > 0) memcpy(args, arg, argsize); }
-      public:
-        const MapperID mapper_id;
-        const MappingTagID tag;
-        const TunableID tunable_id;
-        void *const args;
-        const size_t argsize;
-        unsigned tunable_index; // only valid for LegionSpy
-        TaskContext *const ctx;
-        FutureImpl *const result;
-        const ApUserEvent to_trigger;
-      }; 
     public:
       struct ProcessorGroupInfo {
       public:
@@ -2093,13 +2071,6 @@ namespace Legion {
                                    const MustEpochLauncher &launcher);
       Future issue_timing_measurement(Context ctx,
                                       const TimingLauncher &launcher);
-    public:
-      Future select_tunable_value(Context ctx, TunableID tid,
-                                  MapperID mid, MappingTagID tag,
-                                  const void *args, size_t argsize);
-      int get_tunable_value(Context ctx, TunableID tid, 
-                            MapperID mid, MappingTagID tag);
-      void perform_tunable_selection(const SelectTunableArgs *args);
     public:
       void* get_local_task_variable(Context ctx, LocalVariableID id);
       void set_local_task_variable(Context ctx, LocalVariableID id,
@@ -2955,6 +2926,7 @@ namespace Legion {
       IndexDetachOp*        get_available_index_detach_op(void);
       PointDetachOp*        get_available_point_detach_op(void);
       TimingOp*             get_available_timing_op(void);
+      TunableOp*            get_available_tunable_op(void);
       AllReduceOp*          get_available_all_reduce_op(void);
     public:
       void free_individual_task(IndividualTask *task);
@@ -2998,6 +2970,7 @@ namespace Legion {
       void free_index_detach_op(IndexDetachOp *op);
       void free_point_detach_op(PointDetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_tunable_op(TunableOp *op);
       void free_all_reduce_op(AllReduceOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
@@ -3343,6 +3316,7 @@ namespace Legion {
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
+      mutable LocalLock tunable_op_lock;
       mutable LocalLock all_reduce_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
@@ -3386,6 +3360,7 @@ namespace Legion {
       std::deque<IndexDetachOp*>        available_index_detach_ops;
       std::deque<PointDetachOp*>        available_point_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      std::deque<TunableOp*>            available_tunable_ops;
       std::deque<AllReduceOp*>          available_all_reduce_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;

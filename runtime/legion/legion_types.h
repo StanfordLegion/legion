@@ -339,7 +339,6 @@ namespace Legion {
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
       LG_INDEX_PART_DEFER_CHILD_TASK_ID,
-      LG_SELECT_TUNABLE_TASK_ID,
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
@@ -454,7 +453,6 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
         "Defer Index Partition Child Request",                    \
-        "Select Tunable",                                         \
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
@@ -1452,6 +1450,7 @@ namespace Legion {
     class IndexDetachOp;
     class PointDetachOp;
     class TimingOp;
+    class TunableOp;
     class AllReduceOp;
     class ExternalMappable;
     class RemoteOp;
@@ -1684,6 +1683,7 @@ namespace Legion {
     friend class Internal::IndexDetachOp;                   \
     friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
+    friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \
     friend class Internal::ExternalMappable;                \

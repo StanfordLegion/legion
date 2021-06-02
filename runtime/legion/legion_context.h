@@ -61,7 +61,7 @@ namespace Legion {
         { return executing_processor; }
       inline void set_executing_processor(Processor p)
         { executing_processor = p; }
-      inline unsigned get_tunable_index(void)
+      inline size_t get_tunable_index(void)
         { return total_tunable_count++; }
       inline UniqueID get_unique_id(void) const 
         { return get_context_uid(); }
@@ -375,6 +375,7 @@ namespace Legion {
                                  const MustEpochLauncher &launcher) = 0;
       virtual Future issue_timing_measurement(
                                     const TimingLauncher &launcher) = 0;
+      virtual Future select_tunable_value(const TunableLauncher &launcher) = 0;
       virtual Future issue_mapping_fence(void) = 0;
       virtual Future issue_execution_fence(void) = 0;
       virtual void complete_frame(void) = 0;
@@ -604,7 +605,7 @@ namespace Legion {
       std::vector<PhysicalRegion>               physical_regions; 
     protected:
       Processor                             executing_processor;
-      unsigned                              total_tunable_count;
+      size_t                                total_tunable_count;
     protected:
       Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
       long long                                previous_profiling_time;
@@ -1135,6 +1136,7 @@ namespace Legion {
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
+      virtual Future select_tunable_value(const TunableLauncher &launcher);
       virtual Future issue_mapping_fence(void);
       virtual Future issue_execution_fence(void);
       virtual void complete_frame(void);
@@ -1837,6 +1839,7 @@ namespace Legion {
       virtual void progress_unordered_operations(void);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
+      virtual Future select_tunable_value(const TunableLauncher &launcher);
       virtual Future issue_mapping_fence(void);
       virtual Future issue_execution_fence(void);
       virtual void complete_frame(void);
