@@ -1579,6 +1579,7 @@ namespace Legion {
       COLLECTIVE_LOC_97 = 97,
       COLLECTIVE_LOC_98 = 98,
       COLLECTIVE_LOC_99 = 99,
+      COLLECTIVE_LOC_100 = 100,
     };
 
     // legion_types.h
@@ -1896,6 +1897,7 @@ namespace Legion {
     class ReplDependentPartitionOp;
     class ReplMustEpochOp;
     class ReplTimingOp;
+    class ReplTunableOp;
     class ReplAllReduceOp;
     class ReplFenceOp;
     class ReplMapOp;
@@ -1999,6 +2001,7 @@ namespace Legion {
     friend class Internal::ReplMustEpochOp;                 \
     friend class Internal::ReplMapOp;                       \
     friend class Internal::ReplTimingOp;                    \
+    friend class Internal::ReplTunableOp;                   \
     friend class Internal::ReplAllReduceOp;                 \
     friend class Internal::ReplFenceOp;                     \
     friend class Internal::ReplAttachOp;                    \

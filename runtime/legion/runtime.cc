@@ -16405,6 +16405,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_timing_ops.clear();
+      for (std::deque<ReplTunableOp*>::const_iterator it = 
+            available_repl_tunable_ops.begin(); it !=
+            available_repl_tunable_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_tunable_ops.clear();
       for (std::deque<ReplAllReduceOp*>::const_iterator it = 
             available_repl_all_reduce_ops.begin(); it !=
             available_repl_all_reduce_ops.end(); it++)
@@ -26643,6 +26650,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplTunableOp* Runtime::get_available_repl_tunable_op(void) 
+    //--------------------------------------------------------------------------
+    {
+      return get_available(tunable_op_lock, available_repl_tunable_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplAllReduceOp* Runtime::get_available_repl_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27192,6 +27206,14 @@ namespace Legion {
     {
       AutoLock t_lock(timing_op_lock);
       release_operation<false>(available_repl_timing_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_tunable_op(ReplTunableOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(timing_op_lock);
+      release_operation<false>(available_repl_tunable_ops, op);
     }
 
     //--------------------------------------------------------------------------

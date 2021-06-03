@@ -3782,6 +3782,7 @@ namespace Legion {
       ReplDependentPartitionOp* get_available_repl_dependent_partition_op(void);
       ReplMustEpochOp*      get_available_repl_epoch_op(void);
       ReplTimingOp*         get_available_repl_timing_op(void);
+      ReplTunableOp*        get_available_repl_tunable_op(void);
       ReplAllReduceOp*      get_available_repl_all_reduce_op(void);
       ReplFenceOp*          get_available_repl_fence_op(void);
       ReplMapOp*            get_available_repl_map_op(void);
@@ -3854,6 +3855,7 @@ namespace Legion {
       void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
       void free_repl_epoch_op(ReplMustEpochOp *op);
       void free_repl_timing_op(ReplTimingOp *op);
+      void free_repl_tunable_op(ReplTunableOp *op);
       void free_repl_all_reduce_op(ReplAllReduceOp *op);
       void free_repl_fence_op(ReplFenceOp *op);
       void free_repl_map_op(ReplMapOp *op);
@@ -4305,6 +4307,7 @@ namespace Legion {
                                         available_repl_dependent_partition_ops;
       std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
       std::deque<ReplTimingOp*>         available_repl_timing_ops;
+      std::deque<ReplTunableOp*>        available_repl_tunable_ops;
       std::deque<ReplAllReduceOp*>      available_repl_all_reduce_ops;
       std::deque<ReplFenceOp*>          available_repl_fence_ops;
       std::deque<ReplMapOp*>            available_repl_map_ops;

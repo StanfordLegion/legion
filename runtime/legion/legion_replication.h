@@ -1854,6 +1854,28 @@ namespace Legion {
     }; 
 
     /**
+     * \class ReplTunableOp
+     * A tunable operation that is aware that it is
+     * being executed in a control replicated context
+     */
+    class ReplTunableOp : public TunableOp {
+    public:
+      ReplTunableOp(Runtime *rt);
+      ReplTunableOp(const ReplTunableOp &rhs);
+      virtual ~ReplTunableOp(void);
+    public:
+      ReplTunableOp& operator=(const ReplTunableOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *context);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void deferred_execute(void);
+    protected:
+      BufferBroadcast *value_broadcast;       
+    };
+
+    /**
      * \class ReplAllReduceOp
      * An all-reduce operation that is aware that it is
      * being executed in a control replication context

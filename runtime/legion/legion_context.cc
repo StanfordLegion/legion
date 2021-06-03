@@ -17754,6 +17754,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplicateContext::select_tunable_value(
+                                                const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_TUNABLE_SELECTION);
+        hasher.hash(launcher.tunable);
+        hasher.hash(launcher.mapper);
+        hasher.hash(launcher.tag);
+        hash_argument(hasher, runtime->safe_control_replication, launcher.arg);
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          hash_future(hasher, runtime->safe_control_replication, *it);
+        verify_replicable(hasher, "select_tunable_value");
+      }
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplTunableOp *tunable_op = runtime->get_available_repl_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      tunable_op->initialize_replication(this);
+      add_to_dependence_queue(tunable_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future ReplicateContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {

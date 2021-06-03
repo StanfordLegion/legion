@@ -1795,6 +1795,7 @@ namespace Legion {
         REPLICATE_INDEX_DETACH_RESOURCE,
         REPLICATE_MUST_EPOCH,
         REPLICATE_TIMING_MEASUREMENT,
+        REPLICATE_TUNABLE_SELECTION,
         REPLICATE_MAPPING_FENCE,
         REPLICATE_EXECUTION_FENCE,
         REPLICATE_BEGIN_TRACE,
@@ -2229,6 +2230,7 @@ namespace Legion {
                                       const bool flush, const bool unordered);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
       virtual Future issue_timing_measurement(const TimingLauncher &launcher);
+      virtual Future select_tunable_value(const TunableLauncher &launcher);
       virtual Future issue_mapping_fence(void);
       virtual Future issue_execution_fence(void);
       virtual void begin_trace(TraceID tid, bool logical_only,

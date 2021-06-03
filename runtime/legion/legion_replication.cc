@@ -5315,6 +5315,126 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Tunable Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplTunableOp::ReplTunableOp(Runtime *rt)
+      : TunableOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTunableOp::ReplTunableOp(const ReplTunableOp &rhs)
+      : TunableOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTunableOp::~ReplTunableOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTunableOp& ReplTunableOp::operator=(const ReplTunableOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTunableOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_tunable();
+      value_broadcast = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTunableOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      if (value_broadcast != NULL)
+      {
+        delete value_broadcast;
+        value_broadcast = NULL;
+      }
+      deactivate_tunable();
+      runtime->free_repl_tunable_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTunableOp::initialize_replication(ReplicateContext *repl_ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        assert(value_broadcast == NULL);
+#endif
+        value_broadcast = new BufferBroadcast(repl_ctx, COLLECTIVE_LOC_100);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTunableOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      MapperManager *mapper =
+        runtime->find_mapper(parent_ctx->get_executing_processor(), mapper_id);
+      Mapper::SelectTunableInput input;
+      Mapper::SelectTunableOutput output;
+      input.tunable_id = tunable_id;
+      input.mapping_tag = tag;
+      input.futures = futures;
+      input.args = arg;
+      input.size = argsize;
+      output.value = NULL;
+      output.size = 0;
+      output.take_ownership = true;
+      mapper->invoke_select_tunable_value(parent_ctx->get_owner_task(), 
+                                          &input, &output);
+      if (!runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        assert(value_broadcast != NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        if (repl_ctx->owner_shard->shard_id > 0)
+        {
+          size_t size = 0;
+          const void *buffer = value_broadcast->get_buffer(size);
+          if ((size != output.size) ||
+              (memcmp(buffer, output.value, size) != 0))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s returned different values for selection of "
+                "tunable value %d in parent task %s (UID %lld)",
+                mapper->get_mapper_name(), tunable_id,
+                parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        }
+        else
+          value_broadcast->broadcast(output.value, output.size);
+      }
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
+                        tunable_index, output.value, output.size);
+      // Set and complete the future
+      result.impl->set_local(output.value, output.size, output.take_ownership);
+      complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl All Reduce Op 
     /////////////////////////////////////////////////////////////
 
