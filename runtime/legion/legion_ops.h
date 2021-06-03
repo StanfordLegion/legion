@@ -134,6 +134,7 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
+        TUNABLE_OP_KIND,
         ALL_REDUCE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
@@ -171,6 +172,7 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
+        "Tunable",                  \
         "All Reduce Op",            \
         "Trace Capture",            \
         "Trace Complete",           \
@@ -3994,6 +3996,43 @@ namespace Legion {
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class TunableOp
+     * Operation for performing tunable requests
+     */
+    class TunableOp : public Operation, public LegionHeapify<TunableOp> {
+    public:
+      TunableOp(Runtime *rt);
+      TunableOp(const TunableOp &rhs);
+      virtual ~TunableOp(void);
+    public:
+      TunableOp& operator=(const TunableOp &rhs);
+    public:
+      void activate_tunable(void);
+      void deactivate_tunable(void);
+      Future initialize(InnerContext *ctx, const TunableLauncher &launcher);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+    protected:
+      TunableID tunable_id;
+      MapperID mapper_id;
+      MappingTagID tag;
+      void *arg;
+      size_t argsize;
+      size_t tunable_index;
+      Future result;
+      std::vector<Future> futures;
     };
 
     /**

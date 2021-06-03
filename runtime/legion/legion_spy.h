@@ -661,6 +661,11 @@ namespace Legion {
         log_spy.print("Timing Operation %llu %llu", context, timing);
       }
 
+      static inline void log_tunable_operation(UniqueID context, UniqueID timing)
+      {
+        log_spy.print("Tunable Operation %llu %llu", context, timing);
+      }
+
       static inline void log_all_reduce_operation(UniqueID context, 
                                                   UniqueID reduce)
       {

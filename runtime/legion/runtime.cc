@@ -16300,6 +16300,13 @@ namespace Legion {
         delete (*it);
       }
       available_timing_ops.clear();
+      for (std::deque<TunableOp*>::const_iterator it =
+            available_tunable_ops.begin(); it !=
+            available_tunable_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_tunable_ops.clear();
       for (std::deque<AllReduceOp*>::const_iterator it = 
             available_all_reduce_ops.begin(); it !=
             available_all_reduce_ops.end(); it++)
@@ -18710,86 +18717,6 @@ namespace Legion {
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context in timing measurement!");
       return ctx->issue_timing_measurement(launcher); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag,
-                                         const void *args, size_t argsize)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context select tunable value!");
-      ctx->begin_runtime_call();
-#ifdef DEBUG_LEGION
-      log_run.debug("Getting a value for tunable variable %d in "
-                    "task %s (ID %lld)", tid, ctx->get_task_name(),
-                    ctx->get_unique_id());
-#endif
-      const ApUserEvent to_trigger = Runtime::create_ap_user_event(NULL);
-      FutureImpl *result = new FutureImpl(ctx, this, true/*register*/,
-                              get_available_distributed_id(),
-                              address_space, to_trigger,
-                              ctx->get_owner_task());
-      // Make this here to get a local reference on it now
-      Future result_future(result);
-      result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs task_args(ctx->get_owner_task()->get_unique_op_id(),
-          mid, tag, tid, args, argsize, ctx, result, to_trigger);
-      if (legion_spy_enabled)
-        task_args.tunable_index = ctx->get_tunable_index();
-      issue_runtime_meta_task(task_args, LG_LATENCY_WORK_PRIORITY); 
-      ctx->end_runtime_call();
-      return result_future;
-    }
-
-    //--------------------------------------------------------------------------
-    int Runtime::get_tunable_value(Context ctx, TunableID tid,
-                                   MapperID mid, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context get tunable value!");
-      ctx->begin_runtime_call();
-      Future f = select_tunable_value(ctx, tid, mid, tag, NULL, 0);
-      int result = f.get_result<int>();
-      if (legion_spy_enabled)
-      {
-        unsigned index = ctx->get_tunable_index();
-        LegionSpy::log_tunable_value(ctx->get_unique_id(), index,
-                                     &result, sizeof(result));
-      }
-      ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::perform_tunable_selection(const SelectTunableArgs *args)
-    //--------------------------------------------------------------------------
-    {
-      // Get the mapper first
-      MapperManager *mapper = find_mapper(args->ctx->get_executing_processor(),
-                                          args->mapper_id);
-      Mapper::SelectTunableInput input;
-      Mapper::SelectTunableOutput output;
-      input.tunable_id = args->tunable_id;
-      input.mapping_tag = args->tag;
-      input.args = args->args;
-      input.size = args->argsize;
-      output.value = NULL;
-      output.size = 0;
-      output.take_ownership = true;
-      mapper->invoke_select_tunable_value(args->ctx->get_owner_task(), 
-                                          &input, &output);
-      if (legion_spy_enabled)
-        LegionSpy::log_tunable_value(args->ctx->get_unique_id(), 
-            args->tunable_index, output.value, output.size);
-      // Set and complete the future
-      if ((output.value != NULL) && (output.size > 0))
-        args->result->set_local(output.value, output.size, 
-                                output.take_ownership);
-      Runtime::trigger_event(NULL, args->to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -26606,6 +26533,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TunableOp* Runtime::get_available_tunable_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(tunable_op_lock, available_tunable_ops);
+    }
+
+    //--------------------------------------------------------------------------
     AllReduceOp* Runtime::get_available_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27354,6 +27288,14 @@ namespace Legion {
     {
       AutoLock t_lock(summary_op_lock);
       release_operation<false>(available_repl_summary_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_tunable_op(TunableOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(tunable_op_lock);
+      release_operation<false>(available_tunable_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -31036,18 +30978,6 @@ namespace Legion {
         case LG_INDEX_PART_DEFER_CHILD_TASK_ID:
           {
             IndexPartNode::defer_node_child_request(args);
-            break;
-          }
-        case LG_SELECT_TUNABLE_TASK_ID:
-          {
-            const SelectTunableArgs *tunable_args = 
-              (const SelectTunableArgs*)args;
-            runtime->perform_tunable_selection(tunable_args);
-            // Remove the reference that we added
-            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
-              delete (tunable_args->result);
-            if (tunable_args->args != NULL)
-              free(tunable_args->args);
             break;
           }
         case LG_DEFERRED_ENQUEUE_OP_ID:
