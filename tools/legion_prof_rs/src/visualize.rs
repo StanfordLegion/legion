@@ -55,9 +55,9 @@ struct ProcessorRecord {
 }
 
 #[derive(Serialize, Copy, Clone)]
-struct ScaleRecord {
-    start: u64,
-    end: f64,
+struct ScaleRecord<'a> {
+    start: &'a str,
+    end: &'a str,
     stats_levels: u64,
     max_level: u32,
 }
@@ -547,8 +547,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     {
         let stats_levels = 4;
         let scale_data = ScaleRecord {
-            start: 0,
-            end: state.last_time.0 as f64 * 1.01,
+            start: "0",
+            end: &format!("{:.3}", state.last_time.0 as f64 * 1.01 / 1000.),
             stats_levels: stats_levels,
             max_level: base_level + 1,
         };
