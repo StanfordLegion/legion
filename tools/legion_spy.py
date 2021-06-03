@@ -90,8 +90,9 @@ ALL_REDUCE_OP_KIND = 22
 PREDICATE_OP_KIND = 23
 MUST_EPOCH_OP_KIND = 24
 CREATION_OP_KIND = 25
-REFINEMENT_OP_KIND = 26
-ADVISEMENT_OP_KIND = 27
+TUNABLE_OP_KIND = 26
+REFINEMENT_OP_KIND = 27
+ADVISEMENT_OP_KIND = 28
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -10915,6 +10916,8 @@ dynamic_collective_pat   = re.compile(
     prefix+"Dynamic Collective (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 timing_op_pat            = re.compile(
     prefix+"Timing Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+tunable_op_pat           = re.compile(
+    prefix+"Tunable Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 all_reduce_op_pat        = re.compile(
     prefix+"All Reduce Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 predicate_op_pat         = re.compile(
@@ -11650,6 +11653,14 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(TIMING_OP_KIND)
         op.set_name("Timing Op")
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = tunable_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(TUNABLE_OP_KIND)
+        op.set_name("Tunable Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True

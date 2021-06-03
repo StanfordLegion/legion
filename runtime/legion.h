@@ -2244,6 +2244,26 @@ namespace Legion {
       std::set<Future>                preconditions;
     };
 
+    /**
+     * \struct TunableLauncher
+     * Tunable launchers are used for requesting tunable values from mappers.
+     * @see Runtime
+     */
+    struct TunableLauncher {
+    public:
+      TunableLauncher(TunableID tid,
+                      MapperID mapper = 0,
+                      MappingTagID tag = 0,
+                      size_t return_type_size = SIZE_MAX);
+    public:
+      TunableID                           tunable;
+      MapperID                            mapper;
+      MappingTagID                        tag;
+      TaskArgument                        arg;
+      std::vector<Future>                 futures;
+      size_t                              return_type_size;
+    };
+
     //==========================================================================
     //                          Task Variant Registrars 
     //==========================================================================
@@ -7247,6 +7267,7 @@ namespace Legion {
       Future select_tunable_value(Context ctx, TunableID tid,
                                   MapperID mapper = 0, MappingTagID tag = 0,
                                   const void *args = NULL, size_t argsize = 0);
+      Future select_tunable_value(Context ctx, const TunableLauncher &launcher);
 
       /**
        * @deprecated

@@ -1960,6 +1960,18 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // TunableLauncher
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TunableLauncher::TunableLauncher(TunableID tid, MapperID m, MappingTagID t,
+                                     size_t return_size)
+      : tunable(tid), mapper(m), tag(t), return_type_size(return_size)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MustEpochLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -6492,7 +6504,17 @@ namespace Legion {
                                          const void *args, size_t argsize)
     //--------------------------------------------------------------------------
     {
-      return runtime->select_tunable_value(ctx, tid, mid, tag, args, argsize);
+      TunableLauncher launcher(tid, mid, tag);
+      launcher.arg = TaskArgument(args, argsize);
+      return select_tunable_value(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::select_tunable_value(Context ctx, 
+                                         const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->select_tunable_value(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6500,7 +6522,9 @@ namespace Legion {
                                             MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_tunable_value(ctx, tid, mid, tag);
+      TunableLauncher launcher(tid, mid, tag);
+      Future f = select_tunable_value(ctx, launcher);
+      return f.get_result<int>();
     }
 
     //--------------------------------------------------------------------------

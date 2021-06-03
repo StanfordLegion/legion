@@ -21194,6 +21194,229 @@ namespace Legion {
     }
 
     ///////////////////////////////////////////////////////////// 
+    // Tunable Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TunableOp::TunableOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TunableOp::TunableOp(const TunableOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TunableOp::~TunableOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TunableOp& TunableOp::operator=(const TunableOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::activate_tunable(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      tunable_id = 0;
+      mapper_id = 0;
+      tag = 0;
+      arg = NULL;
+      argsize = 0;
+      tunable_index = 0;
+      return_type_size = 0;
+      instance = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::deactivate_tunable(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      if (arg != NULL)
+        free(arg);
+      result = Future();
+      futures.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    Future TunableOp::initialize(InnerContext *ctx, 
+                                 const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      tunable_id = launcher.tunable;
+      mapper_id = launcher.mapper;
+      tag = launcher.tag;
+      futures = launcher.futures;
+      argsize = launcher.arg.get_size();
+      if (argsize > 0)
+      {
+        arg = malloc(argsize);
+        memcpy(arg, launcher.arg.get_ptr(), argsize);
+      }
+      return_type_size = launcher.return_type_size;
+      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
+            runtime->get_available_distributed_id(),
+            runtime->address_space, get_completion_event(),
+            (launcher.return_type_size < SIZE_MAX) ?
+              &launcher.return_type_size : NULL/*no size*/, this));
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_tunable_operation(ctx->get_unique_id(), unique_op_id);
+        const DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id,
+            result.impl->get_ready_event(), empty_point);
+        tunable_index = parent_ctx->get_tunable_index();
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_tunable();
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_tunable();
+      runtime->free_tunable_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* TunableOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TUNABLE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind TunableOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TUNABLE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<Future>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+        it->impl->register_dependence(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Make the instance if we have an upper bound size
+      // and we have futures we'll likely need to defer on
+      if (!futures.empty() && (return_type_size < SIZE_MAX))
+      {
+        MemoryManager *manager = 
+          runtime->find_memory_manager(runtime->runtime_system_memory);
+        instance = manager->create_future_instance(this, 
+          unique_op_id, completion_event, return_type_size, false/*eager*/);
+        complete_mapping();
+      }
+      std::set<ApEvent> pre_events;
+      for (std::vector<Future>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+      {
+        const ApEvent ready = it->impl->get_ready_event();
+        if (ready.exists())
+          pre_events.insert(ready);
+      }
+      // Also make sure we wait for any execution fences that we have
+      if (execution_fence_event.exists())
+        pre_events.insert(execution_fence_event);
+      RtEvent ready;
+      if (!pre_events.empty())
+        ready = Runtime::protect_event(
+            Runtime::merge_events(NULL, pre_events));
+      if (ready.exists() && !ready.has_triggered())
+      {
+        DeferredExecuteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, ready);
+      }
+      else
+        deferred_execute();
+    }
+
+    //--------------------------------------------------------------------------
+    void TunableOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      MapperManager *mapper =
+        runtime->find_mapper(parent_ctx->get_executing_processor(), mapper_id);
+      Mapper::SelectTunableInput input;
+      Mapper::SelectTunableOutput output;
+      input.tunable_id = tunable_id;
+      input.mapping_tag = tag;
+      input.futures = futures;
+      input.args = arg;
+      input.size = argsize;
+      output.value = NULL;
+      output.size = 0;
+      output.take_ownership = true;
+      mapper->invoke_select_tunable_value(parent_ctx->get_owner_task(), 
+                                          &input, &output);
+      process_result(mapper, output.value, output.size);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
+                        tunable_index, output.value, output.size);
+      if (instance != NULL)
+      {
+        if (output.size > return_type_size)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s returned tunable value of size %zd for selection of "
+              "tunable value %d in parent task %s (UID %lld) but the upper "
+              "bound size set by the launcher was only %zd",
+              mapper->get_mapper_name(), output.size, tunable_id,
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+              return_type_size)
+        // Copy the result into the instance
+        FutureInstance local(output.value, output.size,
+            runtime->runtime_system_memory, ApEvent::NO_AP_EVENT,
+            runtime, false/*eager*/, true/*external*/, output.take_ownership);
+        const ApEvent done = instance->copy_from(&local, this);
+        if (done.exists() && !request_early_complete(done))
+        {
+          complete_execution(Runtime::protect_event(done));
+          return;
+        }
+      }
+      else
+      {
+        // Set and complete the future
+        result.impl->set_local(output.value,output.size,output.take_ownership);
+        complete_mapping();
+      }
+      complete_execution();
+    }
+
+    ///////////////////////////////////////////////////////////// 
     // All Reduce Op 
     /////////////////////////////////////////////////////////////
 

@@ -7271,6 +7271,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future InnerContext::select_tunable_value(const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      TunableOp *tunable_op = runtime->get_available_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      add_to_dependence_queue(tunable_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future InnerContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -17758,6 +17773,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplicateContext::select_tunable_value(
+                                                const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_TUNABLE_SELECTION);
+        hasher.hash(launcher.tunable);
+        hasher.hash(launcher.mapper);
+        hasher.hash(launcher.tag);
+        hash_argument(hasher, runtime->safe_control_replication, launcher.arg);
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          hash_future(hasher, runtime->safe_control_replication, *it);
+        verify_replicable(hasher, "select_tunable_value");
+      }
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplTunableOp *tunable_op = runtime->get_available_repl_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      tunable_op->initialize_replication(this);
+      add_to_dependence_queue(tunable_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future ReplicateContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -22304,6 +22351,16 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_TIMING_MEASUREMENT,
         "Illegal timing measurement operation in leaf task %s"
                      "(ID %lld)", get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::select_tunable_value(const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal tunable value operation request in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
       return Future();
     }
 
