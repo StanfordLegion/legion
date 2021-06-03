@@ -1818,7 +1818,7 @@ namespace Legion {
      */
     class PendingVariantRegistration {
     public:
-      PendingVariantRegistration(VariantID vid, bool has_return,
+      PendingVariantRegistration(VariantID vid, size_t return_type_size,
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc, 
@@ -1832,7 +1832,7 @@ namespace Legion {
       void perform_registration(Runtime *runtime);
     private:
       VariantID vid;
-      bool has_return;
+      size_t return_type_size;
       TaskVariantRegistrar registrar;
       void *user_data;
       size_t user_data_size;
@@ -1867,8 +1867,6 @@ namespace Legion {
       ~TaskImpl(void);
     public:
       TaskImpl& operator=(const TaskImpl &rhs);
-    public:
-      inline bool returns_value(void) const { return has_return_type; }
     public:
       VariantID get_unique_variant_id(void);
       void add_variant(VariantImpl *impl);
@@ -1910,8 +1908,6 @@ namespace Legion {
       // VariantIDs that we've handed out but haven't registered yet
       std::set<VariantID> pending_variants;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
-      // Track whether all these variants have a return type or not
-      bool has_return_type;
       // Track whether all these variants are idempotent or not
       bool all_idempotent;
     };
@@ -1926,8 +1922,8 @@ namespace Legion {
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
       VariantImpl(Runtime *runtime, VariantID vid, TaskImpl *owner, 
-                  const TaskVariantRegistrar &registrar, bool ret_val, 
-                  const CodeDescriptor &realm_desc,
+                  const TaskVariantRegistrar &registrar, 
+                  size_t return_type_size, const CodeDescriptor &realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
       ~VariantImpl(void);
@@ -1938,7 +1934,6 @@ namespace Legion {
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool is_replicable(void) const { return replicable_variant; }
-      inline bool returns_value(void) const { return has_return_value; }
       inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&
         get_execution_constraints(void) const { return execution_constraints; }
@@ -1964,7 +1959,7 @@ namespace Legion {
       TaskImpl *const owner;
       Runtime *const runtime;
       const bool global; // globally valid variant
-      const bool has_return_value; // has a return value
+      const size_t return_type_size;
     public:
       const CodeDescriptorID descriptor_id;
       CodeDescriptor realm_descriptor;
@@ -2449,28 +2444,6 @@ namespace Legion {
         const ApEvent event;
         TopLevelContext *const ctx;
       }; 
-      struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
-      public:
-        SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
-                          TunableID tune, const void *arg, size_t size,
-                          TaskContext *c, FutureImpl *f, ApUserEvent trig)
-          : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
-            tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
-            argsize(size), ctx(c), result(f), to_trigger(trig)
-            { if (argsize > 0) memcpy(args, arg, argsize); }
-      public:
-        const MapperID mapper_id;
-        const MappingTagID tag;
-        const TunableID tunable_id;
-        void *const args;
-        const size_t argsize;
-        unsigned tunable_index; // only valid for LegionSpy
-        TaskContext *const ctx;
-        FutureImpl *const result;
-        const ApUserEvent to_trigger;
-      }; 
     public:
       struct ProcessorGroupInfo {
       public:
@@ -2790,13 +2763,6 @@ namespace Legion {
       Future issue_timing_measurement(Context ctx,
                                       const TimingLauncher &launcher);
     public:
-      Future select_tunable_value(Context ctx, TunableID tid,
-                                  MapperID mid, MappingTagID tag,
-                                  const void *args, size_t argsize);
-      int get_tunable_value(Context ctx, TunableID tid, 
-                            MapperID mid, MappingTagID tag);
-      void perform_tunable_selection(const SelectTunableArgs *args);
-    public:
       void* get_local_task_variable(Context ctx, LocalVariableID id);
       void set_local_task_variable(Context ctx, LocalVariableID id,
                       const void *value, void (*destructor)(void*));
@@ -2919,8 +2885,8 @@ namespace Legion {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc,
-                                 bool ret, VariantID vid = 
-                                                      LEGION_AUTO_GENERATE_ID,
+                                 size_t return_type_size,
+                                 VariantID vid = LEGION_AUTO_GENERATE_ID,
                                  bool check_task_id = true,
                                  bool check_context = true,
                                  bool preregistered = false);
@@ -3800,6 +3766,7 @@ namespace Legion {
       IndexDetachOp*        get_available_index_detach_op(void);
       PointDetachOp*        get_available_point_detach_op(void);
       TimingOp*             get_available_timing_op(void);
+      TunableOp*            get_available_tunable_op(void);
       AllReduceOp*          get_available_all_reduce_op(void);
     public: // Control replication operations
       ReplIndividualTask*   get_available_repl_individual_task(void);
@@ -3815,6 +3782,7 @@ namespace Legion {
       ReplDependentPartitionOp* get_available_repl_dependent_partition_op(void);
       ReplMustEpochOp*      get_available_repl_epoch_op(void);
       ReplTimingOp*         get_available_repl_timing_op(void);
+      ReplTunableOp*        get_available_repl_tunable_op(void);
       ReplAllReduceOp*      get_available_repl_all_reduce_op(void);
       ReplFenceOp*          get_available_repl_fence_op(void);
       ReplMapOp*            get_available_repl_map_op(void);
@@ -3871,6 +3839,7 @@ namespace Legion {
       void free_index_detach_op(IndexDetachOp *op);
       void free_point_detach_op(PointDetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_tunable_op(TunableOp *op);
       void free_all_reduce_op(AllReduceOp *op);
     public: // Control replication operations
       void free_repl_individual_task(ReplIndividualTask *task);
@@ -3886,6 +3855,7 @@ namespace Legion {
       void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
       void free_repl_epoch_op(ReplMustEpochOp *op);
       void free_repl_timing_op(ReplTimingOp *op);
+      void free_repl_tunable_op(ReplTunableOp *op);
       void free_repl_all_reduce_op(ReplAllReduceOp *op);
       void free_repl_fence_op(ReplFenceOp *op);
       void free_repl_map_op(ReplMapOp *op);
@@ -4273,6 +4243,7 @@ namespace Legion {
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
+      mutable LocalLock tunable_op_lock;
       mutable LocalLock all_reduce_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
@@ -4318,6 +4289,7 @@ namespace Legion {
       std::deque<IndexDetachOp*>        available_index_detach_ops;
       std::deque<PointDetachOp*>        available_point_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      std::deque<TunableOp*>            available_tunable_ops;
       std::deque<AllReduceOp*>          available_all_reduce_ops;
     protected: // Control replication operations
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
@@ -4335,6 +4307,7 @@ namespace Legion {
                                         available_repl_dependent_partition_ops;
       std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
       std::deque<ReplTimingOp*>         available_repl_timing_ops;
+      std::deque<ReplTunableOp*>        available_repl_tunable_ops;
       std::deque<ReplAllReduceOp*>      available_repl_all_reduce_ops;
       std::deque<ReplFenceOp*>          available_repl_fence_ops;
       std::deque<ReplMapOp*>            available_repl_map_ops;
@@ -4472,7 +4445,7 @@ namespace Legion {
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      const CodeDescriptor &realm_desc, bool has_ret, 
+                      const CodeDescriptor &realm_desc, size_t return_type_size,
                       const char *task_name,VariantID vid,bool check_id = true);
     public:
       static ReductionOpID& get_current_static_reduction_id(void);

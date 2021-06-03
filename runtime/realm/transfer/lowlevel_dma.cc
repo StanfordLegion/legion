@@ -652,7 +652,7 @@ namespace Realm {
       }
     }
 
-    void AsyncFileIOContext::do_work(TimeLimit work_until)
+    bool AsyncFileIOContext::do_work(TimeLimit work_until)
     {
       // first, reap as many events as we can - oldest first
 #ifdef REALM_USE_KERNEL_AIO
@@ -698,7 +698,7 @@ namespace Realm {
 	  if(launched_operations.empty()) {
 	    if(pending_operations.empty()) {
 	      // finished work - we can return without requeuing ourselves
-	      return;
+	      return false;
 	    } else {
 	      // launch some pending work below
 	      break;
@@ -720,7 +720,7 @@ namespace Realm {
 
       // if we fall through to here, there's still polling for either old
       //  or newly launched work to do
-      make_active();
+      return true;
     }
 
     /*static*/

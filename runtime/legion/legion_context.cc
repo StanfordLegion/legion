@@ -179,7 +179,9 @@ namespace Legion {
       FutureInstance *instance = NULL;
       if (size > 0)
       {
-        Memory memory = runtime->find_local_memory(executing_processor, kind);
+        Memory memory = (kind == Memory::SYSTEM_MEM) || 
+          (kind == Memory::NO_MEMKIND) ? runtime->runtime_system_memory :
+          runtime->find_local_memory(executing_processor, kind);
         if (owned)
           instance = new FutureInstance(value, size, memory,
               ApEvent::NO_AP_EVENT, runtime, false/*eager*/,
@@ -2587,22 +2589,7 @@ namespace Legion {
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
-      {
-        // We need to check to make sure that the task actually
-        // does expect to have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK,
-            "Predicated task launch for task %s in parent "
-                        "task %s (UID %lld) has non-void return type "
-                        "but no default value for its future if the task "
-                        "predicate evaluates to false.  Please set either "
-                        "the 'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "TaskLauncher struct.", impl->get_name(), 
-                        get_task_name(), get_unique_id())
         result->set_result(NULL);
-      }
       return Future(result);
     }
 
@@ -2646,20 +2633,6 @@ namespace Legion {
       }
       if (launcher.predicate_false_result.get_size() == 0)
       {
-        // Check to make sure the task actually does expect to
-        // have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-            "Predicated index task launch for task %s "
-                        "in parent task %s (UID %lld) has non-void "
-                        "return type but no default value for its "
-                        "future if the task predicate evaluates to "
-                        "false.  Please set either the "
-                        "'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(),
-                        get_task_name(), get_unique_id())
         // Just initialize all the futures
         for (Domain::DomainPointIterator itr(launcher.launch_domain);
               itr; itr++)
@@ -2697,23 +2670,7 @@ namespace Legion {
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
-      {
-        // We need to check to make sure that the task actually
-        // does expect to have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-                        "Predicated index task launch for task %s "
-                        "in parent task %s (UID %lld) has non-void "
-                        "return type but no default value for its "
-                        "future if the task predicate evaluates to "
-                        "false.  Please set either the "
-                        "'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(), 
-                        get_task_name(), get_unique_id())
         result->set_result(NULL);
-      }
       return Future(result);
     }
 
@@ -4813,7 +4770,7 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool skip_check)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -7300,6 +7257,21 @@ namespace Legion {
       TimingOp *timing_op = runtime->get_available_timing_op();
       Future result = timing_op->initialize(this, launcher);
       add_to_dependence_queue(timing_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::select_tunable_value(const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      TunableOp *tunable_op = runtime->get_available_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      add_to_dependence_queue(tunable_op);
       return result;
     }
 
@@ -13928,7 +13900,7 @@ namespace Legion {
       }
       future_map.impl->set_all_futures(shard_futures);
       return create_partition_by_domain(parent, future_map, color_space, 
-                                        perform_intersections, part_kind,color);
+            perform_intersections, part_kind, color, true/*skip check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13938,11 +13910,11 @@ namespace Legion {
                                                     IndexSpace color_space,
                                                     bool perform_intersections,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,bool skip_check)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication &&
+      if (runtime->safe_control_replication && !skip_check &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
@@ -17782,6 +17754,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplicateContext::select_tunable_value(
+                                                const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_TUNABLE_SELECTION);
+        hasher.hash(launcher.tunable);
+        hasher.hash(launcher.mapper);
+        hasher.hash(launcher.tag);
+        hash_argument(hasher, runtime->safe_control_replication, launcher.arg);
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          hash_future(hasher, runtime->safe_control_replication, *it);
+        verify_replicable(hasher, "select_tunable_value");
+      }
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplTunableOp *tunable_op = runtime->get_available_repl_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      tunable_op->initialize_replication(this);
+      add_to_dependence_queue(tunable_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future ReplicateContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -21527,7 +21531,7 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool skip_check)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
@@ -22332,6 +22336,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future LeafContext::select_tunable_value(const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal tunable value operation request in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
     Future LeafContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -22870,6 +22884,13 @@ namespace Legion {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
+      }
+      if (!index_launch_spaces.empty())
+      {
+        for (std::map<Domain,IndexSpace>::const_iterator it = 
+              index_launch_spaces.begin(); it != 
+              index_launch_spaces.end(); it++)
+          destroy_index_space(it->second, false/*unordered*/, true/*recurse*/);
       }
       // No need to unmap the physical regions, they never had events
       if (!execution_events.empty())

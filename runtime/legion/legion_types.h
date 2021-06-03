@@ -341,7 +341,6 @@ namespace Legion {
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
       LG_INDEX_PART_DEFER_CHILD_TASK_ID,
-      LG_SELECT_TUNABLE_TASK_ID,
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
@@ -468,7 +467,6 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
         "Defer Index Partition Child Request",                    \
-        "Select Tunable",                                         \
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
@@ -1581,6 +1579,7 @@ namespace Legion {
       COLLECTIVE_LOC_97 = 97,
       COLLECTIVE_LOC_98 = 98,
       COLLECTIVE_LOC_99 = 99,
+      COLLECTIVE_LOC_100 = 100,
     };
 
     // legion_types.h
@@ -1684,6 +1683,7 @@ namespace Legion {
     class IndexDetachOp;
     class PointDetachOp;
     class TimingOp;
+    class TunableOp;
     class AllReduceOp;
     class ExternalMappable;
     class RemoteOp;
@@ -1897,6 +1897,7 @@ namespace Legion {
     class ReplDependentPartitionOp;
     class ReplMustEpochOp;
     class ReplTimingOp;
+    class ReplTunableOp;
     class ReplAllReduceOp;
     class ReplFenceOp;
     class ReplMapOp;
@@ -1976,6 +1977,7 @@ namespace Legion {
     friend class Internal::ReplIndexDetachOp;               \
     friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
+    friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \
     friend class Internal::ExternalMappable;                \
@@ -1999,6 +2001,7 @@ namespace Legion {
     friend class Internal::ReplMustEpochOp;                 \
     friend class Internal::ReplMapOp;                       \
     friend class Internal::ReplTimingOp;                    \
+    friend class Internal::ReplTunableOp;                   \
     friend class Internal::ReplAllReduceOp;                 \
     friend class Internal::ReplFenceOp;                     \
     friend class Internal::ReplAttachOp;                    \

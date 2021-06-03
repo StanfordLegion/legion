@@ -25,6 +25,6 @@ task main()
 
   -- Case 3. 2D partitioned by 3D
   var t = region(ispace(int2d, {4, 4}), int)
-  var u = partition(equal, s, ispace(int3d, {5, 5, 5}))
+  var u = partition(equal, t, ispace(int3d, {5, 5, 5}))
 end
 regentlib.start(main)

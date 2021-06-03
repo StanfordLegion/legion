@@ -2244,6 +2244,24 @@ namespace Legion {
       std::set<Future>                preconditions;
     };
 
+    /**
+     * \struct TunableLauncher
+     * Tunable launchers are used for requesting tunable values from mappers.
+     * @see Runtime
+     */
+    struct TunableLauncher {
+    public:
+      TunableLauncher(TunableID tid,
+                      MapperID mapper = 0,
+                      MappingTagID tag = 0);
+    public:
+      TunableID                           tunable;
+      MapperID                            mapper;
+      MappingTagID                        tag;
+      TaskArgument                        arg;
+      std::vector<Future>                 futures;
+    };
+
     //==========================================================================
     //                          Task Variant Registrars 
     //==========================================================================
@@ -7247,6 +7265,7 @@ namespace Legion {
       Future select_tunable_value(Context ctx, TunableID tid,
                                   MapperID mapper = 0, MappingTagID tag = 0,
                                   const void *args = NULL, size_t argsize = 0);
+      Future select_tunable_value(Context ctx, const TunableLauncher &launcher);
 
       /**
        * @deprecated
@@ -8787,7 +8806,8 @@ namespace Legion {
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
 				      size_t user_len = 0,
-                                      bool has_return_type = false,
+                                      size_t return_type_size = 
+                                                      LEGION_MAX_RETURN_SIZE,
                                       VariantID vid = LEGION_AUTO_GENERATE_ID);
 
       /**
@@ -8887,7 +8907,7 @@ namespace Legion {
 	      size_t user_len = 0,
 	      const char *task_name = NULL,
               VariantID vid = LEGION_AUTO_GENERATE_ID,
-              bool has_return_type = false,
+              size_t return_type_size = LEGION_MAX_RETURN_SIZE,
               bool check_task_id = true);
 
       /**

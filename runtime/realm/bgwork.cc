@@ -607,7 +607,28 @@ namespace Realm {
 #ifdef DEBUG_REALM
 	  item->make_inactive();
 #endif
-	  item->do_work(TimeLimit::absolute(t_quantum, interrupt_flag));
+          while(true) {
+            bool requeue = item->do_work(TimeLimit::absolute(t_quantum, interrupt_flag));
+            if(requeue) {
+              // we can just call this item's work function again if we're not out
+              //  of time and if there's nothing else to do
+              if(manager->active_work_items.load() == 0) {
+                long long now = Clock::current_time_in_nanoseconds();
+                if((work_until_time <= 0) || (work_until_time > now)) {
+                  // update t_quantum and then loop back around
+                  t_quantum = (manager->cfg.work_item_timeslice + now);
+                  if((work_until_time > 0) && (work_until_time < t_quantum))
+                    t_quantum = work_until_time;
+                  continue;
+                }
+              }
+              // if we fall through to here, we've got other stuff to do, so
+              //  actually enqueue the item before going on
+              item->make_active();
+              break;
+            } else
+              break;
+          }
 #ifdef REALM_BGWORK_PROFILE
 	  long long t_stop = Clock::current_time_in_nanoseconds();
 	  long long elapsed = t_stop - t_start;

@@ -1960,6 +1960,17 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // TunableLauncher
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TunableLauncher::TunableLauncher(TunableID tid, MapperID m, MappingTagID t)
+      : tunable(tid), mapper(m), tag(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MustEpochLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -6492,7 +6503,17 @@ namespace Legion {
                                          const void *args, size_t argsize)
     //--------------------------------------------------------------------------
     {
-      return runtime->select_tunable_value(ctx, tid, mid, tag, args, argsize);
+      TunableLauncher launcher(tid, mid, tag);
+      launcher.arg = TaskArgument(args, argsize);
+      return select_tunable_value(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::select_tunable_value(Context ctx, 
+                                         const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->select_tunable_value(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6500,7 +6521,9 @@ namespace Legion {
                                             MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_tunable_value(ctx, tid, mid, tag);
+      TunableLauncher launcher(tid, mid, tag);
+      Future f = select_tunable_value(ctx, launcher);
+      return f.get_result<int>();
     }
 
     //--------------------------------------------------------------------------
@@ -7478,12 +7501,12 @@ namespace Legion {
                                     const CodeDescriptor &realm_desc,
                                     const void *user_data /*= NULL*/,
                                     size_t user_len /*= 0*/,
-                                    bool has_return_type /*= false*/,
+                                    size_t return_type_size/*=MAX_RETURN_SIZE*/,
                                     VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_len, 
-                                       realm_desc, has_return_type, vid);
+                                       realm_desc, return_type_size, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -7494,13 +7517,13 @@ namespace Legion {
 	      size_t user_len /*= 0*/,
 	      const char *task_name /*= NULL*/,
               VariantID vid /*=AUTO_GENERATE_ID*/,
-              bool has_return_type/*=false*/,
+              size_t return_type_size /*=MAX_RETURN_SIZE*/,
               bool check_task_id/*=true*/)
     //--------------------------------------------------------------------------
     {
       // Make a copy of the descriptor here
       return Internal::Runtime::preregister_variant(registrar, user_data, 
-          user_len, realm_desc, has_return_type, task_name, vid, check_task_id);
+         user_len, realm_desc, return_type_size, task_name, vid, check_task_id);
     }
 
     //--------------------------------------------------------------------------

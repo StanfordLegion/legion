@@ -629,7 +629,7 @@ namespace Realm {
     nested_normal = nested_poisoned = 0;
   }
 
-  void EventTriggerNotifier::do_work(TimeLimit work_until)
+  bool EventTriggerNotifier::do_work(TimeLimit work_until)
   {
     // take the lock and grab both lists
     EventWaiter::EventWaiterList todo_normal, todo_poisoned;
@@ -678,8 +678,11 @@ namespace Realm {
 	}
       }
       if(was_empty)
-	make_active();
+        return true;  // request requeuing to get more work done
     }
+
+    // no work left or already requeued
+    return false;
   }
 
   /*static*/ REALM_THREAD_LOCAL EventWaiter::EventWaiterList *EventTriggerNotifier::nested_normal = 0;

@@ -1742,11 +1742,6 @@ function type_check.expr_partition_equal(cx, node)
     report.error(node, "type mismatch in argument 2: expected ispace but got " ..
                 tostring(colors_type))
   end
-  if region_type:ispace().dim > 1 and data.max(colors_type.dim, 1) ~= data.max(region_type:ispace().dim, 1) then
-    report.error(node, "type mismatch in argument 2: expected ispace with " ..
-                tostring(region_type:ispace().dim) .. " dimensions but got " ..
-                tostring(colors_type))
-  end
 
   local region_symbol
   if region:is(ast.typed.expr.ID) then

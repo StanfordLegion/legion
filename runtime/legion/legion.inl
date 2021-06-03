@@ -358,7 +358,41 @@ namespace Legion {
               redop_id, permit_duplicates);
       }
 
-    };
+      template<typename T>
+      struct HasSerdezBound {
+        typedef char yes; typedef long no;
+
+        template <typename C>
+        static yes test(decltype(&C::legion_upper_bound_size));
+        template <typename C> static no test(...);
+
+        static constexpr bool value =
+          sizeof(test<T>(nullptr)) == sizeof(yes);
+      };
+
+      template<typename T, bool HAS_BOUND>
+      struct SerdezBound {
+        static constexpr size_t value = T::legion_upper_bound_size();
+      };
+
+      template<typename T>
+      struct SerdezBound<T,false> {
+        static constexpr size_t value = LEGION_MAX_RETURN_SIZE;
+      };
+
+      template<typename T>
+      struct SizeBound {
+        static constexpr size_t value = sizeof(T);
+      };
+
+      template<typename T>
+      struct ReturnSize {
+        static constexpr size_t value = 
+          std::conditional<IsSerdezType<T>::value,
+           SerdezBound<T,HasSerdezBound<T>::value>, SizeBound<T> >::type::value;
+      };
+
+    }; // Serialization namespace
 
     // Special namespace for providing multi-dimensional 
     // array syntax on accessors 
@@ -5743,7 +5777,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
@@ -5763,7 +5797,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N], size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / field_size;
@@ -5922,7 +5956,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -5946,7 +5980,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -6093,7 +6128,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
@@ -6113,7 +6148,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
@@ -6261,7 +6297,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -6284,7 +6320,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
 #ifdef __CUDA_ARCH__
           assert(bounds.contains_all(r));
@@ -9022,7 +9059,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[N];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9055,7 +9092,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r, 
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -9184,7 +9222,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[N];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9221,7 +9259,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
-              size_t strides[N], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[N],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -9339,7 +9378,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[1];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9372,7 +9411,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r, 
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -9490,7 +9530,7 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t field_size = sizeof(REDOP::RHS)) const
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           size_t strides[1];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
@@ -9526,7 +9566,8 @@ namespace Legion {
         }
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
-              size_t strides[1], size_t field_size = sizeof(REDOP::RHS)) const
+              size_t strides[1],
+              size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
 #ifdef __CUDA_ARCH__
@@ -21321,8 +21362,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
-      return register_task_variant(registrar, desc, NULL/*UDT*/,
-                               0/*sizeof(UDT)*/, true/*has return type*/, vid);
+      return register_task_variant(registrar, desc,NULL/*UDT*/,
+          0/*sizeof(UDT)*/, LegionSerialization::ReturnSize<T>::value, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21336,7 +21377,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                   true/*has return type*/, vid);
+                            LegionSerialization::ReturnSize<T>::value, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21349,7 +21390,7 @@ namespace Legion {
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       return register_task_variant(registrar, desc, NULL/*UDT*/, 
-                           0/*sizeof(UDT)*/, false/*has return type*/, vid);
+                                   0/*sizeof(UDT)*/, 0/*return size*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21363,7 +21404,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                   false/*has return type*/, vid);
+                                   0/*return size*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21377,7 +21418,8 @@ namespace Legion {
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
       return preregister_task_variant(registrar, desc, NULL/*UDT*/, 
-          0/*sizeof(UDT)*/, task_name, vid, true/*has return type*/);
+                                  0/*sizeof(UDT)*/, task_name, vid, 
+                                  LegionSerialization::ReturnSize<T>::value);
     }
 
     //--------------------------------------------------------------------------
@@ -21393,7 +21435,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       return preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                      task_name, vid, true/*has return type*/);
+                    task_name, vid, LegionSerialization::ReturnSize<T>::value);
     }
 
     //--------------------------------------------------------------------------
@@ -21407,7 +21449,7 @@ namespace Legion {
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       return preregister_task_variant(registrar, desc, NULL/*UDT*/,
-                0/*sizeof(UDT)*/, task_name, vid, false/*has return type*/);
+                0/*sizeof(UDT)*/, task_name, vid, 0/*return size*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21423,7 +21465,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       return preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                      task_name, vid, false/*has return type*/);
+                                      task_name, vid, 0/*return size*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21451,7 +21493,7 @@ namespace Legion {
       registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
       preregister_task_variant(registrar, desc, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                               task_name, vid, true/*has ret*/, check_task_id);
+      task_name, vid, LegionSerialization::ReturnSize<T>::value, check_task_id);
       return id;
     }
 
@@ -21480,7 +21522,7 @@ namespace Legion {
       registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       preregister_task_variant(registrar, desc, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                               task_name, vid, false/*has ret*/, check_task_id);
+                               task_name, vid, 0/*return size*/, check_task_id);
       return id;
     }
 
@@ -21511,7 +21553,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                               task_name, vid, true/*has ret*/, check_task_id);
+      task_name, vid, LegionSerialization::ReturnSize<T>::value, check_task_id);
       return id;
     }
 
@@ -21542,7 +21584,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                               task_name, vid, false/*has ret*/, check_task_id);
+                               task_name, vid, 0/*return size*/, check_task_id);
       return id;
     }
 

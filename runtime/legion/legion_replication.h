@@ -1220,6 +1220,7 @@ namespace Legion {
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
+      virtual void prepare_map_must_epoch(void);
     public:
       // Override these so we can broadcast the future result
       virtual void trigger_task_complete(void);
@@ -1271,6 +1272,7 @@ namespace Legion {
       // Have to override this too for doing output in the
       // case that we misspeculate
       virtual void resolve_false(bool speculated, bool launched);
+      virtual void prepare_map_must_epoch(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
@@ -1850,6 +1852,28 @@ namespace Legion {
     protected:
       ValueBroadcast<long long> *timing_collective;
     }; 
+
+    /**
+     * \class ReplTunableOp
+     * A tunable operation that is aware that it is
+     * being executed in a control replicated context
+     */
+    class ReplTunableOp : public TunableOp {
+    public:
+      ReplTunableOp(Runtime *rt);
+      ReplTunableOp(const ReplTunableOp &rhs);
+      virtual ~ReplTunableOp(void);
+    public:
+      ReplTunableOp& operator=(const ReplTunableOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *context);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void deferred_execute(void);
+    protected:
+      BufferBroadcast *value_broadcast;       
+    };
 
     /**
      * \class ReplAllReduceOp

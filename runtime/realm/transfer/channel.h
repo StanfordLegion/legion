@@ -442,6 +442,10 @@ namespace Realm {
 	  AutoLock<> al(available_req_mutex);
 	  available_reqs.push(req);
 	}
+        // update progress counter if iteration isn't completed yet - it might
+        //  have been waiting for another request object
+        if(!iteration_completed.load())
+          update_progress();
 	remove_reference();
       }
 
@@ -927,7 +931,7 @@ namespace Realm {
 
       void enqueue_xd(XD *xd, bool at_front = false);
 
-      virtual void do_work(TimeLimit work_until);
+      virtual bool do_work(TimeLimit work_until);
 
     protected:
       LocalChannel *channel;

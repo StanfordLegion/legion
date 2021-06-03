@@ -151,7 +151,11 @@ namespace Realm {
 			int _numa_domain = -1,
 			long long _min_timeslice_needed = -1);
 
-    virtual void do_work(TimeLimit work_until) = 0;
+    // perform work, trying to respect the 'work_until' time limit - return
+    //  true to request requeuing (this is more efficient than calling
+    //  'make_active' at the end of 'do_work') or false if all work has been
+    //  completed (or if 'make_active' has already been called)
+    virtual bool do_work(TimeLimit work_until) = 0;
 
   protected:
     friend class BackgroundWorkManager::Worker;

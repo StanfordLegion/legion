@@ -13029,11 +13029,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
-                                  bool has_ret, const TaskVariantRegistrar &reg,
+                                  size_t return_size, 
+                                  const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
                                   const CodeDescriptor &realm, 
                                   const char *task_name)
-      : vid(v), has_return(has_ret), registrar(reg), 
+      : vid(v), return_type_size(return_size), registrar(reg), 
         realm_desc(realm), logical_task_name(NULL)
     //--------------------------------------------------------------------------
     {
@@ -13102,7 +13103,7 @@ namespace Legion {
                           strlen(logical_task_name)+1, 
                           false/*mutable*/, false/*send to owner*/);
       runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, has_return, vid, false/*check task*/,
+                    realm_desc, return_type_size, vid, false/*check task*/,
                     true/*check context*/, true/*preregistered*/);
     }
 
@@ -13114,7 +13115,7 @@ namespace Legion {
     TaskImpl::TaskImpl(TaskID tid, Runtime *rt, const char *name/*=NULL*/)
       : task_id(tid), runtime(rt), initial_name(static_cast<char*>(
           malloc(((name == NULL) ? 64 : strlen(name) + 1) * sizeof(char)))),
-        has_return_type(false), all_idempotent(false)
+        all_idempotent(false)
     //--------------------------------------------------------------------------
     {
       // Always fill in semantic info 0 with a name for the task
@@ -13208,14 +13209,6 @@ namespace Legion {
       AutoLock t_lock(task_lock);
       if (!variants.empty())
       {
-        // Make sure that all the variants agree whether there is 
-        // a return type or not
-        if (has_return_type != impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_RETURN_SIZE_MISMATCH, 
-                        "Variants of task %s (ID %d) disagree on whether "
-                        "there is a return type or not. All variants "
-                        "of a task must agree on whether there is a "
-                        "return type.", get_name(false/*need lock*/), task_id)
         if (all_idempotent != impl->is_idempotent())
           REPORT_LEGION_ERROR(ERROR_IDEMPOTENT_MISMATCH, 
                         "Variants of task %s (ID %d) have different idempotent "
@@ -13224,10 +13217,7 @@ namespace Legion {
                         get_name(false/*need lock*/), task_id)
       }
       else
-      {
-        has_return_type = impl->returns_value();
         all_idempotent  = impl->is_idempotent();
-      }
       // Check to see if this variant has already been registered
       if (variants.find(impl->vid) != variants.end())
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_VARIANT_REGISTRATION,
@@ -13650,11 +13640,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Runtime *rt, VariantID v, TaskImpl *own, 
-                           const TaskVariantRegistrar &registrar, bool ret,
-                           const CodeDescriptor &realm,
-                           const void *udata /*=NULL*/, size_t udata_size/*=0*/)
+                             const TaskVariantRegistrar &registrar,
+                             size_t return_size, const CodeDescriptor &realm,
+                             const void *udata/*=NULL*/,size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        has_return_value(ret), 
+        return_type_size(return_size), 
         descriptor_id(runtime->get_unique_code_descriptor_id()),
         realm_descriptor(realm),
         execution_constraints(registrar.execution_constraints),
@@ -13765,7 +13755,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), has_return_value(rhs.has_return_value),
+        global(rhs.global), return_type_size(rhs.return_type_size),
         descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
     //--------------------------------------------------------------------------
     {
@@ -13918,12 +13908,6 @@ namespace Legion {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(owner->task_id);
-            rez.serialize(vid);
-            // Extra padding to fix a realm bug for now
-            rez.serialize(vid);
-            rez.serialize(next_done);
-            rez.serialize(has_return_value);
             // pack the code descriptors 
             Realm::Serialization::ByteCountSerializer counter;
             realm_descriptor.serialize(counter, true/*portable*/);
@@ -13934,6 +13918,12 @@ namespace Legion {
                 serializer(rez.reserve_bytes(impl_size), impl_size);
               realm_descriptor.serialize(serializer, true/*portable*/);
             }
+            rez.serialize(owner->task_id);
+            rez.serialize(vid);
+            // Extra padding to fix a realm bug for now
+            rez.serialize(vid);
+            rez.serialize(next_done);
+            rez.serialize(return_type_size);
             rez.serialize(user_data_size);
             if (user_data_size > 0)
               rez.serialize(user_data, user_data_size);
@@ -13964,17 +13954,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      TaskID task_id;
-      derez.deserialize(task_id);
-      TaskVariantRegistrar registrar(task_id, false/*global*/);
-      VariantID variant_id;
-      derez.deserialize(variant_id);
-      // Extra padding to fix a realm bug for now
-      derez.deserialize(variant_id); 
-      RtUserEvent done;
-      derez.deserialize(done);
-      bool has_return;
-      derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
       CodeDescriptor realm_desc;
@@ -14001,6 +13980,17 @@ namespace Legion {
 #endif
         free(impl_buffer);
       }
+      TaskID task_id;
+      derez.deserialize(task_id);
+      TaskVariantRegistrar registrar(task_id, false/*global*/);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      // Extra padding to fix a realm bug for now
+      derez.deserialize(variant_id); 
+      RtUserEvent done;
+      derez.deserialize(done);
+      size_t return_type_size;
+      derez.deserialize(return_type_size);
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -14020,7 +14010,7 @@ namespace Legion {
       // Can lie about preregistration since the user would already have
       // gotten there error message on the owner node
       runtime->register_variant(registrar, user_data, user_data_size,
-              realm_desc, has_return, variant_id, false/*check task*/,
+              realm_desc, return_type_size, variant_id, false/*check task*/,
               false/*check context*/, true/*preregistered*/);
       AddressSpaceID origin;
       derez.deserialize(origin);
@@ -16310,6 +16300,13 @@ namespace Legion {
         delete (*it);
       }
       available_timing_ops.clear();
+      for (std::deque<TunableOp*>::const_iterator it =
+            available_tunable_ops.begin(); it !=
+            available_tunable_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_tunable_ops.clear();
       for (std::deque<AllReduceOp*>::const_iterator it = 
             available_all_reduce_ops.begin(); it !=
             available_all_reduce_ops.end(); it++)
@@ -16408,6 +16405,13 @@ namespace Legion {
         delete (*it);
       }
       available_repl_timing_ops.clear();
+      for (std::deque<ReplTunableOp*>::const_iterator it = 
+            available_repl_tunable_ops.begin(); it !=
+            available_repl_tunable_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_tunable_ops.clear();
       for (std::deque<ReplAllReduceOp*>::const_iterator it = 
             available_repl_all_reduce_ops.begin(); it !=
             available_repl_all_reduce_ops.end(); it++)
@@ -18723,86 +18727,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag,
-                                         const void *args, size_t argsize)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context select tunable value!");
-      ctx->begin_runtime_call();
-#ifdef DEBUG_LEGION
-      log_run.debug("Getting a value for tunable variable %d in "
-                    "task %s (ID %lld)", tid, ctx->get_task_name(),
-                    ctx->get_unique_id());
-#endif
-      const ApUserEvent to_trigger = Runtime::create_ap_user_event(NULL);
-      FutureImpl *result = new FutureImpl(ctx, this, true/*register*/,
-                              get_available_distributed_id(),
-                              address_space, to_trigger,
-                              ctx->get_owner_task());
-      // Make this here to get a local reference on it now
-      Future result_future(result);
-      result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs task_args(ctx->get_owner_task()->get_unique_op_id(),
-          mid, tag, tid, args, argsize, ctx, result, to_trigger);
-      if (legion_spy_enabled)
-        task_args.tunable_index = ctx->get_tunable_index();
-      issue_runtime_meta_task(task_args, LG_LATENCY_WORK_PRIORITY); 
-      ctx->end_runtime_call();
-      return result_future;
-    }
-
-    //--------------------------------------------------------------------------
-    int Runtime::get_tunable_value(Context ctx, TunableID tid,
-                                   MapperID mid, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context get tunable value!");
-      ctx->begin_runtime_call();
-      Future f = select_tunable_value(ctx, tid, mid, tag, NULL, 0);
-      int result = f.get_result<int>();
-      if (legion_spy_enabled)
-      {
-        unsigned index = ctx->get_tunable_index();
-        LegionSpy::log_tunable_value(ctx->get_unique_id(), index,
-                                     &result, sizeof(result));
-      }
-      ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::perform_tunable_selection(const SelectTunableArgs *args)
-    //--------------------------------------------------------------------------
-    {
-      // Get the mapper first
-      MapperManager *mapper = find_mapper(args->ctx->get_executing_processor(),
-                                          args->mapper_id);
-      Mapper::SelectTunableInput input;
-      Mapper::SelectTunableOutput output;
-      input.tunable_id = args->tunable_id;
-      input.mapping_tag = args->tag;
-      input.args = args->args;
-      input.size = args->argsize;
-      output.value = NULL;
-      output.size = 0;
-      output.take_ownership = true;
-      mapper->invoke_select_tunable_value(args->ctx->get_owner_task(), 
-                                          &input, &output);
-      if (legion_spy_enabled)
-        LegionSpy::log_tunable_value(args->ctx->get_unique_id(), 
-            args->tunable_index, output.value, output.size);
-      // Set and complete the future
-      if ((output.value != NULL) && (output.size > 0))
-        args->result->set_local(output.value, output.size, 
-                                output.take_ownership);
-      Runtime::trigger_event(NULL, args->to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
     void* Runtime::get_local_task_variable(Context ctx, LocalVariableID id)
     //--------------------------------------------------------------------------
     {
@@ -20099,7 +20023,8 @@ namespace Legion {
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   const CodeDescriptor &realm_code_desc,
-                                  bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
+                                  size_t return_type_size,
+                                  VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/,
                                   bool check_context /*= true*/,
                                   bool preregistered /*= false*/)
@@ -20107,7 +20032,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->register_variant(registrar, user_data,
-            user_data_size, realm_code_desc, ret, vid, check_task_id);
+         user_data_size, realm_code_desc, return_type_size, vid, check_task_id);
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
       if (check_task_id && 
@@ -20130,8 +20055,8 @@ namespace Legion {
                       "variant ID 0. Variant ID 0 is reserved for task "
                       "generators.", registrar.task_id)
       // Make our variant and add it to the set of variants
-      VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
-                                          registrar, ret, realm_code_desc,
+      VariantImpl *impl = new VariantImpl(this, vid, task_impl, registrar,
+                                          return_type_size, realm_code_desc,
                                           user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
@@ -26615,6 +26540,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TunableOp* Runtime::get_available_tunable_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(tunable_op_lock, available_tunable_ops);
+    }
+
+    //--------------------------------------------------------------------------
     AllReduceOp* Runtime::get_available_all_reduce_op(void)
     //--------------------------------------------------------------------------
     {
@@ -26715,6 +26647,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return get_available(timing_op_lock, available_repl_timing_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTunableOp* Runtime::get_available_repl_tunable_op(void) 
+    //--------------------------------------------------------------------------
+    {
+      return get_available(tunable_op_lock, available_repl_tunable_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -27270,6 +27209,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_repl_tunable_op(ReplTunableOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(timing_op_lock);
+      release_operation<false>(available_repl_tunable_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_repl_all_reduce_op(ReplAllReduceOp *op)
     //--------------------------------------------------------------------------
     {
@@ -27363,6 +27310,14 @@ namespace Legion {
     {
       AutoLock t_lock(summary_op_lock);
       release_operation<false>(available_repl_summary_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_tunable_op(TunableOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(tunable_op_lock);
+      release_operation<false>(available_tunable_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -27793,6 +27748,22 @@ namespace Legion {
       else
         visible_memories.best_affinity_to(proc);
       visible_memories.only_kind(mem_kind);
+      if (visible_memories.count() == 0)
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        const char *proc_names[] = {
+#define PROC_NAMES(name, desc) desc,
+          REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+        };
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "%s Processor " IDFMT " has no %s memory",
+            proc_names[proc.kind()], proc.id, mem_names[mem_kind])
+      }
       return visible_memories.first();
     }
 
@@ -30459,7 +30430,7 @@ namespace Legion {
     /*static*/ VariantID Runtime::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          const CodeDescriptor &code_desc, bool has_ret, 
+                          const CodeDescriptor &code_desc, size_t return_size, 
                           const char *task_name, VariantID vid, bool check_id)
     //--------------------------------------------------------------------------
     {
@@ -30486,7 +30457,7 @@ namespace Legion {
                       "variant ID 0. Variant ID 0 is reserved for task "
                       "generators.", registrar.task_id)
       // Offset by the runtime tasks
-      pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
+      pending_table.push_back(new PendingVariantRegistration(vid, return_size,
                               registrar, user_data, user_data_size, 
                               code_desc, task_name));
       return vid;
@@ -31029,18 +31000,6 @@ namespace Legion {
         case LG_INDEX_PART_DEFER_CHILD_TASK_ID:
           {
             IndexPartNode::defer_node_child_request(args);
-            break;
-          }
-        case LG_SELECT_TUNABLE_TASK_ID:
-          {
-            const SelectTunableArgs *tunable_args = 
-              (const SelectTunableArgs*)args;
-            runtime->perform_tunable_selection(tunable_args);
-            // Remove the reference that we added
-            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
-              delete (tunable_args->result);
-            if (tunable_args->args != NULL)
-              free(tunable_args->args);
             break;
           }
         case LG_DEFERRED_ENQUEUE_OP_ID:

@@ -191,7 +191,6 @@ namespace Legion {
             const std::vector<StaticDependence> *dependences,
             const Predicate &p, Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
-      void check_future_size(size_t future_size);
     public:
       bool select_task_options(bool prioritize);
     public:
@@ -625,6 +624,10 @@ namespace Legion {
       private:
         unsigned char store;
       };
+      struct FutureHandles : public Collectable {
+      public:
+        std::map<DomainPoint,DistributedID> handles;
+      };
     public:
       MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
@@ -692,6 +695,7 @@ namespace Legion {
       IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
       FutureMap future_map;
+      FutureHandles *future_handles;
       ReductionOpID redop;
       bool deterministic_redop;
       const ReductionOp *reduction_op;
@@ -752,8 +756,6 @@ namespace Legion {
                              bool track = true, bool top_level=false,
                              bool implicit_top_level = false,
                              std::vector<OutputRequirement> *outputs = NULL);
-      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
-                                 bool do_registration);
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs);
@@ -789,6 +791,7 @@ namespace Legion {
       virtual void handle_post_mapped(bool deferral, 
                           RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
+      virtual void prepare_map_must_epoch(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -1072,8 +1075,6 @@ namespace Legion {
                              std::vector<OutputRequirement> *outputs = NULL);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
-      void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
-                                 bool do_registration);
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs,
@@ -1084,6 +1085,8 @@ namespace Legion {
     protected:
       void activate_index_task(void);
       void deactivate_index_task(void);
+    public:
+      virtual void prepare_map_must_epoch(void);
     protected:
       virtual void finalize_output_regions(void);
     public:
@@ -1173,6 +1176,8 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
+    public:
+      void enumerate_futures(const Domain &domain);
     public:
       static void process_slice_mapped(Deserializer &derez,
                                        AddressSpaceID source);
@@ -1288,9 +1293,10 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance);
-      void handle_future(const DomainPoint &point, FutureInstance *instance,
-                        void *metadata, size_t metasize, FutureFunctor *functor,
-                        Processor future_proc, bool own_functor); 
+      void handle_future(const DomainPoint &point,
+                         FutureInstance *instance, void *metadata, 
+                         size_t metasize, FutureFunctor *functor,
+                         Processor future_proc, bool own_functor); 
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &point,
