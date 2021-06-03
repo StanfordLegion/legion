@@ -45,10 +45,6 @@ variables:
   CXX: "g++-10"
   F90: "gfortran-10"
 
-.clang35: &clang35
-  CC:  "clang-3.5"
-  CXX: "clang++-3.5"
-  F90: "gfortran-5"
 .clang38: &clang38
   CC:  "clang-3.8"
   CXX: "clang++-3.8"
@@ -83,9 +79,6 @@ variables:
   CXX: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icpc"
   F90: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/ifort"
 
-.terra35: &terra35
-  LLVM_CONFIG: "llvm-config-3.5"
-  TERRA_DIR: "/usr/local/terra35"
 .terra38: &terra38
   LLVM_CONFIG: "llvm-config-3.8"
   TERRA_DIR: "/usr/local/terra38"
@@ -263,11 +256,6 @@ before_script:
       echo "Unknown platform. Setting THREADS to 1."
       export THREADS=1
     fi
-  # - |
-  #   if [[ "$(uname)" = "Darwin" ]]; then
-  #     brew update
-  #     brew install pypy homebrew/versions/llvm35
-  #   fi
   - |
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
@@ -1204,16 +1192,6 @@ clang10_cxx20_debug_regent:
   variables:
     <<: [*clang10, *terra9, *debug, *cxx20_normal, *regent]
 
-# Linux with Clang 3.5
-clang35_cxx11_debug_legion:
-  <<: [*linux, *image, *tests]
-  variables:
-    <<: [*clang35, *terra35, *debug, *cxx11_normal, *legion]
-# FIXME: Breaks on attempting to split vector-op
-# clang35_cxx11_debug_regent:
-#   <<: [*linux_compute, *image, *tests]
-#   variables:
-#     <<: [*clang35, *terra35, *debug, *cxx11_normal, *regent]
 clang8_cxx17_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
