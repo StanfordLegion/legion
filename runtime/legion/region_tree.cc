@@ -19958,16 +19958,20 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
                 to_untrack.begin(); it != to_untrack.end(); it++)
           {
-            it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/);
+            // do not invalidate trackers if we don't own the equivalence sets
+            if (!nonexclusive_virtual_mapping_root)
+              it->first->invalidate_trackers(it->second, applied_events,
+                  local_space, NULL/*no collective mapping*/);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }
         }
         else
         {
-          source_context->deduplicate_invalidate_trackers(to_untrack, 
-                                                          applied_events);
+          // do not invalidate trackers if we don't own the equivalence sets
+          if (!nonexclusive_virtual_mapping_root)
+            source_context->deduplicate_invalidate_trackers(to_untrack, 
+                                                            applied_events);
           for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
                 to_untrack.begin(); it != to_untrack.end(); it++)
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
