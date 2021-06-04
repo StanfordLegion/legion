@@ -721,6 +721,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_ENABLE_TESTING=ON')
         if 'LAUNCHER' in env:
             cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
+        if env['USE_CUDA'] == '1':
+            cmdline.append('-DLegion_TEST_ARGS=-ll:gpu 1')
     else:
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
