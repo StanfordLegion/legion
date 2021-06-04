@@ -184,9 +184,10 @@ def data_tsv_str(level, level_ready, ready, start, end, color, opacity, title,
     # replace None with ''
     def xstr(s):
         return str(s or '')
-    return xstr(level) + "\t" + xstr(level_ready) + "\t" + xstr(ready) + "\t" + \
-           xstr(start) + "\t" + \
-           xstr(end) + "\t" + \
+    return xstr(level) + "\t" + xstr(level_ready) + "\t" + \
+           xstr('%.3f' % ready if ready else ready) + "\t" + \
+           xstr('%.3f' % start if start else start) + "\t" + \
+           xstr('%.3f' % end if end else end) + "\t" + \
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
            xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\n"
