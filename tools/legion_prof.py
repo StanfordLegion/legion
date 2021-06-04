@@ -1578,7 +1578,7 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
         HasNoDependencies.__init__(self)
         TimeRange.__init__(self, None, ready, start, stop)
         self.proftask_id = op_id
-        self.color = '#FFC0CB'  # Pink
+        self.color = '#ffc0cb'  # Pink
         self.is_task = True
 
     def get_color(self):
@@ -3162,7 +3162,7 @@ class State(object):
             elif variant.variant_id == 6: # Garbage Collection
                 variant.assign_color('#990000') # Crimson
             elif variant.variant_id == 7: # Logical Dependence Analysis
-                variant.assign_color('#0000FF') # Duke Blue
+                variant.assign_color('#0000ff') # Duke Blue
             elif variant.variant_id == 8: # Operation Physical Analysis
                 variant.assign_color('#009900') # Green
             elif variant.variant_id == 9: # Task Physical Analysis
