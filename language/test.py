@@ -56,7 +56,7 @@ def detect_python_interpreter():
     return sys.executable
 
 def run(filename, debug, verbose, timelimit, flags, env):
-    args = ((['-mg'] if debug else []) +
+    args = ((['-g'] if debug else []) +
             [os.path.basename(filename)] + flags +
             ([] if verbose else ['-level', 'runtime=5,threads=5']))
     if verbose: print('Running', ' '.join(args))
