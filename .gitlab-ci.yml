@@ -367,6 +367,7 @@ before_script:
           NVCC_WRAPPER=`pwd`/../bin/nvcc_wrapper
           KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${NVCC_WRAPPER}"
           export KOKKOS_CXX_COMPILER="${NVCC_WRAPPER}"
+          export NVCC_WRAPPER_DEFAULT_COMPILER="${CUDAHOSTCXX}"
         fi
       else
         export KOKKOS_CXX_COMPILER="$CXX"
