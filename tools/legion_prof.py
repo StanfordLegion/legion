@@ -3443,9 +3443,9 @@ class State(object):
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
             with open(util_tsv_filename, "w") as util_tsv_file:
                 util_tsv_file.write("time\tcount\n")
-                util_tsv_file.write("0.00\t0.00\n") # initial point
+                util_tsv_file.write("0.000\t0.00\n") # initial point
                 for util_point in utilization:
-                    util_tsv_file.write("%.2f\t%.2f\n" % util_point)
+                    util_tsv_file.write("%.3f\t%.2f\n" % util_point)
 
     def simplify_op(self, op_dependencies, op_existence_set, transitive_map, op_path, _dir):
         cur_op_id = op_path[-1]
