@@ -3152,9 +3152,9 @@ class State(object):
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
         op_colors = {}
-        for variant in itervalues(self.variants):
+        for variant in sorted(itervalues(self.variants), key=lambda v: (v.task_kind.task_id, v.variant_id)):
             variant.compute_color(lsfr.get_next(), num_colors)
-        for variant in itervalues(self.meta_variants):
+        for variant in sorted(itervalues(self.meta_variants), key=lambda v: v.variant_id):
             if variant.variant_id == 1: # Remote message
                 variant.assign_color('#006600') # Evergreen
             elif variant.variant_id == 2: # Post-Execution
@@ -3169,16 +3169,16 @@ class State(object):
                 variant.assign_color('#009900') #Green
             else:
                 variant.compute_color(lsfr.get_next(), num_colors)
-        for kind in iterkeys(self.op_kinds):
+        for kind in sorted(iterkeys(self.op_kinds)):
             op_colors[kind] = color_helper(lsfr.get_next(), num_colors)
         # Now we need to assign all the operations colors
         for op in itervalues(self.operations):
             op.assign_color(op_colors)
         # Assign all the message kinds different colors
-        for kinds in (self.mapper_call_kinds,
-                      self.runtime_call_kinds):
-            for kind in itervalues(kinds):
-                kind.assign_color(color_helper(lsfr.get_next(), num_colors))
+        for kind in sorted(itervalues(self.mapper_call_kinds), key=lambda k: k.mapper_call_kind):
+            kind.assign_color(color_helper(lsfr.get_next(), num_colors))
+        for kind in sorted(itervalues(self.runtime_call_kinds), key=lambda k: k.runtime_call_kind):
+            kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def show_copy_matrix(self, output_prefix):
         template_file_name = os.path.join(root_dir, "legion_prof_copy.html.template")
