@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::state::{NodeID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp, Color};
+use crate::state::{Chan, ChanID, ChanPoint, NodeID, MemID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp, Color};
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/timeline.js");
@@ -271,7 +271,34 @@ impl State {
         (timepoint, proc_count)
     }
 
-    fn convert_to_utilization(&self, points: &Vec<ProcPoint>, proc_id: ProcID) -> Vec<ProcPoint> {
+    fn group_node_chan_kind_timepoints(&self) ->
+        BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>>
+    {
+        let mut result = BTreeMap::new();
+
+        for (chan_id, chan) in &self.channels {
+            if !chan.time_points.is_empty() {
+                if chan_id.node_id().is_some() {
+                    let mut nodes = vec![
+                        None,
+                        chan_id.src.map(|src| src.node_id()),
+                        chan_id.dst.map(|dst| dst.node_id())
+                    ];
+                    &nodes.dedup();
+                    for node in nodes {
+                        result
+                            .entry(node)
+                            .or_insert_with(|| Vec::new())
+                            .push((*chan_id, &chan.time_points))
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    fn convert_proc_points_to_utilization(&self, points: &Vec<ProcPoint>, proc_id: ProcID) -> Vec<ProcPoint> {
         let mut utilization = Vec::new();
         let mut count = 0;
         for point in points {
@@ -290,7 +317,31 @@ impl State {
         utilization
     }
 
-    fn calculate_utilization_data(
+    // This is character-for-character the same function as convert_proc_points_to_utilization(
+    // TODO look into making a TimePoint trait so that we don't have to repeat method definitions
+    fn convert_chan_points_to_utilization(&self, points: &Vec<ChanPoint>, chan_id: ChanID) -> Vec<ChanPoint> {
+        let mut utilization = Vec::new();
+        let mut count = 0;
+
+        if chan_id.node_id().is_some() {
+            for point in points {
+                if point.first {
+                    count += 1;
+                    if count == 1 {
+                        utilization.push(*point);
+                    }
+                } else {
+                    count -= 1;
+                    if count == 0 {
+                        utilization.push(*point);
+                    }
+                }
+            }
+        }
+        utilization
+    }
+
+    fn calculate_proc_utilization_data(
         &self,
         points: Vec<ProcPoint>,
         owners: BTreeSet<ProcID>,
@@ -328,6 +379,53 @@ impl State {
         utilization
     }
 
+    fn calculate_chan_utilization_data(
+        &self,
+        points: Vec<ChanPoint>,
+        owners: BTreeSet<ChanID>
+    ) -> Vec<(Timestamp, f64)> {
+        // we assume that the timepoints are sorted before this step
+
+        // loop through all the timepoints. Get the earliest. If it's first,
+        // add to the count. if it's second, decrement the count. Store the
+        // (time, count) pair.
+
+        assert!(owners.len() > 0);
+
+        let max_count = owners.len();
+
+        let mut utilization = Vec::new();
+        let mut last_time = None;
+        let mut count = 0;
+
+        for point in &points {
+            if point.first {
+                count += 1;
+            } else {
+                count -= 1;
+            }
+
+            let count = count as f64;
+            let max_count = max_count as f64;
+            if last_time.map_or(false, |time| time == point.time) {
+                if count > 0.0 {
+                    *utilization.last_mut().unwrap() = (point.time, 1.0);
+                } else {
+                    *utilization.last_mut().unwrap() = (point.time, count / max_count);
+                }
+            } else {
+                if count > 0.0 {
+                    utilization.push((point.time, 1.0));
+                } else {
+                    utilization.push((point.time, count / max_count));
+                }
+            }
+            last_time = Some(point.time);
+        }
+
+        utilization
+    }
+
     fn get_nodes(&self) -> BTreeSet<Option<NodeID>> {
         let mut nodes = BTreeSet::new();
         for proc in self.procs.values() {
@@ -352,7 +450,7 @@ impl State {
     }
 
     fn emit_utilization_tsv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-        let (timepoint, proc_count) = self.group_node_proc_kind_timepoints();
+        let (timepoint_proc, proc_count) = self.group_node_proc_kind_timepoints();
 
         let nodes = self.get_nodes();
         let kinds = self.get_kinds();
@@ -367,7 +465,7 @@ impl State {
                     Some(node_id) => format!("{}", node_id.0),
                 };
                 let group_name = format!("{} ({:?})", &node_name, kind);
-                if timepoint.contains_key(&group) {
+                if timepoint_proc.contains_key(&group) {
                     stats
                         .entry(node_name)
                         .or_insert_with(|| Vec::new())
@@ -382,7 +480,7 @@ impl State {
             serde_json::to_writer(&file, &stats)?;
         }
 
-        for (group, points) in timepoint {
+        for (group, points) in timepoint_proc {
             let owners: BTreeSet<_> = points
                 .iter()
                 .filter(|(_, tp)| !tp.is_empty())
@@ -396,10 +494,10 @@ impl State {
                 let mut utilizations: Vec<_> = points
                     .iter()
                     .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(proc_id, tp)| self.convert_to_utilization(tp, *proc_id))
+                    .flat_map(|(proc_id, tp)| self.convert_proc_points_to_utilization(tp, *proc_id))
                     .collect();
                 utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_utilization_data(utilizations, owners, count)
+                self.calculate_proc_utilization_data(utilizations, owners, count)
             };
 
             let (node, kind) = group;
@@ -416,7 +514,50 @@ impl State {
                 .delimiter(b'\t')
                 .from_path(filename)?;
             f.serialize(UtilizationRecord {
-                time: "0.00",
+                time: "0.000",
+                count: "0.00",
+            })?;
+            for (time, count) in utilization {
+                f.serialize(UtilizationRecord {
+                    time: &format!("{}", time),
+                    count: &format!("{:.2}", count),
+                })?;
+            }
+        }
+
+        let timepoint_chan = self.group_node_chan_kind_timepoints();
+        for (node_id, points) in timepoint_chan {
+            let owners: BTreeSet<_> = points
+                .iter()
+                .filter(|(_, tp)| !tp.is_empty())
+                .map(|(chan_id, tp)| *chan_id)
+                .collect();
+
+            let utilization = if owners.is_empty() {
+                Vec::new()
+            } else {
+                let mut utilizations: Vec<_> = points
+                    .iter()
+                    .filter(|(_, tp)| !tp.is_empty())
+                    .flat_map(|(chan_id, tp)| self.convert_chan_points_to_utilization(tp, *chan_id))
+                    .collect();
+                utilizations.sort_by_key(|point| point.time_key());
+                self.calculate_chan_utilization_data(utilizations, owners)
+            };
+
+            let group_name = if let Some(node_id) = node_id {
+                format!("{} (Channel)", node_id.0)
+            } else { "all (Channel)".to_owned() };
+
+            let filename = path
+                .as_ref()
+                .join("tsv")
+                .join(format!("{}_util.tsv", group_name));
+            let mut f = csv::WriterBuilder::new()
+                .delimiter(b'\t')
+                .from_path(filename)?;
+            f.serialize(UtilizationRecord {
+                time: "0.000",
                 count: "0.00",
             })?;
             for (time, count) in utilization {

@@ -8,7 +8,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::serialize::Record;
 
-const TASK_GRANULARITY_THRESHOLD: u64 = 10;
+const TASK_GRANULARITY_THRESHOLD: u64 = 10 * 1000;
 
 
 // Make sure this is up to date with lowlevel.h
@@ -134,7 +134,7 @@ impl ProcPoint {
         ProcPoint { time, entry, first }
     }
     pub fn time_key(&self) -> Timestamp {
-        Timestamp(2 * self.time.0) + ((!self.first) as u64).into()
+        Timestamp(2 * self.time.0) + (1000 * (!self.first) as u64).into()
     }
 }
 
@@ -300,8 +300,8 @@ impl Proc {
         }
         fn add_waiters(waiters: &Waiters, entry: ProcEntry, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
-                util_points.push(ProcPoint::new(wait.start, entry, true));
-                util_points.push(ProcPoint::new(wait.end, entry, false));
+                util_points.push(ProcPoint::new(wait.start, entry, false));
+                util_points.push(ProcPoint::new(wait.end, entry, true));
             }
         }
 
@@ -390,6 +390,12 @@ impl Proc {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemID(pub u64);
 
+impl MemID {
+    pub fn node_id(&self) -> NodeID {
+        NodeID((self.0 >> 40) & ((1 << 16) - 1))
+    }
+}
+
 #[derive(Debug)]
 pub struct Mem {
     mem_id: MemID,
@@ -448,7 +454,7 @@ pub enum ChanEntry {
     DepPart(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ChanPoint {
     pub time: Timestamp,
     pub entry: ChanEntry,
@@ -459,15 +465,15 @@ impl ChanPoint {
     fn new(time: Timestamp, entry: ChanEntry, first: bool) -> Self {
         ChanPoint { time, entry, first }
     }
-    fn time_key(&self) -> Timestamp {
-        Timestamp(2 * self.time.0) + ((!self.first) as u64).into()
+    pub fn time_key(&self) -> Timestamp {
+        Timestamp(2 * self.time.0) + (1000 * (!self.first) as u64).into()
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChanID {
-    src: Option<MemID>,
-    dst: Option<MemID>,
+    pub src: Option<MemID>,
+    pub dst: Option<MemID>,
 }
 
 impl ChanID {
@@ -489,15 +495,23 @@ impl ChanID {
             dst: None,
         }
     }
+
+    pub fn node_id(&self) -> Option<NodeID> {
+        if self.src.is_some() {
+            self.src.map(|src| src.node_id())
+        } else {
+            self.dst.map(|dst| dst.node_id())
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Chan {
-    channel_id: ChanID,
+    pub channel_id: ChanID,
     copies: Vec<Copy>,
     fills: Vec<Fill>,
     depparts: Vec<DepPart>,
-    time_points: Vec<ChanPoint>,
+    pub time_points: Vec<ChanPoint>,
     max_levels: u32,
 }
 
@@ -1604,9 +1618,9 @@ pub struct State {
     next_prof_uid: ProfUID,
     max_dim: i32,
     pub procs: BTreeMap<ProcID, Proc>,
-    mems: BTreeMap<MemID, Mem>,
+    pub mems: BTreeMap<MemID, Mem>,
     mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
-    channels: BTreeMap<ChanID, Chan>,
+    pub channels: BTreeMap<ChanID, Chan>,
     pub task_kinds: BTreeMap<TaskID, TaskKind>,
     pub variants: BTreeMap<(TaskID, VariantID), Variant>,
     pub meta_variants: BTreeMap<VariantID, Variant>,
