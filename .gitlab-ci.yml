@@ -202,6 +202,7 @@ variables:
 
 .prof: &prof
   USE_PROF: "1"
+  BASH_ENV: "/root/.cargo/env" # make sure Cargo environment gets loaded
 
 .legion: &legion
   TEST_REGENT: "0"
