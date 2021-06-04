@@ -1563,9 +1563,9 @@ struct LFSR {
 impl LFSR {
     fn new(size: u64) -> Self {
         let needed_bits = (size as f64).log2().ceil() as u32;
-        let seed_configuration = 0b1100111100100101;
+        let seed_configuration = 0b1010010011110011;
         LFSR {
-            register: seed_configuration & ((1 << needed_bits) - 1),
+            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits))) >> (16 - needed_bits),
             bits: needed_bits,
             max_value: 1 << needed_bits,
             taps: match needed_bits {
@@ -1591,10 +1591,10 @@ impl LFSR {
     fn next(&mut self) -> u32 {
         let mut xor = 0;
         for t in &self.taps {
-            xor += (self.register >> t - 1) & 1;
+            xor += (self.register >> (self.bits - t)) & 1;
         }
         xor = xor & 1;
-        self.register = ((self.register << 1) | xor) & ((1 << self.bits) - 1);
+        self.register = ((self.register >> 1) | (xor << (self.bits-1))) & ((1 << self.bits) - 1);
         self.register
     }
 }
