@@ -131,10 +131,11 @@ def run_gc(logfiles, verbose, py_exe_path):
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
 def run_prof(out_dir, logfiles, verbose, py_exe_path):
+    result_dir = os.path.join(out_dir, 'legion_prof')
     cmd = [
         py_exe_path,
         os.path.join(regent.root_dir(), 'tools', 'legion_prof.py'),
-        '-o', os.path.join(out_dir, 'legion_prof'),
+        '-o', result_dir,
     ] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
@@ -145,6 +146,21 @@ def run_prof(out_dir, logfiles, verbose, py_exe_path):
     retcode = proc.wait()
     if retcode != 0:
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
+def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
+    result_dir = os.path.join(out_dir, 'legion_prof_rs')
+    cmd = [legion_prof_rs, '-o', result_dir,] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_text(filename, label):
@@ -170,7 +186,7 @@ def find_labeled_flags(filename, prefix, short):
         return flags[:1]
     return flags
 
-def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
@@ -190,12 +206,12 @@ def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, f
     else:
         raise TestFailure(last_cmd, 1, 'Expected failure, but test ran successfully!')
 
-def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     for params in runs_with:
         run(filename, debug, verbose, timelimit, params + flags, env)
 
-def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
@@ -211,7 +227,7 @@ def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env
     finally:
         shutil.rmtree(spy_dir)
 
-def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     gc_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     gc_log = os.path.join(gc_dir, 'gc_%.log')
     gc_flags = ['-level', 'legion_gc=2', '-logfile', gc_log]
@@ -227,7 +243,7 @@ def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, flags, env)
     finally:
         shutil.rmtree(gc_dir)
 
-def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
     prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
@@ -240,6 +256,7 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, flags, en
             prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
             assert len(prof_logs) > 0
             run_prof(prof_dir, prof_logs, verbose, py_exe_path)
+            run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
     finally:
         shutil.rmtree(prof_dir)
 
@@ -252,11 +269,11 @@ FAIL = 'fail'
 INTERRUPT = 'interrupt'
 INTERNALERROR = 'internalerror'
 
-def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path):
+def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path, legion_prof_rs):
     test_fn, test_args = test_closure
     saved_temps = []
     try:
-        test_fn(filename, debug, verbose, short, timelimit, py_exe_path, *test_args)
+        test_fn(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, *test_args)
     except KeyboardInterrupt:
         return test_name, filename, [], INTERRUPT, 0, None
     except TestFailure as e:
@@ -386,7 +403,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
 def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                   openmp, cuda, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, poll_interval,
-                  short, no_pretty):
+                  short, no_pretty, legion_prof_rs):
     # run only one test at a time if '-j' isn't set
     if not thread_count:
         thread_count = 1
@@ -424,7 +441,8 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                 raise e
             thread_pool.apply_async(test_runner,
                                     (test_name, test_fn, debug, verbose,
-                                     test_path, timelimit, short, py_exe_path),
+                                     test_path, timelimit, short, py_exe_path,
+                                     legion_prof_rs),
                                     callback=callback,
                                     error_callback=error_callback)
 
@@ -597,6 +615,9 @@ def test_driver(argv):
                         action='store_true',
                         help='disable pretty-printing tests',
                         dest='no_pretty')
+    parser.add_argument('--legion-prof-rs',
+                        default='legion_prof',
+                        help='location of Legion Prof Rust binary')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
@@ -619,7 +640,8 @@ def test_driver(argv):
         args.timelimit,
         args.poll_interval,
         args.short,
-        args.no_pretty)
+        args.no_pretty,
+        args.legion_prof_rs)
 
 if __name__ == '__main__':
     test_driver(sys.argv)
