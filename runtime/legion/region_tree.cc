@@ -21515,9 +21515,12 @@ namespace Legion {
               interfering_children.end(); it++)
         {
           RegionNode *child = get_child(*it);
+          // Still need to filter empty children when traversing here
+          if (expr_covers && child->row_source->is_empty())
+            continue;
           child->compute_equivalence_sets(ctx, context, target, target_space,
                                 expr, mask, opid, source, ready_events,
-                                true/*downward only*/, false/*expr covers*/);
+                                true/*downward only*/, expr_covers);
         }
       }
       else
@@ -21562,9 +21565,12 @@ namespace Legion {
                 interfering_children.end(); it++)
           {
             RegionNode *child = get_child(*it);
+            // Still need to filter empty children when traversing here
+            if (expr_covers && child->row_source->is_empty())
+              continue;
             child->compute_equivalence_sets(ctx, context, target, 
                 target_space, expr, children_traversal, opid, source,
-                ready_events, true/*downward only*/, false/*expr covers*/);
+                ready_events, true/*downward only*/, expr_covers);
           }
         }
       }
