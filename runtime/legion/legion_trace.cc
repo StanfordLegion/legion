@@ -3341,14 +3341,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::remove_equivalence_set(EquivalenceSet *set,
-                            const FieldMask &mask, InnerContext *filter_context)
+    bool TraceConditionSet::can_filter_context(ContextID filter_id) const
     //--------------------------------------------------------------------------
     {
-      // Do not remove this if we are not filtering form the context
-      // that owns this trace
-      if ((filter_context != NULL) && (filter_context != context))
-        return;
+      return (filter_id == context->get_context_id());
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceConditionSet::remove_equivalence_set(EquivalenceSet *set,
+                                                   const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
       {
         AutoLock s_lock(set_lock);
         invalid_mask |= mask;

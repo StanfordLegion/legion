@@ -661,8 +661,9 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
+      virtual bool can_filter_context(ContextID filter_id) const;
       virtual void remove_equivalence_set(EquivalenceSet *set,
-                const FieldMask &mask, InnerContext *filter_context);
+                                          const FieldMask &mask);
     public:
       void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);

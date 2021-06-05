@@ -2204,8 +2204,9 @@ namespace Legion {
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
+      virtual bool can_filter_context(ContextID filter_id) const = 0;
       virtual void remove_equivalence_set(EquivalenceSet *set,
-            const FieldMask &mask, InnerContext *filter_context) = 0;
+                                          const FieldMask &mask) = 0;
     };
 
     /**
@@ -2905,8 +2906,9 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
+      virtual bool can_filter_context(ContextID filter_id) const;
       virtual void remove_equivalence_set(EquivalenceSet *set,
-            const FieldMask &mask, InnerContext *filter_context);
+                                          const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);
     public:

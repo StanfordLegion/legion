@@ -16071,7 +16071,8 @@ namespace Legion {
         if (recorded_trackers.empty() || 
             (mask * recorded_trackers.get_valid_mask()))
           return;
-        if (!(recorded_trackers.get_valid_mask() - mask))
+        if ((filter_context == NULL) &&
+            !(recorded_trackers.get_valid_mask() - mask))
         {
           // Mask dominates all trackers, so we can just grab them all
           // Add reference to them all to keep them alive until we 
@@ -16085,11 +16086,16 @@ namespace Legion {
         {
           // Filter out specific trackers
           std::vector<EqSetTracker*> to_delete;
+          const ContextID filter_id = 
+            (filter_context == NULL) ? 0 : filter_context->get_context_id();
           for (FieldMaskSet<EqSetTracker>::iterator it =
                 recorded_trackers.begin(); it != recorded_trackers.end(); it++)
           {
             const FieldMask overlap = mask & it->second;
             if (!overlap)
+              continue;
+            if ((filter_context != NULL) &&
+                !it->first->can_filter_context(filter_id))
               continue;
             if (to_remove.insert(it->first, overlap))
               it->first->add_tracker_reference();
@@ -16109,7 +16115,7 @@ namespace Legion {
         for (FieldMaskSet<EqSetTracker>::const_iterator it =
               to_remove.begin(); it != to_remove.end(); it++)
         {
-          it->first->remove_equivalence_set(this, it->second, filter_context);
+          it->first->remove_equivalence_set(this, it->second);
           if (it->first->remove_tracker_reference())
             delete it->first;
         }
@@ -18330,13 +18336,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::remove_equivalence_set(EquivalenceSet *set,
-                            const FieldMask &mask, InnerContext *filter_context)
+    bool VersionManager::can_filter_context(ContextID filter_id) const
     //--------------------------------------------------------------------------
     {
-      // If we have a filter context, then only fitler for that context
-      if ((filter_context != NULL) && (filter_context->get_context_id() != ctx))
-        return;
+      return (filter_id == ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::remove_equivalence_set(EquivalenceSet *set,
+                                                const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
       {
         AutoLock m_lock(manager_lock);
         FieldMaskSet<EquivalenceSet>::iterator finder = 
