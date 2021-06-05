@@ -1002,7 +1002,7 @@ namespace Legion {
                                              const FieldMask &mask);
       virtual void deduplicate_invalidate_trackers(
                     const FieldMaskSet<EquivalenceSet> &to_untrack,
-                    std::set<RtEvent> &applied_events);
+                    std::set<RtEvent> &applied_events, bool local_only = false);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       bool inline_child_task(TaskOp *child);
@@ -2353,7 +2353,7 @@ namespace Legion {
           const AddressSpaceID source, RtUserEvent ready_event);
       virtual void deduplicate_invalidate_trackers(
                     const FieldMaskSet<EquivalenceSet> &to_untrack,
-                    std::set<RtEvent> &applied_events);
+                    std::set<RtEvent> &applied_events, bool local_only = false);
     public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);

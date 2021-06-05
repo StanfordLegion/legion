@@ -3862,7 +3862,7 @@ namespace Legion {
                                                     const FieldMask &mask)
           { record_equivalence_set(set, mask); }
         virtual void remove_equivalence_set(EquivalenceSet *set,
-                                            const FieldMask &mask)
+                      const FieldMask &mask, InnerContext *filter_context)
           { assert(false); }
       public:
         EquivalenceSet* get_set(void) const;

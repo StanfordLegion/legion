@@ -646,8 +646,9 @@ namespace Legion {
         TraceConditionSet *const set;
       };
     public:
-      TraceConditionSet(RegionTreeForest *forest, IndexSpaceExpression *expr,
-                const FieldMask &mask, const std::set<RegionNode*> &regions); 
+      TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
+                        IndexSpaceExpression *expr, const FieldMask &mask,
+                        const std::set<RegionNode*> &regions); 
       TraceConditionSet(const TraceConditionSet &rhs);
       virtual ~TraceConditionSet(void);
     public:
@@ -661,7 +662,7 @@ namespace Legion {
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
       virtual void remove_equivalence_set(EquivalenceSet *set,
-                                          const FieldMask &mask);
+                const FieldMask &mask, InnerContext *filter_context);
     public:
       void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, std::set<RtEvent> &ready_events);
@@ -686,6 +687,7 @@ namespace Legion {
       RtEvent recompute_equivalence_sets(Operation *op);
       void finalize_computed_sets(void);
     public:
+      InnerContext *const context;
       RegionTreeForest *const forest;
       IndexSpaceExpression *const condition_expr;
       const FieldMask condition_mask;

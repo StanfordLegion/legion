@@ -18652,7 +18652,7 @@ namespace Legion {
                 to_untrack.begin(); it != to_untrack.end(); it++)
           {
             it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/);
+                          local_space, NULL/*no collective mapping*/);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }
@@ -19945,6 +19945,9 @@ namespace Legion {
                                    bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!nonexclusive_virtual_mapping_root || (source_context != NULL));
+#endif
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
@@ -19959,9 +19962,9 @@ namespace Legion {
                 to_untrack.begin(); it != to_untrack.end(); it++)
           {
             // do not invalidate trackers if we don't own the equivalence sets
-            if (!nonexclusive_virtual_mapping_root)
-              it->first->invalidate_trackers(it->second, applied_events,
-                  local_space, NULL/*no collective mapping*/);
+            it->first->invalidate_trackers(it->second, applied_events,
+                local_space, NULL/*no collective mapping*/,
+                nonexclusive_virtual_mapping_root ? source_context : NULL);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }
@@ -19969,9 +19972,8 @@ namespace Legion {
         else
         {
           // do not invalidate trackers if we don't own the equivalence sets
-          if (!nonexclusive_virtual_mapping_root)
-            source_context->deduplicate_invalidate_trackers(to_untrack, 
-                                                            applied_events);
+          source_context->deduplicate_invalidate_trackers(to_untrack, 
+                  applied_events, nonexclusive_virtual_mapping_root);
           for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
                 to_untrack.begin(); it != to_untrack.end(); it++)
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
