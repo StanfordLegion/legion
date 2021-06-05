@@ -5378,8 +5378,18 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(value_broadcast == NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        value_broadcast = new BufferBroadcast(repl_ctx, COLLECTIVE_LOC_100);
+        // We'll always make node zero the owner shard here
+        if (repl_ctx->owner_shard->shard_id > 0)
+          value_broadcast = new BufferBroadcast(repl_ctx, 0/*owner shard*/,
+                                                COLLECTIVE_LOC_100);
+        else
+          value_broadcast = new BufferBroadcast(repl_ctx, COLLECTIVE_LOC_100);
       }
     }
 
