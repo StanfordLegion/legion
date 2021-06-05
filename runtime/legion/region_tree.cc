@@ -19854,7 +19854,8 @@ namespace Legion {
                                               const UniqueID opid,
                                               const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
-                                              const bool downward_only)
+                                              const bool downward_only,
+                                              const bool expr_covers)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -19874,14 +19875,14 @@ namespace Legion {
         {
           // Defer this computation until the version manager data is ready
           DeferComputeEquivalenceSetArgs args(this, ctx, context, target, 
-                                  target_space, expr, mask, opid, source);
+                    target_space, expr, mask, opid, source, expr_covers);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
           ready_events.insert(args.ready);
         }
         else
           compute_equivalence_sets(ctx, context, target, target_space, expr,
-                    mask, opid, source, ready_events, true/*downward only*/);
+            mask, opid, source, ready_events,true/*downward only*/,expr_covers);
       }
       if (!!parent_traversal)
       {
@@ -19891,14 +19892,16 @@ namespace Legion {
 #endif
         parent->compute_equivalence_sets(ctx, context, target, target_space,
                                          expr, parent_traversal, opid, source, 
-                                         ready_events, false/*downward only*/);
+                                         ready_events, false/*downward only*/,
+                                         false/*expr covers*/);
       }
       if (!children_traversal.empty())
       {
         for (FieldMaskSet<PartitionNode>::const_iterator it = 
               children_traversal.begin(); it != children_traversal.end(); it++)
           it->first->compute_equivalence_sets(ctx, context, target,target_space,
-           expr, it->second, opid, source, ready_events, true/*downward only*/);
+                                   expr, it->second, opid, source, ready_events,
+                                   true/*downward only*/, expr_covers);
       }
     }
 
@@ -19906,11 +19909,11 @@ namespace Legion {
     RegionNode::DeferComputeEquivalenceSetArgs::DeferComputeEquivalenceSetArgs(
           RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
           const AddressSpaceID ts, IndexSpaceExpression *e, const FieldMask &m, 
-          const UniqueID id, const AddressSpaceID s)
+          const UniqueID id, const AddressSpaceID s, const bool covers)
       : LgTaskArgs<DeferComputeEquivalenceSetArgs>(implicit_provenance),
         proxy_this(proxy), ctx(x), context(c), target(t), target_space(ts),
         expr(e), mask(new FieldMask(m)), opid(id), source(s),
-        ready(Runtime::create_rt_user_event())
+        ready(Runtime::create_rt_user_event()), expr_covers(covers)
     //--------------------------------------------------------------------------
     {
       expr->add_expression_reference();
@@ -19926,7 +19929,8 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       dargs->proxy_this->compute_equivalence_sets(dargs->ctx, dargs->context,
           dargs->target, dargs->target_space, dargs->expr, *(dargs->mask), 
-          dargs->opid, dargs->source, ready_events, true/*downward only*/);
+          dargs->opid, dargs->source, ready_events, true/*downward only*/,
+          dargs->expr_covers);
       if (!ready_events.empty())
         Runtime::trigger_event(dargs->ready, 
             Runtime::merge_events(ready_events));
@@ -21477,21 +21481,43 @@ namespace Legion {
                                               const UniqueID opid,
                                               const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
-                                              const bool downward_only)
+                                              const bool downward_only,
+                                              const bool expr_covers)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       if (downward_only)
       {
         std::vector<LegionColor> interfering_children;
-        row_source->find_interfering_children(expr, interfering_children);
+        if (expr_covers)
+        {
+          // Expr covers so all the children interfere
+          if (row_source->total_children == row_source->max_linearized_color)
+          {
+            interfering_children.resize(row_source->total_children);
+            for (LegionColor color = 0; 
+                  color < row_source->total_children; color++)
+              interfering_children[color] = color;
+          }
+          else
+          {
+            ColorSpaceIterator *iterator =
+              row_source->color_space->create_color_space_iterator();
+            while (iterator->is_valid())
+              interfering_children.push_back(iterator->yield_color());
+            delete iterator;
+          }
+        }
+        else
+          row_source->find_interfering_children(expr, interfering_children);
         for (std::vector<LegionColor>::const_iterator it = 
               interfering_children.begin(); it != 
               interfering_children.end(); it++)
         {
           RegionNode *child = get_child(*it);
-          child->compute_equivalence_sets(ctx,context,target,target_space,expr,
-                       mask, opid, source, ready_events, true/*downward only*/);
+          child->compute_equivalence_sets(ctx, context, target, target_space,
+                                expr, mask, opid, source, ready_events,
+                                true/*downward only*/, false/*expr covers*/);
         }
       }
       else
@@ -21505,19 +21531,40 @@ namespace Legion {
         if (!!parent_traversal)
           parent->compute_equivalence_sets(ctx, context, target, target_space,
                                            expr, parent_traversal, opid, source, 
-                                           ready_events,false/*downward only*/);
+                                           ready_events, false/*downward only*/,
+                                           false/*expr covers*/);
         if (!!children_traversal)
         {
           std::vector<LegionColor> interfering_children;
-          row_source->find_interfering_children(expr, interfering_children);
+          if (expr_covers)
+          {
+            // Expr covers so all the children interfere
+            if (row_source->total_children == row_source->max_linearized_color)
+            {
+              interfering_children.resize(row_source->total_children);
+              for (LegionColor color = 0;
+                    color < row_source->total_children; color++)
+                interfering_children[color] = color;
+            }
+            else
+            {
+              ColorSpaceIterator *iterator =
+                row_source->color_space->create_color_space_iterator();
+              while (iterator->is_valid())
+                interfering_children.push_back(iterator->yield_color());
+              delete iterator;
+            }
+          }
+          else
+            row_source->find_interfering_children(expr, interfering_children);
           for (std::vector<LegionColor>::const_iterator it = 
                 interfering_children.begin(); it != 
                 interfering_children.end(); it++)
           {
             RegionNode *child = get_child(*it);
-            child->compute_equivalence_sets(ctx, context, target, target_space,
-                                         expr, children_traversal, opid, source,
-                                         ready_events, true/*downward only*/);
+            child->compute_equivalence_sets(ctx, context, target, 
+                target_space, expr, children_traversal, opid, source,
+                ready_events, true/*downward only*/, false/*expr covers*/);
           }
         }
       }

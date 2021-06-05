@@ -3723,7 +3723,7 @@ namespace Legion {
       const ContextID ctx = get_context_id();
       region->compute_equivalence_sets(ctx, this, target, target_space,
                                        region->row_source, mask, opid, source, 
-                                       ready, false/*down only*/);
+                                       ready,false/*down only*/,true/*covers*/);
       if (!ready.empty())
         return Runtime::merge_events(ready);
       else

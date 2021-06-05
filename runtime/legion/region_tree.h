@@ -3824,7 +3824,7 @@ namespace Legion {
         DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
             InnerContext *c, EqSetTracker *t, const AddressSpaceID ts,
             IndexSpaceExpression *e, const FieldMask &m, 
-            const UniqueID id, const AddressSpaceID s);
+            const UniqueID id, const AddressSpaceID s, const bool covers);
       public:
         RegionNode *const proxy_this;
         const ContextID ctx;
@@ -3836,6 +3836,7 @@ namespace Legion {
         const UniqueID opid;
         const AddressSpaceID source;
         const RtUserEvent ready;
+        const bool expr_covers;
       };
       class InvalidFunctor {
       public:
@@ -3994,7 +3995,8 @@ namespace Legion {
                                     const UniqueID opid,
                                     const AddressSpaceID original_source,
                                     std::set<RtEvent> &ready_events,
-                                    const bool downward_only);
+                                    const bool downward_only,
+                                    const bool expr_covers);
       static void handle_deferred_compute_equivalence_sets(const void *args);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
                                  std::set<RtEvent> &applied_events, 
@@ -4112,7 +4114,8 @@ namespace Legion {
                                     const UniqueID opid,
                                     const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
-                                    const bool downward_only);
+                                    const bool downward_only,
+                                    const bool expr_covers);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  std::set<RtEvent> &applied_events,
                                  std::vector<EquivalenceSet*> &to_release,
