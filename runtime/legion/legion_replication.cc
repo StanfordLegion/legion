@@ -5411,7 +5411,7 @@ namespace Legion {
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        if (repl_ctx->owner_shard->shard_id > 0)
+        if (repl_ctx->owner_shard->shard_id != value_broadcast->origin)
         {
           size_t size = 0;
           const void *buffer = value_broadcast->get_buffer(size);
