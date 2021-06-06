@@ -15953,9 +15953,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::InvalidateFunctor::InvalidateFunctor(DistributedID id,
               const FieldMask &m, std::set<RtEvent> &ap, AddressSpaceID o, 
-              const CollectiveMapping *mapping, Runtime *rt)
-      : did(id), mask(m), applied(ap), origin(o), invalidate_mapping(mapping),
-        runtime(rt)
+              UniqueID uid, const CollectiveMapping *mapping, Runtime *rt)
+      : did(id), mask(m), applied(ap), origin(o), ctx_uid(uid),
+        invalidate_mapping(mapping), runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -15973,6 +15973,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(mask);
         rez.serialize(origin);
+        rez.serialize(ctx_uid);
         rez.serialize(done_event);
       }
       runtime->send_equivalence_set_invalidate_trackers(target, rez);
@@ -15983,7 +15984,8 @@ namespace Legion {
     void EquivalenceSet::invalidate_trackers(const FieldMask &mask,
                                     std::set<RtEvent> &applied_events,
                                     const AddressSpaceID origin_space,
-                                    const CollectiveMapping *invalidate_mapping)
+                                    const CollectiveMapping *invalidate_mapping,
+                                    InnerContext *filter_context /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       // First send out any messages to remote nodes that need to be sent
@@ -16002,6 +16004,8 @@ namespace Legion {
             // requests to all the ones that will not get it automatically
             if ((*invalidate_mapping)[0] == runtime->address_space)
             {
+              const UniqueID ctx_uid = (filter_context == NULL) ? 0 :
+                filter_context->get_context_uid();
               for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
               {
                 const AddressSpace target = (*collective_mapping)[idx];
@@ -16014,6 +16018,7 @@ namespace Legion {
                   rez.serialize(did);
                   rez.serialize(mask);
                   rez.serialize(origin_space);
+                  rez.serialize(ctx_uid);
                   rez.serialize(done_event);
                 }
                 runtime->send_equivalence_set_invalidate_trackers(target, rez);
@@ -16027,6 +16032,8 @@ namespace Legion {
       {
         if (collective_mapping != NULL)
         {
+          const UniqueID ctx_uid = (filter_context == NULL) ? 0 :
+                filter_context->get_context_uid();
           // Send it to each of the children
           std::vector<AddressSpaceID> children;
           collective_mapping->get_children(origin_space, local_space, children);
@@ -16040,6 +16047,7 @@ namespace Legion {
               rez.serialize(did);
               rez.serialize(mask);
               rez.serialize(origin_space);
+              rez.serialize(ctx_uid);
               rez.serialize(done_event);
             }
             runtime->send_equivalence_set_invalidate_trackers(*it, rez);
@@ -16049,8 +16057,10 @@ namespace Legion {
       }
       if (is_owner() && has_remote_instances())
       {
+        const UniqueID ctx_uid = (filter_context == NULL) ? 0 :
+                filter_context->get_context_uid();
         InvalidateFunctor functor(did, mask, applied_events, origin_space,
-                                  invalidate_mapping, runtime);
+                                  ctx_uid, invalidate_mapping, runtime);
         map_over_remote_instances(functor);
       }
       // Finally perform our invalidation here
@@ -16061,7 +16071,8 @@ namespace Legion {
         if (recorded_trackers.empty() || 
             (mask * recorded_trackers.get_valid_mask()))
           return;
-        if (!(recorded_trackers.get_valid_mask() - mask))
+        if ((filter_context == NULL) &&
+            !(recorded_trackers.get_valid_mask() - mask))
         {
           // Mask dominates all trackers, so we can just grab them all
           // Add reference to them all to keep them alive until we 
@@ -16075,11 +16086,16 @@ namespace Legion {
         {
           // Filter out specific trackers
           std::vector<EqSetTracker*> to_delete;
+          const ContextID filter_id = 
+            (filter_context == NULL) ? 0 : filter_context->get_context_id();
           for (FieldMaskSet<EqSetTracker>::iterator it =
                 recorded_trackers.begin(); it != recorded_trackers.end(); it++)
           {
             const FieldMask overlap = mask & it->second;
             if (!overlap)
+              continue;
+            if ((filter_context != NULL) &&
+                !it->first->can_filter_context(filter_id))
               continue;
             if (to_remove.insert(it->first, overlap))
               it->first->add_tracker_reference();
@@ -16121,13 +16137,27 @@ namespace Legion {
       derez.deserialize(mask);
       AddressSpaceID origin;
       derez.deserialize(origin);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
       std::set<RtEvent> applied_events; 
+      InnerContext *local_ctx = NULL;
+      if (ctx_uid > 0)
+      {
+        local_ctx = runtime->find_context(ctx_uid, true/*null if not found*/);
+        if (local_ctx == NULL)
+        {
+          // If we don't have the context here we are done
+          Runtime::trigger_event(done_event, ready_event);
+          return;
+        }
+      }
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->invalidate_trackers(mask, applied_events, origin, NULL/*mapping*/);
+      set->invalidate_trackers(mask, applied_events, origin,
+                               NULL/*mapping*/, local_ctx);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event,
             Runtime::merge_events(applied_events));
@@ -18312,6 +18342,13 @@ namespace Legion {
       assert(mask * disjoint_complete);
 #endif
       pending_equivalence_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::can_filter_context(ContextID filter_id) const
+    //--------------------------------------------------------------------------
+    {
+      return (filter_id == ctx);
     }
 
     //--------------------------------------------------------------------------

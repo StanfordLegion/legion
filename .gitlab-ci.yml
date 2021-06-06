@@ -45,10 +45,6 @@ variables:
   CXX: "g++-10"
   F90: "gfortran-10"
 
-.clang35: &clang35
-  CC:  "clang-3.5"
-  CXX: "clang++-3.5"
-  F90: "gfortran-5"
 .clang38: &clang38
   CC:  "clang-3.8"
   CXX: "clang++-3.8"
@@ -83,9 +79,6 @@ variables:
   CXX: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icpc"
   F90: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/ifort"
 
-.terra35: &terra35
-  LLVM_CONFIG: "llvm-config-3.5"
-  TERRA_DIR: "/usr/local/terra35"
 .terra38: &terra38
   LLVM_CONFIG: "llvm-config-3.8"
   TERRA_DIR: "/usr/local/terra38"
@@ -95,6 +88,11 @@ variables:
 .terra9: &terra9
   LLVM_CONFIG: "llvm-config-9"
   TERRA_DIR: "/usr/local/terra9"
+
+.llvm7: &llvm7
+  LLVM_CONFIG: "llvm-config-7"
+.llvm9: &llvm9
+  LLVM_CONFIG: "llvm-config-9"
 
 .debug: &debug
   DEBUG: "1"
@@ -263,11 +261,6 @@ before_script:
       echo "Unknown platform. Setting THREADS to 1."
       export THREADS=1
     fi
-  # - |
-  #   if [[ "$(uname)" = "Darwin" ]]; then
-  #     brew update
-  #     brew install pypy homebrew/versions/llvm35
-  #   fi
   - |
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
@@ -379,6 +372,7 @@ before_script:
           NVCC_WRAPPER=`pwd`/../bin/nvcc_wrapper
           KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${NVCC_WRAPPER}"
           export KOKKOS_CXX_COMPILER="${NVCC_WRAPPER}"
+          export NVCC_WRAPPER_DEFAULT_COMPILER="${CUDAHOSTCXX}"
         fi
       else
         export KOKKOS_CXX_COMPILER="$CXX"
@@ -445,11 +439,8 @@ before_script:
   tags:
     - p100
 
-.p100_cuda80: &p100_cuda80
+.p100_base: &p100_base
   IS_P100_JOB: "1"
-  CUDA: "/usr/local/cuda-8.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-8.0"
-  CUDAHOSTCXX: "g++-5"
   USE_CUDA: "1"
   GPU_ARCH: "60"
   # cmake needs to know where to find libcuda.so
@@ -457,51 +448,48 @@ before_script:
   KOKKOS_CUDA_ARCH: "PASCAL60"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+
+.p100_cuda80: &p100_cuda80
+  <<: *p100_base
+  CUDA: "/usr/local/cuda-8.0"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-8.0"
+  CUDAHOSTCXX: "g++-5"
   # cuda 8.0 does not come with thrust
   USE_COMPLEX: "0"
   # have to tell cudafe to expect c++11 stuff
   NVCC_FLAGS: "-std=c++11"
 
 .p100_cuda90: &p100_cuda90
-  IS_P100_JOB: "1"
+  <<: *p100_base
   CUDA: "/usr/local/cuda-9.0"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.0"
   CUDAHOSTCXX: "g++-6"
-  USE_CUDA: "1"
-  GPU_ARCH: "60"
-  # cmake needs to know where to find libcuda.so
-  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
-  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
-  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
 .p100_cuda92: &p100_cuda92
-  IS_P100_JOB: "1"
+  <<: *p100_base
   CUDA: "/usr/local/cuda-9.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.2"
   CUDAHOSTCXX: "g++-7"
-  USE_CUDA: "1"
-  GPU_ARCH: "60"
-  # cmake needs to know where to find libcuda.so
-  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
-  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
-  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
   # cuda 9.2 has bugs in thrust that break complex reduction ops
   USE_COMPLEX: "0"
 
 .p100_cuda102: &p100_cuda102
-  IS_P100_JOB: "1"
+  <<: *p100_base
   CUDA: "/usr/local/cuda-10.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-10.2"
   CUDAHOSTCXX: "g++-8"
-  USE_CUDA: "1"
-  GPU_ARCH: "60"
-  # cmake needs to know where to find libcuda.so
-  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
-  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
-  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+
+.p100_cuda110: &p100_cuda110
+  <<: *p100_base
+  CUDA: "/usr/local/cuda-11.0"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.0"
+  CUDAHOSTCXX: "g++-9"
+
+.p100_cuda112: &p100_cuda112
+  <<: *p100_base
+  CUDA: "/usr/local/cuda-11.2"
+  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  CUDAHOSTCXX: "g++-9"
 
 ###
 ### Docker Image
@@ -509,9 +497,9 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04:210603
 .image_clang: &image_clang
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210603
 .image_2004: &image_2004
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 .image_hpcsdk: &image_hpcsdk
@@ -540,9 +528,6 @@ before_script:
     # do not automatically run pipelines for pull requests
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       when: never
-    # if 'all-cuda' appears in a commit message, run all cuda tests
-    - if: '$CI_PIPELINE_SOURCE == "push" && $USE_CUDA == "1" && $CI_COMMIT_MESSAGE =~ /all-cuda/'
-      when: always
     # commits only run a short suite of jobs
     - if: '$CI_PIPELINE_SOURCE == "push" && $IS_SHORT_JOB != "1"'
       when: never
@@ -1204,16 +1189,6 @@ clang10_cxx20_debug_regent:
   variables:
     <<: [*clang10, *terra9, *debug, *cxx20_normal, *regent]
 
-# Linux with Clang 3.5
-clang35_cxx11_debug_legion:
-  <<: [*linux, *image, *tests]
-  variables:
-    <<: [*clang35, *terra35, *debug, *cxx11_normal, *legion]
-# FIXME: Breaks on attempting to split vector-op
-# clang35_cxx11_debug_regent:
-#   <<: [*linux_compute, *image, *tests]
-#   variables:
-#     <<: [*clang35, *terra35, *debug, *cxx11_normal, *regent]
 clang8_cxx17_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
@@ -1244,14 +1219,40 @@ p100_cuda102_gcc8_cxx11_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *cmake, *legion, *ctest]
+p100_cuda110_gcc9_cxx14_debug_cmake_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda110, *cmake, *legion, *ctest, *short]
+p100_cuda110_gcc9_cxx14_release_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda110, *legion]
+p100_cuda112_gcc9_cxx14_debug_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *legion, *short]
+p100_cuda112_gcc9_cxx14_release_cmake_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda112, *cmake, *legion, *ctest]
 p100_cuda90_clang7_cxx11_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *terra70, *release, *cxx11_normal, *p100_cuda90, *regent, *short]
+    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda90, *regent, *short]
 p100_cuda90_clang7_cxx11_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *terra70, *release, *cxx11_normal, *p100_cuda90, *cmake, *regent]
+    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda90, *cmake, *regent]
+
+# CUDA+GASNet tests:
+p100_cuda112_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *gasnetex_mpi, *legion, *ctest, *short]
+p100_cuda112_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda112, *gasnetex_mpi, *regent]
 
 # Kokkos tests:
 clang8_cxx14_debug_kokkos_legion:

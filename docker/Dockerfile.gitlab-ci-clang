@@ -21,7 +21,6 @@ RUN dpkg --add-architecture i386 && \
       gfortran-4.8 gfortran-4.9 \
       gcc-multilib g++-multilib \
       gcc-4.9-multilib g++-4.9-multilib \
-      clang-3.5 libclang-3.5-dev llvm-3.5-dev \
       clang-3.8 libclang-3.8-dev llvm-3.8-dev \
       clang-8 libclang-8-dev llvm-8-dev \
       libncurses5-dev \
@@ -35,7 +34,7 @@ RUN dpkg --add-architecture i386 && \
     pip install --upgrade 'pip>=20,<21' && \
     pip install --upgrade 'setuptools>=44,<45' && \
     pip install cffi github3.py 'numpy>=1.16,<1.17' qualname && \
-    pip3 install --upgrade setuptools 'setuptools_rust>=0.11,<0.12' && \
+    pip3 install --upgrade 'setuptools>=50,<51' 'setuptools_rust>=0.11,<0.12' && \
     pip3 install cffi github3.py 'numpy>=1.18,<1.19' 'cryptography>=3.2,<3.3'
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -46,11 +45,6 @@ RUN wget https://cmake.org/files/v3.13/cmake-3.13.0-Linux-x86_64.tar.gz && \
     rm cmake-3.13.0-Linux-x86_64.tar.gz
 
 RUN git clone -b luajit2.1 https://github.com/StanfordLegion/terra.git && \
-    cp -r terra terra35 && \
-    LLVM_CONFIG=llvm-config-3.5 make -C terra35 REEXPORT_LLVM_COMPONENTS="irreader jit mcjit x86" && \
-    mkdir /usr/local/terra35 && \
-    make -C terra35 install PREFIX=/usr/local/terra35 && \
-    rm -rf terra35 && \
     cp -r terra terra38 && \
     LLVM_CONFIG=llvm-config-3.8 make -C terra38 REEXPORT_LLVM_COMPONENTS="irreader mcjit x86" && \
     mkdir /usr/local/terra38 && \

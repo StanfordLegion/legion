@@ -3215,10 +3215,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceConditionSet::TraceConditionSet(RegionTreeForest *f, 
-                              IndexSpaceExpression *expr, const FieldMask &mask, 
-                              const std::set<RegionNode*> &rgs)
-      : forest(f), condition_expr(expr), condition_mask(mask), 
+    TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
+                        RegionTreeForest *f, IndexSpaceExpression *expr,
+                        const FieldMask &mask, const std::set<RegionNode*> &rgs)
+      : context(trace->logical_trace->ctx), forest(f),
+        condition_expr(expr), condition_mask(mask), 
         regions(std::vector<RegionNode*>(rgs.begin(), rgs.end())),
         precondition_views(NULL), anticondition_views(NULL), 
         postcondition_views(NULL)
@@ -3232,8 +3233,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(const TraceConditionSet &rhs)
-      : forest(rhs.forest), condition_expr(rhs.condition_expr),
-        condition_mask(rhs.condition_mask), regions(rhs.regions)
+      : context(rhs.context), forest(rhs.forest),
+        condition_expr(rhs.condition_expr), condition_mask(rhs.condition_mask),
+        regions(rhs.regions)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3336,6 +3338,13 @@ namespace Legion {
     {
       AutoLock s_lock(set_lock);
       pending_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceConditionSet::can_filter_context(ContextID filter_id) const
+    //--------------------------------------------------------------------------
+    {
+      return (filter_id == context->get_context_id());
     }
 
     //--------------------------------------------------------------------------
@@ -3788,7 +3797,8 @@ namespace Legion {
         IndexSpaceExpression *overlap = 
           forest->intersect_index_spaces(condition_expr, (*it)->row_source);
         (*it)->compute_equivalence_sets(ctxid, context, this, space, overlap,
-            invalid_mask, opid, space, ready_events, false/*downward only*/);
+                                    invalid_mask, opid, space, ready_events,
+                                    false/*downward only*/, false/*covers*/);
       }
       invalid_mask.clear();
       if (!ready_events.empty())
@@ -4086,7 +4096,7 @@ namespace Legion {
           if (condition_expr->get_volume() == eq_node->get_volume())
             condition_expr = eq_node;
           TraceConditionSet *condition = 
-            new TraceConditionSet(forest, condition_expr, 
+            new TraceConditionSet(trace, forest, condition_expr, 
                                   it->set_mask, it->elements);
           condition->add_reference();
           condition->capture(eit->first, ready_events);

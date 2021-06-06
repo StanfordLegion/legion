@@ -3723,7 +3723,7 @@ namespace Legion {
       const ContextID ctx = get_context_id();
       region->compute_equivalence_sets(ctx, this, target, target_space,
                                        region->row_source, mask, opid, source, 
-                                       ready, false/*down only*/);
+                                       ready,false/*down only*/,true/*covers*/);
       if (!ready.empty())
         return Runtime::merge_events(ready);
       else
@@ -3880,14 +3880,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::deduplicate_invalidate_trackers(
-                                 const FieldMaskSet<EquivalenceSet> &to_untrack,
-                                 std::set<RtEvent> &applied_events)
+                             const FieldMaskSet<EquivalenceSet> &to_untrack,
+                             std::set<RtEvent> &applied_events, bool local_only)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             to_untrack.begin(); it != to_untrack.end(); it++)
         it->first->invalidate_trackers(it->second, applied_events,
-            runtime->address_space, NULL/*no collective mapping*/);
+            runtime->address_space, NULL/*no collective mapping*/,
+            local_only ? this : NULL/*filter everything*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20006,8 +20007,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::deduplicate_invalidate_trackers(
-                                 const FieldMaskSet<EquivalenceSet> &to_untrack,
-                                 std::set<RtEvent> &applied_events)
+                             const FieldMaskSet<EquivalenceSet> &to_untrack,
+                             std::set<RtEvent> &applied_events, bool local_only)
     //--------------------------------------------------------------------------
     {
       // check to see if we're the first shard on this node
@@ -20025,7 +20026,8 @@ namespace Legion {
           // each node with the collective manager map
           if (first_local_shard)
             it->first->invalidate_trackers(it->second, applied_events,
-                runtime->address_space, &collective_mapping);
+                runtime->address_space, &collective_mapping,
+                local_only ? this : NULL/*filter everything*/);
         }
         else
         {
@@ -20050,7 +20052,8 @@ namespace Legion {
             target_shard = color % total_shards;
           if (target_shard == owner_shard->shard_id)
             it->first->invalidate_trackers(it->second, applied_events,
-                  runtime->address_space, NULL/*collective manager*/);
+                  runtime->address_space, NULL/*collective manager*/,
+                  local_only ? this : NULL/*filter everything*/);
         }
       }
     }

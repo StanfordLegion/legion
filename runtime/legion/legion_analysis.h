@@ -2204,6 +2204,7 @@ namespace Legion {
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
+      virtual bool can_filter_context(ContextID filter_id) const = 0;
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
     };
@@ -2238,7 +2239,8 @@ namespace Legion {
       public:
         InvalidateFunctor(DistributedID did, const FieldMask &mask,
                           std::set<RtEvent> &applied, AddressSpaceID origin,
-                          const CollectiveMapping *mapping, Runtime *runtime);
+                          UniqueID ctx_uid, const CollectiveMapping *mapping,
+                          Runtime *runtime);
       public:
         void apply(AddressSpaceID target);
       public:
@@ -2246,6 +2248,7 @@ namespace Legion {
         const FieldMask &mask;
         std::set<RtEvent> &applied;
         const AddressSpaceID origin;
+        const UniqueID ctx_uid;
         const CollectiveMapping *const invalidate_mapping;
         Runtime *const runtime;
       };
@@ -2443,7 +2446,8 @@ namespace Legion {
       void invalidate_trackers(const FieldMask &mask,
                                std::set<RtEvent> &applied_events,
                                const AddressSpaceID origin_space,
-                               const CollectiveMapping *collective_mapping);
+                               const CollectiveMapping *collective_mapping,
+                               InnerContext *filter_context = NULL);
       void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
                       const FieldMask &clone_mask,
                       const bool forward_to_owner,
@@ -2902,6 +2906,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
+      virtual bool can_filter_context(ContextID filter_id) const;
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           

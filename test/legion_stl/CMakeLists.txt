@@ -23,8 +23,6 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(test_stl test_stl.cc)
-set_property(TARGET test_stl PROPERTY CXX_STANDARD 11)
-set_property(TARGET test_stl PROPERTY CXX_STANDARD_REQUIRED ON)
 target_link_libraries(test_stl Legion::Legion)
 if(Legion_ENABLE_TESTING)
   add_test(NAME test_stl COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:test_stl> ${Legion_TEST_ARGS})

@@ -77,8 +77,9 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
         if openmp: extra_flags.append('--openmp')
         if python: extra_flags.append('--python')
         extra_flags.extend(['--extra=-fjobs', '--extra=%s' % jobs])
-        if not spy and not prof and not gcov and not hdf5 and not openmp and not cuda:
-            extra_flags.append('--debug')
+        # FIXME: this breaks on newer versions of Terra
+        # if not spy and not prof and not gcov and not hdf5 and not openmp and not cuda:
+        #     extra_flags.append('--debug')
 
         subprocess.check_call(
             [sys.executable, './test.py', '-q'] + test_threads + max_dim_flag + short_flag + no_pretty_flag + extra_flags + inner_flag,
