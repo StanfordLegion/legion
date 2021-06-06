@@ -16143,8 +16143,17 @@ namespace Legion {
       derez.deserialize(done_event);
 
       std::set<RtEvent> applied_events; 
-      InnerContext *local_ctx =
-        (ctx_uid == 0) ? NULL : runtime->find_context(ctx_uid);
+      InnerContext *local_ctx = NULL;
+      if (ctx_uid > 0)
+      {
+        local_ctx = runtime->find_context(ctx_uid, true/*null if not found*/);
+        if (local_ctx == NULL)
+        {
+          // If we don't have the context here we are done
+          Runtime::trigger_event(done_event, ready_event);
+          return;
+        }
+      }
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       set->invalidate_trackers(mask, applied_events, origin,
