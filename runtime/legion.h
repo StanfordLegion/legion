@@ -4144,6 +4144,22 @@ namespace Legion {
     };
 
     /**
+     * \class PointTransformFunctor
+     * A point transform functor provides a virtual function
+     * infterface for transforming points in one coordinate space
+     * into a different coordinate space. Calls to this functor 
+     * must be pure in that the same arguments passed to the 
+     * functor must always yield the same results.
+     */
+    class PointTransformFunctor {
+    public:
+      virtual ~PointTransformFunctor(void);
+    public:
+      virtual DomainPoint transform_point(const DomainPoint &point,
+                                          const Domain &range) = 0;
+    };
+
+    /**
      * \class Runtime
      * The Runtime class is the primary interface for
      * Legion.  Every task is given a reference to the runtime as
@@ -6382,6 +6398,40 @@ namespace Legion {
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
                            bool collective = false, ShardingID sid = 0);
+
+      /**
+       * Apply a transform to a FutureMap. All points that access the
+       * FutureMap will be transformed by the 'transform' function before
+       * accessing the backing future map. Note that multiple transforms
+       * can be composed this way to create new FutureMaps. This version
+       * takes a function pointer which must take a domain point and the
+       * range of the original future map and returns a new domain point
+       * that must fall within the range.
+       * @param ctx enclosing task context
+       * @param fm future map to apply a new coordinate space to
+       * @param fnptr a function pointer to call to transform points
+       * @return a new future map with the coordinate space transformed
+       */
+      typedef DomainPoint (*PointTransformFnptr)(const DomainPoint &point,
+                                                 const Domain &range);
+      FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     PointTransformFnptr fnptr);
+      /**
+       * Apply a transform to a FutureMap. All points that access the
+       * FutureMap will be transformed by the 'transform' function before
+       * accessing the backing future map. Note that multiple transforms
+       * can be composed this way to create new FutureMaps. This version
+       * takes a pointer PointTransform functor object to invoke to 
+       * transform the coordinate spaces of the points.
+       * @param ctx enclosing task context
+       * @param fm future map to apply a new coordinate space to
+       * @param functor pointer to a functor to transform points
+       * @param take_ownership whether the runtime should delete the functor
+       * @return a new future map with the coordinate space transformed
+       */
+      FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     PointTransformFunctor *functor,
+                                     bool take_ownership = false);
 
       /**
        * @deprecated
