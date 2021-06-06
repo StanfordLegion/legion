@@ -334,7 +334,7 @@
 #endif
 // Percentage of memory to reserve for eager allocations
 #ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
-#define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 60
+#define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 1
 #endif
 // Maximum number of templates to keep around in traces
 #ifndef LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE
