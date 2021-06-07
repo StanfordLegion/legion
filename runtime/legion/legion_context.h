@@ -469,12 +469,12 @@ namespace Legion {
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
     public:
-      virtual Lock create_lock(void) = 0;
+      virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l) = 0;
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests) = 0;
       virtual void release_grant(Grant grant) = 0;
     public:
-      virtual PhaseBarrier create_phase_barrier(unsigned arrivals) = 0;
+      virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
       virtual void destroy_phase_barrier(PhaseBarrier pb) = 0;
       virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb) = 0;
     public:
@@ -1249,12 +1249,10 @@ namespace Legion {
       virtual void post_end_task(const void *res, size_t res_size, 
                                  bool owned, FutureFunctor *callback_functor);
     public:
-      virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
       virtual void release_grant(Grant grant);
     public:
-      virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
       virtual void destroy_phase_barrier(PhaseBarrier pb);
       virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
@@ -1959,12 +1957,10 @@ namespace Legion {
       virtual void post_end_task(const void *res, size_t res_size, 
                                  bool owned, FutureFunctor *callback_functor);
     public:
-      virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
       virtual void release_grant(Grant grant);
     public:
-      virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
       virtual void destroy_phase_barrier(PhaseBarrier pb);
       virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
