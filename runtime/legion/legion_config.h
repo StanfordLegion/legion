@@ -149,7 +149,7 @@
 // the Realm DMA system being used for actually moving the data.
 #ifndef MAX_RETURN_SIZE // For backwards compatibility
 #ifndef LEGION_MAX_RETURN_SIZE
-#define LEGION_MAX_RETURN_SIZE    8192 // maximum return type size in bytes
+#define LEGION_MAX_RETURN_SIZE    32768 // maximum return type size in bytes
 #endif
 #else
 #ifndef LEGION_MAX_RETURN_SIZE
