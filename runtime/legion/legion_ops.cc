@@ -3392,6 +3392,9 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_privilege();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
@@ -4383,8 +4386,6 @@ namespace Legion {
       initialize_memoizable();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
-      src_versions.resize(launcher.src_requirements.size());
-      dst_versions.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -4918,8 +4919,7 @@ namespace Legion {
         // Also check the compatibility properties here
         check_compatibility_properties();
       }
-      // Register a dependence on our predicate
-      register_predicate_dependence();
+      perform_base_dependence_analysis();
       ProjectionInfo projection_info;
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -4978,6 +4978,9 @@ namespace Legion {
     void CopyOp::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // Register a dependence on our predicate
       register_predicate_dependence();
       src_versions.resize(src_requirements.size());
@@ -12375,6 +12378,9 @@ namespace Legion {
         check_release_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
@@ -13128,17 +13134,10 @@ namespace Legion {
     void DynamicCollectiveOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // See if we had any contributions for this dynamic collective
-      std::vector<Future> contributions;
-      parent_ctx->find_collective_contributions(collective, contributions);
-      for (std::vector<Future>::const_iterator it = contributions.begin();
-            it != contributions.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->impl != NULL);
-#endif
-        it->impl->register_dependence(this);
-      }
+      std::vector<PhaseBarrier> wait_barriers, no_arrival_barriers;
+      wait_barriers.push_back(collective);
+      parent_ctx->perform_barrier_dependence_analysis(this,
+                        wait_barriers, no_arrival_barriers);
     }
 
     //--------------------------------------------------------------------------
@@ -17610,6 +17609,9 @@ namespace Legion {
         check_fill_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
@@ -18272,11 +18274,7 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_fill_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
+      perform_base_dependence_analysis();
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
@@ -18290,6 +18288,9 @@ namespace Legion {
     void IndexFillOp::perform_base_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // Register a dependence on our predicate
       register_predicate_dependence();
       // If we are waiting on a future register a dependence

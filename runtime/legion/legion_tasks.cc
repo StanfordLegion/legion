@@ -5892,6 +5892,9 @@ namespace Legion {
           it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(logical_regions.size());
@@ -8587,6 +8590,9 @@ namespace Legion {
       for (std::vector<FutureMap>::const_iterator it = 
             point_futures.begin(); it != point_futures.end(); it++)
         it->impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(logical_regions.size());
