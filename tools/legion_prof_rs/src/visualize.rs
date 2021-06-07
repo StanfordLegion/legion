@@ -255,15 +255,21 @@ impl State {
         let mut proc_count = BTreeMap::new();
 
         for proc in self.procs.values() {
-            if !proc.time_points.is_empty() {
-                let nodes = vec![None, Some(proc.node_id)];
-                for node in nodes {
-                    let group = (node, proc.kind);
+            let nodes = vec![None, Some(proc.node_id)];
+            for node in nodes {
+                let group = (node, proc.kind);
+                // set to 1 if group not in timepoints_dict
+                // increment otherwise
+                if timepoint.contains_key(&group) {
+                    proc_count.entry(group).and_modify(|i| *i += 1);
+                } else {
+                    proc_count.insert(group, 1);
+                }
+                if !proc.is_empty() {
                     timepoint
                         .entry(group)
                         .or_insert_with(|| Vec::new())
                         .push((proc.proc_id, &proc.util_time_points));
-                    *proc_count.entry(group).or_insert(0) += 1;
                 }
             }
         }
@@ -355,11 +361,10 @@ impl State {
 
         assert!(owners.len() > 0);
 
-        let max_count = max_count as f64;
-
         let mut utilization = Vec::new();
-        let mut count = 0;
         let mut last_time = None;
+        let max_count = max_count as f64;
+        let mut count = 0;
 
         for point in points {
             if point.first {
@@ -368,10 +373,12 @@ impl State {
                 count -= 1;
             }
 
+            let ratio = count as f64 / max_count;
+
             if last_time.map_or(false, |time| time == point.time) {
-                *utilization.last_mut().unwrap() = (point.time, count as f64 / max_count);
+                *utilization.last_mut().unwrap() = (point.time, ratio);
             } else {
-                utilization.push((point.time, count as f64 / max_count));
+                utilization.push((point.time, ratio));
             }
             last_time = Some(point.time);
         }
