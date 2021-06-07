@@ -2723,32 +2723,6 @@ namespace Legion {
       Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
       Future get_predicate_future(Context ctx, const Predicate &p);
     public:
-      Lock create_lock(Context ctx);
-      void destroy_lock(Context ctx, Lock l);
-      Grant acquire_grant(Context ctx, 
-                          const std::vector<LockRequest> &requests);
-      void release_grant(Context ctx, Grant grant);
-    public:
-      PhaseBarrier create_phase_barrier(Context ctx, unsigned arrivals);
-      void destroy_phase_barrier(Context ctx, PhaseBarrier pb);
-      PhaseBarrier advance_phase_barrier(Context ctx, PhaseBarrier pb);
-    public:
-      DynamicCollective create_dynamic_collective(Context ctx,
-                                                  unsigned arrivals,
-                                                  ReductionOpID redop,
-                                                  const void *init_value,
-                                                  size_t init_size);
-      void destroy_dynamic_collective(Context ctx, DynamicCollective dc);
-      void arrive_dynamic_collective(Context ctx, DynamicCollective dc,
-                                     const void *buffer, size_t size,
-                                     unsigned count);
-      void defer_dynamic_collective_arrival(Context ctx, 
-                                            DynamicCollective dc,
-                                            const Future &f, unsigned count);
-      Future get_dynamic_collective_result(Context ctx, DynamicCollective dc);
-      DynamicCollective advance_dynamic_collective(Context ctx,
-                                                   DynamicCollective dc);
-    public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       Future issue_mapping_fence(Context ctx);

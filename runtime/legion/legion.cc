@@ -6295,14 +6295,14 @@ namespace Legion {
     Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_lock(ctx);
+      return ctx->create_lock();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_lock(ctx, l);
+      ctx->destroy_lock(l);
     }
 
     //--------------------------------------------------------------------------
@@ -6310,14 +6310,14 @@ namespace Legion {
                                       const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
-      return runtime->acquire_grant(ctx, requests);
+      return ctx->acquire_grant(requests);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::release_grant(Context ctx, Grant grant)
     //--------------------------------------------------------------------------
     {
-      runtime->release_grant(ctx, grant);
+      ctx->release_grant(grant);
     }
 
     //--------------------------------------------------------------------------
@@ -6325,14 +6325,14 @@ namespace Legion {
                                                         unsigned arrivals)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_phase_barrier(ctx, arrivals);
+      return ctx->create_phase_barrier(arrivals);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_phase_barrier(ctx, pb);
+      ctx->destroy_phase_barrier(pb);
     }
 
     //--------------------------------------------------------------------------
@@ -6340,7 +6340,7 @@ namespace Legion {
                                                          PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-      return runtime->advance_phase_barrier(ctx, pb);
+      return ctx->advance_phase_barrier(pb);
     }
 
     //--------------------------------------------------------------------------
@@ -6351,8 +6351,8 @@ namespace Legion {
                                                         size_t init_size)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_dynamic_collective(ctx, arrivals, redop,
-                                                init_value, init_size);
+      return ctx->create_dynamic_collective(arrivals, redop, 
+                                            init_value, init_size);
     }
     
     //--------------------------------------------------------------------------
@@ -6360,7 +6360,7 @@ namespace Legion {
                                                       DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_dynamic_collective(ctx, dc);
+      ctx->destroy_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -6371,7 +6371,7 @@ namespace Legion {
                                                      unsigned count)
     //--------------------------------------------------------------------------
     {
-      runtime->arrive_dynamic_collective(ctx, dc, buffer, size, count);
+      ctx->arrive_dynamic_collective(dc, buffer, size, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6381,7 +6381,7 @@ namespace Legion {
                                                    unsigned count)
     //--------------------------------------------------------------------------
     {
-      runtime->defer_dynamic_collective_arrival(ctx, dc, f, count);
+      ctx->defer_dynamic_collective_arrival(dc, f, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6389,7 +6389,7 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_dynamic_collective_result(ctx, dc);
+      return ctx->get_dynamic_collective_result(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -6397,7 +6397,7 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      return runtime->advance_dynamic_collective(ctx, dc);
+      return ctx->advance_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------
