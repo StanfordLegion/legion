@@ -8668,9 +8668,6 @@ namespace Legion {
     PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-      // For now we issue a mapping fence whenever we do this because
-      // we do not have any logical dependence analysis on phase barriers
-      issue_mapping_fence();
       AutoRuntimeCall call(this);
       PhaseBarrier result = pb;
       Runtime::advance_barrier(result);
@@ -8717,27 +8714,110 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       future.impl->contribute_to_collective(dc, count);
+      // No need to register anything if this future is an application future
+      // or it was made in a context above this in the region tree
+      if ((future.impl->producer_op == NULL) ||
+          (future.impl->producer_depth < get_depth()))
+        return;
       // Record this future as a contribution to the collective
       // for future dependence analysis
-      AutoLock col_lock(collective_lock);
-      collective_contributions[dc.phase_barrier].push_back(future);
+      AutoLock pb_lock(phase_barrier_lock);
+      barrier_contributions[dc.phase_barrier].push_back(
+          BarrierContribution(future.impl->producer_op, future.impl->op_gen,
+#ifdef LEGION_SPY
+            future.impl->producer_uid,
+#else
+            0/*no uid*/,
+#endif
+            0/*no muid*/));
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::find_collective_contributions(DynamicCollective dc, 
-                                             std::vector<Future> &contributions)
+    void InnerContext::perform_barrier_dependence_analysis(Operation *op,
+                              const std::vector<PhaseBarrier> &wait_barriers,
+                              const std::vector<PhaseBarrier> &arrival_barriers,
+                              MustEpochOp *must_epoch_op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Find any future contributions and record dependences for the op
-      // Contributions were made to the previous phase
-      ApEvent previous = Runtime::get_previous_phase(dc.phase_barrier);
-      AutoLock col_lock(collective_lock);
-      std::map<ApEvent,std::vector<Future> >::iterator finder = 
-          collective_contributions.find(previous);
-      if (finder == collective_contributions.end())
-        return;
-      contributions = finder->second;
-      collective_contributions.erase(finder);
+      const UniqueID uid = op->get_unique_op_id();
+      const GenerationID gen = op->get_generation();
+      const UniqueID muid = (must_epoch_op == NULL) ? 0 :
+        must_epoch_op->get_unique_op_id();
+      AutoLock pb_lock(phase_barrier_lock);
+      for (std::vector<PhaseBarrier>::const_iterator wit =
+            wait_barriers.begin(); wit != wait_barriers.end(); wit++)
+      {
+        ApEvent previous = Runtime::get_previous_phase(wit->phase_barrier);
+        std::map<ApEvent,std::vector<BarrierContribution> >::iterator finder =
+          barrier_contributions.find(previous);
+        if (finder == barrier_contributions.end())
+          continue;
+        for (std::vector<BarrierContribution>::iterator it =
+              finder->second.begin(); it != finder->second.end(); /*nothing*/)
+        {
+          // If must epoch and same uid then skip it
+          if ((muid > 0) && (muid == it->muid))
+          {
+            it++;
+            continue;
+          }
+#ifdef LEGION_SPY
+          // No pruning for Legion Spy
+          op->register_dependence(it->op, it->gen);
+          LegionSpy::log_mapping_dependence(get_unique_id(), 
+              it->uid, 0, uid, 0, TRUE_DEPENDENCE);
+          it++;
+#else
+          if (op->register_dependence(it->op, it->gen))
+            it++;
+          else
+            it = finder->second.erase(it);
+#endif        
+        }
+        if (finder->second.empty())
+          barrier_contributions.erase(finder);
+      }
+      // Record our barriers for future uses
+      for (std::vector<PhaseBarrier>::const_iterator ait =
+            arrival_barriers.begin(); ait != arrival_barriers.end(); ait++)
+      {
+        // Save this barrier for later
+        barrier_contributions[ait->phase_barrier].push_back(
+            BarrierContribution(op, gen, uid, muid));
+        // Barriers must trigger in order so we also record dependences on
+        // the prior generation of our arrival barriers
+        ApEvent previous = Runtime::get_previous_phase(ait->phase_barrier);
+        if (!previous.exists())
+          continue;
+        std::map<ApEvent,std::vector<BarrierContribution> >::iterator finder =
+          barrier_contributions.find(previous);
+        if (finder == barrier_contributions.end())
+          continue;
+        for (std::vector<BarrierContribution>::iterator it =
+              finder->second.begin(); it != finder->second.end(); /*nothing*/)
+        {
+          // If must epoch and same uid then skip it
+          if ((muid > 0) && (muid == it->muid))
+          {
+            it++;
+            continue;
+          }
+#ifdef LEGION_SPY
+          // No pruning for Legion Spy
+          op->register_dependence(it->op, it->gen);
+          LegionSpy::log_mapping_dependence(get_unique_id(), 
+              it->uid, 0, uid, 0, TRUE_DEPENDENCE);
+          it++;
+#else
+          if (op->register_dependence(it->op, it->gen))
+            it++;
+          else
+            it = finder->second.erase(it);
+#endif        
+        }
+        if (finder->second.empty())
+          barrier_contributions.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8761,9 +8841,6 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      // For now we issue a mapping fence whenever we do this because
-      // we do not have any logical dependence analysis on phase barriers
-      issue_mapping_fence();
       AutoRuntimeCall call(this);
       DynamicCollective result = dc;
       Runtime::advance_barrier(result);

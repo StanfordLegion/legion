@@ -1256,10 +1256,10 @@ namespace Legion {
       virtual void destroy_phase_barrier(PhaseBarrier pb);
       virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
-      void record_dynamic_collective_contribution(DynamicCollective dc,
-                                                  const Future &f);
-      void find_collective_contributions(DynamicCollective dc,
-                                         std::vector<Future> &contributions);
+      void perform_barrier_dependence_analysis(Operation *op,
+            const std::vector<PhaseBarrier> &wait_barriers,
+            const std::vector<PhaseBarrier> &arrival_barriers, 
+            MustEpochOp *must_epoch = NULL);
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
                                                   ReductionOpID redop,
@@ -1429,9 +1429,20 @@ namespace Legion {
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
     protected:
-      // Tracking information for dynamic collectives
-      mutable LocalLock                       collective_lock;
-      std::map<ApEvent,std::vector<Future> >  collective_contributions;
+      // Dependence tracking information for phase barriers
+      mutable LocalLock                                   phase_barrier_lock;
+      struct BarrierContribution {
+      public:
+        BarrierContribution(void) : op(NULL), gen(0), uid(0), muid(0) { }
+        BarrierContribution(Operation *o, GenerationID g, UniqueID u,UniqueID m)
+          : op(o), gen(g), uid(u), muid(m) { }
+      public:
+        Operation *op;
+        GenerationID gen;
+        UniqueID uid;
+        UniqueID muid; // must epoch uid
+      };
+      std::map<ApEvent,std::vector<BarrierContribution> > barrier_contributions;
     protected:
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;
@@ -1963,11 +1974,7 @@ namespace Legion {
     public:
       virtual void destroy_phase_barrier(PhaseBarrier pb);
       virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
-    public:
-      void record_dynamic_collective_contribution(DynamicCollective dc,
-                                                  const Future &f);
-      void find_collective_contributions(DynamicCollective dc,
-                                         std::vector<Future> &contributions);
+    public: 
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
                                                   ReductionOpID redop,

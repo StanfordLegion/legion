@@ -5393,6 +5393,9 @@ namespace Legion {
           it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       ProjectionInfo projection_info;
@@ -7240,6 +7243,9 @@ namespace Legion {
         it->impl->register_dependence(this);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         ProjectionInfo projection_info(runtime, regions[idx], launch_space);

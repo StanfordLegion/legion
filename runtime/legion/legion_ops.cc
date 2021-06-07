@@ -2928,6 +2928,9 @@ namespace Legion {
     {
       if (runtime->check_privileges)
         check_privilege();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -4443,6 +4446,9 @@ namespace Legion {
       }
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       ProjectionInfo projection_info;
       src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -6647,6 +6653,9 @@ namespace Legion {
         check_copy_privileges(true/*permit projection*/);
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -9809,6 +9818,9 @@ namespace Legion {
         check_acquire_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
@@ -10692,6 +10704,9 @@ namespace Legion {
         check_release_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
       // Register any mapping dependences that we have
@@ -11438,17 +11453,10 @@ namespace Legion {
     void DynamicCollectiveOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // See if we had any contributions for this dynamic collective
-      std::vector<Future> contributions;
-      parent_ctx->find_collective_contributions(collective, contributions);
-      for (std::vector<Future>::const_iterator it = contributions.begin();
-            it != contributions.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->impl != NULL);
-#endif
-        it->impl->register_dependence(this);
-      }
+      std::vector<PhaseBarrier> wait_barriers, no_arrival_barriers;
+      wait_barriers.push_back(collective);
+      parent_ctx->perform_barrier_dependence_analysis(this,
+                        wait_barriers, no_arrival_barriers);
     }
 
     //--------------------------------------------------------------------------
@@ -15642,6 +15650,9 @@ namespace Legion {
         check_fill_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
@@ -16287,6 +16298,9 @@ namespace Legion {
         check_fill_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
