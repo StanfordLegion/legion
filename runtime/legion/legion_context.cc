@@ -2428,6 +2428,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Lock TaskContext::create_lock(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return Lock(Reservation::create_reservation());
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier TaskContext::create_phase_barrier(unsigned arrivals)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return PhaseBarrier(ApBarrier(Realm::Barrier::create_barrier(arrivals)));
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::initialize_overhead_tracker(void)
     //--------------------------------------------------------------------------
     {
@@ -9246,14 +9262,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Lock InnerContext::create_lock(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      return Lock(Reservation::create_reservation());
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
@@ -9288,15 +9296,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       grant.impl->release_grant();
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InnerContext::create_phase_barrier(unsigned arrivals)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      return PhaseBarrier(ApBarrier(Realm::Barrier::create_barrier(arrivals)));
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_phase_barrier(PhaseBarrier pb)
@@ -22919,16 +22919,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Lock LeafContext::create_lock(void)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal create lock performed in leaf task %s (UID %lld)",
-          get_task_name(), get_unique_id())
-      return Lock();
-    }
-
-    //--------------------------------------------------------------------------
     void LeafContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
@@ -22954,16 +22944,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
           "Illegal release grant performed in leaf task %s (UID %lld)",
           get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier LeafContext::create_phase_barrier(unsigned arrivals)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal create phase barrier performed in leaf task %s (UID %lld)",
-          get_task_name(), get_unique_id())
-      return PhaseBarrier();
     }
 
     //--------------------------------------------------------------------------

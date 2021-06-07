@@ -8232,7 +8232,10 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
-      tpl->register_operation(this);
+      if (fence_kind == EXECUTION_FENCE)
+        tpl->register_operation(this);
+      else
+        complete_execution();
       complete_mapping();
       resolve_speculation();
     }
