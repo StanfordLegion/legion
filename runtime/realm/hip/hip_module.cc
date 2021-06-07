@@ -3485,8 +3485,12 @@ namespace Realm {
 
       for(std::vector<GPU *>::iterator it = gpus.begin();
           it != gpus.end();
-          it++)
+          it++) {
+#ifdef REALM_USE_HIP_HIJACK
+        GlobalRegistrations::remove_gpu_context(*it);
+#endif
         delete *it;
+      }
       gpus.clear();
       
       Module::cleanup();
