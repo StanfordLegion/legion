@@ -18249,6 +18249,9 @@ namespace Legion {
     PhaseBarrier ReplicateContext::advance_phase_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      // For now we issue a mapping fence whenever we do this because
+      // we do not have any logical dependence analysis on phase barriers
+      issue_mapping_fence();
       AutoRuntimeCall call(this);
       if (runtime->safe_control_replication &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
@@ -18336,6 +18339,9 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
+      // For now we issue a mapping fence whenever we do this because
+      // we do not have any logical dependence analysis on phase barriers
+      issue_mapping_fence();
       AutoRuntimeCall call(this);
       if (runtime->safe_control_replication && 
           ((current_trace == NULL) || !current_trace->is_fixed()))

@@ -5861,7 +5861,8 @@ namespace Legion {
 #endif
       // Get ourselves an execution fence barrier
       // No need for a mapping fence since we're just replaying
-      execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
+      if (fence_kind == EXECUTION_FENCE)
+        execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
       FenceOp::trigger_replay();
     }
 
