@@ -689,24 +689,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::destroy_user_lock(Reservation r)
-    //--------------------------------------------------------------------------
-    {
-      // Can only be called from user land so no
-      // need to hold the lock
-      context_locks.push_back(r);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::destroy_user_barrier(ApBarrier b)
-    //--------------------------------------------------------------------------
-    {
-      // Can only be called from user land so no 
-      // need to hold the lock
-      context_barriers.push_back(b);
-    } 
-
-    //--------------------------------------------------------------------------
     void TaskContext::add_created_region(LogicalRegion handle, bool task_local)
     //--------------------------------------------------------------------------
     {
@@ -8621,12 +8603,124 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f) 
+    Lock InnerContext::create_lock(void)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+      return Lock(Reservation::create_reservation());
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_lock(Lock l)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Can only be called from user land so no need to hold the lock
+      context_locks.push_back(l.reservation_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    Grant InnerContext::acquire_grant(const std::vector<LockRequest> &requests)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Kind of annoying, but we need to unpack and repack the
+      // Lock type here to build new requests because the C++
+      // type system is dumb with nested classes.
+      std::vector<GrantImpl::ReservationRequest> 
+        unpack_requests(requests.size());
+      for (unsigned idx = 0; idx < requests.size(); idx++)
+      {
+        unpack_requests[idx] = 
+          GrantImpl::ReservationRequest(requests[idx].lock.reservation_lock,
+                                        requests[idx].mode,
+                                        requests[idx].exclusive);
+      }
+      return Grant(new GrantImpl(unpack_requests));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::release_grant(Grant grant)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      grant.impl->release_grant();
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier InnerContext::create_phase_barrier(unsigned arrivals)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return PhaseBarrier(ApBarrier(Realm::Barrier::create_barrier(arrivals)));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Can only be called from user land so no need to hold the lock
+      context_barriers.push_back(pb.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      // For now we issue a mapping fence whenever we do this because
+      // we do not have any logical dependence analysis on phase barriers
+      issue_mapping_fence();
+      AutoRuntimeCall call(this);
+      PhaseBarrier result = pb;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InnerContext::create_dynamic_collective(
+                                       unsigned arrivals, ReductionOpID redop,
+                                       const void *init_value, size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return DynamicCollective(
+          ApBarrier(Realm::Barrier::create_barrier(arrivals, redop, 
+                                    init_value, init_size)), redop);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_dynamic_collective(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Can only be called from user land so no need to hold the lock
+      context_barriers.push_back(dc.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::arrive_dynamic_collective(DynamicCollective dc,
+                                const void *buffer, size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      Runtime::phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                           const Future &future, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      future.impl->contribute_to_collective(dc, count);
+      // Record this future as a contribution to the collective
+      // for future dependence analysis
       AutoLock col_lock(collective_lock);
-      collective_contributions[dc.phase_barrier].push_back(f);
+      collective_contributions[dc.phase_barrier].push_back(future);
     }
 
     //--------------------------------------------------------------------------
@@ -8659,6 +8753,23 @@ namespace Legion {
         runtime->get_available_dynamic_collective_op();
       Future result = collective->initialize(this, dc);
       add_to_dependence_queue(collective);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InnerContext::advance_dynamic_collective(
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      // For now we issue a mapping fence whenever we do this because
+      // we do not have any logical dependence analysis on phase barriers
+      issue_mapping_fence();
+      AutoRuntimeCall call(this);
+      DynamicCollective result = dc;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
+#endif
       return result;
     }
 
@@ -12448,27 +12559,132 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f) 
+    Lock LeafContext::create_lock(void)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal create lock performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return Lock();
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::find_collective_contributions(DynamicCollective dc, 
-                                             std::vector<Future> &contributions) 
+    void LeafContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy lock performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    Grant LeafContext::acquire_grant(const std::vector<LockRequest> &requests)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal acquire grant performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return Grant();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::release_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal release grant performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier LeafContext::create_phase_barrier(unsigned arrivals)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal create phase barrier performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return PhaseBarrier();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy phase barrier performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier LeafContext::advance_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal advance phase barrier performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return PhaseBarrier();
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective LeafContext::create_dynamic_collective(
+                                       unsigned arrivals, ReductionOpID redop,
+                                       const void *init_value, size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal create dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+      return DynamicCollective();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_dynamic_collective(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::arrive_dynamic_collective(DynamicCollective dc,
+                                const void *buffer, size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal arrive dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                           const Future &future, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal defer dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
     Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal get dynamic collective performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
       return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective LeafContext::advance_dynamic_collective(
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal advance dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+      return DynamicCollective();
     }
 
     //--------------------------------------------------------------------------

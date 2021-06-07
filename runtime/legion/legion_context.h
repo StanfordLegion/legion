@@ -469,11 +469,29 @@ namespace Legion {
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
     public:
-      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
-                                                          const Future &f) = 0;
-      virtual void find_collective_contributions(DynamicCollective dc,
-                                             std::vector<Future> &futures) = 0;
+      virtual Lock create_lock(void) = 0;
+      virtual void destroy_lock(Lock l) = 0;
+      virtual Grant acquire_grant(const std::vector<LockRequest> &requests) = 0;
+      virtual void release_grant(Grant grant) = 0;
+    public:
+      virtual PhaseBarrier create_phase_barrier(unsigned arrivals) = 0;
+      virtual void destroy_phase_barrier(PhaseBarrier pb) = 0;
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb) = 0;
+    public:
+      virtual DynamicCollective create_dynamic_collective(
+                                                  unsigned arrivals,
+                                                  ReductionOpID redop,
+                                                  const void *init_value,
+                                                  size_t init_size) = 0;
+      virtual void destroy_dynamic_collective(DynamicCollective dc) = 0;
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                        const void *buffer, size_t size, unsigned count) = 0;
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &future,
+                                                    unsigned count) = 0;
       virtual Future get_dynamic_collective_result(DynamicCollective dc) = 0;
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc) = 0;
     public:
       virtual TaskPriority get_current_priority(void) const = 0;
       virtual void set_current_priority(TaskPriority priority) = 0;
@@ -497,9 +515,6 @@ namespace Legion {
       void register_index_space_creation(IndexSpace space);
     public:
       void register_index_partition_creation(IndexPartition handle);
-    public:
-      void destroy_user_lock(Reservation r);
-      void destroy_user_barrier(ApBarrier b);
     public:
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
     public:
@@ -608,11 +623,7 @@ namespace Legion {
       size_t                                total_tunable_count;
     protected:
       Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
-      long long                                previous_profiling_time;
-    protected:
-      // Resources that can build up over a task's lifetime
-      LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
-      LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
+      long long                                previous_profiling_time; 
     protected:
       std::map<LocalVariableID,
                std::pair<void*,void (*)(void*)> > task_local_variables;
@@ -1238,11 +1249,33 @@ namespace Legion {
       virtual void post_end_task(const void *res, size_t res_size, 
                                  bool owned, FutureFunctor *callback_functor);
     public:
-      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
-                                                          const Future &f);
-      virtual void find_collective_contributions(DynamicCollective dc,
-                                       std::vector<Future> &contributions);
+      virtual Lock create_lock(void);
+      virtual void destroy_lock(Lock l);
+      virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
+      virtual void release_grant(Grant grant);
+    public:
+      virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
+      virtual void destroy_phase_barrier(PhaseBarrier pb);
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
+    public:
+      void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                  const Future &f);
+      void find_collective_contributions(DynamicCollective dc,
+                                         std::vector<Future> &contributions);
+      virtual DynamicCollective create_dynamic_collective(
+                                                  unsigned arrivals,
+                                                  ReductionOpID redop,
+                                                  const void *init_value,
+                                                  size_t init_size);
+      virtual void destroy_dynamic_collective(DynamicCollective dc);
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                        const void *buffer, size_t size, unsigned count);
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &future,
+                                                    unsigned count);
       virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc);
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority); 
@@ -1415,6 +1448,10 @@ namespace Legion {
       // analysis stage of the pipeline and therefore no lock is needed
       std::map<IndexTreeNode*,
         std::vector<AttachProjectionFunctor*> > attach_functions;
+    protected:
+      // Resources that can build up over a task's lifetime
+      LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
+      LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
     };
 
     /**
@@ -1922,11 +1959,33 @@ namespace Legion {
       virtual void post_end_task(const void *res, size_t res_size, 
                                  bool owned, FutureFunctor *callback_functor);
     public:
-      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
-                                                          const Future &f);
-      virtual void find_collective_contributions(DynamicCollective dc,
-                                             std::vector<Future> &futures);
+      virtual Lock create_lock(void);
+      virtual void destroy_lock(Lock l);
+      virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
+      virtual void release_grant(Grant grant);
+    public:
+      virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
+      virtual void destroy_phase_barrier(PhaseBarrier pb);
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
+    public:
+      void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                  const Future &f);
+      void find_collective_contributions(DynamicCollective dc,
+                                         std::vector<Future> &contributions);
+      virtual DynamicCollective create_dynamic_collective(
+                                                  unsigned arrivals,
+                                                  ReductionOpID redop,
+                                                  const void *init_value,
+                                                  size_t init_size);
+      virtual void destroy_dynamic_collective(DynamicCollective dc);
+      virtual void arrive_dynamic_collective(DynamicCollective dc,
+                        const void *buffer, size_t size, unsigned count);
+      virtual void defer_dynamic_collective_arrival(DynamicCollective dc,
+                                                    const Future &future,
+                                                    unsigned count);
       virtual Future get_dynamic_collective_result(DynamicCollective dc);
+      virtual DynamicCollective advance_dynamic_collective(
+                                                   DynamicCollective dc);
     protected:
       mutable LocalLock                            leaf_lock;
       std::set<RtEvent>                            execution_events;
