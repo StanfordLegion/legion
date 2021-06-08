@@ -3003,6 +3003,7 @@ namespace Realm {
       , cfg_min_avail_mem(0)
       , cfg_max_ctxsync_threads(4)
       , cfg_multithread_dma(false)
+      , cfg_hostreg_limit(1 << 30)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
     {}
@@ -3113,7 +3114,8 @@ namespace Realm {
       	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
       	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
           .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
-          .add_option_int("-cuda:mtdma", m->cfg_multithread_dma);
+          .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
+          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm');
 #ifdef REALM_USE_HIP_HIJACK
         cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif	
@@ -3362,6 +3364,17 @@ namespace Realm {
 	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
 	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
 	    continue;
+    
+      // skip any memory that's over the max size limit for host
+      //  registration
+      if((cfg_hostreg_limit > 0) &&
+         ((*it)->size > cfg_hostreg_limit)) {
+	      log_gpu.info() << "memory " << (*it)->me
+                       << " is larger than hostreg limit ("
+                       << (*it)->size << " > " << cfg_hostreg_limit
+                       << ") - skipping registration";
+        continue;
+      }
 
 	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
 	  if(base == 0)
