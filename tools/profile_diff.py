@@ -6,18 +6,60 @@ from glob import glob
 from fnmatch import fnmatch
 import os.path
 from tabulate import tabulate
+import pandas
 from difflib import ndiff
 import daff
-import csv
+import sys
 from argparse import ArgumentParser
 
 class Profile:
-    def __init__(self, path):
+    def __init__(self, path, file_patterns):
         self.path = path
-        self.files = set(map(lambda path: os.path.relpath(path, self.path),
-            glob(f"{path}/**", recursive=True)))
+        # Glob all files in the chosen directory tree
+        all_files = glob(f"{path}/**", recursive=True)
+        # Convert each path to one relative to the base path
+        relative_files = map(lambda path: os.path.relpath(path, self.path),all_files)
+        # Filter out only paths that match one of the file_patterns
+        filtered_files = filter(lambda path: any([fnmatch(path, pattern) for pattern in file_patterns]),
+                relative_files)
+        # And make this as our set of files
+        self.files = set(filtered_files)
 
-    def dump_diff(self, other, tsv_file_pattern):
+    # This method is very similar to dump_diff below but it returns a pair
+    # (same, msg) that shows whether there is a diff between the two profiles
+    # and gives a pref summary to explain
+    def check(self, other, exclude_field_patterns):
+        same = True
+        msg = []
+        fileset_diff = set(self.diff_fileset(other))
+        for filename, inself, inother in fileset_diff:
+            if not inself:
+                msg.append(f"{self.path} is missing {filename}")
+                same = False
+            if not inother:
+                msg.append(f"{other.path} is missing {filename}")
+                same = False
+
+        # Now, find the diffs between the tsv files
+        for filename, in_self, in_other in fileset_diff:
+            # get the extension of the file
+            (_, extension) = os.path.splitext(filename)
+            # If the file is present in both self and other, and is a tsv...
+            if in_self and in_other and extension == '.tsv':
+                # The fields to be excluded are only the fields where the filepattern is none or a
+                # file pattern matched the given filename
+                exclude_fields = set(map(lambda pair: pair[1],
+                        filter(lambda pair: pair[0] is None or fnmatch(filename, pair[0]),
+                            exclude_field_patterns)))
+                # Calculate the diff
+                table_diff = self.diff_tsv(other, filename, exclude_fields)
+                # And if the diff isn't None
+                if table_diff is not None:
+                    msg.append(f"Diff detected in file {filename}")
+                    same = False
+        return same, '\n'.join(msg)
+
+    def dump_diff(self, other, exclude_field_patterns):
         # First identify which files both profiles have
         fileset_diff = sorted(self.diff_fileset(other))
         # Replace True and False with emoji to make the diff easier to read
@@ -32,9 +74,14 @@ class Profile:
             # get the extension of the file
             (_, extension) = os.path.splitext(filename)
             # If the file is present in both self and other, and is a tsv...
-            if in_self and in_other and extension == '.tsv' and fnmatch(filename, f"tsv/{tsv_file_pattern}"):
+            if in_self and in_other and extension == '.tsv':
+                # The fields to be excluded are only the fields where the filepattern is none or a
+                # file pattern matched the given filename
+                exclude_fields = set(map(lambda pair: pair[1],
+                        filter(lambda pair: pair[0] is None or fnmatch(filename, pair[0]),
+                            exclude_field_patterns)))
                 # Calculate the diff
-                table_diff = self.diff_tsv(other, filename)
+                table_diff = self.diff_tsv(other, filename, exclude_fields)
                 # And if the diff isn't None
                 if table_diff is not None:
                     # Then print the filename and the diff
@@ -43,13 +90,23 @@ class Profile:
                     print('-' * len(filename))
                     print(table_diff)
 
-    def diff_tsv(self, other, filename):
+    def diff_tsv(self, other, filename, exclude_fields):
         # We will store our variables in these lists
         with open(os.path.join(self.path, filename)) as self_file:
-            self_data = daff.PythonTableView(list(csv.reader(self_file, delimiter='\t')))
+            self_dataframe = pandas.read_csv(self_file, delimiter='\t')
+            self_dataframe_filtered = self_dataframe.drop(
+                    filter(lambda field: field in self_dataframe.columns, exclude_fields),
+                    axis = 1)
+            self_list = [self_dataframe_filtered.columns.tolist()] + self_dataframe_filtered.values.tolist()
+            self_data = daff.PythonTableView(self_list)
 
         with open(os.path.join(other.path, filename)) as other_file:
-            other_data = daff.PythonTableView(list(csv.reader(other_file, delimiter='\t')))
+            other_dataframe = pandas.read_csv(other_file, delimiter='\t')
+            other_dataframe_filtered = other_dataframe.drop(
+                    filter(lambda field: field in other_dataframe.columns, exclude_fields),
+                    axis = 1)
+            other_list = [other_dataframe_filtered.columns.tolist()] + other_dataframe_filtered.values.tolist()
+            other_data = daff.PythonTableView(other_list)
 
         alignment  = daff.Coopy.compareTables(self_data, other_data).align()
         result     = daff.PythonTableView([])
@@ -99,6 +156,7 @@ def warn(message):
     print(f"WARNING: {message}");
 
 def main(args):
+    # Validate arguments
     if not os.path.exists(args.left):
         warn(f"{args.left} does not exist")
         return
@@ -112,8 +170,23 @@ def main(args):
         warn(f"{args.right} is not a directory")
         return
 
-    lprofile, rprofile = Profile(args.left), Profile(args.right)
-    lprofile.dump_diff(rprofile, args.tsv_file_pattern)
+    # For each exclude_field arg, split at the ':' if there is one, or have the first
+    # element of the pair be None
+    exclude_field_patterns = list(map(lambda arg: tuple(arg.split(':', 1)) if arg.find(':') != -1 else (None, arg),
+            args.exclude_field))
+
+    file_patterns = args.file_pattern if len(args.file_pattern) > 0 else ['*']
+    lprofile = Profile(args.left, file_patterns=file_patterns)
+    rprofile = Profile(args.right, file_patterns=file_patterns)
+    if args.check:
+        same, msg = lprofile.check(rprofile, exclude_field_patterns=exclude_field_patterns)
+        print(msg)
+        if same:
+            sys.exit(0)
+        else:
+            sys.exit(1)
+    else:
+        lprofile.dump_diff(rprofile, exclude_field_patterns=exclude_field_patterns)
 
 if __name__ == '__main__':
     # If we're running as main, parse in some arguments, and them
@@ -121,6 +194,16 @@ if __name__ == '__main__':
     parser = ArgumentParser(description='Show the diff between two profiler outputs')
     parser.add_argument('left', type=str, help='The first, or left profiler output')
     parser.add_argument('right', type=str, help='The second, or right profiler output')
-    parser.add_argument('--tsv-file-pattern', type=str, default='*', help='The pattern to match for tsv files to diff. Defaults to *.')
+    parser.add_argument('--file-pattern', type=str, default=[], action='append', help='''
+    A pattern of files to match. Can be passed multiple times. If not passed, defaults to *.''')
+    parser.add_argument('--check', action='store_true', help='''
+    Run in 'check mode'. In this mode, instead of showing a diff, the tool will
+    only print a brief summary of detected differences. It will exit(0) if no diff is detected
+    and exit nonzero if a difference is detected.''')
+    parser.add_argument('--exclude-field', type=str, default=[], action='append', help='''
+    A pattern to exclude from comparison. Each pattern should have the format
+    "<optional glob-style filepath>:[field name]". So two valid arguments would "count" and
+    "tsv/Proc_0x*:prof_uid". This argument can be applied multiple times to exclude different
+    patterns''')
     args = parser.parse_args()
     main(args)
