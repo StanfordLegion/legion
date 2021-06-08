@@ -162,6 +162,29 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
     return result_dir
 
+def compare_prof_results(verbose, py_exe_path, profile_dirs):
+    cmd = [py_exe_path,
+           os.path.join(regent.root_dir(), 'tools', 'profile_diff.py'),
+           '--check',
+           '--file-pattern', 'tsv/Proc_*.tsv',
+           '--file-pattern', 'tsv/*CPU*_util.tsv',
+           '--file-pattern', 'tsv/*GPU*_util.tsv',
+           '--file-pattern', 'tsv/*Utility*_util.tsv',
+           '--file-pattern', 'tsv/*Channel*_util.tsv',
+           '--exclude-field', 'tsv/Proc*.tsv:title',
+           '--exclude-field', 'tsv/Proc*.tsv:prof_uid',
+           '--exclude-field', 'tsv/Proc*.tsv:initiation',
+           ] + profile_dirs
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_text(filename, label):
     re_label = re.compile(_re_label.format(label=label), re.MULTILINE)
@@ -255,8 +278,9 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_pr
 
             prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
             assert len(prof_logs) > 0
-            run_prof(prof_dir, prof_logs, verbose, py_exe_path)
-            run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
+            result_py = run_prof(prof_dir, prof_logs, verbose, py_exe_path)
+            result_rs = run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
+            compare_prof_results(verbose, py_exe_path, [result_py, result_rs])
     finally:
         shutil.rmtree(prof_dir)
 
