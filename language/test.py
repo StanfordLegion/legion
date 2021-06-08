@@ -509,6 +509,11 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                     if output is not None: print(output)
                     test_counters[test_name].failed += 1
                     num_failed += 1
+                elif outcome == INTERNALERROR:
+                    print('[%sERROR%s] (%s) %s' % (red, clear, test_name, filename))
+                    if output is not None: print(output)
+                    test_counters[test_name].failed += 1
+                    num_failed += 1
                 else:
                     raise Exception('Unexpected test outcome %s' % outcome)
             except queue.Empty:
