@@ -94,8 +94,8 @@ pub fn emit_trace<P: AsRef<Path>>(state: &mut State, path: P, force: bool) -> io
                     phase: "X",
                     timestamp: 0.0,
                     duration: 0.0,
-                    pid: proc.node_id.0,
-                    tid: proc.proc_in_node,
+                    pid: proc.proc_id.node_id().0,
+                    tid: proc.proc_id.proc_in_node(),
                 };
 
                 let mut start = time_range.start.unwrap();

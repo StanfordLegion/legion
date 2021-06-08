@@ -237,7 +237,7 @@ impl Proc {
 
         Ok(ProcessorRecord {
             full_text: format!("{:?} Processor 0x{:x}", self.kind, self.proc_id),
-            text: format!("{:?} Proc {}", self.kind, self.proc_in_node),
+            text: format!("{:?} Proc {}", self.kind, self.proc_id.proc_in_node()),
             tsv: filename,
             levels: level,
         })
@@ -255,7 +255,7 @@ impl State {
         let mut proc_count = BTreeMap::new();
 
         for proc in self.procs.values() {
-            let nodes = vec![None, Some(proc.node_id)];
+            let nodes = vec![None, Some(proc.proc_id.node_id())];
             for node in nodes {
                 let group = (node, proc.kind);
                 // set to 1 if group not in timepoints_dict
@@ -437,7 +437,7 @@ impl State {
         let mut nodes = BTreeSet::new();
         for proc in self.procs.values() {
             if !proc.time_points.is_empty() {
-                nodes.insert(Some(proc.node_id));
+                nodes.insert(Some(proc.proc_id.node_id()));
             }
         }
         if nodes.len() > 1 {

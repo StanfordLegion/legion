@@ -151,12 +151,22 @@ pub struct NodeID(pub u64);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventID(pub u64);
 
+impl ProcID {
+    // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+    // owner_node = proc_id[55:40]
+    // proc_idx = proc_id[11:0]
+    pub fn node_id(&self) -> NodeID {
+        NodeID((self.0 >> 40) & ((1 << 16) - 1))
+    }
+    pub fn proc_in_node(&self) -> u64 {
+        (self.0) & ((1 << 12) - 1)
+    }
+}
+
 #[derive(Debug)]
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    pub node_id: NodeID,
-    pub proc_in_node: u64,
     app_ranges: Vec<()>,
     last_time: Option<Timestamp>,
     pub tasks: BTreeMap<OpID, Task>,
@@ -175,11 +185,6 @@ impl Proc {
         Proc {
             proc_id,
             kind,
-            // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-            // owner_node = proc_id[55:40]
-            // proc_idx = proc_id[11:0]
-            node_id: NodeID((proc_id.0 >> 40) & ((1 << 16) - 1)),
-            proc_in_node: (proc_id.0) & ((1 << 12) - 1),
             app_ranges: Vec::new(),
             last_time: None,
             tasks: BTreeMap::new(),
@@ -398,6 +403,9 @@ impl MemID {
     pub fn node_id(&self) -> NodeID {
         NodeID((self.0 >> 40) & ((1 << 16) - 1))
     }
+    pub fn mem_in_node(&self) -> u64 {
+        (self.0) & ((1 << 12) - 1)
+    }
 }
 
 #[derive(Debug)]
@@ -405,8 +413,6 @@ pub struct Mem {
     mem_id: MemID,
     kind: MemKind,
     capacity: u64,
-    node_id: NodeID,
-    mem_in_node: u64,
     instances: BTreeSet<()>,
     time_points: Vec<()>,
     max_live_instances: Option<u64>,
@@ -420,8 +426,6 @@ impl Mem {
             mem_id,
             kind,
             capacity,
-            node_id: NodeID((mem_id.0 >> 40) & ((1 << 16) - 1)),
-            mem_in_node: (mem_id.0) & ((1 << 12) - 1),
             instances: BTreeSet::new(),
             time_points: Vec::new(),
             max_live_instances: None,
