@@ -3002,6 +3002,7 @@ namespace Realm {
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
       , cfg_max_ctxsync_threads(4)
+      , cfg_multithread_dma(false)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
     {}
@@ -3111,7 +3112,8 @@ namespace Realm {
       	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
       	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
       	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-          .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads);
+          .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
+          .add_option_int("-cuda:mtdma", m->cfg_multithread_dma);
 #ifdef REALM_USE_HIP_HIJACK
         cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif	
