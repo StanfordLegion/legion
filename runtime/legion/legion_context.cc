@@ -8745,15 +8745,15 @@ namespace Legion {
     {
       AutoLock pb_lock(phase_barrier_lock);
       if (!wait_barriers.empty())
-        analyze_barrier_dependences(op, wait_barriers, must_epoch);
+        analyze_barrier_dependences(op, wait_barriers, must_epoch, true);
       if (!arrive_barriers.empty())
-        analyze_barrier_dependences(op, arrive_barriers, must_epoch);
+        analyze_barrier_dependences(op, arrive_barriers, must_epoch, false);
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::analyze_barrier_dependences(Operation *op,
                               const std::vector<PhaseBarrier> &barriers,
-                              MustEpochOp *must_epoch_op /*= NULL*/)
+                              MustEpochOp *must_epoch_op, bool previous_gen)
     //--------------------------------------------------------------------------
     {
       const UniqueID uid = op->get_unique_op_id();
@@ -8765,9 +8765,10 @@ namespace Legion {
             barriers.begin(); ait != barriers.end(); ait++)
       {
         // Figure out the generic barrier ID
-        const size_t barrier_gen = 
-          Realm::ID(ait->phase_barrier.id).event_generation();
-        const size_t barrier_name = ait->phase_barrier.id - barrier_gen;
+        const ApBarrier barrier = previous_gen ? ait->phase_barrier :
+          Runtime::get_previous_phase(ait->phase_barrier);
+        const size_t barrier_gen = Realm::ID(barrier.id).event_generation();
+        const size_t barrier_name = barrier.id - barrier_gen;
         std::list<BarrierContribution> &previous =
           barrier_contributions[barrier_name];
         for (std::list<BarrierContribution>::iterator it =

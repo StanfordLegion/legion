@@ -1263,7 +1263,7 @@ namespace Legion {
     protected:
       void analyze_barrier_dependences(Operation *op,
             const std::vector<PhaseBarrier> &barriers,
-            MustEpochOp *must_epoch = NULL);
+            MustEpochOp *must_epoch, bool previous_gen);
     public:
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
