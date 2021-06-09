@@ -25,7 +25,7 @@ pub enum ProcKind {
 }
 
 // Make sure this is up to date with lowlevel.h
-#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(i32)]
 pub enum MemKind {
     NoMemKind = 0,
@@ -396,6 +396,22 @@ impl Proc {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct MemPoint {
+    pub time: Timestamp,
+    pub entry: (InstID, OpID),
+    pub first: bool,
+}
+
+impl MemPoint {
+    fn new(time: Timestamp, entry: (InstID, OpID), first: bool) -> Self {
+        MemPoint { time, entry, first }
+    }
+    pub fn time_key(&self) -> (u64, u8) {
+        (self.time.0, if self.first { 0 } else { 1 })
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemID(pub u64);
 
@@ -410,11 +426,11 @@ impl MemID {
 
 #[derive(Debug)]
 pub struct Mem {
-    mem_id: MemID,
-    kind: MemKind,
-    capacity: u64,
-    instances: BTreeSet<()>,
-    time_points: Vec<()>,
+    pub mem_id: MemID,
+    pub kind: MemKind,
+    pub capacity: u64,
+    instances: BTreeSet<(InstID, OpID)>,
+    pub time_points: Vec<MemPoint>,
     max_live_instances: Option<u64>,
     last_time: Option<Timestamp>,
     affinity: Option<u64>,
@@ -434,7 +450,18 @@ impl Mem {
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {}
-    fn sort_time_range(&mut self, last_time: Timestamp) {}
+
+    fn sort_time_range(&mut self, last_time: Timestamp, instances: &BTreeMap<(InstID, OpID), Inst>) {
+        self.max_live_instances = Some(0);
+        for key in &self.instances {
+            let inst = instances.get(&key).unwrap();
+            self.time_points.push(
+                MemPoint::new(inst.time_range.start.unwrap(), *key, true));
+            self.time_points.push(
+                MemPoint::new(inst.time_range.stop.unwrap(), *key, false))
+        }
+        self.time_points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+    }
 }
 
 #[derive(Debug)]
@@ -892,7 +919,7 @@ pub struct Inst {
     base: Base,
     inst_id: InstID,
     mem_id: Option<MemID>,
-    size: Option<u64>,
+    pub size: Option<u64>,
     time_range: TimeRange,
     deps: InitiationDependencies,
     ispace_ids: Vec<ISpaceID>,
@@ -1643,7 +1670,7 @@ pub struct State {
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    instances: BTreeMap<(InstID, OpID), Inst>,
+    pub instances: BTreeMap<(InstID, OpID), Inst>,
     index_spaces: BTreeMap<ISpaceID, ISpace>,
     index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
@@ -1867,7 +1894,7 @@ impl State {
             proc.sort_time_range(self.last_time);
         }
         for mem in self.mems.values_mut() {
-            mem.sort_time_range(self.last_time);
+            mem.sort_time_range(self.last_time, &self.instances);
         }
         for channel in self.channels.values_mut() {
             channel.sort_time_range(self.last_time);
@@ -2303,6 +2330,12 @@ fn process_record(record: &Record, state: &mut State) {
             mem_id,
             size,
         } => {
+            state
+                .mems
+                .get_mut(&mem_id)
+                .unwrap()
+                .instances
+                .insert((*inst_id, *op_id));
             state
                 .create_instance(*inst_id, *op_id)
                 .set_mem(*mem_id)

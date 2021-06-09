@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::state::{Chan, ChanID, ChanPoint, NodeID, MemID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp, Color};
+use crate::state::{Chan, ChanID, ChanPoint, NodeID, MemID, MemKind, MemPoint, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp, Color};
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/timeline.js");
@@ -277,6 +277,26 @@ impl State {
         (timepoint, proc_count)
     }
 
+    fn group_node_mem_kind_timepoints(&self) ->
+        BTreeMap<(Option<NodeID>, MemKind), Vec<(MemID, &Vec<MemPoint>)>>
+    {
+        let mut result = BTreeMap::new();
+        for (mem_id, mem) in &self.mems {
+            if !mem.time_points.is_empty() {
+                let nodes = vec![None, Some(mem.mem_id.node_id())];
+                for node in nodes {
+                    let group = (node, mem.kind);
+                    result
+                        .entry(group)
+                        .or_insert_with(|| Vec::new())
+                        .push((*mem_id, &mem.time_points))
+                }
+            }
+        }
+
+        result
+    }
+
     fn group_node_chan_kind_timepoints(&self) ->
         BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>>
     {
@@ -384,6 +404,46 @@ impl State {
         }
 
         utilization
+    }
+
+    fn calculate_mem_utilization_data(
+        &self,
+        points: Vec<&MemPoint>,
+        owners: BTreeSet<MemID>
+        ) -> Vec<(Timestamp, f64)> {
+        assert!(owners.len() > 0);
+
+
+        let mut result = Vec::new();
+
+        let mut max_count = 0;
+        for mem_id in owners {
+            let mem = self.mems.get(&mem_id).unwrap();
+            max_count += mem.capacity;
+        }
+
+        let max_count = max_count as f64;
+        let mut count = 0;
+        let mut last_time = None;
+
+        for point in points {
+            let inst = self.instances.get(&point.entry).unwrap();
+            if point.first {
+                count += inst.size.unwrap();
+            } else {
+                count -= inst.size.unwrap();
+            }
+
+            let ratio = count as f64 / max_count;
+            if last_time.map_or(false, |time| time == point.time) {
+                *result.last_mut().unwrap() = (point.time, ratio);
+            } else {
+                result.push((point.time, ratio));
+            }
+            last_time = Some(point.time);
+        }
+
+        result
     }
 
     fn calculate_chan_utilization_data(
@@ -513,6 +573,52 @@ impl State {
                 Some(node_id) => format!("{}", node_id.0),
             };
             let group_name = format!("{} ({:?})", &node_name, kind);
+            let filename = path
+                .as_ref()
+                .join("tsv")
+                .join(format!("{}_util.tsv", group_name));
+            let mut f = csv::WriterBuilder::new()
+                .delimiter(b'\t')
+                .from_path(filename)?;
+            f.serialize(UtilizationRecord {
+                time: "0.000",
+                count: "0.00",
+            })?;
+            for (time, count) in utilization {
+                f.serialize(UtilizationRecord {
+                    time: &format!("{}", time),
+                    count: &format!("{:.2}", count),
+                })?;
+            }
+        }
+
+        let timepoint_mem = self.group_node_mem_kind_timepoints();
+
+        for (group, points) in timepoint_mem {
+            let owners: BTreeSet<_> = points
+                .iter()
+                .filter(|(_, tp)| !tp.is_empty())
+                .map(|(mem_id, tp)| *mem_id)
+                .collect();
+
+            let utilization = if owners.is_empty() {
+                Vec::new()
+            } else {
+                let mut utilizations: Vec<_> = points
+                    .iter()
+                    .filter(|(_, tp)| !tp.is_empty())
+                    .flat_map(|(_, tp)| *tp)
+                    .collect();
+                utilizations.sort_by_key(|point| point.time_key());
+                self.calculate_mem_utilization_data(utilizations, owners)
+            };
+
+            let (node, kind) = group;
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} ({:?} Memory)", &node_name, kind);
             let filename = path
                 .as_ref()
                 .join("tsv")
