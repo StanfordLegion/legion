@@ -57,7 +57,7 @@ class Profile:
                 if table_diff is not None:
                     msg.append(f"Diff detected in file {filename}")
                     same = False
-        return same, '\n'.join(msg)
+        return same, msg
 
     def dump_diff(self, other, exclude_field_patterns):
         # First identify which files both profiles have
@@ -180,7 +180,8 @@ def main(args):
     rprofile = Profile(args.right, file_patterns=file_patterns)
     if args.check:
         same, msg = lprofile.check(rprofile, exclude_field_patterns=exclude_field_patterns)
-        print(msg)
+        for line in msg:
+            print(line)
         if same:
             sys.exit(0)
         else:
