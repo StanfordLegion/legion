@@ -498,9 +498,9 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04:210603
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04:210608
 .image_clang: &image_clang
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210603
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210608
 .image_2004: &image_2004
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
 .image_hpcsdk: &image_hpcsdk
