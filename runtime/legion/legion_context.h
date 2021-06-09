@@ -1412,8 +1412,13 @@ namespace Legion {
     public:
       void perform_barrier_dependence_analysis(Operation *op,
             const std::vector<PhaseBarrier> &wait_barriers,
-            const std::vector<PhaseBarrier> &arrival_barriers, 
+            const std::vector<PhaseBarrier> &arrive_barriers,
             MustEpochOp *must_epoch = NULL);
+    protected:
+      void analyze_barrier_dependences(Operation *op,
+            const std::vector<PhaseBarrier> &barriers,
+            MustEpochOp *must_epoch = NULL);
+    public:
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
                                                   ReductionOpID redop,
@@ -1591,15 +1596,17 @@ namespace Legion {
       struct BarrierContribution {
       public:
         BarrierContribution(void) : op(NULL), gen(0), uid(0), muid(0) { }
-        BarrierContribution(Operation *o, GenerationID g, UniqueID u,UniqueID m)
-          : op(o), gen(g), uid(u), muid(m) { }
+        BarrierContribution(Operation *o, GenerationID g, 
+                            UniqueID u, UniqueID m, size_t bg)
+          : op(o), gen(g), uid(u), muid(m), bargen(bg) { }
       public:
         Operation *op;
         GenerationID gen;
         UniqueID uid;
         UniqueID muid; // must epoch uid
+        size_t bargen; // the barrier generation
       };
-      std::map<ApEvent,std::vector<BarrierContribution> > barrier_contributions;
+      std::map<size_t,std::list<BarrierContribution> > barrier_contributions;
     protected:
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;

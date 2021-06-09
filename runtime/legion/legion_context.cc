@@ -20,6 +20,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 #include "legion/legion_replication.h"
+#include "realm/id.h"
 
 #define SWAP_PART_KINDS(k1, k2) \
   {                             \
@@ -9364,21 +9365,37 @@ namespace Legion {
         return;
       // Record this future as a contribution to the collective
       // for future dependence analysis
+      const size_t barrier_gen = 
+        Realm::ID(dc.phase_barrier.id).event_generation();
+      const size_t barrier_name = dc.phase_barrier.id - barrier_gen;
       AutoLock pb_lock(phase_barrier_lock);
-      barrier_contributions[dc.phase_barrier].push_back(
+      barrier_contributions[barrier_name].push_back(
           BarrierContribution(future.impl->producer_op, future.impl->op_gen,
 #ifdef LEGION_SPY
             future.impl->producer_uid,
 #else
             0/*no uid*/,
 #endif
-            0/*no muid*/));
+            0/*no muid*/, barrier_gen));
     }
 
     //--------------------------------------------------------------------------
     void InnerContext::perform_barrier_dependence_analysis(Operation *op,
-                              const std::vector<PhaseBarrier> &wait_barriers,
-                              const std::vector<PhaseBarrier> &arrival_barriers,
+                            const std::vector<PhaseBarrier> &wait_barriers,
+                            const std::vector<PhaseBarrier> &arrive_barriers,
+                            MustEpochOp *must_epoch)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock pb_lock(phase_barrier_lock);
+      if (!wait_barriers.empty())
+        analyze_barrier_dependences(op, wait_barriers, must_epoch);
+      if (!arrive_barriers.empty())
+        analyze_barrier_dependences(op, arrive_barriers, must_epoch);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::analyze_barrier_dependences(Operation *op,
+                              const std::vector<PhaseBarrier> &barriers,
                               MustEpochOp *must_epoch_op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -9386,59 +9403,25 @@ namespace Legion {
       const GenerationID gen = op->get_generation();
       const UniqueID muid = (must_epoch_op == NULL) ? 0 :
         must_epoch_op->get_unique_op_id();
-      AutoLock pb_lock(phase_barrier_lock);
-      for (std::vector<PhaseBarrier>::const_iterator wit =
-            wait_barriers.begin(); wit != wait_barriers.end(); wit++)
-      {
-        ApEvent previous = Runtime::get_previous_phase(wit->phase_barrier);
-        std::map<ApEvent,std::vector<BarrierContribution> >::iterator finder =
-          barrier_contributions.find(previous);
-        if (finder == barrier_contributions.end())
-          continue;
-        for (std::vector<BarrierContribution>::iterator it =
-              finder->second.begin(); it != finder->second.end(); /*nothing*/)
-        {
-          // If must epoch and same uid then skip it
-          if ((muid > 0) && (muid == it->muid))
-          {
-            it++;
-            continue;
-          }
-#ifdef LEGION_SPY
-          // No pruning for Legion Spy
-          op->register_dependence(it->op, it->gen);
-          LegionSpy::log_mapping_dependence(get_unique_id(), 
-              it->uid, 0, uid, 0, TRUE_DEPENDENCE);
-          it++;
-#else
-          if (op->register_dependence(it->op, it->gen))
-            it++;
-          else
-            it = finder->second.erase(it);
-#endif        
-        }
-        if (finder->second.empty())
-          barrier_contributions.erase(finder);
-      }
       // Record our barriers for future uses
       for (std::vector<PhaseBarrier>::const_iterator ait =
-            arrival_barriers.begin(); ait != arrival_barriers.end(); ait++)
+            barriers.begin(); ait != barriers.end(); ait++)
       {
-        // Save this barrier for later
-        barrier_contributions[ait->phase_barrier].push_back(
-            BarrierContribution(op, gen, uid, muid));
-        // Barriers must trigger in order so we also record dependences on
-        // the prior generation of our arrival barriers
-        ApEvent previous = Runtime::get_previous_phase(ait->phase_barrier);
-        if (!previous.exists())
-          continue;
-        std::map<ApEvent,std::vector<BarrierContribution> >::iterator finder =
-          barrier_contributions.find(previous);
-        if (finder == barrier_contributions.end())
-          continue;
-        for (std::vector<BarrierContribution>::iterator it =
-              finder->second.begin(); it != finder->second.end(); /*nothing*/)
+        // Figure out the generic barrier ID
+        const size_t barrier_gen = 
+          Realm::ID(ait->phase_barrier.id).event_generation();
+        const size_t barrier_name = ait->phase_barrier.id - barrier_gen;
+        std::list<BarrierContribution> &previous =
+          barrier_contributions[barrier_name];
+        for (std::list<BarrierContribution>::iterator it =
+              previous.begin(); it != previous.end(); /*nothing*/)
         {
+          // skip anything with a larger barrier generation
+          if (it->bargen >= barrier_gen)
+          {
+            it++;
+            continue;
+          }
           // If must epoch and same uid then skip it
           if ((muid > 0) && (muid == it->muid))
           {
@@ -9455,11 +9438,10 @@ namespace Legion {
           if (op->register_dependence(it->op, it->gen))
             it++;
           else
-            it = finder->second.erase(it);
+            it = previous.erase(it);
 #endif        
         }
-        if (finder->second.empty())
-          barrier_contributions.erase(finder);
+        previous.push_back(BarrierContribution(op,gen,uid,muid,barrier_gen));
       }
     }
 
