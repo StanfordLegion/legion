@@ -3932,7 +3932,7 @@ namespace Legion {
           {
             unsigned read_only_count = 0;
             std::vector<unsigned> performed_regions;
-            performed_regions.reserve(regions.size());
+            performed_regions.reserve(region_count);
             std::set<RtEvent> registration_postconditions;
             std::vector<UpdateAnalysis*> analyses(region_count, NULL);
             std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
@@ -3969,7 +3969,7 @@ namespace Legion {
                                           unique_op_id,
 #endif
                                           record_valid);
-              if (IS_READ_ONLY(regions[idx]))
+              if (IS_READ_ONLY(logical_regions[idx]))
                 read_only_count++;
             }
             // In order to avoid cycles when mapping multiple tasks in parallel
@@ -3986,7 +3986,7 @@ namespace Legion {
                     performed_regions.begin(); it !=
                     performed_regions.end(); it++)
               {
-                if (!IS_READ_ONLY(regions[*it]))
+                if (!IS_READ_ONLY(logical_regions[*it]))
                   continue;
                 read_only_regions.push_back(*it);
                 const RtEvent precondition = reg_pre[*it];
