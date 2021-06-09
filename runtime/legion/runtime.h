@@ -3502,10 +3502,13 @@ namespace Legion {
                                          ApEvent e1, ApEvent e2, ApEvent e3);
       static inline ApEvent merge_events(const TraceInfo *info,
                                          const std::set<ApEvent> &events);
+      static inline ApEvent merge_events(const TraceInfo *info,
+                                         const std::vector<ApEvent> &events);
     public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
+      static inline RtEvent merge_events(const std::vector<RtEvent> &events);
     public:
       static inline ApUserEvent create_ap_user_event(const TraceInfo *info);
       static inline void trigger_event(const TraceInfo *info, 
@@ -3763,8 +3766,11 @@ namespace Legion {
           return *(events.begin());
       }
 #endif
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      // Fuck C++
+      const std::set<ApEvent> *legion_events = &events;
+      const std::set<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (events.find(result) != events.end()))
@@ -3779,6 +3785,74 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, result);
+#endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, events);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events(
+                      const TraceInfo *info, const std::vector<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (events.empty())
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result;
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
+      if (events.size() == 1)
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result = events.front();
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return events.front();
+      }
+#endif
+      // Fuck C++
+      const std::vector<ApEvent> *legion_events = &events;
+      const std::vector<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
+      ApEvent result(Realm::Event::merge_events(*realm_events));
+#ifdef LEGION_DISABLE_EVENT_PRUNING 
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      else
+      {
+        // Check to make sure it isn't a rename
+        for (unsigned idx = 0; idx < events.size(); idx++)
+        {
+          if (events[idx] != result)
+            continue;
+          Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+          rename.trigger(result);
+          result = ApEvent(rename);
+          break;
+        }
+      }
+#endif
+#ifdef LEGION_SPY
+      for (std::vector<ApEvent>::const_iterator it = events.begin();
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
@@ -3815,9 +3889,32 @@ namespace Legion {
       if (events.size() == 1)
         return *(events.begin());
 #endif
+      // Fuck C++
+      const std::set<RtEvent> *legion_events = &events;
+      const std::set<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      return RtEvent(Realm::Event::merge_events(*realm_events));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(
+                                             const std::vector<RtEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (events.empty())
+        return RtEvent::NO_RT_EVENT;
+      if (events.size() == 1)
+        return events.front();
+#endif
+      // Fuck C++
+      const std::vector<RtEvent> *legion_events = &events;
+      const std::vector<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
+      // No logging for runtime operations currently
       return RtEvent(Realm::Event::merge_events(*realm_events));
     }
 
