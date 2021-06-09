@@ -80,6 +80,8 @@ namespace Realm {
       bool cfg_skip_busy_gpus;
       size_t cfg_min_avail_mem;
       int cfg_max_ctxsync_threads;
+      bool cfg_multithread_dma;
+      size_t cfg_hostreg_limit;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
