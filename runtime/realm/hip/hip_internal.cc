@@ -15,6 +15,7 @@
  */
 
 #include "realm/hip/hip_internal.h"
+#include "realm/hip/hip_module.h"
 
 namespace Realm {
   
@@ -201,6 +202,10 @@ namespace Realm {
 						  stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
       {
         src_gpu = _src_gpu;
+        
+        // switch out of ordered mode if multi-threaded dma is requested
+        if(_src_gpu->module->cfg_multithread_dma)
+          xdq.ordered_mode = false;
 
 	Memory fbm = src_gpu->fbmem->me;
 

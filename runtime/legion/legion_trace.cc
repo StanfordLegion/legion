@@ -5840,8 +5840,7 @@ namespace Legion {
                                                Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> rhs;
-      rhs.insert(rhs_);
+      std::vector<ApEvent> rhs(1, rhs_);
       record_merge_events(lhs, rhs, memo);
     }
 
@@ -5850,9 +5849,9 @@ namespace Legion {
                                                ApEvent e2, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> rhs;
-      rhs.insert(e1);
-      rhs.insert(e2);
+      std::vector<ApEvent> rhs(2);
+      rhs[0] = e1;
+      rhs[1] = e2;
       record_merge_events(lhs, rhs, memo);
     }
 
@@ -5862,10 +5861,10 @@ namespace Legion {
                                                Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> rhs;
-      rhs.insert(e1);
-      rhs.insert(e2);
-      rhs.insert(e3);
+      std::vector<ApEvent> rhs(3);
+      rhs[0] = e1;
+      rhs[1] = e2;
+      rhs[2] = e3;
       record_merge_events(lhs, rhs, memo);
     }
 
@@ -5900,6 +5899,57 @@ namespace Legion {
         ApUserEvent rename = Runtime::create_ap_user_event(NULL);
         Runtime::trigger_event(NULL, rename, lhs);
         lhs = rename;
+      }
+#endif
+
+      insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
+            memo->get_trace_local_id()));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs,
+                                               const std::vector<ApEvent>& rhs,
+                                               Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      std::set<unsigned> rhs_;
+      for (std::vector<ApEvent>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder != event_map.end())
+          rhs_.insert(finder->second);
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
+      else
+      {
+        // Check for reuse
+        for (unsigned idx = 0; idx < rhs.size(); idx++)
+        {
+          if (lhs != rhs[idx])
+            continue;
+          Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+          rename.trigger(lhs);
+          lhs = ApEvent(rename);
+          break;
+        }
       }
 #endif
 
@@ -6771,6 +6821,113 @@ namespace Legion {
         ApUserEvent rename = Runtime::create_ap_user_event(NULL);
         Runtime::trigger_event(NULL, rename, lhs);
         lhs = rename;
+      }
+#endif
+      insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
+            memo->get_trace_local_id()));
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_merge_events(ApEvent &lhs,
+                              const std::vector<ApEvent> &rhs, Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      std::set<unsigned> rhs_;
+      std::set<RtEvent> wait_for;
+      std::vector<ApEvent> pending_events;
+      std::map<ApEvent,RtUserEvent> request_events;
+      for (std::vector<ApEvent>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder == event_map.end())
+        {
+          // We're going to need to check this event later
+          pending_events.push_back(*it);
+          // See if anyone else has requested this event yet 
+          std::map<ApEvent,RtEvent>::const_iterator request_finder = 
+            pending_event_requests.find(*it);
+          if (request_finder == pending_event_requests.end())
+          {
+            const RtUserEvent request_event = Runtime::create_rt_user_event();
+            pending_event_requests[*it] = request_event;
+            wait_for.insert(request_event);
+            request_events[*it] = request_event;
+          }
+          else
+            wait_for.insert(request_finder->second);
+        }
+        else if (finder->second != NO_INDEX)
+          rhs_.insert(finder->second);
+      }
+      // If we have anything to wait for we need to do that
+      if (!wait_for.empty())
+      {
+        tpl_lock.release();
+        // Send any request messages first
+        if (!request_events.empty())
+        {
+          for (std::map<ApEvent,RtUserEvent>::const_iterator it = 
+                request_events.begin(); it != request_events.end(); it++)
+            request_remote_shard_event(it->first, it->second);
+        }
+        // Do the wait
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+        tpl_lock.reacquire();
+        // All our pending events should be here now
+        for (std::vector<ApEvent>::const_iterator it = 
+              pending_events.begin(); it != pending_events.end(); it++)
+        {
+          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != event_map.end());
+#endif
+          if (finder->second != NO_INDEX)
+            rhs_.insert(finder->second);
+        }
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+      
+      // If the lhs event wasn't made on this node then we need to rename it
+      // because we need all events to go back to a node where we know that
+      // we have a shard that can answer queries about it
+      const AddressSpaceID event_space = find_event_space(lhs);
+      if (event_space != repl_ctx->runtime->address_space)
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename, lhs);
+        lhs = rename;
+      }
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      else if (!lhs.exists())
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename);
+        lhs = rename;
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < rhs.size(); idx++)
+        {
+          if (lhs != rhs[idx])
+            continue;
+          ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+          Runtime::trigger_event(NULL, rename, lhs);
+          lhs = rename;
+          break;
+        }
       }
 #endif
       insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
@@ -8663,14 +8820,15 @@ namespace Legion {
                              std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> to_merge;
-      for (std::set<unsigned>::iterator it = rhs.begin(); it != rhs.end();
-           ++it)
+      std::vector<ApEvent> to_merge;
+      to_merge.reserve(rhs.size());
+      for (std::set<unsigned>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(*it < events.size());
 #endif
-        to_merge.insert(events[*it]);
+        to_merge.push_back(events[*it]);
       }
       ApEvent result = Runtime::merge_events(NULL, to_merge);
       events[lhs] = result;

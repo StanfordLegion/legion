@@ -569,6 +569,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(ApEvent &lhs,
+                                                const std::vector<ApEvent>& rhs,
+                                                Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
+      if (local_space != origin_space)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_MERGE_EVENTS);
+          rez.serialize(done);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize<size_t>(rhs.size());
+          for (std::vector<ApEvent>::const_iterator it = 
+                rhs.begin(); it != rhs.end(); it++)
+            rez.serialize(*it);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_merge_events(lhs, rhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
@@ -1182,12 +1216,11 @@ namespace Legion {
             }
             else
             {
-              std::set<ApEvent> rhs_events;
+              std::vector<ApEvent> rhs_events(num_rhs);
               for (unsigned idx = 0; idx < num_rhs; idx++)
               {
                 ApEvent event;
-                derez.deserialize(event);
-                rhs_events.insert(event);
+                derez.deserialize(rhs_events[idx]);
               }
               tpl->record_merge_events(lhs, rhs_events, memo);
             }

@@ -916,6 +916,8 @@ namespace Legion {
                                        ApEvent e3, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
@@ -1236,6 +1238,8 @@ namespace Legion {
       using PhysicalTemplate::record_merge_events;
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,

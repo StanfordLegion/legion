@@ -153,8 +153,10 @@ namespace Legion {
                                        ApEvent e2, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
                                        ApEvent e3, Memoizable *memo) = 0;
-      virtual void record_merge_events(ApEvent &lhs, 
+      virtual void record_merge_events(ApEvent &lhs,
                             const std::set<ApEvent>& rhs, Memoizable *memo) = 0;
+      virtual void record_merge_events(ApEvent &lhs,
+                         const std::vector<ApEvent>& rhs, Memoizable *memo) = 0;
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -279,6 +281,8 @@ namespace Legion {
                                        ApEvent e3, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -411,6 +415,12 @@ namespace Legion {
         }
       inline void record_merge_events(ApEvent &result, 
                                       const std::set<ApEvent> &events) const
+        {
+          base_sanity_check();
+          rec->record_merge_events(result, events, memo);
+        }
+      inline void record_merge_events(ApEvent &result, 
+                                      const std::vector<ApEvent> &events) const
         {
           base_sanity_check();
           rec->record_merge_events(result, events, memo);

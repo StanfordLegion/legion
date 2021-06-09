@@ -3079,6 +3079,8 @@ namespace Realm {
       , cfg_min_avail_mem(0)
       , cfg_max_ctxsync_threads(4)
       , cfg_lmem_resize_to_max(false)
+      , cfg_multithread_dma(false)
+      , cfg_hostreg_limit(1 << 30)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
       , uvm_base(0), uvmmem(0)
@@ -3092,20 +3094,63 @@ namespace Realm {
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
+      CudaModule *m = new CudaModule;
 
-      // before we do anything, make sure there's a CUDA driver and GPUs to talk to
+      // first order of business - read command line parameters
+      {
+	CommandLineParser cp;
+
+	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
+	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+          .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
+	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
+	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
+	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
+	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
+	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
+	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
+	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
+	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
+	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
+	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
+          .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max)
+	  .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
+          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm');
+#ifdef REALM_USE_CUDART_HIJACK
+	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
+#endif
+
+	bool ok = cp.parse_command_line(cmdline);
+	if(!ok) {
+	  log_gpu.error() << "error reading CUDA command line parameters";
+	  exit(1);
+	}
+      }
+
       std::vector<GPUInfo *> infos;
       {
 	int num_devices;
 	CUresult ret = cuInit(0);
-	if(ret == CUDA_ERROR_NO_DEVICE) {
-	  // continue on so that we recognize things like -ll:gpu, but there
-	  //  are no devices to be found
-	  num_devices = 0;
-	  log_gpu.info() << "cuInit reports no devices found";
-	} else if(ret != CUDA_SUCCESS) {
-	  log_gpu.warning() << "cuInit(0) returned " << ret << " - module not loaded";
-	  return 0;
+        if(ret != CUDA_SUCCESS) {
+          // failure to initialize the driver is a fatal error if we know gpus
+          //  have been requested
+          if(m->cfg_num_gpus > 0) {
+            const char *err_name, *err_str;
+            cuGetErrorName(ret, &err_name);
+            cuGetErrorString(ret, &err_str);
+            log_gpu.fatal() << "gpus requested, but cuInit(0) returned "
+                            << ret << " (" << err_name << "): " << err_str;
+            abort();
+          } else if(ret == CUDA_ERROR_NO_DEVICE) {
+            num_devices = 0;
+            log_gpu.info() << "cuInit reports no devices found";
+          } else if(ret != CUDA_SUCCESS) {
+            log_gpu.warning() << "cuInit(0) returned " << ret << " - module not loaded";
+            delete m;
+            return 0;
+          }
 	} else {
 	  CHECK_CU( cuDeviceGetCount(&num_devices) );
 	  for(int i = 0; i < num_devices; i++) {
@@ -3128,11 +3173,6 @@ namespace Realm {
 	  }
 	}
 
-	if(infos.empty()) {
-	  log_gpu.warning() << "no CUDA-capable GPUs found - module not loaded";
-	  return 0;
-	}
-
 	// query peer-to-peer access (all pairs)
 	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
 	    it1 != infos.end();
@@ -3153,41 +3193,8 @@ namespace Realm {
 	    }
       }
 
-      CudaModule *m = new CudaModule;
-
       // give the gpu info we assembled to the module
       m->gpu_info.swap(infos);
-
-      // first order of business - read command line parameters
-      {
-	CommandLineParser cp;
-
-	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
-	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
-	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
-          .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
-	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
-	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
-	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
-	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
-	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
-	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
-	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
-	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
-	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
-          .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max);
-#ifdef REALM_USE_CUDART_HIJACK
-	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
-#endif
-
-	bool ok = cp.parse_command_line(cmdline);
-	if(!ok) {
-	  log_gpu.error() << "error reading CUDA command line parameters";
-	  exit(1);
-	}
-      }
 
       return m;
     }
@@ -3494,6 +3501,17 @@ namespace Realm {
              ((*it)->kind == MemoryImpl::MKIND_MANAGED))
 	    continue;
 
+          // skip any memory that's over the max size limit for host
+          //  registration
+          if((cfg_hostreg_limit > 0) &&
+             ((*it)->size > cfg_hostreg_limit)) {
+	    log_gpu.info() << "memory " << (*it)->me
+                           << " is larger than hostreg limit ("
+                           << (*it)->size << " > " << cfg_hostreg_limit
+                           << ") - skipping registration";
+            continue;
+          }
+
 	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
 	  if(base == 0)
 	    continue;
@@ -3609,8 +3627,12 @@ namespace Realm {
 
       for(std::vector<GPU *>::iterator it = gpus.begin();
 	  it != gpus.end();
-	  it++)
+	  it++) {
+#ifdef REALM_USE_CUDART_HIJACK
+        GlobalRegistrations::remove_gpu_context(*it);
+#endif
 	delete *it;
+      }
       gpus.clear();
       
       Module::cleanup();
