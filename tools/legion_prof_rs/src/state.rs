@@ -43,6 +43,15 @@ pub enum MemKind {
     L1Cache = 12,
 }
 
+impl fmt::Display for MemKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MemKind::ZeroCopy => write!(f, "Zero-Copy"),
+            _ => write!(f, "{:?}", self)
+        }
+    }
+}
+
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(i32)]

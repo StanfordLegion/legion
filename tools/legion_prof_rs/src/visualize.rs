@@ -618,7 +618,7 @@ impl State {
                 None => "all".to_owned(),
                 Some(node_id) => format!("{}", node_id.0),
             };
-            let group_name = format!("{} ({:?} Memory)", &node_name, kind);
+            let group_name = format!("{} ({} Memory)", &node_name, kind);
             let filename = path
                 .as_ref()
                 .join("tsv")
