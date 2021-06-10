@@ -502,7 +502,7 @@ before_script:
 .image_clang: &image_clang
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210608
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210609
 .image_hpcsdk: &image_hpcsdk
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
 .image_icc: &image_icc
