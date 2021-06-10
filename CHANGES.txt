@@ -20,6 +20,9 @@ Version 21.06.0 (June ??, 2021)
     - Registration of host memory with CUDA driver is skipped for host
         memories larger than 1GB by default due to CUDA driver overhead.
         This threshold can be increased (or decreased) with `-cuda:hostreg`
+  * Tools
+    - New Rust implementation of Legion Prof is 5-15x faster than the
+        original (even with PyPy)
 
 Version 21.03.0 (March 30, 2021)
   * Build
