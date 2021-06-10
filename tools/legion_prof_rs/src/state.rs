@@ -8,7 +8,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::serialize::Record;
 
-const TASK_GRANULARITY_THRESHOLD: u64 = 10 * 1000;
+const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
 
 
 // Make sure this is up to date with lowlevel.h
@@ -110,6 +110,12 @@ pub enum DimKind {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
 pub struct Timestamp(pub u64 /* ns */);
+
+impl Timestamp {
+    pub const fn from_us(microseconds: u64) -> Timestamp {
+        Timestamp(microseconds * 1000)
+    }
+}
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -302,7 +308,7 @@ impl Proc {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
             let ready = time.ready;
-            if stop - start > TASK_GRANULARITY_THRESHOLD.into() && !ready.is_none() {
+            if stop - start > TASK_GRANULARITY_THRESHOLD && !ready.is_none() {
                 all_points.push(ProcPoint::new(ready.unwrap(), entry, true, start.0));
                 all_points.push(ProcPoint::new(stop, entry, false, 0));
             } else {
@@ -2388,8 +2394,7 @@ fn process_record(record: &Record, state: &mut State) {
             assert!(state.mapper_call_kinds.contains_key(kind));
             assert!(*start <= *stop);
             // For now we'll only add very expensive mapper calls (more than 100 us)
-            #[rustfmt::skip]
-            if stop.0 - start.0 >= 100_000 /* ns */ {
+            if *stop - *start >= Timestamp::from_us(100) {
                 let time_range = TimeRange::new_start(*start, *stop);
                 state.create_mapper_call(*kind, *proc_id, *op_id, time_range);
                 state.update_last_time(*stop);

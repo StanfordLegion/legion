@@ -62,10 +62,10 @@ fn main() -> io::Result<()> {
     let trace = matches.is_present("trace");
     let start_trim = matches
         .value_of("start-trim")
-        .map(|x| Timestamp(x.parse::<u64>().unwrap() * 1000));
+        .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
     let stop_trim = matches
         .value_of("stop-trim")
-        .map(|x| Timestamp(x.parse::<u64>().unwrap() * 1000));
+        .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
 
     let mut state = State::default();
     for filename in filenames {
