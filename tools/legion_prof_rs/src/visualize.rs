@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::state::{Chan, ChanID, ChanPoint, NodeID, MemID, MemKind, MemPoint, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, Timestamp, Color};
+use crate::state::{
+    ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry, ProcID, ProcKind,
+    ProcPoint, State, Timestamp,
+};
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/timeline.js");
@@ -68,7 +71,7 @@ impl Proc {
         f: &mut csv::Writer<File>,
         point: &ProcPoint,
         state: &State,
-        ) -> io::Result<()> {
+    ) -> io::Result<()> {
         let (base, time_range, waiters) = self.entry(point.entry);
         let name = match point.entry {
             ProcEntry::Task(op_id) => {
@@ -105,7 +108,7 @@ impl Proc {
                 .unwrap()
                 .name
                 .clone(),
-            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id.0)
+            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id.0),
         };
 
         let color = match point.entry {
@@ -277,9 +280,9 @@ impl State {
         (timepoint, proc_count)
     }
 
-    fn group_node_mem_kind_timepoints(&self) ->
-        BTreeMap<(Option<NodeID>, MemKind), Vec<(MemID, &Vec<MemPoint>)>>
-    {
+    fn group_node_mem_kind_timepoints(
+        &self,
+    ) -> BTreeMap<(Option<NodeID>, MemKind), Vec<(MemID, &Vec<MemPoint>)>> {
         let mut result = BTreeMap::new();
         for (mem_id, mem) in &self.mems {
             if !mem.time_points.is_empty() {
@@ -297,9 +300,9 @@ impl State {
         result
     }
 
-    fn group_node_chan_kind_timepoints(&self) ->
-        BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>>
-    {
+    fn group_node_chan_kind_timepoints(
+        &self,
+    ) -> BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>> {
         let mut result = BTreeMap::new();
 
         for (chan_id, chan) in &self.channels {
@@ -308,7 +311,7 @@ impl State {
                     let mut nodes = vec![
                         None,
                         chan_id.src.map(|src| src.node_id()),
-                        chan_id.dst.map(|dst| dst.node_id())
+                        chan_id.dst.map(|dst| dst.node_id()),
                     ];
                     &nodes.dedup();
                     for node in nodes {
@@ -324,7 +327,11 @@ impl State {
         result
     }
 
-    fn convert_proc_points_to_utilization(&self, points: &Vec<ProcPoint>, proc_id: ProcID) -> Vec<ProcPoint> {
+    fn convert_proc_points_to_utilization(
+        &self,
+        points: &Vec<ProcPoint>,
+        proc_id: ProcID,
+    ) -> Vec<ProcPoint> {
         let mut utilization = Vec::new();
         let mut count = 0;
         for point in points {
@@ -345,7 +352,11 @@ impl State {
 
     // This is character-for-character the same function as convert_proc_points_to_utilization(
     // TODO look into making a TimePoint trait so that we don't have to repeat method definitions
-    fn convert_chan_points_to_utilization(&self, points: &Vec<ChanPoint>, chan_id: ChanID) -> Vec<ChanPoint> {
+    fn convert_chan_points_to_utilization(
+        &self,
+        points: &Vec<ChanPoint>,
+        chan_id: ChanID,
+    ) -> Vec<ChanPoint> {
         let mut utilization = Vec::new();
         let mut count = 0;
 
@@ -409,10 +420,9 @@ impl State {
     fn calculate_mem_utilization_data(
         &self,
         points: Vec<&MemPoint>,
-        owners: BTreeSet<MemID>
-        ) -> Vec<(Timestamp, f64)> {
+        owners: BTreeSet<MemID>,
+    ) -> Vec<(Timestamp, f64)> {
         assert!(owners.len() > 0);
-
 
         let mut result = Vec::new();
 
@@ -449,7 +459,7 @@ impl State {
     fn calculate_chan_utilization_data(
         &self,
         points: Vec<ChanPoint>,
-        owners: BTreeSet<ChanID>
+        owners: BTreeSet<ChanID>,
     ) -> Vec<(Timestamp, f64)> {
         // we assume that the timepoints are sorted before this step
 
@@ -542,8 +552,8 @@ impl State {
         }
 
         {
-            let mut filename = path.as_ref().join("json").join("utils.json");
-            let mut file = File::create(filename)?;
+            let filename = path.as_ref().join("json").join("utils.json");
+            let file = File::create(filename)?;
             serde_json::to_writer(&file, &stats)?;
         }
 
@@ -660,7 +670,9 @@ impl State {
 
             let group_name = if let Some(node_id) = node_id {
                 format!("{} (Channel)", node_id.0)
-            } else { "all (Channel)".to_owned() };
+            } else {
+                "all (Channel)".to_owned()
+            };
 
             let filename = path
                 .as_ref()
@@ -759,7 +771,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state.emit_utilization_tsv(&path)?;
 
     {
-        let mut filename = path.join("legion_prof_processor.tsv");
+        let filename = path.join("legion_prof_processor.tsv");
         let mut file = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_path(filename)?;
@@ -769,7 +781,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     }
 
     {
-        let mut filename = path.join("legion_prof_ops.tsv");
+        let filename = path.join("legion_prof_ops.tsv");
         let mut file = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_path(filename)?;
@@ -807,8 +819,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             max_level: base_level + 1,
         };
 
-        let mut filename = path.join("json").join("scale.json");
-        let mut file = File::create(filename)?;
+        let filename = path.join("json").join("scale.json");
+        let file = File::create(filename)?;
         serde_json::to_writer(&file, &scale_data)?;
     }
 

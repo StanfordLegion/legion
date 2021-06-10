@@ -17,8 +17,8 @@ use nom::{
 };
 
 use crate::state::{
-    EventID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID, RuntimeCallKindID, TaskID,
-    Timestamp, VariantID,
+    EventID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID, RuntimeCallKindID,
+    TaskID, Timestamp, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -60,11 +60,13 @@ pub struct RecordFormat {
     pub fields: Vec<FieldFormat>,
 }
 
+// Note: we use different, more specialized types for some of the ones
+// below.
 type DepPartOpKind = i32;
-type IDType = u64;
+// type IDType = u64;
 type MaxDim = i32;
 type MemKind = i32;
-type MessageKind = i32;
+// type MessageKind = i32;
 type ProcKind = i32;
 type UniqueID = u64;
 
@@ -713,7 +715,7 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             start,
             stop,
             fevent,
-            num_requests
+            num_requests,
         },
     ))
 }
@@ -726,17 +728,17 @@ fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, request_type) = le_u32(input)?;
     let (input, num_hops) = le_u32(input)?;
     Ok((
-            input,
-            Record::CopyInstInfo {
-                op_id,
-                src_inst,
-                dst_inst,
-                fevent,
-                num_fields,
-                request_type,
-                num_hops
-            }
-       ))
+        input,
+        Record::CopyInstInfo {
+            op_id,
+            src_inst,
+            dst_inst,
+            fevent,
+            num_fields,
+            request_type,
+            num_hops,
+        },
+    ))
 }
 fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;

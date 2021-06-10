@@ -1,7 +1,7 @@
 use std::cmp::{max, Reverse};
-use std::fmt;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
+use std::fmt;
 
 use derive_more::{Add, From, LowerHex, Sub};
 use num_enum::TryFromPrimitive;
@@ -9,7 +9,6 @@ use num_enum::TryFromPrimitive;
 use crate::serialize::Record;
 
 const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
-
 
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
@@ -47,7 +46,7 @@ impl fmt::Display for MemKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MemKind::ZeroCopy => write!(f, "Zero-Copy"),
-            _ => write!(f, "{:?}", self)
+            _ => write!(f, "{:?}", self),
         }
     }
 }
@@ -134,7 +133,7 @@ pub enum ProcEntry {
     MetaTask(OpID, VariantID, usize),
     MapperCall(usize),
     RuntimeCall(usize),
-    ProfTask(usize)
+    ProfTask(usize),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -150,10 +149,19 @@ pub struct ProcPoint {
 
 impl ProcPoint {
     fn new(time: Timestamp, entry: ProcEntry, first: bool, secondary_sort_key: u64) -> Self {
-        ProcPoint { time, entry, first , secondary_sort_key: secondary_sort_key}
+        ProcPoint {
+            time,
+            entry,
+            first,
+            secondary_sort_key: secondary_sort_key,
+        }
     }
     pub fn time_key(&self) -> (u64, u8, u64) {
-        (self.time.0, if self.first { 0 } else { 1 }, self.secondary_sort_key)
+        (
+            self.time.0,
+            if self.first { 0 } else { 1 },
+            self.secondary_sort_key,
+        )
     }
 }
 
@@ -215,7 +223,11 @@ impl Proc {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tasks.is_empty() && self.meta_tasks.is_empty() && self.mapper_calls.is_empty() && self.runtime_calls.is_empty() && self.prof_tasks.is_empty()
+        self.tasks.is_empty()
+            && self.meta_tasks.is_empty()
+            && self.mapper_calls.is_empty()
+            && self.runtime_calls.is_empty()
+            && self.prof_tasks.is_empty()
     }
 
     pub fn entry(&self, entry: ProcEntry) -> (&Base, &TimeRange, &Waiters) {
@@ -295,6 +307,10 @@ impl Proc {
             runtime_call.trim_time_range(start, stop);
         }
         self.runtime_calls.retain(|t| !t.time_range.was_removed);
+        for prof_task in &mut self.prof_tasks {
+            prof_task.trim_time_range(start, stop);
+        }
+        self.prof_tasks.retain(|t| !t.time_range.was_removed);
     }
 
     fn sort_time_range(&mut self, last_time: Timestamp) {
@@ -466,16 +482,21 @@ impl Mem {
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {}
 
-    fn sort_time_range(&mut self, last_time: Timestamp, instances: &BTreeMap<(InstID, OpID), Inst>) {
+    fn sort_time_range(
+        &mut self,
+        last_time: Timestamp,
+        instances: &BTreeMap<(InstID, OpID), Inst>,
+    ) {
         self.max_live_instances = Some(0);
         for key in &self.instances {
             let inst = instances.get(&key).unwrap();
-            self.time_points.push(
-                MemPoint::new(inst.time_range.start.unwrap(), *key, true));
-            self.time_points.push(
-                MemPoint::new(inst.time_range.stop.unwrap(), *key, false))
+            self.time_points
+                .push(MemPoint::new(inst.time_range.start.unwrap(), *key, true));
+            self.time_points
+                .push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false))
         }
-        self.time_points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        self.time_points
+            .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
     }
 }
 
@@ -632,14 +653,12 @@ impl Chan {
                     ChanEntry::Copy(idx) => self.copies[idx].base.set_level(level),
                     ChanEntry::Fill(idx) => self.fills[idx].base.set_level(level),
                     ChanEntry::DepPart(idx) => self.depparts[idx].base.set_level(level),
-                    _ => unreachable!(),
                 };
             } else {
                 let level = match point.entry {
                     ChanEntry::Copy(idx) => self.copies[idx].base.level.unwrap(),
                     ChanEntry::Fill(idx) => self.fills[idx].base.level.unwrap(),
                     ChanEntry::DepPart(idx) => self.depparts[idx].base.level.unwrap(),
-                    _ => unreachable!(),
                 };
                 free_levels.push(Reverse(level));
             }
@@ -1143,7 +1162,6 @@ pub struct Base {
     pub prof_uid: ProfUID,
     pub level: Option<u32>,
     pub level_ready: Option<u32>,
-    proc_id: Option<ProcID>,
 }
 
 impl Base {
@@ -1152,7 +1170,6 @@ impl Base {
             prof_uid: state.get_prof_uid(),
             level: None,
             level_ready: None,
-            proc_id: None,
         }
     }
     fn set_level(&mut self, level: u32) -> &mut Self {
@@ -1163,11 +1180,6 @@ impl Base {
     fn set_level_ready(&mut self, level_ready: u32) -> &mut Self {
         assert_eq!(self.level_ready, None);
         self.level_ready = Some(level_ready);
-        self
-    }
-    fn set_proc(&mut self, proc_id: ProcID) -> &mut Self {
-        assert_eq!(self.proc_id, None);
-        self.proc_id = Some(proc_id);
         self
     }
 }
@@ -1483,9 +1495,8 @@ pub struct CopyInfo {
     fevent: EventID,
     num_fields: u32,
     request_type: u32,
-    num_hops: u32
+    num_hops: u32,
 }
-
 
 #[derive(Debug)]
 pub struct Copy {
@@ -1497,7 +1508,7 @@ pub struct Copy {
     deps: InitiationDependencies,
     fevent: EventID,
     num_requests: u32,
-    copy_info: Vec<CopyInfo>
+    copy_info: Vec<CopyInfo>,
 }
 
 impl Copy {
@@ -1510,7 +1521,7 @@ impl Copy {
         time_range: TimeRange,
         fevent: EventID,
         num_requests: u32,
-        copy_info: Vec<CopyInfo>
+        copy_info: Vec<CopyInfo>,
     ) -> Self {
         Copy {
             base,
@@ -1521,7 +1532,7 @@ impl Copy {
             deps: InitiationDependencies::new(op_id),
             fevent,
             num_requests,
-            copy_info
+            copy_info,
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
@@ -1580,9 +1591,9 @@ fn compute_color(step: u32, num_steps: u32) -> Color {
     let f = h * 6.0 - i;
     let q = 1.0 - f;
     let rem = (i as u32) % 6;
-    let mut r = 0.0;
-    let mut g = 0.0;
-    let mut b = 0.0;
+    let r;
+    let g;
+    let b;
     if rem == 0 {
         r = 1.0;
         g = f;
@@ -1629,7 +1640,8 @@ impl LFSR {
         let needed_bits = (size as f64).log2().ceil() as u32;
         let seed_configuration = 0b1010010011110011;
         LFSR {
-            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits))) >> (16 - needed_bits),
+            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits)))
+                >> (16 - needed_bits),
             bits: needed_bits,
             max_value: 1 << needed_bits,
             taps: match needed_bits {
@@ -1658,7 +1670,7 @@ impl LFSR {
             xor += (self.register >> (self.bits - t)) & 1;
         }
         xor = xor & 1;
-        self.register = ((self.register >> 1) | (xor << (self.bits-1))) & ((1 << self.bits) - 1);
+        self.register = ((self.register >> 1) | (xor << (self.bits - 1))) & ((1 << self.bits) - 1);
         self.register
     }
 }
@@ -1745,7 +1757,7 @@ impl State {
     ) -> &mut MetaTask {
         let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
         self.meta_tasks.insert((op_id, variant_id), proc_id);
-        let mut tasks = self
+        let tasks = self
             .procs
             .get_mut(&proc_id)
             .unwrap()
@@ -1813,13 +1825,21 @@ impl State {
         size: u64,
         time_range: TimeRange,
         fevent: EventID,
-        num_requests: u32
+        num_requests: u32,
     ) {
         let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
         let channel = self.find_copy_channel(src, dst);
-        channel
-            .copies
-            .push(Copy::new(base, src, dst, size, op_id, time_range, fevent, num_requests, Vec::new()));
+        channel.copies.push(Copy::new(
+            base,
+            src,
+            dst,
+            size,
+            op_id,
+            time_range,
+            fevent,
+            num_requests,
+            Vec::new(),
+        ));
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
@@ -2286,14 +2306,25 @@ fn process_record(record: &Record, state: &mut State) {
             start,
             stop,
             fevent,
-            num_requests
+            num_requests,
         } => {
             let channel_id = ChanID::new_copy(*src, *dst);
             let copy_id = state.find_copy_channel(*src, *dst).copies.len();
-            state.copy_map.entry(*fevent).or_insert_with(|| (channel_id, copy_id));
+            state
+                .copy_map
+                .entry(*fevent)
+                .or_insert_with(|| (channel_id, copy_id));
 
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_copy(*op_id, *src, *dst, *size, time_range, *fevent, *num_requests);
+            state.create_copy(
+                *op_id,
+                *src,
+                *dst,
+                *size,
+                time_range,
+                *fevent,
+                *num_requests,
+            );
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
@@ -2303,7 +2334,7 @@ fn process_record(record: &Record, state: &mut State) {
             fevent,
             num_fields,
             request_type,
-            num_hops
+            num_hops,
         } => {
             let copy_info = CopyInfo {
                 src_inst: *src_inst,
@@ -2311,11 +2342,10 @@ fn process_record(record: &Record, state: &mut State) {
                 fevent: *fevent,
                 num_fields: *num_fields,
                 request_type: *request_type,
-                num_hops: *num_hops
+                num_hops: *num_hops,
             };
             let (channel_id, channel_idx) = *state.copy_map.get(fevent).unwrap();
-            state.find_channel(channel_id)
-                .copies[channel_idx]
+            state.find_channel(channel_id).copies[channel_idx]
                 .copy_info
                 .push(copy_info);
         }
