@@ -16,7 +16,7 @@ class Profile:
     def __init__(self, path, file_patterns):
         self.path = path
         # Glob all files in the chosen directory tree
-        all_files = glob(f"{path}/**", recursive=True)
+        all_files = glob("%s/**" % path, recursive=True)
         # Convert each path to one relative to the base path
         relative_files = map(lambda path: os.path.relpath(path, self.path),all_files)
         # Filter out only paths that match one of the file_patterns
@@ -34,10 +34,10 @@ class Profile:
         fileset_diff = set(self.diff_fileset(other))
         for filename, inself, inother in fileset_diff:
             if not inself:
-                msg.append(f"{self.path} is missing {filename}")
+                msg.append("%s is missing %s" % (self.path, filename))
                 same = False
             if not inother:
-                msg.append(f"{other.path} is missing {filename}")
+                msg.append("%s is missing %s" % (other.path, filename))
                 same = False
 
         # Now, find the diffs between the tsv files
@@ -55,7 +55,7 @@ class Profile:
                 table_diff = self.diff_tsv(other, filename, exclude_fields)
                 # And if the diff isn't None
                 if table_diff is not None:
-                    msg.append(f"Diff detected in file {filename}")
+                    msg.append("Diff detected in file %s" % filename)
                     same = False
         return same, msg
 
@@ -67,7 +67,7 @@ class Profile:
                 fileset_diff)
         # Tabulate and print the result
         print(tabulate(diff_with_emoji,
-            headers=['Filename', f"Exists in {self.path}", f"Exists in {other.path}"]))
+            headers=['Filename', "Exists in %s" % self.path, "Exists in %s" % other.path]))
 
         # Now, find the diffs between the tsv files
         for filename, in_self, in_other in fileset_diff:
@@ -153,21 +153,21 @@ class Profile:
         return '✅' if b else '❌'
 
 def warn(message):
-    print(f"WARNING: {message}");
+    print("WARNING: %s" % message);
 
 def main(args):
     # Validate arguments
     if not os.path.exists(args.left):
-        warn(f"{args.left} does not exist")
+        warn("%s does not exist" % args.left)
         return
     elif not os.path.isdir(args.left):
-        warn(f"{args.left} is not a directory")
+        warn("%s is not a directory" % args.left)
         return
     if not os.path.exists(args.right):
-        warn(f"{args.right} does not exist")
+        warn("%s does not exist" % args.right)
         return
     elif not os.path.isdir(args.right):
-        warn(f"{args.right} is not a directory")
+        warn("%s is not a directory" % args.right)
         return
 
     # For each exclude_field arg, split at the ':' if there is one, or have the first
