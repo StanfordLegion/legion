@@ -125,16 +125,20 @@ pub enum ProcEntry {
 #[derive(Debug, Copy, Clone)]
 pub struct ProcPoint {
     pub time: Timestamp,
+    // Secondary sort_key, used for breaking ties in sorting
+    // In practice, we plan for this to be a nanosecond timestamp,
+    // like the time field above.
+    pub secondary_sort_key: u64,
     pub entry: ProcEntry,
     pub first: bool,
 }
 
 impl ProcPoint {
-    fn new(time: Timestamp, entry: ProcEntry, first: bool) -> Self {
-        ProcPoint { time, entry, first }
+    fn new(time: Timestamp, entry: ProcEntry, first: bool, secondary_sort_key: u64) -> Self {
+        ProcPoint { time, entry, first , secondary_sort_key: secondary_sort_key}
     }
-    pub fn time_key(&self) -> Timestamp {
-        Timestamp(2 * self.time.0) + (1000 * (!self.first) as u64).into()
+    pub fn time_key(&self) -> (u64, u8, u64) {
+        (self.time.0, if self.first { 0 } else { 1 }, self.secondary_sort_key)
     }
 }
 
@@ -285,23 +289,23 @@ impl Proc {
             let stop = time.stop.unwrap();
             let ready = time.ready;
             if stop - start > TASK_GRANULARITY_THRESHOLD.into() && !ready.is_none() {
-                all_points.push(ProcPoint::new(ready.unwrap(), entry, true));
-                all_points.push(ProcPoint::new(stop, entry, false));
+                all_points.push(ProcPoint::new(ready.unwrap(), entry, true, start.0));
+                all_points.push(ProcPoint::new(stop, entry, false, 0));
             } else {
-                all_points.push(ProcPoint::new(start, entry, true));
-                all_points.push(ProcPoint::new(stop, entry, false));
+                all_points.push(ProcPoint::new(start, entry, true, 0));
+                all_points.push(ProcPoint::new(stop, entry, false, 0));
             }
 
-            points.push(ProcPoint::new(start, entry, true));
-            points.push(ProcPoint::new(stop, entry, false));
+            points.push(ProcPoint::new(start, entry, true, 0));
+            points.push(ProcPoint::new(stop, entry, false, 0));
 
-            util_points.push(ProcPoint::new(start, entry, true));
-            util_points.push(ProcPoint::new(stop, entry, false));
+            util_points.push(ProcPoint::new(start, entry, true, 0));
+            util_points.push(ProcPoint::new(stop, entry, false, 0));
         }
         fn add_waiters(waiters: &Waiters, entry: ProcEntry, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
-                util_points.push(ProcPoint::new(wait.start, entry, false));
-                util_points.push(ProcPoint::new(wait.end, entry, true));
+                util_points.push(ProcPoint::new(wait.start, entry, false, 0));
+                util_points.push(ProcPoint::new(wait.end, entry, true, 0));
             }
         }
 
@@ -465,8 +469,8 @@ impl ChanPoint {
     fn new(time: Timestamp, entry: ChanEntry, first: bool) -> Self {
         ChanPoint { time, entry, first }
     }
-    pub fn time_key(&self) -> Timestamp {
-        Timestamp(2 * self.time.0) + (1000 * (!self.first) as u64).into()
+    pub fn time_key(&self) -> (u64, u8) {
+        (self.time.0, if self.first { 0 } else { 1 })
     }
 }
 
