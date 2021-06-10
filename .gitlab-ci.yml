@@ -202,6 +202,7 @@ variables:
 
 .prof: &prof
   USE_PROF: "1"
+  BASH_ENV: "/root/.cargo/env" # make sure Cargo environment gets loaded
 
 .legion: &legion
   TEST_REGENT: "0"
@@ -497,11 +498,11 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04:210603
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04:210610
 .image_clang: &image_clang
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210603
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210610
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210609
 .image_hpcsdk: &image_hpcsdk
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
 .image_icc: &image_icc
