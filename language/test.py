@@ -299,15 +299,15 @@ def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, sh
     try:
         test_fn(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, *test_args)
     except KeyboardInterrupt:
-        return test_name, filename, [], INTERRUPT, 0, None
+        return test_name, filename, None, [], INTERRUPT, 0, None
     except TestFailure as e:
-        return test_name, e.command, [], FAIL, e.retcode, e.output
+        return test_name, filename, e.command, [], FAIL, e.retcode, e.output
     except Exception as e:
         if verbose:
-            return test_name, filename, [], INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
-        return test_name, filename, [], INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
+            return test_name, filename, None, [], INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
+        return test_name, filename, None, [], INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
     else:
-        return test_name, filename, [], PASS, 0, None
+        return test_name, filename, None, [], PASS, 0, None
 
 class Counter:
     def __init__(self):
@@ -487,13 +487,15 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
         while num_remaining:
             # wait for up to 'interval' seconds for something to finish
             try:
-                test_name, filename, saved_temps, outcome, retcode, output = result_queue.get(timeout=poll_interval)
+                test_name, filename, command, saved_temps, outcome, retcode, output = result_queue.get(timeout=poll_interval)
                 num_remaining -= 1
                 if len(saved_temps) > 0:
                     all_saved_temps.append((test_name, filename, saved_temps))
                 if outcome == PASS:
                     if not quiet:
                         print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
+                        if verbose and command is not None:
+                            print(command)
                     if output is not None: print(output)
                     test_counters[test_name].passed += 1
                     num_passed += 1
@@ -506,11 +508,15 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                     else:
                         errmsg = 'return code %d' % retcode
                     print('[%sFAIL%s] (%s) (%s) %s' % (red, clear, test_name, errmsg, filename))
+                    if command is not None:
+                        print(command)
                     if output is not None: print(output)
                     test_counters[test_name].failed += 1
                     num_failed += 1
                 elif outcome == INTERNALERROR:
                     print('[%sERROR%s] (%s) %s' % (red, clear, test_name, filename))
+                    if command is not None:
+                        print(command)
                     if output is not None: print(output)
                     test_counters[test_name].failed += 1
                     num_failed += 1
@@ -523,7 +529,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
             if poll_interval:
                 t_now = time.time()
                 if (t_now >= t_last + poll_interval) or (num_remaining == 0):
-                    print('Time elapsed: %4d s, tests passed: %4d, failed: %4d, remaining: %4d' % (int(t_now - t_start), num_passed, num_failed, num_remaining))
+                    print('Time elapsed: %4d s, tests passed: %4d, failed: %4d, remaining: %4d' % (int(t_now - t_start), num_passed, num_failed, num_remaining), flush=True)
                     t_last = t_now
 
         thread_pool.join()
