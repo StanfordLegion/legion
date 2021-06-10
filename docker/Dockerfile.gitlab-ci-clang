@@ -36,7 +36,7 @@ RUN pip install --upgrade 'pip>=20,<21' && \
     pip install --upgrade 'setuptools>=44,<45' && \
     pip install cffi github3.py 'numpy>=1.16,<1.17' qualname && \
     pip3 install --upgrade 'setuptools>=50,<51' 'setuptools_rust>=0.11,<0.12' && \
-    pip3 install cffi github3.py 'numpy>=1.18,<1.19' 'cryptography>=3.2,<3.3' 'pandas>=0.25,<0.26' daff tabulate
+    pip3 install cffi github3.py 'numpy>=1.18,<1.19' 'cryptography>=3.2,<3.3' 'pandas>=0.24,<0.25' daff tabulate
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
