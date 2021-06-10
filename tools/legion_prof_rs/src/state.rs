@@ -209,7 +209,7 @@ impl Proc {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tasks.is_empty() && self.mapper_calls.is_empty() && self.runtime_calls.is_empty() && self.prof_tasks.is_empty()
+        self.tasks.is_empty() && self.meta_tasks.is_empty() && self.mapper_calls.is_empty() && self.runtime_calls.is_empty() && self.prof_tasks.is_empty()
     }
 
     pub fn entry(&self, entry: ProcEntry) -> (&Base, &TimeRange, &Waiters) {
