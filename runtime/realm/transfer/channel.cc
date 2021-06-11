@@ -331,6 +331,10 @@ namespace Realm {
     //  (i.e. from [pos, pos+retval) )
     size_t SequenceAssembler::add_span(size_t pos, size_t count)
     {
+      // nothing to do for empty spans
+      if(count == 0)
+        return 0;
+
       // fastest case - try to bump the contig amount without a lock, assuming
       //  there's no noncontig spans
       size_t prev_x2 = pos << 1;
