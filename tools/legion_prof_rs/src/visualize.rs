@@ -263,13 +263,7 @@ impl State {
             let nodes = vec![None, Some(proc.proc_id.node_id())];
             for node in nodes {
                 let group = (node, proc.kind);
-                // set to 1 if group not in timepoints_dict
-                // increment otherwise
-                if timepoint.contains_key(&group) {
-                    proc_count.entry(group).and_modify(|i| *i += 1);
-                } else {
-                    proc_count.insert(group, 1);
-                }
+                proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
                 if !proc.is_empty() {
                     timepoint
                         .entry(group)
