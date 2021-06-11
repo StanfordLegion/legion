@@ -2,10 +2,10 @@ use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{create_dir, remove_dir_all, File};
 use std::io;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use rayon::prelude::*;
 
@@ -18,13 +18,42 @@ static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/timeline.js");
 static UTIL_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/util.js");
 
+impl Serialize for Timestamp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut buf = [0u8; 64];
+        let mut cursor = Cursor::new(&mut buf[..]);
+        write!(cursor, "{}", self).unwrap();
+        let len = cursor.position() as usize;
+        serializer.serialize_bytes(&buf[..len])
+    }
+}
+
+#[derive(Copy, Clone)]
+struct Count(f64);
+
+impl Serialize for Count {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut buf = [0u8; 64];
+        let mut cursor = Cursor::new(&mut buf[..]);
+        write!(cursor, "{:.2}", self.0).unwrap();
+        let len = cursor.position() as usize;
+        serializer.serialize_bytes(&buf[..len])
+    }
+}
+
 #[derive(Serialize, Copy, Clone)]
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
-    ready: &'a str,
-    start: &'a str,
-    end: &'a str,
+    ready: Timestamp,
+    start: Timestamp,
+    end: Timestamp,
     color: &'a str,
     opacity: f64,
     title: &'a str,
@@ -46,9 +75,9 @@ struct OpRecord<'a> {
 }
 
 #[derive(Serialize, Copy, Clone)]
-struct UtilizationRecord<'a> {
-    time: &'a str,
-    count: &'a str,
+struct UtilizationRecord {
+    time: Timestamp,
+    count: Count,
 }
 
 #[derive(Serialize, Clone)]
@@ -159,9 +188,9 @@ impl Proc {
         let default = DataRecord {
             level,
             level_ready,
-            ready: "0",
-            start: "0",
-            end: "0",
+            ready: Timestamp(0),
+            start: Timestamp(0),
+            end: Timestamp(0),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -177,26 +206,26 @@ impl Proc {
         if !waiters.wait_intervals.is_empty() {
             for wait in &waiters.wait_intervals {
                 f.serialize(DataRecord {
-                    ready: &format!("{}", start),
-                    start: &format!("{}", start),
-                    end: &format!("{}", wait.start),
+                    ready: start,
+                    start: start,
+                    end: wait.start,
                     opacity: 1.0,
                     title: &name,
                     ..default
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
-                    ready: &format!("{}", wait.start),
-                    start: &format!("{}", wait.start),
-                    end: &format!("{}", wait.ready),
+                    ready: wait.start,
+                    start: wait.start,
+                    end: wait.ready,
                     opacity: 0.15,
                     ..default
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (ready)", &name),
-                    ready: &format!("{}", wait.ready),
-                    start: &format!("{}", wait.ready),
-                    end: &format!("{}", wait.end),
+                    ready: wait.ready,
+                    start: wait.ready,
+                    end: wait.end,
                     opacity: 0.45,
                     ..default
                 })?;
@@ -204,9 +233,9 @@ impl Proc {
             }
             if start < time_range.stop.unwrap() {
                 f.serialize(DataRecord {
-                    ready: &format!("{}", start),
-                    start: &format!("{}", start),
-                    end: &format!("{}", time_range.stop.unwrap()),
+                    ready: start,
+                    start: start,
+                    end: time_range.stop.unwrap(),
                     opacity: 1.0,
                     title: &name,
                     ..default
@@ -214,9 +243,9 @@ impl Proc {
             }
         } else {
             f.serialize(DataRecord {
-                ready: &format!("{}", time_range.ready.unwrap_or(start)),
-                start: &format!("{}", start),
-                end: &format!("{}", time_range.stop.unwrap()),
+                ready: time_range.ready.unwrap_or(start),
+                start: start,
+                end: time_range.stop.unwrap(),
                 ..default
             })?;
         }
@@ -562,13 +591,13 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: "0.000",
-            count: "0.00",
+            time: Timestamp(0),
+            count: Count(0.0),
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: &format!("{}", time),
-                count: &format!("{:.2}", count),
+                time: time,
+                count: Count(count),
             })?;
         }
 
@@ -613,13 +642,13 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: "0.000",
-            count: "0.00",
+            time: Timestamp(0),
+            count: Count(0.0),
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: &format!("{}", time),
-                count: &format!("{:.2}", count),
+                time: time,
+                count: Count(count),
             })?;
         }
 
@@ -664,13 +693,13 @@ impl State {
             .delimiter(b'\t')
             .from_path(filename)?;
         f.serialize(UtilizationRecord {
-            time: "0.000",
-            count: "0.00",
+            time: Timestamp(0),
+            count: Count(0.0),
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: &format!("{}", time),
-                count: &format!("{:.2}", count),
+                time: time,
+                count: Count(count),
             })?;
         }
 
