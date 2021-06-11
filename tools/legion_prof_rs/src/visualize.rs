@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use rayon::prelude::*;
+
 use crate::state::{
     ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry, ProcID, ProcKind,
     ProcPoint, State, Timestamp,
@@ -755,14 +757,20 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     // generate tsv data
     let mut base_level = 0;
-    let mut proc_records = BTreeMap::new();
+    let proc_records: BTreeMap<_, _> = state
+        .procs
+        .values()
+        .collect::<Vec<_>>()
+        .par_iter()
+        .filter(|proc| !proc.is_empty())
+        .map(|proc| {
+            proc.emit_tsv(&path, state)
+                .map(|record| (proc.proc_id, record))
+        })
+        .collect::<io::Result<_>>()?;
 
-    for proc in state.procs.values() {
-        if !proc.is_empty() {
-            let record = proc.emit_tsv(&path, state)?;
-            base_level += record.levels;
-            proc_records.insert(proc.proc_id, record);
-        }
+    for record in proc_records.values() {
+        base_level += record.levels;
     }
 
     state.emit_utilization_tsv(&path)?;
