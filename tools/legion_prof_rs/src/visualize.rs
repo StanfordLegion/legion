@@ -736,9 +736,6 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state: &State,
     path: P,
     force: bool,
-    show_procs: bool,
-    show_channels: bool,
-    show_instances: bool,
 ) -> io::Result<()> {
     let path = create_unique_dir(path, force)?;
     println!(

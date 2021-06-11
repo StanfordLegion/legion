@@ -28,7 +28,7 @@ fn ts_to_us(ts: Timestamp) -> f64 {
     (ts.0 as f64) / 1e3
 }
 
-pub fn emit_trace<P: AsRef<Path>>(state: &mut State, path: P, force: bool) -> io::Result<()> {
+pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Result<()> {
     println!("Generating trace file {:?}", path.as_ref());
 
     let mut file = OpenOptions::new()

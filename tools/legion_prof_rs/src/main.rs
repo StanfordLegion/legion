@@ -1,5 +1,7 @@
 use std::io;
 
+use rayon::prelude::*;
+
 use legion_prof::analyze::print_statistics;
 use legion_prof::serialize::deserialize;
 use legion_prof::state::{State, Timestamp};
@@ -68,24 +70,29 @@ fn main() -> io::Result<()> {
         .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
 
     let mut state = State::default();
-    for filename in filenames {
-        println!("Reading log file {:?}...", filename);
-        let records = deserialize(filename)?;
-        println!("Matched {} objects", records.len());
-        state.process_records(&records);
+    let filenames: Vec<_> = filenames.collect();
+    let records: Result<Vec<_>, _> = filenames
+        .par_iter()
+        .map(|filename| {
+            println!("Reading log file {:?}...", filename);
+            deserialize(filename)
+        })
+        .collect();
+    for record in records? {
+        println!("Matched {} objects", record.len());
+        state.process_records(&record);
     }
 
     state.trim_time_range(start_trim, stop_trim);
+    println!("Sorting time ranges");
     state.sort_time_range();
     if statistics {
-        print_statistics(&mut state);
-    }
-    if trace {
-        emit_trace(&mut state, output, force)?;
-    }
-    if !statistics && !trace {
+        print_statistics(&state);
+    } else if trace {
+        emit_trace(&state, output, force)?;
+    } else {
         state.assign_colors();
-        emit_interactive_visualization(&mut state, output, force, true, true, true)?;
+        emit_interactive_visualization(&state, output, force)?;
     }
 
     Ok(())
