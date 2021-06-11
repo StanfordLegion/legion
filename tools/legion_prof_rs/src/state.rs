@@ -6,6 +6,8 @@ use std::fmt;
 use derive_more::{Add, From, LowerHex, Sub};
 use num_enum::TryFromPrimitive;
 
+use rayon::prelude::*;
+
 use crate::serialize::Record;
 
 const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
@@ -1925,15 +1927,17 @@ impl State {
     }
 
     pub fn sort_time_range(&mut self) {
-        for proc in self.procs.values_mut() {
-            proc.sort_time_range(self.last_time);
-        }
-        for mem in self.mems.values_mut() {
-            mem.sort_time_range(self.last_time, &self.instances);
-        }
-        for channel in self.channels.values_mut() {
-            channel.sort_time_range(self.last_time);
-        }
+        let last_time = self.last_time;
+        let instances = &self.instances;
+        self.procs
+            .par_iter_mut()
+            .for_each(|(_, proc)| proc.sort_time_range(last_time));
+        self.mems
+            .par_iter_mut()
+            .for_each(|(_, mem)| mem.sort_time_range(last_time, instances));
+        self.channels
+            .par_iter_mut()
+            .for_each(|(_, channel)| channel.sort_time_range(last_time));
     }
 
     pub fn assign_colors(&mut self) {
