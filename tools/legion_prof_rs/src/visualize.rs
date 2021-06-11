@@ -2,27 +2,58 @@ use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{create_dir, remove_dir_all, File};
 use std::io;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
+
+use rayon::prelude::*;
 
 use crate::state::{
     ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry, ProcID, ProcKind,
-    ProcPoint, State, Timestamp,
+    ProcPoint, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/timeline.js");
 static UTIL_JS_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/js/util.js");
 
+impl Serialize for Timestamp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut buf = [0u8; 64];
+        let mut cursor = Cursor::new(&mut buf[..]);
+        write!(cursor, "{}", self).unwrap();
+        let len = cursor.position() as usize;
+        serializer.serialize_bytes(&buf[..len])
+    }
+}
+
+#[derive(Copy, Clone)]
+struct Count(f64);
+
+impl Serialize for Count {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut buf = [0u8; 64];
+        let mut cursor = Cursor::new(&mut buf[..]);
+        write!(cursor, "{:.2}", self.0).unwrap();
+        let len = cursor.position() as usize;
+        serializer.serialize_bytes(&buf[..len])
+    }
+}
+
 #[derive(Serialize, Copy, Clone)]
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
-    ready: &'a str,
-    start: &'a str,
-    end: &'a str,
+    ready: Timestamp,
+    start: Timestamp,
+    end: Timestamp,
     color: &'a str,
     opacity: f64,
     title: &'a str,
@@ -44,9 +75,9 @@ struct OpRecord<'a> {
 }
 
 #[derive(Serialize, Copy, Clone)]
-struct UtilizationRecord<'a> {
-    time: &'a str,
-    count: &'a str,
+struct UtilizationRecord {
+    time: Timestamp,
+    count: Count,
 }
 
 #[derive(Serialize, Clone)]
@@ -157,9 +188,9 @@ impl Proc {
         let default = DataRecord {
             level,
             level_ready,
-            ready: "0",
-            start: "0",
-            end: "0",
+            ready: Timestamp(0),
+            start: Timestamp(0),
+            end: Timestamp(0),
             color: &color,
             opacity: 1.0,
             title: &name,
@@ -175,26 +206,26 @@ impl Proc {
         if !waiters.wait_intervals.is_empty() {
             for wait in &waiters.wait_intervals {
                 f.serialize(DataRecord {
-                    ready: &format!("{}", start),
-                    start: &format!("{}", start),
-                    end: &format!("{}", wait.start),
+                    ready: start,
+                    start: start,
+                    end: wait.start,
                     opacity: 1.0,
                     title: &name,
                     ..default
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
-                    ready: &format!("{}", wait.start),
-                    start: &format!("{}", wait.start),
-                    end: &format!("{}", wait.ready),
+                    ready: wait.start,
+                    start: wait.start,
+                    end: wait.ready,
                     opacity: 0.15,
                     ..default
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (ready)", &name),
-                    ready: &format!("{}", wait.ready),
-                    start: &format!("{}", wait.ready),
-                    end: &format!("{}", wait.end),
+                    ready: wait.ready,
+                    start: wait.ready,
+                    end: wait.end,
                     opacity: 0.45,
                     ..default
                 })?;
@@ -202,9 +233,9 @@ impl Proc {
             }
             if start < time_range.stop.unwrap() {
                 f.serialize(DataRecord {
-                    ready: &format!("{}", start),
-                    start: &format!("{}", start),
-                    end: &format!("{}", time_range.stop.unwrap()),
+                    ready: start,
+                    start: start,
+                    end: time_range.stop.unwrap(),
                     opacity: 1.0,
                     title: &name,
                     ..default
@@ -212,9 +243,9 @@ impl Proc {
             }
         } else {
             f.serialize(DataRecord {
-                ready: &format!("{}", time_range.ready.unwrap_or(start)),
-                start: &format!("{}", start),
-                end: &format!("{}", time_range.stop.unwrap()),
+                ready: time_range.ready.unwrap_or(start),
+                start: start,
+                end: time_range.stop.unwrap(),
                 ..default
             })?;
         }
@@ -261,13 +292,7 @@ impl State {
             let nodes = vec![None, Some(proc.proc_id.node_id())];
             for node in nodes {
                 let group = (node, proc.kind);
-                // set to 1 if group not in timepoints_dict
-                // increment otherwise
-                if timepoint.contains_key(&group) {
-                    proc_count.entry(group).and_modify(|i| *i += 1);
-                } else {
-                    proc_count.insert(group, 1);
-                }
+                proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
                 if !proc.is_empty() {
                     timepoint
                         .entry(group)
@@ -327,12 +352,14 @@ impl State {
         result
     }
 
-    fn convert_proc_points_to_utilization(
+    fn convert_points_to_utilization<Entry, Secondary>(
         &self,
-        points: &Vec<ProcPoint>,
-        proc_id: ProcID,
-    ) -> Vec<ProcPoint> {
-        let mut utilization = Vec::new();
+        points: &Vec<TimePoint<Entry, Secondary>>,
+        utilization: &mut Vec<TimePoint<Entry, Secondary>>,
+    ) where
+        Entry: Copy,
+        Secondary: Copy,
+    {
         let mut count = 0;
         for point in points {
             if point.first {
@@ -347,35 +374,6 @@ impl State {
                 }
             }
         }
-        utilization
-    }
-
-    // This is character-for-character the same function as convert_proc_points_to_utilization(
-    // TODO look into making a TimePoint trait so that we don't have to repeat method definitions
-    fn convert_chan_points_to_utilization(
-        &self,
-        points: &Vec<ChanPoint>,
-        chan_id: ChanID,
-    ) -> Vec<ChanPoint> {
-        let mut utilization = Vec::new();
-        let mut count = 0;
-
-        if chan_id.node_id().is_some() {
-            for point in points {
-                if point.first {
-                    count += 1;
-                    if count == 1 {
-                        utilization.push(*point);
-                    }
-                } else {
-                    count -= 1;
-                    if count == 0 {
-                        utilization.push(*point);
-                    }
-                }
-            }
-        }
-        utilization
     }
 
     fn calculate_proc_utilization_data(
@@ -526,6 +524,163 @@ impl State {
         kinds
     }
 
+    fn emit_utilization_tsv_proc<P: AsRef<Path>>(
+        &self,
+        path: P,
+        group: (Option<NodeID>, ProcKind),
+        points: Vec<(ProcID, &Vec<ProcPoint>)>,
+        proc_count: &BTreeMap<(Option<NodeID>, ProcKind), u64>,
+    ) -> io::Result<()> {
+        let owners: BTreeSet<_> = points
+            .iter()
+            .filter(|(_, tp)| !tp.is_empty())
+            .map(|(proc_id, _)| *proc_id)
+            .collect();
+
+        let utilization = if owners.is_empty() {
+            Vec::new()
+        } else {
+            let count = *proc_count.get(&group).unwrap_or(&(owners.len() as u64));
+            let mut utilizations = Vec::new();
+            for (_, tp) in points {
+                if !tp.is_empty() {
+                    self.convert_points_to_utilization(tp, &mut utilizations);
+                }
+            }
+            utilizations.sort_by_key(|point| point.time_key());
+            self.calculate_proc_utilization_data(utilizations, owners, count)
+        };
+
+        let (node, kind) = group;
+        let node_name = match node {
+            None => "all".to_owned(),
+            Some(node_id) => format!("{}", node_id.0),
+        };
+        let group_name = format!("{} ({:?})", &node_name, kind);
+        let filename = path
+            .as_ref()
+            .join("tsv")
+            .join(format!("{}_util.tsv", group_name));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(filename)?;
+        f.serialize(UtilizationRecord {
+            time: Timestamp(0),
+            count: Count(0.0),
+        })?;
+        for (time, count) in utilization {
+            f.serialize(UtilizationRecord {
+                time: time,
+                count: Count(count),
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn emit_utilization_tsv_mem<P: AsRef<Path>>(
+        &self,
+        path: P,
+        group: (Option<NodeID>, MemKind),
+        points: Vec<(MemID, &Vec<MemPoint>)>,
+    ) -> io::Result<()> {
+        let owners: BTreeSet<_> = points
+            .iter()
+            .filter(|(_, tp)| !tp.is_empty())
+            .map(|(mem_id, _)| *mem_id)
+            .collect();
+
+        let utilization = if owners.is_empty() {
+            Vec::new()
+        } else {
+            let mut utilizations: Vec<_> = points
+                .iter()
+                .filter(|(_, tp)| !tp.is_empty())
+                .flat_map(|(_, tp)| *tp)
+                .collect();
+            utilizations.sort_by_key(|point| point.time_key());
+            self.calculate_mem_utilization_data(utilizations, owners)
+        };
+
+        let (node, kind) = group;
+        let node_name = match node {
+            None => "all".to_owned(),
+            Some(node_id) => format!("{}", node_id.0),
+        };
+        let group_name = format!("{} ({} Memory)", &node_name, kind);
+        let filename = path
+            .as_ref()
+            .join("tsv")
+            .join(format!("{}_util.tsv", group_name));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(filename)?;
+        f.serialize(UtilizationRecord {
+            time: Timestamp(0),
+            count: Count(0.0),
+        })?;
+        for (time, count) in utilization {
+            f.serialize(UtilizationRecord {
+                time: time,
+                count: Count(count),
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn emit_utilization_tsv_chan<P: AsRef<Path>>(
+        &self,
+        path: P,
+        node_id: Option<NodeID>,
+        points: Vec<(ChanID, &Vec<ChanPoint>)>,
+    ) -> io::Result<()> {
+        let owners: BTreeSet<_> = points
+            .iter()
+            .filter(|(_, tp)| !tp.is_empty())
+            .map(|(chan_id, _)| *chan_id)
+            .collect();
+
+        let utilization = if owners.is_empty() {
+            Vec::new()
+        } else {
+            let mut utilizations = Vec::new();
+            for (_, tp) in points {
+                if !tp.is_empty() {
+                    self.convert_points_to_utilization(tp, &mut utilizations);
+                }
+            }
+            utilizations.sort_by_key(|point| point.time_key());
+            self.calculate_chan_utilization_data(utilizations, owners)
+        };
+
+        let group_name = if let Some(node_id) = node_id {
+            format!("{} (Channel)", node_id.0)
+        } else {
+            "all (Channel)".to_owned()
+        };
+
+        let filename = path
+            .as_ref()
+            .join("tsv")
+            .join(format!("{}_util.tsv", group_name));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(filename)?;
+        f.serialize(UtilizationRecord {
+            time: Timestamp(0),
+            count: Count(0.0),
+        })?;
+        for (time, count) in utilization {
+            f.serialize(UtilizationRecord {
+                time: time,
+                count: Count(count),
+            })?;
+        }
+
+        Ok(())
+    }
+
     fn emit_utilization_tsv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let (timepoint_proc, proc_count) = self.group_node_proc_kind_timepoints();
 
@@ -551,147 +706,46 @@ impl State {
             }
         }
 
+        let path = path.as_ref();
         {
-            let filename = path.as_ref().join("json").join("utils.json");
+            let filename = path.join("json").join("utils.json");
             let file = File::create(filename)?;
             serde_json::to_writer(&file, &stats)?;
         }
 
-        for (group, points) in timepoint_proc {
-            let owners: BTreeSet<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .map(|(proc_id, tp)| *proc_id)
-                .collect();
-
-            let utilization = if owners.is_empty() {
-                Vec::new()
-            } else {
-                let count = *proc_count.get(&group).unwrap_or(&(owners.len() as u64));
-                let mut utilizations: Vec<_> = points
-                    .iter()
-                    .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(proc_id, tp)| self.convert_proc_points_to_utilization(tp, *proc_id))
-                    .collect();
-                utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_proc_utilization_data(utilizations, owners, count)
-            };
-
-            let (node, kind) = group;
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} ({:?})", &node_name, kind);
-            let filename = path
-                .as_ref()
-                .join("tsv")
-                .join(format!("{}_util.tsv", group_name));
-            let mut f = csv::WriterBuilder::new()
-                .delimiter(b'\t')
-                .from_path(filename)?;
-            f.serialize(UtilizationRecord {
-                time: "0.000",
-                count: "0.00",
-            })?;
-            for (time, count) in utilization {
-                f.serialize(UtilizationRecord {
-                    time: &format!("{}", time),
-                    count: &format!("{:.2}", count),
-                })?;
-            }
-        }
-
         let timepoint_mem = self.group_node_mem_kind_timepoints();
-
-        for (group, points) in timepoint_mem {
-            let owners: BTreeSet<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .map(|(mem_id, tp)| *mem_id)
-                .collect();
-
-            let utilization = if owners.is_empty() {
-                Vec::new()
-            } else {
-                let mut utilizations: Vec<_> = points
-                    .iter()
-                    .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(_, tp)| *tp)
-                    .collect();
-                utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_mem_utilization_data(utilizations, owners)
-            };
-
-            let (node, kind) = group;
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} ({} Memory)", &node_name, kind);
-            let filename = path
-                .as_ref()
-                .join("tsv")
-                .join(format!("{}_util.tsv", group_name));
-            let mut f = csv::WriterBuilder::new()
-                .delimiter(b'\t')
-                .from_path(filename)?;
-            f.serialize(UtilizationRecord {
-                time: "0.000",
-                count: "0.00",
-            })?;
-            for (time, count) in utilization {
-                f.serialize(UtilizationRecord {
-                    time: &format!("{}", time),
-                    count: &format!("{:.2}", count),
-                })?;
-            }
-        }
-
         let timepoint_chan = self.group_node_chan_kind_timepoints();
-        for (node_id, points) in timepoint_chan {
-            let owners: BTreeSet<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .map(|(chan_id, tp)| *chan_id)
-                .collect();
 
-            let utilization = if owners.is_empty() {
-                Vec::new()
-            } else {
-                let mut utilizations: Vec<_> = points
-                    .iter()
-                    .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(chan_id, tp)| self.convert_chan_points_to_utilization(tp, *chan_id))
-                    .collect();
-                utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_chan_utilization_data(utilizations, owners)
-            };
+        let mut result_proc = Ok(());
+        let mut result_mem = Ok(());
+        let mut result_chan = Ok(());
+        rayon::scope(|s| {
+            s.spawn(|_| {
+                result_proc = timepoint_proc
+                    .into_par_iter()
+                    .map(|(group, points)| {
+                        self.emit_utilization_tsv_proc(path, group, points, &proc_count)
+                    })
+                    .collect::<io::Result<_>>()
+            });
 
-            let group_name = if let Some(node_id) = node_id {
-                format!("{} (Channel)", node_id.0)
-            } else {
-                "all (Channel)".to_owned()
-            };
+            s.spawn(|_| {
+                result_mem = timepoint_mem
+                    .into_par_iter()
+                    .map(|(group, points)| self.emit_utilization_tsv_mem(path, group, points))
+                    .collect::<io::Result<_>>()
+            });
 
-            let filename = path
-                .as_ref()
-                .join("tsv")
-                .join(format!("{}_util.tsv", group_name));
-            let mut f = csv::WriterBuilder::new()
-                .delimiter(b'\t')
-                .from_path(filename)?;
-            f.serialize(UtilizationRecord {
-                time: "0.000",
-                count: "0.00",
-            })?;
-            for (time, count) in utilization {
-                f.serialize(UtilizationRecord {
-                    time: &format!("{}", time),
-                    count: &format!("{:.2}", count),
-                })?;
-            }
-        }
+            s.spawn(|_| {
+                result_chan = timepoint_chan
+                    .into_par_iter()
+                    .map(|(node_id, points)| self.emit_utilization_tsv_chan(path, node_id, points))
+                    .collect::<io::Result<_>>()
+            });
+        });
+        result_proc?;
+        result_mem?;
+        result_chan?;
 
         Ok(())
     }
@@ -736,9 +790,6 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state: &State,
     path: P,
     force: bool,
-    show_procs: bool,
-    show_channels: bool,
-    show_instances: bool,
 ) -> io::Result<()> {
     let path = create_unique_dir(path, force)?;
     println!(
@@ -758,14 +809,20 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     // generate tsv data
     let mut base_level = 0;
-    let mut proc_records = BTreeMap::new();
+    let proc_records: BTreeMap<_, _> = state
+        .procs
+        .values()
+        .collect::<Vec<_>>()
+        .par_iter()
+        .filter(|proc| !proc.is_empty())
+        .map(|proc| {
+            proc.emit_tsv(&path, state)
+                .map(|record| (proc.proc_id, record))
+        })
+        .collect::<io::Result<_>>()?;
 
-    for proc in state.procs.values() {
-        if !proc.is_empty() {
-            let record = proc.emit_tsv(&path, state)?;
-            base_level += record.levels;
-            proc_records.insert(proc.proc_id, record);
-        }
+    for record in proc_records.values() {
+        base_level += record.levels;
     }
 
     state.emit_utilization_tsv(&path)?;
