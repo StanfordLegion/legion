@@ -356,8 +356,8 @@ impl State {
         &self,
         points: &Vec<ProcPoint>,
         proc_id: ProcID,
-    ) -> Vec<ProcPoint> {
-        let mut utilization = Vec::new();
+        utilization: &mut Vec<ProcPoint>,
+    ) {
         let mut count = 0;
         for point in points {
             if point.first {
@@ -372,7 +372,6 @@ impl State {
                 }
             }
         }
-        utilization
     }
 
     // This is character-for-character the same function as convert_proc_points_to_utilization(
@@ -381,26 +380,22 @@ impl State {
         &self,
         points: &Vec<ChanPoint>,
         chan_id: ChanID,
-    ) -> Vec<ChanPoint> {
-        let mut utilization = Vec::new();
+        utilization: &mut Vec<ChanPoint>,
+    ) {
         let mut count = 0;
-
-        if chan_id.node_id().is_some() {
-            for point in points {
-                if point.first {
-                    count += 1;
-                    if count == 1 {
-                        utilization.push(*point);
-                    }
-                } else {
-                    count -= 1;
-                    if count == 0 {
-                        utilization.push(*point);
-                    }
+        for point in points {
+            if point.first {
+                count += 1;
+                if count == 1 {
+                    utilization.push(*point);
+                }
+            } else {
+                count -= 1;
+                if count == 0 {
+                    utilization.push(*point);
                 }
             }
         }
-        utilization
     }
 
     fn calculate_proc_utilization_data(
@@ -568,11 +563,12 @@ impl State {
             Vec::new()
         } else {
             let count = *proc_count.get(&group).unwrap_or(&(owners.len() as u64));
-            let mut utilizations: Vec<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .flat_map(|(proc_id, tp)| self.convert_proc_points_to_utilization(tp, *proc_id))
-                .collect();
+            let mut utilizations = Vec::new();
+            for (proc_id, tp) in points {
+                if !tp.is_empty() {
+                    self.convert_proc_points_to_utilization(tp, proc_id, &mut utilizations);
+                }
+            }
             utilizations.sort_by_key(|point| point.time_key());
             self.calculate_proc_utilization_data(utilizations, owners, count)
         };
@@ -670,11 +666,12 @@ impl State {
         let utilization = if owners.is_empty() {
             Vec::new()
         } else {
-            let mut utilizations: Vec<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .flat_map(|(chan_id, tp)| self.convert_chan_points_to_utilization(tp, *chan_id))
-                .collect();
+            let mut utilizations = Vec::new();
+            for (chan_id, tp) in points {
+                if !tp.is_empty() {
+                    self.convert_chan_points_to_utilization(tp, chan_id, &mut utilizations);
+                }
+            }
             utilizations.sort_by_key(|point| point.time_key());
             self.calculate_chan_utilization_data(utilizations, owners)
         };
