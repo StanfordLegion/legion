@@ -139,26 +139,34 @@ pub enum ProcEntry {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct ProcPoint {
+pub struct TimePoint<Entry, Secondary>
+where
+    Entry: std::marker::Copy,
+    Secondary: std::marker::Copy,
+{
     pub time: Timestamp,
     // Secondary sort_key, used for breaking ties in sorting
     // In practice, we plan for this to be a nanosecond timestamp,
     // like the time field above.
-    pub secondary_sort_key: u64,
-    pub entry: ProcEntry,
+    pub secondary_sort_key: Secondary,
+    pub entry: Entry,
     pub first: bool,
 }
 
-impl ProcPoint {
-    fn new(time: Timestamp, entry: ProcEntry, first: bool, secondary_sort_key: u64) -> Self {
-        ProcPoint {
+impl<Entry, Secondary> TimePoint<Entry, Secondary>
+where
+    Entry: std::marker::Copy,
+    Secondary: std::marker::Copy,
+{
+    pub fn new(time: Timestamp, entry: Entry, first: bool, secondary_sort_key: Secondary) -> Self {
+        TimePoint {
             time,
             entry,
             first,
             secondary_sort_key: secondary_sort_key,
         }
     }
-    pub fn time_key(&self) -> (u64, u8, u64) {
+    pub fn time_key(&self) -> (u64, u8, Secondary) {
         (
             self.time.0,
             if self.first { 0 } else { 1 },
@@ -166,6 +174,8 @@ impl ProcPoint {
         )
     }
 }
+
+pub type ProcPoint = TimePoint<ProcEntry, u64>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct ProcID(pub u64);
@@ -429,21 +439,9 @@ impl Proc {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct MemPoint {
-    pub time: Timestamp,
-    pub entry: (InstID, OpID),
-    pub first: bool,
-}
+pub type MemEntry = (InstID, OpID);
 
-impl MemPoint {
-    fn new(time: Timestamp, entry: (InstID, OpID), first: bool) -> Self {
-        MemPoint { time, entry, first }
-    }
-    pub fn time_key(&self) -> (u64, u8) {
-        (self.time.0, if self.first { 0 } else { 1 })
-    }
-}
+pub type MemPoint = TimePoint<MemEntry, ()>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemID(pub u64);
@@ -492,10 +490,18 @@ impl Mem {
         self.max_live_instances = Some(0);
         for key in &self.instances {
             let inst = instances.get(&key).unwrap();
-            self.time_points
-                .push(MemPoint::new(inst.time_range.start.unwrap(), *key, true));
-            self.time_points
-                .push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false))
+            self.time_points.push(MemPoint::new(
+                inst.time_range.start.unwrap(),
+                *key,
+                true,
+                (),
+            ));
+            self.time_points.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                (),
+            ))
         }
         self.time_points
             .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
@@ -527,21 +533,7 @@ pub enum ChanEntry {
     DepPart(usize),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct ChanPoint {
-    pub time: Timestamp,
-    pub entry: ChanEntry,
-    pub first: bool,
-}
-
-impl ChanPoint {
-    fn new(time: Timestamp, entry: ChanEntry, first: bool) -> Self {
-        ChanPoint { time, entry, first }
-    }
-    pub fn time_key(&self) -> (u64, u8) {
-        (self.time.0, if self.first { 0 } else { 1 })
-    }
-}
+pub type ChanPoint = TimePoint<ChanEntry, ()>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChanID {
@@ -617,8 +609,8 @@ impl Chan {
         fn add(time: &TimeRange, entry: ChanEntry, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(start, entry, true));
-            points.push(ChanPoint::new(stop, entry, false));
+            points.push(ChanPoint::new(start, entry, true, ()));
+            points.push(ChanPoint::new(stop, entry, false, ()));
         }
 
         let points = &mut self.time_points;

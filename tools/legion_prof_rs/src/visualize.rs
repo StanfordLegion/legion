@@ -11,7 +11,7 @@ use rayon::prelude::*;
 
 use crate::state::{
     ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry, ProcID, ProcKind,
-    ProcPoint, State, Timestamp,
+    ProcPoint, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -352,36 +352,14 @@ impl State {
         result
     }
 
-    fn convert_proc_points_to_utilization(
+    fn convert_points_to_utilization<Entry, Secondary>(
         &self,
-        points: &Vec<ProcPoint>,
-        proc_id: ProcID,
-        utilization: &mut Vec<ProcPoint>,
-    ) {
-        let mut count = 0;
-        for point in points {
-            if point.first {
-                count += 1;
-                if count == 1 {
-                    utilization.push(*point);
-                }
-            } else {
-                count -= 1;
-                if count == 0 {
-                    utilization.push(*point);
-                }
-            }
-        }
-    }
-
-    // This is character-for-character the same function as convert_proc_points_to_utilization(
-    // TODO look into making a TimePoint trait so that we don't have to repeat method definitions
-    fn convert_chan_points_to_utilization(
-        &self,
-        points: &Vec<ChanPoint>,
-        chan_id: ChanID,
-        utilization: &mut Vec<ChanPoint>,
-    ) {
+        points: &Vec<TimePoint<Entry, Secondary>>,
+        utilization: &mut Vec<TimePoint<Entry, Secondary>>,
+    ) where
+        Entry: Copy,
+        Secondary: Copy,
+    {
         let mut count = 0;
         for point in points {
             if point.first {
@@ -564,9 +542,9 @@ impl State {
         } else {
             let count = *proc_count.get(&group).unwrap_or(&(owners.len() as u64));
             let mut utilizations = Vec::new();
-            for (proc_id, tp) in points {
+            for (_, tp) in points {
                 if !tp.is_empty() {
-                    self.convert_proc_points_to_utilization(tp, proc_id, &mut utilizations);
+                    self.convert_points_to_utilization(tp, &mut utilizations);
                 }
             }
             utilizations.sort_by_key(|point| point.time_key());
@@ -667,9 +645,9 @@ impl State {
             Vec::new()
         } else {
             let mut utilizations = Vec::new();
-            for (chan_id, tp) in points {
+            for (_, tp) in points {
                 if !tp.is_empty() {
-                    self.convert_chan_points_to_utilization(tp, chan_id, &mut utilizations);
+                    self.convert_points_to_utilization(tp, &mut utilizations);
                 }
             }
             utilizations.sort_by_key(|point| point.time_key());
