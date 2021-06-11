@@ -522,6 +522,161 @@ impl State {
         kinds
     }
 
+    fn emit_utilization_tsv_proc<P: AsRef<Path>>(
+        &self,
+        path: P,
+        group: (Option<NodeID>, ProcKind),
+        points: Vec<(ProcID, &Vec<ProcPoint>)>,
+        proc_count: &BTreeMap<(Option<NodeID>, ProcKind), u64>,
+    ) -> io::Result<()> {
+        let owners: BTreeSet<_> = points
+            .iter()
+            .filter(|(_, tp)| !tp.is_empty())
+            .map(|(proc_id, _)| *proc_id)
+            .collect();
+
+        let utilization = if owners.is_empty() {
+            Vec::new()
+        } else {
+            let count = *proc_count.get(&group).unwrap_or(&(owners.len() as u64));
+            let mut utilizations: Vec<_> = points
+                .iter()
+                .filter(|(_, tp)| !tp.is_empty())
+                .flat_map(|(proc_id, tp)| self.convert_proc_points_to_utilization(tp, *proc_id))
+                .collect();
+            utilizations.sort_by_key(|point| point.time_key());
+            self.calculate_proc_utilization_data(utilizations, owners, count)
+        };
+
+        let (node, kind) = group;
+        let node_name = match node {
+            None => "all".to_owned(),
+            Some(node_id) => format!("{}", node_id.0),
+        };
+        let group_name = format!("{} ({:?})", &node_name, kind);
+        let filename = path
+            .as_ref()
+            .join("tsv")
+            .join(format!("{}_util.tsv", group_name));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(filename)?;
+        f.serialize(UtilizationRecord {
+            time: "0.000",
+            count: "0.00",
+        })?;
+        for (time, count) in utilization {
+            f.serialize(UtilizationRecord {
+                time: &format!("{}", time),
+                count: &format!("{:.2}", count),
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn emit_utilization_tsv_mem<P: AsRef<Path>>(
+        &self,
+        path: P,
+        group: (Option<NodeID>, MemKind),
+        points: Vec<(MemID, &Vec<MemPoint>)>,
+    ) -> io::Result<()> {
+        let owners: BTreeSet<_> = points
+            .iter()
+            .filter(|(_, tp)| !tp.is_empty())
+            .map(|(mem_id, _)| *mem_id)
+            .collect();
+
+        let utilization = if owners.is_empty() {
+            Vec::new()
+        } else {
+            let mut utilizations: Vec<_> = points
+                .iter()
+                .filter(|(_, tp)| !tp.is_empty())
+                .flat_map(|(_, tp)| *tp)
+                .collect();
+            utilizations.sort_by_key(|point| point.time_key());
+            self.calculate_mem_utilization_data(utilizations, owners)
+        };
+
+        let (node, kind) = group;
+        let node_name = match node {
+            None => "all".to_owned(),
+            Some(node_id) => format!("{}", node_id.0),
+        };
+        let group_name = format!("{} ({} Memory)", &node_name, kind);
+        let filename = path
+            .as_ref()
+            .join("tsv")
+            .join(format!("{}_util.tsv", group_name));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(filename)?;
+        f.serialize(UtilizationRecord {
+            time: "0.000",
+            count: "0.00",
+        })?;
+        for (time, count) in utilization {
+            f.serialize(UtilizationRecord {
+                time: &format!("{}", time),
+                count: &format!("{:.2}", count),
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn emit_utilization_tsv_chan<P: AsRef<Path>>(
+        &self,
+        path: P,
+        node_id: Option<NodeID>,
+        points: Vec<(ChanID, &Vec<ChanPoint>)>,
+    ) -> io::Result<()> {
+        let owners: BTreeSet<_> = points
+            .iter()
+            .filter(|(_, tp)| !tp.is_empty())
+            .map(|(chan_id, _)| *chan_id)
+            .collect();
+
+        let utilization = if owners.is_empty() {
+            Vec::new()
+        } else {
+            let mut utilizations: Vec<_> = points
+                .iter()
+                .filter(|(_, tp)| !tp.is_empty())
+                .flat_map(|(chan_id, tp)| self.convert_chan_points_to_utilization(tp, *chan_id))
+                .collect();
+            utilizations.sort_by_key(|point| point.time_key());
+            self.calculate_chan_utilization_data(utilizations, owners)
+        };
+
+        let group_name = if let Some(node_id) = node_id {
+            format!("{} (Channel)", node_id.0)
+        } else {
+            "all (Channel)".to_owned()
+        };
+
+        let filename = path
+            .as_ref()
+            .join("tsv")
+            .join(format!("{}_util.tsv", group_name));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(filename)?;
+        f.serialize(UtilizationRecord {
+            time: "0.000",
+            count: "0.00",
+        })?;
+        for (time, count) in utilization {
+            f.serialize(UtilizationRecord {
+                time: &format!("{}", time),
+                count: &format!("{:.2}", count),
+            })?;
+        }
+
+        Ok(())
+    }
+
     fn emit_utilization_tsv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let (timepoint_proc, proc_count) = self.group_node_proc_kind_timepoints();
 
@@ -547,147 +702,31 @@ impl State {
             }
         }
 
+        let path = path.as_ref();
         {
-            let filename = path.as_ref().join("json").join("utils.json");
+            let filename = path.join("json").join("utils.json");
             let file = File::create(filename)?;
             serde_json::to_writer(&file, &stats)?;
         }
 
-        for (group, points) in timepoint_proc {
-            let owners: BTreeSet<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .map(|(proc_id, tp)| *proc_id)
-                .collect();
-
-            let utilization = if owners.is_empty() {
-                Vec::new()
-            } else {
-                let count = *proc_count.get(&group).unwrap_or(&(owners.len() as u64));
-                let mut utilizations: Vec<_> = points
-                    .iter()
-                    .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(proc_id, tp)| self.convert_proc_points_to_utilization(tp, *proc_id))
-                    .collect();
-                utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_proc_utilization_data(utilizations, owners, count)
-            };
-
-            let (node, kind) = group;
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} ({:?})", &node_name, kind);
-            let filename = path
-                .as_ref()
-                .join("tsv")
-                .join(format!("{}_util.tsv", group_name));
-            let mut f = csv::WriterBuilder::new()
-                .delimiter(b'\t')
-                .from_path(filename)?;
-            f.serialize(UtilizationRecord {
-                time: "0.000",
-                count: "0.00",
-            })?;
-            for (time, count) in utilization {
-                f.serialize(UtilizationRecord {
-                    time: &format!("{}", time),
-                    count: &format!("{:.2}", count),
-                })?;
-            }
-        }
+        timepoint_proc
+            .into_par_iter()
+            .map(|(group, points)| self.emit_utilization_tsv_proc(path, group, points, &proc_count))
+            .collect::<io::Result<_>>()?;
 
         let timepoint_mem = self.group_node_mem_kind_timepoints();
 
-        for (group, points) in timepoint_mem {
-            let owners: BTreeSet<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .map(|(mem_id, tp)| *mem_id)
-                .collect();
-
-            let utilization = if owners.is_empty() {
-                Vec::new()
-            } else {
-                let mut utilizations: Vec<_> = points
-                    .iter()
-                    .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(_, tp)| *tp)
-                    .collect();
-                utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_mem_utilization_data(utilizations, owners)
-            };
-
-            let (node, kind) = group;
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} ({} Memory)", &node_name, kind);
-            let filename = path
-                .as_ref()
-                .join("tsv")
-                .join(format!("{}_util.tsv", group_name));
-            let mut f = csv::WriterBuilder::new()
-                .delimiter(b'\t')
-                .from_path(filename)?;
-            f.serialize(UtilizationRecord {
-                time: "0.000",
-                count: "0.00",
-            })?;
-            for (time, count) in utilization {
-                f.serialize(UtilizationRecord {
-                    time: &format!("{}", time),
-                    count: &format!("{:.2}", count),
-                })?;
-            }
-        }
+        timepoint_mem
+            .into_par_iter()
+            .map(|(group, points)| self.emit_utilization_tsv_mem(path, group, points))
+            .collect::<io::Result<_>>()?;
 
         let timepoint_chan = self.group_node_chan_kind_timepoints();
-        for (node_id, points) in timepoint_chan {
-            let owners: BTreeSet<_> = points
-                .iter()
-                .filter(|(_, tp)| !tp.is_empty())
-                .map(|(chan_id, tp)| *chan_id)
-                .collect();
 
-            let utilization = if owners.is_empty() {
-                Vec::new()
-            } else {
-                let mut utilizations: Vec<_> = points
-                    .iter()
-                    .filter(|(_, tp)| !tp.is_empty())
-                    .flat_map(|(chan_id, tp)| self.convert_chan_points_to_utilization(tp, *chan_id))
-                    .collect();
-                utilizations.sort_by_key(|point| point.time_key());
-                self.calculate_chan_utilization_data(utilizations, owners)
-            };
-
-            let group_name = if let Some(node_id) = node_id {
-                format!("{} (Channel)", node_id.0)
-            } else {
-                "all (Channel)".to_owned()
-            };
-
-            let filename = path
-                .as_ref()
-                .join("tsv")
-                .join(format!("{}_util.tsv", group_name));
-            let mut f = csv::WriterBuilder::new()
-                .delimiter(b'\t')
-                .from_path(filename)?;
-            f.serialize(UtilizationRecord {
-                time: "0.000",
-                count: "0.00",
-            })?;
-            for (time, count) in utilization {
-                f.serialize(UtilizationRecord {
-                    time: &format!("{}", time),
-                    count: &format!("{:.2}", count),
-                })?;
-            }
-        }
+        timepoint_chan
+            .into_par_iter()
+            .map(|(node_id, points)| self.emit_utilization_tsv_chan(path, node_id, points))
+            .collect::<io::Result<_>>()?;
 
         Ok(())
     }
