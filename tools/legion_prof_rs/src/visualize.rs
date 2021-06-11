@@ -709,24 +709,39 @@ impl State {
             serde_json::to_writer(&file, &stats)?;
         }
 
-        timepoint_proc
-            .into_par_iter()
-            .map(|(group, points)| self.emit_utilization_tsv_proc(path, group, points, &proc_count))
-            .collect::<io::Result<_>>()?;
-
         let timepoint_mem = self.group_node_mem_kind_timepoints();
-
-        timepoint_mem
-            .into_par_iter()
-            .map(|(group, points)| self.emit_utilization_tsv_mem(path, group, points))
-            .collect::<io::Result<_>>()?;
-
         let timepoint_chan = self.group_node_chan_kind_timepoints();
 
-        timepoint_chan
-            .into_par_iter()
-            .map(|(node_id, points)| self.emit_utilization_tsv_chan(path, node_id, points))
-            .collect::<io::Result<_>>()?;
+        let mut result_proc = Ok(());
+        let mut result_mem = Ok(());
+        let mut result_chan = Ok(());
+        rayon::scope(|s| {
+            s.spawn(|_| {
+                result_proc = timepoint_proc
+                    .into_par_iter()
+                    .map(|(group, points)| {
+                        self.emit_utilization_tsv_proc(path, group, points, &proc_count)
+                    })
+                    .collect::<io::Result<_>>()
+            });
+
+            s.spawn(|_| {
+                result_mem = timepoint_mem
+                    .into_par_iter()
+                    .map(|(group, points)| self.emit_utilization_tsv_mem(path, group, points))
+                    .collect::<io::Result<_>>()
+            });
+
+            s.spawn(|_| {
+                result_chan = timepoint_chan
+                    .into_par_iter()
+                    .map(|(node_id, points)| self.emit_utilization_tsv_chan(path, node_id, points))
+                    .collect::<io::Result<_>>()
+            });
+        });
+        result_proc?;
+        result_mem?;
+        result_chan?;
 
         Ok(())
     }
