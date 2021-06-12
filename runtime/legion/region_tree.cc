@@ -9211,7 +9211,42 @@ namespace Legion {
 #endif
       // Now do the pairwise disjointness tests
       disjoint = true;
-      if (total_children == max_linearized_color)
+      if (is_complete(false/*from app*/, true/*false if not ready*/))
+      {
+        // If we're complete we can check this using a linear algorithm
+        // by suming up the volumes of all the children
+        const size_t parent_volume = parent->get_volume();
+        size_t children_volume = 0;
+        if (total_children == max_linearized_color)
+        {
+          for (LegionColor color = 0; color < max_linearized_color; color++)
+          {
+            IndexSpaceNode *child = get_child(color);
+            children_volume += child->get_volume();
+            if (children_volume > parent_volume)
+              break;
+          }
+        }
+        else
+        {
+          ColorSpaceIterator *itr = color_space->create_color_space_iterator();
+          while (itr->is_valid())
+          {
+            const LegionColor color = itr->yield_color();
+            IndexSpaceNode *child = get_child(color);
+            children_volume += child->get_volume();
+            if (children_volume > parent_volume)
+              break;
+          }
+          delete itr;
+        }
+#ifdef DEBUG_LEGION
+        assert(parent_volume <= children_volume);
+#endif
+        if (parent_volume < children_volume)
+          disjoint = false;
+      }
+      else if (total_children == max_linearized_color)
       {
         for (LegionColor c1 = 0; disjoint && 
               (c1 < max_linearized_color); c1++)
