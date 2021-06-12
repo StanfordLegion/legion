@@ -1439,7 +1439,11 @@ public:
       size_t old_count = messages_handled.fetch_sub(count);
       // if counts match, all messages are already handled and we can
       //  contribute to the check completion
-      if(old_count == count) {
+      // if we've handled MORE messages than the sender sent, then we've
+      //  clearly failed the quiescence check
+      if(old_count >= count) {
+        if(old_count > count)
+          quiescence_checker.is_quiescent = false;
 	if(++quiescence_checker.messages_received == int(gasnet_nodes() - 1))
 	  quiescence_checker.condvar.broadcast();
       }
