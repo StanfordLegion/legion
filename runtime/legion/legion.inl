@@ -20895,7 +20895,9 @@ namespace Legion {
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
-      const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
+      const UDT *user_data = NULL;
+      static_assert(sizeof(user_data) == sizeof(userdata), "C++ is dumb");
+      memcpy(&user_data, &userdata, sizeof(user_data));
 
       // Invoke the task with the given context
       T return_value = (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
@@ -20919,7 +20921,9 @@ namespace Legion {
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
-      const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
+      const UDT *user_data = NULL;
+      static_assert(sizeof(user_data) == sizeof(userdata), "C++ is dumb");
+      memcpy(&user_data, &userdata, sizeof(user_data));
 
       (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 

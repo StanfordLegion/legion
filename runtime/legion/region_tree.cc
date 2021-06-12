@@ -3061,8 +3061,10 @@ namespace Legion {
             view_sets.begin(); vit != view_sets.end(); vit++)
       {
         // Stupid container problem
-        const std::set<LogicalView*> *log_views = 
-          reinterpret_cast<const std::set<LogicalView*>*>(&vit->elements);
+        const std::set<LogicalView*> *log_views = NULL; 
+        const std::set<InstanceView*> *inst_views = &vit->elements;
+        static_assert(sizeof(log_views) == sizeof(inst_views), "Fuck c++");
+        memcpy(&log_views, &inst_views, sizeof(log_views));
         OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
            usage, version_info, *log_views, trace_info, ApEvent::NO_AP_EVENT);
         analysis->add_reference();
@@ -5200,11 +5202,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_index_space_name(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+        LegionSpy::log_index_space_name(handle.id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_index_space(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+	runtime->profiler->record_index_space(handle.id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5220,11 +5230,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_index_partition_name(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+        LegionSpy::log_index_partition_name(handle.id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_index_part(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+	runtime->profiler->record_index_part(handle.id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5240,11 +5258,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_field_space_name(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+        LegionSpy::log_field_space_name(handle.id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_field_space(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+	runtime->profiler->record_field_space(handle.id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5261,11 +5287,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_field_name(handle.id, fid,
-            reinterpret_cast<const char*>(buf));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buf, sizeof(ptr));
+        LegionSpy::log_field_name(handle.id, fid, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_field(handle.id, fid, size, 
-            reinterpret_cast<const char*>(buf));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buf, sizeof(ptr));
+	runtime->profiler->record_field(handle.id, fid, size, ptr); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5281,13 +5315,21 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_region_name(handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
-            reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_logical_region(handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
-	    reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5303,9 +5345,13 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
-            handle.field_space.id, handle.tree_id,
-            reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------

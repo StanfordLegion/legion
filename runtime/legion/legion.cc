@@ -6642,7 +6642,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                          dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -6652,18 +6653,19 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_name(IndexPartition handle,
-                                         const char *&result)
+    void Runtime::retrieve_name(IndexPartition handle, const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -6673,7 +6675,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -6685,7 +6688,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -6696,7 +6700,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -6707,7 +6712,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------

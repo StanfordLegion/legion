@@ -7059,7 +7059,10 @@
 #ifdef DEBUG_LEGION
       assert(get_count() == SPARSE_CNT);
 #endif
-      return reinterpret_cast<SparseSet*>(bits[1]);
+      SparseSet *result = NULL;
+      static_assert(sizeof(result) == sizeof(bits[1]), "Fuck c++");
+      memcpy(&result, bits+1, sizeof(result)); // Fuck c++
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -7070,7 +7073,8 @@
 #ifdef DEBUG_LEGION
       assert(get_count() == SPARSE_CNT);
 #endif
-      bits[1] = reinterpret_cast<uint64_t>(ptr);
+      static_assert(sizeof(ptr) == sizeof(bits[1]), "Fuck c++");
+      memcpy(bits+1, &ptr, sizeof(ptr)); // Fuck c++
     }
 
     //-------------------------------------------------------------------------
@@ -7081,7 +7085,10 @@
 #ifdef DEBUG_LEGION
       assert(get_count() == DENSE_CNT);
 #endif
-      return reinterpret_cast<BITMASK*>(bits[1]);
+      BITMASK *result = NULL;
+      static_assert(sizeof(result) == sizeof(bits[1]),"Fuck c++");
+      memcpy(&result, bits+1, sizeof(result)); // Fuck c++
+      return result;
     }
 
     //-------------------------------------------------------------------------
@@ -7092,7 +7099,8 @@
 #ifdef DEBUG_LEGION
       assert(get_count() == DENSE_CNT);
 #endif
-      bits[1] = reinterpret_cast<uint64_t>(ptr);
+      static_assert(sizeof(ptr) == sizeof(bits[1]), "Fuck c++");
+      memcpy(bits+1, &ptr, sizeof(ptr)); // Fuck c++
     }
 
     //-------------------------------------------------------------------------

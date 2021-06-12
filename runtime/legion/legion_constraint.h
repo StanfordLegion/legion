@@ -246,101 +246,43 @@ namespace Legion {
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const = 0;
     public:
-      virtual SpecializedConstraint* as_specialized_constraint(void) = 0;
-      virtual MemoryConstraint* as_memory_constraint(void) = 0;
-      virtual FieldConstraint* as_field_constraint(void) = 0;
-      virtual OrderingConstraint* as_ordering_constraint(void) = 0;
-      virtual SplittingConstraint* as_splitting_constraint(void) = 0;
-      virtual DimensionConstraint* as_dimension_constraint(void) = 0;
-      virtual AlignmentConstraint* as_alignment_constraint(void) = 0;
-      virtual OffsetConstraint* as_offset_constraint(void) = 0;
-      virtual PointerConstraint* as_pointer_constraint(void) = 0;
+      virtual SpecializedConstraint* as_specialized_constraint(void)
+        { return NULL; }
+      virtual MemoryConstraint* as_memory_constraint(void)
+        { return NULL; }
+      virtual FieldConstraint* as_field_constraint(void)
+        { return NULL; }
+      virtual OrderingConstraint* as_ordering_constraint(void)
+        { return NULL; }
+      virtual SplittingConstraint* as_splitting_constraint(void)
+        { return NULL; }
+      virtual DimensionConstraint* as_dimension_constraint(void)
+        { return NULL; } 
+      virtual AlignmentConstraint* as_alignment_constraint(void)
+        { return NULL; }
+      virtual OffsetConstraint* as_offset_constraint(void)
+        { return NULL; }
+      virtual PointerConstraint* as_pointer_constraint(void)
+        { return NULL; }
     public:
       virtual const SpecializedConstraint* 
-        as_specialized_constraint(void) const = 0;
+        as_specialized_constraint(void) const { return NULL; }
       virtual const MemoryConstraint* 
-        as_memory_constraint(void) const = 0;
+        as_memory_constraint(void) const { return NULL; }
       virtual const FieldConstraint* 
-        as_field_constraint(void) const = 0;
+        as_field_constraint(void) const { return NULL; }
       virtual const OrderingConstraint* 
-        as_ordering_constraint(void) const = 0;
+        as_ordering_constraint(void) const { return NULL; }
       virtual const SplittingConstraint* 
-        as_splitting_constraint(void) const = 0;
+        as_splitting_constraint(void) const { return NULL; }
       virtual const DimensionConstraint* 
-        as_dimension_constraint(void) const = 0;
+        as_dimension_constraint(void) const { return NULL; }
       virtual const AlignmentConstraint* 
-        as_alignment_constraint(void) const = 0;
+        as_alignment_constraint(void) const { return NULL; }
       virtual const OffsetConstraint* 
-        as_offset_constraint(void) const = 0;
+        as_offset_constraint(void) const { return NULL; }
       virtual const PointerConstraint* 
-        as_pointer_constraint(void) const = 0;
-    };
-
-    /**
-     * A helper class for definiting the virtual methods for all kinds
-     * of layout constraint classes
-     */
-    template<typename T>
-    class LayoutConstraintBase : public LayoutConstraint {
-    public:
-      virtual LayoutConstraintKind get_constraint_kind(void) const
-        { return T::constraint_kind; }
-    public:
-      virtual SpecializedConstraint* as_specialized_constraint(void)
-      { return (T::constraint_kind == LEGION_SPECIALIZED_CONSTRAINT) ? 
-                reinterpret_cast<SpecializedConstraint*>(this) : NULL; }
-      virtual MemoryConstraint* as_memory_constraint(void)
-      { return (T::constraint_kind == LEGION_MEMORY_CONSTRAINT) ?
-                reinterpret_cast<MemoryConstraint*>(this) : NULL; }
-      virtual FieldConstraint* as_field_constraint(void)
-      { return (T::constraint_kind == LEGION_FIELD_CONSTRAINT) ?
-                reinterpret_cast<FieldConstraint*>(this) : NULL; }
-      virtual OrderingConstraint* as_ordering_constraint(void)
-      { return (T::constraint_kind == LEGION_ORDERING_CONSTRAINT) ?
-                reinterpret_cast<OrderingConstraint*>(this) : NULL; }
-      virtual SplittingConstraint* as_splitting_constraint(void)
-      { return (T::constraint_kind == LEGION_SPLITTING_CONSTRAINT) ?
-                reinterpret_cast<SplittingConstraint*>(this) : NULL; }
-      virtual DimensionConstraint* as_dimension_constraint(void)
-      { return (T::constraint_kind == LEGION_DIMENSION_CONSTRAINT) ?
-                reinterpret_cast<DimensionConstraint*>(this) : NULL; }
-      virtual AlignmentConstraint* as_alignment_constraint(void)
-      { return (T::constraint_kind == LEGION_ALIGNMENT_CONSTRAINT) ?
-                reinterpret_cast<AlignmentConstraint*>(this) : NULL; }
-      virtual OffsetConstraint* as_offset_constraint(void)
-      { return (T::constraint_kind == LEGION_OFFSET_CONSTRAINT) ?
-                reinterpret_cast<OffsetConstraint*>(this) : NULL; }
-      virtual PointerConstraint* as_pointer_constraint(void)
-      { return (T::constraint_kind == LEGION_POINTER_CONSTRAINT) ?
-                reinterpret_cast<PointerConstraint*>(this) : NULL; }
-    public:
-      virtual const SpecializedConstraint* as_specialized_constraint(void) const
-      { return (T::constraint_kind == LEGION_SPECIALIZED_CONSTRAINT) ? 
-                reinterpret_cast<const SpecializedConstraint*>(this) : NULL; }
-      virtual const MemoryConstraint* as_memory_constraint(void) const
-      { return (T::constraint_kind == LEGION_MEMORY_CONSTRAINT) ?
-                reinterpret_cast<const MemoryConstraint*>(this) : NULL; }
-      virtual const FieldConstraint* as_field_constraint(void) const
-      { return (T::constraint_kind == LEGION_FIELD_CONSTRAINT) ?
-                reinterpret_cast<const FieldConstraint*>(this) : NULL; }
-      virtual const OrderingConstraint* as_ordering_constraint(void) const
-      { return (T::constraint_kind == LEGION_ORDERING_CONSTRAINT) ?
-                reinterpret_cast<const OrderingConstraint*>(this) : NULL; }
-      virtual const SplittingConstraint* as_splitting_constraint(void) const
-      { return (T::constraint_kind == LEGION_SPLITTING_CONSTRAINT) ?
-                reinterpret_cast<const SplittingConstraint*>(this) : NULL; }
-      virtual const DimensionConstraint* as_dimension_constraint(void) const
-      { return (T::constraint_kind == LEGION_DIMENSION_CONSTRAINT) ?
-                reinterpret_cast<const DimensionConstraint*>(this) : NULL; }
-      virtual const AlignmentConstraint* as_alignment_constraint(void) const
-      { return (T::constraint_kind == LEGION_ALIGNMENT_CONSTRAINT) ?
-                reinterpret_cast<const AlignmentConstraint*>(this) : NULL; }
-      virtual const OffsetConstraint* as_offset_constraint(void) const
-      { return (T::constraint_kind == LEGION_OFFSET_CONSTRAINT) ?
-                reinterpret_cast<const OffsetConstraint*>(this) : NULL; }
-      virtual const PointerConstraint* as_pointer_constraint(void) const
-      { return (T::constraint_kind == LEGION_POINTER_CONSTRAINT) ?
-                reinterpret_cast<const PointerConstraint*>(this) : NULL; }
+        as_pointer_constraint(void) const { return NULL; }
     };
 
     /**
@@ -357,8 +299,7 @@ namespace Legion {
      * constructor will fall back to the normal case so this
      * kind of constraint won't need to be set in the default case.
      */
-    class SpecializedConstraint : 
-      public LayoutConstraintBase<SpecializedConstraint> {
+    class SpecializedConstraint : public LayoutConstraint { 
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_SPECIALIZED_CONSTRAINT;
@@ -372,6 +313,13 @@ namespace Legion {
                             int max_overhead = 0);
     public:
       bool operator==(const SpecializedConstraint &other) const;
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual SpecializedConstraint* as_specialized_constraint(void) 
+        { return this; }
+      virtual const SpecializedConstraint* as_specialized_constraint(void) const
+        { return this; }
     public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
@@ -410,7 +358,7 @@ namespace Legion {
      * ordering of memories in which the runtime should attempt
      * to create a physical instance.
      */
-    class MemoryConstraint : public LayoutConstraintBase<MemoryConstraint> {
+    class MemoryConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_MEMORY_CONSTRAINT;
@@ -420,6 +368,13 @@ namespace Legion {
     public:
       inline bool operator==(const MemoryConstraint &other) const
       { return kind == other.kind && has_kind == other.has_kind; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual MemoryConstraint* as_memory_constraint(void) 
+        { return this; }
+      virtual const MemoryConstraint* as_memory_constraint(void) const
+        { return this; }
     public:
       inline bool is_valid(void) const { return has_kind; }
       inline Memory::Kind get_kind(void) const { return kind; }
@@ -444,7 +399,7 @@ namespace Legion {
      * flag whether they want the fields to be contiguous in
      * the physical instance layout.
      */
-    class FieldConstraint : public LayoutConstraintBase<FieldConstraint> {
+    class FieldConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_FIELD_CONSTRAINT;
@@ -456,6 +411,13 @@ namespace Legion {
                       bool contiguous, bool inorder = true);
     public:
       bool operator==(const FieldConstraint &other) const;
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual FieldConstraint* as_field_constraint(void) 
+        { return this; }
+      virtual const FieldConstraint* as_field_constraint(void) const
+        { return this; }
     public:
       inline bool is_contiguous(void) const { return contiguous; }
       inline bool is_inorder(void) const { return inorder; }
@@ -498,7 +460,7 @@ namespace Legion {
      * constraint if there is an associated split constraint
      * saying how to split the logical dimension.
      */
-    class OrderingConstraint : public LayoutConstraintBase<OrderingConstraint> {
+    class OrderingConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_ORDERING_CONSTRAINT;
@@ -509,6 +471,13 @@ namespace Legion {
     public:
       inline bool operator==(const OrderingConstraint &other) const
       { return ordering == other.ordering && contiguous == other.contiguous; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual OrderingConstraint* as_ordering_constraint(void) 
+        { return this; }
+      virtual const OrderingConstraint* as_ordering_constraint(void) const
+        { return this; }
     public:
       bool entails(const OrderingConstraint &other, unsigned total_dims) const;
       bool conflicts(const OrderingConstraint &other,unsigned total_dims) const;
@@ -533,8 +502,7 @@ namespace Legion {
      * These two constructors provide both top-down and bottom-up
      * ways of saying how to break a dimension apart.
      */
-    class SplittingConstraint : 
-      public LayoutConstraintBase<SplittingConstraint> {
+    class SplittingConstraint : public LayoutConstraint { 
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_SPLITTING_CONSTRAINT;
@@ -545,6 +513,13 @@ namespace Legion {
     public:
       inline bool operator==(const SplittingConstraint &o) const
       { return kind == o.kind && value == o.value && chunks == o.chunks; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual SplittingConstraint* as_splitting_constraint(void) 
+        { return this; }
+      virtual const SplittingConstraint* as_splitting_constraint(void) const
+        { return this; }
     public:
       bool entails(const SplittingConstraint &other) const;
       bool conflicts(const SplittingConstraint &other) const;
@@ -563,8 +538,7 @@ namespace Legion {
      * Dimension constraints specify the minimum or maximum 
      * necessary size of a given dimension.
      */
-    class DimensionConstraint : 
-      public LayoutConstraintBase<DimensionConstraint> {
+    class DimensionConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                           LEGION_DIMENSION_CONSTRAINT;
@@ -574,6 +548,13 @@ namespace Legion {
     public:
       inline bool operator==(const DimensionConstraint &o) const
       { return kind == o.kind && eqk == o.eqk && value == o.value; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual DimensionConstraint* as_dimension_constraint(void) 
+        { return this; }
+      virtual const DimensionConstraint* as_dimension_constraint(void) const
+        { return this; }
     public:
       bool entails(const DimensionConstraint &other) const;
       bool conflicts(const DimensionConstraint &other) const;
@@ -593,8 +574,7 @@ namespace Legion {
      * set lower or upper bounds or equality for a the 
      * byte-alignment of a given field.
      */
-    class AlignmentConstraint : 
-      public LayoutConstraintBase<AlignmentConstraint> {
+    class AlignmentConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_ALIGNMENT_CONSTRAINT;
@@ -605,6 +585,13 @@ namespace Legion {
     public:
       inline bool operator==(const AlignmentConstraint &o) const
       { return fid == o.fid && eqk == o.eqk && alignment == o.alignment; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual AlignmentConstraint* as_alignment_constraint(void) 
+        { return this; }
+      virtual const AlignmentConstraint* as_alignment_constraint(void) const
+        { return this; }
     public:
       bool entails(const AlignmentConstraint &other) const;
       bool conflicts(const AlignmentConstraint &other) const;
@@ -623,7 +610,7 @@ namespace Legion {
      * Specify an offset constraint for a given field. In
      * the case of this constraint equality is implied.
      */
-    class OffsetConstraint : public LayoutConstraintBase<OffsetConstraint> {
+    class OffsetConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_OFFSET_CONSTRAINT;
@@ -633,6 +620,13 @@ namespace Legion {
     public:
       inline bool operator==(const OffsetConstraint &o) const
       { return fid == o.fid && offset == o.offset; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual OffsetConstraint* as_offset_constraint(void) 
+        { return this; }
+      virtual const OffsetConstraint* as_offset_constraint(void) const
+        { return this; }
     public:
       bool entails(const OffsetConstraint &other) const;
       bool conflicts(const OffsetConstraint &other) const;
@@ -650,7 +644,7 @@ namespace Legion {
      * Specify the assumed pointer for a given field in
      * the physical instance.
      */
-    class PointerConstraint : public LayoutConstraintBase<PointerConstraint> {
+    class PointerConstraint : public LayoutConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             LEGION_POINTER_CONSTRAINT;
@@ -660,6 +654,13 @@ namespace Legion {
     public:
       inline bool operator==(const PointerConstraint &o) const
       { return is_valid == o.is_valid && memory == o.memory && ptr == o.ptr; }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual PointerConstraint* as_pointer_constraint(void) 
+        { return this; }
+      virtual const PointerConstraint* as_pointer_constraint(void) const
+        { return this; }
     public:
       bool entails(const PointerConstraint &other) const;
       bool conflicts(const PointerConstraint &other) const;
