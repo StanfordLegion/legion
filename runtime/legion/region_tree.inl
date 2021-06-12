@@ -313,8 +313,11 @@ namespace Legion {
     {
       typedef std::vector<typename Realm::CopyIndirection<DIM,T>::Base*>
         IndirectionVector;
-      IndirectionVector &indirections = 
-        *reinterpret_cast<IndirectionVector*>(&indirects);
+      std::vector<void*> *indirects_ptr = &indirects;
+      IndirectionVector *indirections_ptr = NULL;
+      static_assert(sizeof(indirections_ptr)==sizeof(indirects_ptr),"Fuck c++");
+      memcpy(&indirections_ptr, &indirects_ptr, sizeof(indirects_ptr));
+      IndirectionVector &indirections = *indirections_ptr; 
       // Sort instances into field sets and
       FieldMaskSet<IndirectRecord> record_sets;
       for (unsigned idx = 0; idx < records.size(); idx++)
@@ -384,8 +387,11 @@ namespace Legion {
     {
       typedef std::vector<typename Realm::CopyIndirection<DIM,T>::Base*>
         IndirectionVector;
-      IndirectionVector &indirections = 
-        *reinterpret_cast<IndirectionVector*>(&indirects);
+      std::vector<void*> *indirects_ptr = &indirects;
+      IndirectionVector *indirections_ptr = NULL;
+      static_assert(sizeof(indirections_ptr)==sizeof(indirects_ptr),"Fuck c++");
+      memcpy(&indirections_ptr, &indirects_ptr, sizeof(indirects_ptr));
+      IndirectionVector &indirections = *indirections_ptr;
       for (unsigned idx = 0; idx < indirections.size(); idx++)
         delete indirections[idx];
       indirects.clear();
@@ -423,8 +429,11 @@ namespace Legion {
 #endif 
       typedef std::vector<const typename Realm::CopyIndirection<DIM,T>::Base*>
         IndirectionVector;
-      const IndirectionVector &indirections = 
-        *reinterpret_cast<const IndirectionVector*>(&indirects);
+      const std::vector<void*> *indirects_ptr = &indirects;
+      const IndirectionVector *indirections_ptr = NULL;
+      static_assert(sizeof(indirections_ptr)==sizeof(indirects_ptr),"Fuck c++");
+      memcpy(&indirections_ptr, &indirects_ptr, sizeof(indirects_ptr));
+      const IndirectionVector &indirections = *indirections_ptr;
       ApEvent result;
       if (pred_guard.exists())
       {
@@ -1430,8 +1439,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(tag == type_tag);
 #endif
-      Realm::IndexSpace<DIM,T> *space = 
-        reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
+      Realm::IndexSpace<DIM,T> *space = NULL;
+      static_assert(sizeof(space) == sizeof(result), "Fuck c++");
+      memcpy(&space, &result, sizeof(space));
       return get_realm_index_space(*space, need_tight_result);
     }
 
@@ -2731,8 +2741,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(type_tag == handle.get_type_tag());
 #endif
-      Realm::IndexSpace<DIM,T> *space = 
-        reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
+      Realm::IndexSpace<DIM,T> *space = NULL;
+      static_assert(sizeof(space) == sizeof(result), "Fuck c++");
+      memcpy(&space, &result, sizeof(space));
       return get_realm_index_space(*space, need_tight_result);
     }
 

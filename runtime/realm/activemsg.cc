@@ -856,7 +856,9 @@ namespace Realm {
 				       count++, // how many messages we handle in a batch
 				       start_time, CurrentTime());
 #endif
-	delete current_msg;
+        // recycle message
+        current_msg->block->recycle_message(current_msg, this);
+
 	current_msg = next_msg;
       }
       // we always handle all the messages, but still indicate we're done

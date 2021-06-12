@@ -554,7 +554,26 @@ namespace Realm {
 
     if(!dense()) {
       // test against sparsity map too
-      assert(0);
+      size_t total_volume = 0;
+      SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+      const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+	  it != entries.end();
+	  it++) {
+	if(!it->bounds.overlaps(r)) continue;
+	if(it->sparsity.exists()) {
+	  assert(0);
+	} else if(it->bitmap != 0) {
+	  assert(0);
+	} else {
+          Rect<N,T> isect = it->bounds.intersection(r);
+          total_volume += isect.volume();
+	}
+      }
+
+      // did we miss anything?
+      if(total_volume < r.volume())
+        return false;
     }
 
     return true;

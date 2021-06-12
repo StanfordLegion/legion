@@ -628,24 +628,24 @@ class Processor(object):
         time_points_all = list()
         for task in self.tasks:
             if (task.stop-task.start > 10 and task.ready != None):
-                time_points_all.append(TimePoint(task.ready, task, True))
-                time_points_all.append(TimePoint(task.stop, task, False))
+                time_points_all.append(TimePoint(task.ready, task, True, task.start))
+                time_points_all.append(TimePoint(task.stop, task, False, 0))
             else:
-                time_points_all.append(TimePoint(task.start, task, True))
-                time_points_all.append(TimePoint(task.stop, task, False))
+                time_points_all.append(TimePoint(task.start, task, True, 0))
+                time_points_all.append(TimePoint(task.stop, task, False, 0))
 
-            self.time_points.append(TimePoint(task.start, task, True))
-            self.time_points.append(TimePoint(task.stop, task, False))
+            self.time_points.append(TimePoint(task.start, task, True, 0))
+            self.time_points.append(TimePoint(task.stop, task, False, 0))
 
-            self.util_time_points.append(TimePoint(task.start, task, True))
-            self.util_time_points.append(TimePoint(task.stop, task, False))
+            self.util_time_points.append(TimePoint(task.start, task, True, 0))
+            self.util_time_points.append(TimePoint(task.stop, task, False, 0))
             if isinstance(task, HasWaiters):
                 # wait intervals don't count for the util graph
                 for wait_interval in task.wait_intervals:
                     self.util_time_points.append(TimePoint(wait_interval.start, 
-                                                           task, False))
+                                                           task, False, 0))
                     self.util_time_points.append(TimePoint(wait_interval.end, 
-                                                           task, True))
+                                                           task, True, 0))
 
         self.util_time_points.sort(key=lambda p: p.time_key)
         self.time_points.sort(key=lambda p: p.time_key)
@@ -774,12 +774,15 @@ class Processor(object):
 
 class TimePoint(object):
     __slots__ = ['time', 'thing', 'first', 'time_key']
-    def __init__(self, time, thing, first):
+    def __init__(self, time, thing, first, secondary_sort_key):
         assert time != None
         self.time = time
         self.thing = thing
         self.first = first
-        self.time_key = 2*time + (0 if first is True else 1)
+        # secondary_sort_key is a parameter used for breaking ties in sorting.
+        # In practice, we plan for this to be a nanosecond timestamp,
+        # like the time field above.
+        self.time_key = (time, 0 if first is True else 1, secondary_sort_key)
     def __cmp__(a, b):
         if a.time_key < b.time_key:
             return -1
@@ -840,8 +843,8 @@ class Memory(object):
     def sort_time_range(self):
         self.max_live_instances = 0
         for inst in self.instances:
-            self.time_points.append(TimePoint(inst.start, inst, True))
-            self.time_points.append(TimePoint(inst.stop, inst, False))
+            self.time_points.append(TimePoint(inst.start, inst, True, 0))
+            self.time_points.append(TimePoint(inst.stop, inst, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
@@ -1020,8 +1023,8 @@ class Channel(object):
     def sort_time_range(self):
         self.max_live_copies = 0 
         for copy in self.copies:
-            self.time_points.append(TimePoint(copy.start, copy, True))
-            self.time_points.append(TimePoint(copy.stop, copy, False))
+            self.time_points.append(TimePoint(copy.start, copy, True, 0))
+            self.time_points.append(TimePoint(copy.stop, copy, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()

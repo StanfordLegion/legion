@@ -730,6 +730,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_ENABLE_TESTING=ON')
         if 'LAUNCHER' in env:
             cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
+        if env['USE_CUDA'] == '1':
+            cmdline.append('-DLegion_TEST_ARGS=-ll:gpu 1')
     else:
         cmdline.append('-DLegion_ENABLE_TESTING=OFF')
     if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
@@ -761,6 +763,12 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmd([make_exe, '-C', build_dir, '-j', str(thread_count)], env=env)
     cmd([make_exe, '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
+
+def build_legion_prof_rs(root_dir, tmp_dir, env):
+    cmd(['cargo', 'install',
+         '--path', os.path.join(root_dir, 'tools', 'legion_prof_rs'),
+         '--root', tmp_dir],
+        env=env)
 
 def build_regent(root_dir, env):
     cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
@@ -1007,7 +1015,8 @@ def run_tests(test_modules=None,
         ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
         ('DEFINE_HEADERS_DIR', os.path.join(root_dir, 'runtime')),
-        ('CMAKE_BUILD_DIR', os.path.join(tmp_dir, 'build'))] + (
+        ('CMAKE_BUILD_DIR', os.path.join(tmp_dir, 'build')),
+        ('TMP_BIN_DIR', os.path.join(tmp_dir, 'bin'))] + (
 
         # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC
         # options for Gcov on to the compile and link flags.
@@ -1020,6 +1029,8 @@ def run_tests(test_modules=None,
     try:
         # Build tests.
         with Stage('build'):
+            if use_prof:
+                build_legion_prof_rs(root_dir, tmp_dir, env)
             if use_cmake:
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,

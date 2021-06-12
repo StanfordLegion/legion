@@ -5053,8 +5053,10 @@ namespace Legion {
                                                 const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      const std::set<ApEvent> *ptr = &events;
+      const std::set<Realm::Event> *realm_events = NULL;
+      static_assert(sizeof(realm_events) == sizeof(ptr), "Fuck c++");
+      memcpy(&realm_events, &ptr, sizeof(realm_events));
       return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
     }
 

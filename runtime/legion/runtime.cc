@@ -13282,10 +13282,15 @@ namespace Legion {
       if (needs_lock)
       {
         // Do the request through the semantic information
-        const void *result = NULL; size_t dummy_size;
-        if (retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG, result, 
+        const void *ptr = NULL; size_t dummy_size;
+        if (retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG, ptr,
               dummy_size, true/*can fail*/, false/*wait until*/))
-          return reinterpret_cast<const char*>(result);
+        {
+          const char *result = NULL;
+          static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+          memcpy(&result, &ptr, sizeof(result));
+          return result;
+        }
       }
       else
       {
@@ -13294,7 +13299,13 @@ namespace Legion {
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
           semantic_infos.find(LEGION_NAME_SEMANTIC_TAG);
         if (finder != semantic_infos.end())
-          return reinterpret_cast<const char*>(finder->second.buffer);
+        {
+          const char *result = NULL;
+          static_assert(sizeof(result) == 
+              sizeof(finder->second.buffer), "Fuck c++");
+          memcpy(&result, &finder->second.buffer, sizeof(result)); 
+          return result;
+        }
       }
       // Couldn't find it so use the initial name
       return initial_name;
