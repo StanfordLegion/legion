@@ -1693,7 +1693,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!finalized);
 #endif
-      const uint8_t *data = reinterpret_cast<const uint8_t*>(&value); 
+      const T *ptr = &value;
+      const uint8_t *data = NULL;
+      static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
+      memcpy(&data, &ptr, sizeof(data));
       for (unsigned idx = 0; idx < sizeof(T); idx++)
       {
         blocks.b[bytes++] = data[idx];
@@ -1738,7 +1741,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!finalized);
 #endif
-      const uint8_t *data = reinterpret_cast<const uint8_t*>(value); 
+      const uint8_t *data = NULL;
+      static_assert(sizeof(data) == sizeof(value), "Fuck c++");
+      memcpy(&data, &value, sizeof(data));
       for (unsigned idx = 0; idx < size; idx++)
       {
         blocks.b[bytes++] = data[idx];

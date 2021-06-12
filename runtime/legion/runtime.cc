@@ -4900,7 +4900,7 @@ namespace Legion {
 
       // This is safe to do as we require the deferred buffer to be 1-D.
       const Realm::InstanceLayout<1,coord_t> *layout =
-        reinterpret_cast<const Realm::InstanceLayout<1,coord_t>*>(
+        static_cast<const Realm::InstanceLayout<1,coord_t>*>(
             instance.get_layout());
 
       size_t num_elements = pnum_elements != NULL

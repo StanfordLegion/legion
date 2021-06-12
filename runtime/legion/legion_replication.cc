@@ -5284,8 +5284,10 @@ namespace Legion {
             {
               double value = Realm::Clock::current_time();
               result.impl->set_local(&value, sizeof(value));
-              long long *ptr = reinterpret_cast<long long*>(&value);
-              timing_collective->broadcast(*ptr);
+              long long alt_value = 0;
+              static_assert(sizeof(alt_value) == sizeof(value), "Fuck c++");
+              memcpy(&alt_value, &value, sizeof(value));
+              timing_collective->broadcast(alt_value);
               break;
             }
           case LEGION_MEASURE_MICRO_SECONDS:

@@ -1033,7 +1033,7 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Convert the ap event for the space into an ap user event and 
       // trigger it once the operation is complete
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
@@ -1054,7 +1054,7 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Convert the ap event for the space into an ap user event and 
       // trigger it once the operation is complete
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD, 
@@ -1076,7 +1076,7 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Convert the ap event for the space into an ap user event and 
       // trigger it once the operation is complete
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
@@ -1100,7 +1100,7 @@ namespace Legion {
 
       if (child_node->set_domain(domain, source))
         assert(false);
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
