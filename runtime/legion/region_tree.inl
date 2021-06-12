@@ -1244,20 +1244,18 @@ namespace Legion {
           else
             continue;
         }
-        // If the sparsity maps are different, then we still need to test them
-        // for equivalence since we know they have the same number of points
-        if (!local_space.sparsity.exists())
+        if (!local_space.sparsity.exists() || !other_space.sparsity.exists())
         {
+          // Realm guarantees that tightening will remove a sparsity map if it
+          // can so if one index space has a sparsity map and the other doesn't
+          // then by definition they cannot be congruent (see issue #1020)
 #ifdef DEBUG_LEGION
-          assert(other_space.sparsity.exists());
+          // Should never hit this assertion as they should have equal sparsity
+          // map IDs if the sparsity map does not exist for both of them
+          assert(local_space.sparsity.exists() ||
+                  other_space.sparsity.exists());
 #endif
-          if (!other_space.contains_all(local_space.bounds))
-            continue;
-        }
-        else if (!other_space.sparsity.exists())
-        {
-          if (!local_space.contains_all(other_space.bounds))
-            continue;
+          continue;
         }
         else
         {
