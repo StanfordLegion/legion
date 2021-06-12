@@ -1251,28 +1251,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(other_space.sparsity.exists());
 #endif
-          Realm::IndexSpaceIterator<DIM,T> itr(other_space);
-          while (itr.valid)
-          {
-            if (!local_space.bounds.contains(itr.rect))
-              break;
-            itr.step();
-          }
-          // If we broke out early, that means we're not congruent
-          if (itr.valid)
+          if (!other_space.contains_all(local_space.bounds))
             continue;
         }
         else if (!other_space.sparsity.exists())
         {
-          Realm::IndexSpaceIterator<DIM,T> itr(local_space);
-          while (itr.valid)
-          {
-            if (!other_space.bounds.contains(itr.rect))
-              break;
-            itr.step();
-          }
-          // If we broke out early, that means we're not congruent
-          if (itr.valid)
+          if (!local_space.contains_all(other_space.bounds))
             continue;
         }
         else
