@@ -46,7 +46,7 @@ namespace Legion {
      * A small helper calss for performing exchanges of
      * instances for indirection copies
      */
-    struct IndirectRecord {
+    struct IndirectRecord : public LegionHeapify<IndirectRecord> {
     public:
       IndirectRecord(void) { }
       IndirectRecord(const FieldMask &m, InstanceManager *p, 
