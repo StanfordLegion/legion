@@ -301,7 +301,7 @@ namespace Legion {
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
-                                     std::vector<void*> &indirects,
+                                     std::vector<CopyIndirection*> &indirects,
                                      std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                                      unsigned unique_indirections_identifier,
@@ -311,13 +311,6 @@ namespace Legion {
                                      const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
-      typedef std::vector<typename Realm::CopyIndirection<DIM,T>::Base*>
-        IndirectionVector;
-      std::vector<void*> *indirects_ptr = &indirects;
-      IndirectionVector *indirections_ptr = NULL;
-      static_assert(sizeof(indirections_ptr)==sizeof(indirects_ptr),"Fuck c++");
-      memcpy(&indirections_ptr, &indirects_ptr, sizeof(indirects_ptr));
-      IndirectionVector &indirections = *indirections_ptr; 
       // Sort instances into field sets and
       FieldMaskSet<IndirectRecord> record_sets;
       for (unsigned idx = 0; idx < records.size(); idx++)
@@ -332,8 +325,8 @@ namespace Legion {
       LegionList<FieldSet<IndirectRecord*> >::aligned field_sets;
       record_sets.compute_field_sets(FieldMask(), field_sets);
       // Note that we might be appending to some existing indirections
-      const unsigned offset = indirections.size();
-      indirections.resize(offset+field_sets.size());
+      const unsigned offset = indirects.size();
+      indirects.resize(offset+field_sets.size());
       unsigned index = 0;
       for (LegionList<FieldSet<IndirectRecord*> >::aligned::const_iterator it =
             field_sets.begin(); it != field_sets.end(); it++, index++)
@@ -343,7 +336,7 @@ namespace Legion {
                                     possible_out_of_range, possible_aliasing);
         NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
             indirect_type, &helper);
-        indirections[offset+index] = helper.result;
+        indirects[offset+index] = helper.result;
 #ifdef LEGION_SPY
         LegionSpy::log_indirect_instance(unique_indirections_identifier,
             offset+index, indirect_inst_event, indirect_field);
@@ -381,20 +374,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceExpression::destroy_indirections_internal(
-                                                  std::vector<void*> &indirects)
+    void IndexSpaceExpression::unpack_indirections_internal(Deserializer &derez,
+                                    std::vector<CopyIndirection*> &indirections)
     //--------------------------------------------------------------------------
     {
-      typedef std::vector<typename Realm::CopyIndirection<DIM,T>::Base*>
-        IndirectionVector;
-      std::vector<void*> *indirects_ptr = &indirects;
-      IndirectionVector *indirections_ptr = NULL;
-      static_assert(sizeof(indirections_ptr)==sizeof(indirects_ptr),"Fuck c++");
-      memcpy(&indirections_ptr, &indirects_ptr, sizeof(indirects_ptr));
-      IndirectionVector &indirections = *indirections_ptr;
-      for (unsigned idx = 0; idx < indirections.size(); idx++)
-        delete indirections[idx];
-      indirects.clear();
+      size_t num_indirections;
+      derez.deserialize(num_indirections);
+      indirections.reserve(indirections.size() + num_indirections);
+      for (unsigned idx1 = 0; idx1 < num_indirections; idx1++)
+      {
+        TypeTag type_tag;
+        derez.deserialize(type_tag);
+        FieldID fid;
+        derez.deserialize(fid);
+        PhysicalInstance inst;
+        derez.deserialize(inst);
+        size_t num_records;
+        derez.deserialize(num_records);
+        std::set<IndirectRecord*> records;
+        for (unsigned idx2 = 0; idx2 < num_records; idx2++)
+        {
+          IndirectRecord *record = new IndirectRecord;
+          derez.deserialize(record->inst);
+          derez.deserialize(record->domain);
+          records.insert(record);
+        }
+        bool is_range, out_of_range, aliasing;
+        derez.deserialize(is_range);
+        derez.deserialize(out_of_range);
+        derez.deserialize(aliasing);
+        UnstructuredIndirectionHelper<DIM,T> helper(fid, is_range, inst,
+            records, out_of_range, aliasing);
+        NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
+            type_tag, &helper);
+        indirections.push_back(helper.result);
+        for (typename std::set<IndirectRecord*>::const_iterator it =
+              records.begin(); it != records.end(); it++)
+          delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -405,7 +422,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<void*> &indirects,
+                                 const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
@@ -429,11 +446,9 @@ namespace Legion {
 #endif 
       typedef std::vector<const typename Realm::CopyIndirection<DIM,T>::Base*>
         IndirectionVector;
-      const std::vector<void*> *indirects_ptr = &indirects;
-      const IndirectionVector *indirections_ptr = NULL;
-      static_assert(sizeof(indirections_ptr)==sizeof(indirects_ptr),"Fuck c++");
-      memcpy(&indirections_ptr, &indirects_ptr, sizeof(indirects_ptr));
-      const IndirectionVector &indirections = *indirections_ptr;
+      IndirectionVector indirections(indirects.size());
+      for (unsigned idx = 0; idx < indirects.size(); idx++)
+        indirections[idx] = indirects[idx]->to_base<DIM,T>();
       ApEvent result;
       if (pred_guard.exists())
       {
@@ -461,8 +476,12 @@ namespace Legion {
 #endif
       }
       if (trace_info.recording)
-        trace_info.record_issue_indirect(result, this, src_fields, dst_fields,
-                                         indirects, precondition, pred_guard);
+        trace_info.record_issue_indirect(result, this, src_fields,
+                                         dst_fields, indirects,
+#ifdef LEGION_SPY
+                                         unique_indirections_identifier,
+#endif
+                                         precondition, pred_guard);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -1673,7 +1692,7 @@ namespace Legion {
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
-                                     std::vector<void*> &indirections,
+                                     std::vector<CopyIndirection*> &indirects,
                                      std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                                      unsigned unique_indirections_identifier,
@@ -1685,7 +1704,7 @@ namespace Legion {
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance, 
-                                 records, indirections, indirect_indexes,
+                                 records, indirects, indirect_indexes,
 #ifdef LEGION_SPY
                                  unique_indirections_identifier, indirect_event,
 #endif
@@ -1694,11 +1713,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceOperationT<DIM,T>::destroy_indirections(
-                                               std::vector<void*> &indirections)
+    void IndexSpaceOperationT<DIM,T>::unpack_indirections(Deserializer &derez,
+                                    std::vector<CopyIndirection*> &indirections)
     //--------------------------------------------------------------------------
     {
-      destroy_indirections_internal<DIM,T>(indirections);
+      unpack_indirections_internal<DIM,T>(derez, indirections);
     }
 
     //--------------------------------------------------------------------------
@@ -1707,7 +1726,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<void*> &indirects,
+                                 const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
@@ -5333,7 +5352,7 @@ namespace Legion {
                                      const PhysicalInstance indirect_instance,
                                      const LegionVector<
                                             IndirectRecord>::aligned &records,
-                                     std::vector<void*> &indirections,
+                                     std::vector<CopyIndirection*> &indirects,
                                      std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                                      unsigned unique_indirections_identifier,
@@ -5345,7 +5364,7 @@ namespace Legion {
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
                                  indirect_type, is_range, indirect_instance,
-                                 records, indirections, indirect_indexes,
+                                 records, indirects, indirect_indexes,
 #ifdef LEGION_SPY
                                  unique_indirections_identifier, indirect_event,
 #endif
@@ -5354,11 +5373,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::destroy_indirections(
-                                               std::vector<void*> &indirections)
+    void IndexSpaceNodeT<DIM,T>::unpack_indirections(Deserializer &derez,
+                                    std::vector<CopyIndirection*> &indirections)
     //--------------------------------------------------------------------------
     {
-      destroy_indirections_internal<DIM,T>(indirections);
+      unpack_indirections_internal<DIM,T>(derez, indirections);
     }
 
     //--------------------------------------------------------------------------
@@ -5367,7 +5386,7 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<void*> &indirects,
+                                 const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif

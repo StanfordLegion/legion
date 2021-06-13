@@ -1540,6 +1540,7 @@ namespace Legion {
     class AssignFenceCompletion;
     class IssueCopy;
     class IssueFill;
+    class IssueIndirect;
     class GetOpTermEvent;
     class SetOpSyncEvent;
     class SetEffects;
@@ -1552,6 +1553,7 @@ namespace Legion {
 
     // region_tree.h
     class RegionTreeForest;
+    class CopyIndirection;
     class IndexSpaceExpression;
     class IndexSpaceOperation;
     template<int DIM, typename T> class IndexSpaceOperationT;

@@ -2451,7 +2451,7 @@ namespace Legion {
                                                  dst_indexes);
       // Build the indirection first which will also give us the
       // indirection indexes for each of the source fields
-      std::vector<void*> indirections;
+      std::vector<CopyIndirection*> indirections;
       std::vector<unsigned> indirection_indexes;
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
@@ -2535,10 +2535,10 @@ namespace Legion {
                                   indirect_id,
 #endif
                                   copy_pre, pred_guard);
-      if (!trace_info.recording)
-        // If we're not recording then destroy our indirections
-        // Otherwise the trace took ownership of them
-        copy_expr->destroy_indirections(indirections);
+      // Clean up our indirections
+      for (std::vector<CopyIndirection*>::const_iterator it =
+            indirections.begin(); it != indirections.end(); it++)
+        delete (*it);
       return copy_post;
     }
 
@@ -2584,7 +2584,7 @@ namespace Legion {
                                                  dst_indexes);
       // Build the indirection first which will also give us the
       // indirection indexes for each of the source fields
-      std::vector<void*> indirections;
+      std::vector<CopyIndirection*> indirections;
       std::vector<unsigned> indirection_indexes;
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
@@ -2668,10 +2668,10 @@ namespace Legion {
                                   indirect_id,
 #endif
                                   copy_pre, pred_guard);
-      if (!trace_info.recording)
-        // If we're not recording then destroy our indirections
-        // Otherwise the trace took ownership of them
-        copy_expr->destroy_indirections(indirections);
+      // Clean up our indirections
+      for (std::vector<CopyIndirection*>::const_iterator it =
+            indirections.begin(); it != indirections.end(); it++)
+        delete (*it);
       return copy_post;
     }
 
@@ -2724,7 +2724,7 @@ namespace Legion {
                                                  dst_indexes);
       // Build the indirection first which will also give us the
       // indirection indexes for each of the source fields
-      std::vector<void*> indirections;
+      std::vector<CopyIndirection*> indirections;
       std::vector<unsigned> src_indirection_indexes;
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
@@ -2809,10 +2809,10 @@ namespace Legion {
                                   indirect_id,
 #endif
                                   copy_pre, pred_guard);
-      if (!trace_info.recording)
-        // If we're not recording then destroy our indirections
-        // Otherwise the trace took ownership of them
-        copy_expr->destroy_indirections(indirections);
+      // Clean up our indirections
+      for (std::vector<CopyIndirection*>::const_iterator it =
+            indirections.begin(); it != indirections.end(); it++)
+        delete (*it);
       return copy_post;
     }
 

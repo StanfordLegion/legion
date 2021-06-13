@@ -163,7 +163,10 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<void*> &indirections,
+                           const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier, 
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
                            unsigned src_idx, unsigned dst_idx,
@@ -232,6 +235,7 @@ namespace Legion {
         REMOTE_TRACE_MERGE_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_VIEWS,
+        REMOTE_TRACE_ISSUE_INDIRECT,
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_FILL_VIEWS,
         REMOTE_TRACE_RECORD_OP_VIEW,
@@ -290,7 +294,10 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<void*> &indirections,
+                           const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual void record_copy_views(ApEvent lhs, Memoizable *memo,
                            unsigned src_idx, unsigned dst_idx,
@@ -561,12 +568,19 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard) const
         {
           sanity_check();
-          rec->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
-                                     indirections, precondition, pred_guard);
+          rec->record_issue_indirect(memo, result, expr, src_fields,
+                                     dst_fields, indirections,
+#ifdef LEGION_SPY
+                                     unique_indirections_identifier,
+#endif
+                                     precondition, pred_guard);
         }
       inline void record_copy_views(ApEvent lhs,
                                     IndexSpaceExpression *expr,
