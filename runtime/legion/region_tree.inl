@@ -392,12 +392,13 @@ namespace Legion {
         size_t num_records;
         derez.deserialize(num_records);
         std::set<IndirectRecord*> records;
+        LegionVector<IndirectRecord>::aligned record_allocs(num_records);
         for (unsigned idx2 = 0; idx2 < num_records; idx2++)
         {
-          IndirectRecord *record = new IndirectRecord;
-          derez.deserialize(record->inst);
-          derez.deserialize(record->domain);
-          records.insert(record);
+          IndirectRecord &record = record_allocs[idx2];
+          derez.deserialize(record.inst);
+          derez.deserialize(record.domain);
+          records.insert(&record);
         }
         bool is_range, out_of_range, aliasing;
         derez.deserialize(is_range);
@@ -408,9 +409,6 @@ namespace Legion {
         NT_TemplateHelper::demux<UnstructuredIndirectionHelper<DIM,T> >(
             type_tag, &helper);
         indirections.push_back(helper.result);
-        for (typename std::set<IndirectRecord*>::const_iterator it =
-              records.begin(); it != records.end(); it++)
-          delete (*it);
       }
     }
 
