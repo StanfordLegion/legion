@@ -22,7 +22,8 @@ Version 21.06.0 (June ??, 2021)
         This threshold can be increased (or decreased) with `-cuda:hostreg`
   * Tools
     - New Rust implementation of Legion Prof is 5-15x faster than the
-        original (even with PyPy)
+        original (even with PyPy). For more details, see:
+        https://legion.stanford.edu/profiling/#rust-legion-prof
 
 Version 21.03.0 (March 30, 2021)
   * Build
