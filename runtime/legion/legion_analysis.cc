@@ -710,7 +710,10 @@ namespace Legion {
                              ApEvent &lhs, IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -719,12 +722,46 @@ namespace Legion {
 #endif
       if (local_space != origin_space)
       {
-        // TODO
-        assert(false);
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_ISSUE_INDIRECT);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          expr->pack_expression(rez, origin_space);
+#ifdef DEBUG_LEGION
+          assert(src_fields.size() == dst_fields.size());
+#endif
+          rez.serialize<size_t>(src_fields.size());
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+          {
+            pack_src_dst_field(rez, src_fields[idx]);
+            pack_src_dst_field(rez, dst_fields[idx]);
+          }
+          rez.serialize<size_t>(indirections.size());
+          for (unsigned idx = 0; idx < indirections.size(); idx++)
+            indirections[idx]->serializer(rez);
+          rez.serialize(precondition);
+          rez.serialize(pred_guard);
+#ifdef LEGION_SPY
+          rez.serialize(unique_indirections_identifier);
+#endif
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
       }
       else
-        remote_tpl->record_issue_indirect(memo, lhs, expr,src_fields,dst_fields,
-                                          indirections,precondition,pred_guard);
+        remote_tpl->record_issue_indirect(memo, lhs, expr, src_fields,
+                                          dst_fields, indirections,
+#ifdef LEGION_SPY
+                                          unique_indirections_identifier,
+#endif
+                                          precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -1361,6 +1398,65 @@ namespace Legion {
               Runtime::trigger_event(done);
             break;
           }
+        case REMOTE_TRACE_ISSUE_INDIRECT:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApUserEvent *lhs_ptr;
+            derez.deserialize(lhs_ptr);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
+            size_t num_fields;
+            derez.deserialize(num_fields);
+            std::vector<CopySrcDstField> src_fields(num_fields);
+            std::vector<CopySrcDstField> dst_fields(num_fields);
+            for (unsigned idx = 0; idx < num_fields; idx++)
+            {
+              unpack_src_dst_field(derez, src_fields[idx]);
+              unpack_src_dst_field(derez, dst_fields[idx]);
+            }
+            std::vector<CopyIndirection*> indirections;
+            expr->unpack_indirections(derez, indirections);
+            ApEvent precondition;
+            derez.deserialize(precondition);
+            PredEvent pred_guard;
+            derez.deserialize(pred_guard);
+#ifdef LEGION_SPY
+            unsigned unique_indirections_identifier;
+            derez.deserialize(unique_indirections_identifier);
+#endif
+            // Use this to track if lhs changes
+            const ApUserEvent lhs_copy = lhs;
+            // Do the base call
+            tpl->record_issue_indirect(memo, lhs, expr, src_fields,
+                                       dst_fields, indirections,
+#ifdef LEGION_SPY
+                                       unique_indirections_identifier,
+#endif
+                                       precondition, pred_guard);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_ISSUE_INDIRECT);
+                rez.serialize(lhs_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // lhs was unchanged
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
         case REMOTE_TRACE_ISSUE_FILL:
           {
             RtUserEvent done;
@@ -1750,6 +1846,7 @@ namespace Legion {
         case REMOTE_TRACE_REQUEST_TERM_EVENT:
         case REMOTE_TRACE_MERGE_EVENTS:
         case REMOTE_TRACE_ISSUE_COPY:
+        case REMOTE_TRACE_ISSUE_INDIRECT:
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
 #ifdef LEGION_GPU_REDUCTIONS
