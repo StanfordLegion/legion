@@ -3002,6 +3002,8 @@ namespace Realm {
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
       , cfg_max_ctxsync_threads(4)
+      , cfg_multithread_dma(false)
+      , cfg_hostreg_limit(1 << 30)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
     {}
@@ -3022,6 +3024,39 @@ namespace Realm {
     /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
+      HipModule *m = new HipModule;
+      
+      // first order of business - read command line parameters
+      {
+        CommandLineParser cp;
+
+      	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
+      	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+      	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+      	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
+      	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
+          .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
+      	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
+      	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
+      	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
+      	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)	
+      	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
+      	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
+      	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+          .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
+          .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
+          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm');
+#ifdef REALM_USE_HIP_HIJACK
+        cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
+#endif	
+        
+        bool ok = cp.parse_command_line(cmdline);
+      	if(!ok) {
+      	  log_gpu.error() << "error reading HIP command line parameters";
+      	  exit(1);
+      	}
+      }
+      
 #ifdef HIP_DLOPEN
       printf("enable hip dlopen!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
       hiplib_handle = dlopen("/opt/rocm-3.7.0/lib/libamdhip64.so", RTLD_GLOBAL | RTLD_LAZY);
@@ -3089,39 +3124,8 @@ namespace Realm {
       	    }
       }
 
-      HipModule *m = new HipModule;
-
       // give the gpu info we assembled to the module
       m->gpu_info.swap(infos);
-
-      // first order of business - read command line parameters
-      {
-	CommandLineParser cp;
-
-      	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
-      	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
-      	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
-      	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
-      	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
-          .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
-      	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
-      	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
-      	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
-      	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)	
-      	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
-      	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-      	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-          .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads);
-#ifdef REALM_USE_HIP_HIJACK
-        cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
-#endif	
-
-	bool ok = cp.parse_command_line(cmdline);
-      	if(!ok) {
-      	  log_gpu.error() << "error reading HIP command line parameters";
-      	  exit(1);
-      	}
-      }
 
       return m;
     }
@@ -3360,6 +3364,17 @@ namespace Realm {
 	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
 	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
 	    continue;
+    
+      // skip any memory that's over the max size limit for host
+      //  registration
+      if((cfg_hostreg_limit > 0) &&
+         ((*it)->size > cfg_hostreg_limit)) {
+	      log_gpu.info() << "memory " << (*it)->me
+                       << " is larger than hostreg limit ("
+                       << (*it)->size << " > " << cfg_hostreg_limit
+                       << ") - skipping registration";
+        continue;
+      }
 
 	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
 	  if(base == 0)
@@ -3470,8 +3485,12 @@ namespace Realm {
 
       for(std::vector<GPU *>::iterator it = gpus.begin();
           it != gpus.end();
-          it++)
+          it++) {
+#ifdef REALM_USE_HIP_HIJACK
+        GlobalRegistrations::remove_gpu_context(*it);
+#endif
         delete *it;
+      }
       gpus.clear();
       
       Module::cleanup();

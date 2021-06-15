@@ -152,8 +152,15 @@ bool test_case(const char *name,
   }
 
   // verify containment
+#define USE_CONTAINS_ALL
+#ifdef USE_CONTAINS_ALL
+  IndexSpace<N,T> is_cover(covering);
+#endif
   for(size_t i = 0; i < input_rects.size(); i++) {
     bool found = false;
+#ifdef USE_CONTAINS_ALL
+    found = is_cover.contains_all(input_rects[i]);
+#else
     // note that compute_covering doesn't officially guarantee rectangles
     //  will stay together, which would require testing this for every point,
     //  but the current implementation does, so do the faster version
@@ -162,6 +169,7 @@ bool test_case(const char *name,
 	found = true;
 	break;
       }
+#endif
     if(!found) {
       log_app.error() << name << ": missing coverage: " << input_rects[i] << " not in " << PrettyVector<Rect<N,T> >(covering);
       return false;

@@ -5303,8 +5303,10 @@ namespace Legion {
             {
               double value = Realm::Clock::current_time();
               result.impl->set_local(&value, sizeof(value));
-              long long *ptr = reinterpret_cast<long long*>(&value);
-              timing_collective->broadcast(*ptr);
+              long long alt_value = 0;
+              static_assert(sizeof(alt_value) == sizeof(value), "Fuck c++");
+              memcpy(&alt_value, &value, sizeof(value));
+              timing_collective->broadcast(alt_value);
               break;
             }
           case LEGION_MEASURE_MICRO_SECONDS:
@@ -5397,8 +5399,18 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(value_broadcast == NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        value_broadcast = new BufferBroadcast(repl_ctx, COLLECTIVE_LOC_100);
+        // We'll always make node zero the owner shard here
+        if (repl_ctx->owner_shard->shard_id > 0)
+          value_broadcast = new BufferBroadcast(repl_ctx, 0/*owner shard*/,
+                                                COLLECTIVE_LOC_100);
+        else
+          value_broadcast = new BufferBroadcast(repl_ctx, COLLECTIVE_LOC_100);
       }
     }
 
@@ -5417,7 +5429,7 @@ namespace Legion {
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        if (repl_ctx->owner_shard->shard_id > 0)
+        if (repl_ctx->owner_shard->shard_id != value_broadcast->origin)
         {
           size_t expected_size = 0;
           const void *expected_buffer = value_broadcast->get_buffer(size);
@@ -5851,7 +5863,8 @@ namespace Legion {
 #endif
       // Get ourselves an execution fence barrier
       // No need for a mapping fence since we're just replaying
-      execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
+      if (fence_kind == EXECUTION_FENCE)
+        execution_fence_barrier = repl_ctx->get_next_execution_fence_barrier();
       FenceOp::trigger_replay();
     }
 

@@ -1033,7 +1033,7 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Convert the ap event for the space into an ap user event and 
       // trigger it once the operation is complete
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
@@ -1054,7 +1054,7 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Convert the ap event for the space into an ap user event and 
       // trigger it once the operation is complete
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD, 
@@ -1076,7 +1076,7 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Convert the ap event for the space into an ap user event and 
       // trigger it once the operation is complete
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
@@ -1100,7 +1100,7 @@ namespace Legion {
 
       if (child_node->set_domain(domain, source))
         assert(false);
-      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+      ApUserEvent space_ready = *(static_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
@@ -2660,7 +2660,7 @@ namespace Legion {
                                                  dst_indexes);
       // Build the indirection first which will also give us the
       // indirection indexes for each of the source fields
-      std::vector<void*> indirections;
+      std::vector<CopyIndirection*> indirections;
       std::vector<unsigned> indirection_indexes;
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
@@ -2744,10 +2744,10 @@ namespace Legion {
                                   indirect_id,
 #endif
                                   copy_pre, pred_guard);
-      if (!trace_info.recording)
-        // If we're not recording then destroy our indirections
-        // Otherwise the trace took ownership of them
-        copy_expr->destroy_indirections(indirections);
+      // Clean up our indirections
+      for (std::vector<CopyIndirection*>::const_iterator it =
+            indirections.begin(); it != indirections.end(); it++)
+        delete (*it);
       return copy_post;
     }
 
@@ -2793,7 +2793,7 @@ namespace Legion {
                                                  dst_indexes);
       // Build the indirection first which will also give us the
       // indirection indexes for each of the source fields
-      std::vector<void*> indirections;
+      std::vector<CopyIndirection*> indirections;
       std::vector<unsigned> indirection_indexes;
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
@@ -2877,10 +2877,10 @@ namespace Legion {
                                   indirect_id,
 #endif
                                   copy_pre, pred_guard);
-      if (!trace_info.recording)
-        // If we're not recording then destroy our indirections
-        // Otherwise the trace took ownership of them
-        copy_expr->destroy_indirections(indirections);
+      // Clean up our indirections
+      for (std::vector<CopyIndirection*>::const_iterator it =
+            indirections.begin(); it != indirections.end(); it++)
+        delete (*it);
       return copy_post;
     }
 
@@ -2933,7 +2933,7 @@ namespace Legion {
                                                  dst_indexes);
       // Build the indirection first which will also give us the
       // indirection indexes for each of the source fields
-      std::vector<void*> indirections;
+      std::vector<CopyIndirection*> indirections;
       std::vector<unsigned> src_indirection_indexes;
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
@@ -3018,10 +3018,10 @@ namespace Legion {
                                   indirect_id,
 #endif
                                   copy_pre, pred_guard);
-      if (!trace_info.recording)
-        // If we're not recording then destroy our indirections
-        // Otherwise the trace took ownership of them
-        copy_expr->destroy_indirections(indirections);
+      // Clean up our indirections
+      for (std::vector<CopyIndirection*>::const_iterator it =
+            indirections.begin(); it != indirections.end(); it++)
+        delete (*it);
       return copy_post;
     }
 
@@ -5709,11 +5709,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_index_space_name(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+        LegionSpy::log_index_space_name(handle.id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_index_space(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+	runtime->profiler->record_index_space(handle.id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5729,11 +5737,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_index_partition_name(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+        LegionSpy::log_index_partition_name(handle.id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_index_part(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+	runtime->profiler->record_index_part(handle.id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5749,11 +5765,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_field_space_name(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+        LegionSpy::log_field_space_name(handle.id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_field_space(handle.id,
-            reinterpret_cast<const char*>(buffer));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
+	runtime->profiler->record_field_space(handle.id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5770,11 +5794,19 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
-        LegionSpy::log_field_name(handle.id, fid,
-            reinterpret_cast<const char*>(buf));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buf, sizeof(ptr));
+        LegionSpy::log_field_name(handle.id, fid, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_field(handle.id, fid, size, 
-            reinterpret_cast<const char*>(buf));
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buf) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buf, sizeof(ptr));
+	runtime->profiler->record_field(handle.id, fid, size, ptr); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5790,13 +5822,21 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_region_name(handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
-            reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id, ptr);
+      }
       if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
 	runtime->profiler->record_logical_region(handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
-	    reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5812,9 +5852,13 @@ namespace Legion {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                           size, is_mutable, local_only);
       if (runtime->legion_spy_enabled && (LEGION_NAME_SEMANTIC_TAG == tag))
+      {
+        const char *ptr = NULL;
+        static_assert(sizeof(buffer) == sizeof(ptr), "Fuck c++");
+        memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
-            handle.field_space.id, handle.tree_id,
-            reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id, ptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9805,7 +9849,43 @@ namespace Legion {
       {
         // If we're the owner we do the disjointness test
         disjoint = true;
-        if (total_children == max_linearized_color)
+        if (is_complete(false/*from app*/, true/*false if not ready*/))
+        {
+          // If we're complete we can check this using a linear algorithm
+          // by suming up the volumes of all the children
+          const size_t parent_volume = parent->get_volume();
+          size_t children_volume = 0;
+          if (total_children == max_linearized_color)
+          {
+            for (LegionColor color = 0; color < max_linearized_color; color++)
+            {
+              IndexSpaceNode *child = get_child(color);
+              children_volume += child->get_volume();
+              if (children_volume > parent_volume)
+                break;
+            }
+          }
+          else
+          {
+            ColorSpaceIterator *itr =
+              color_space->create_color_space_iterator();
+            while (itr->is_valid())
+            {
+              const LegionColor color = itr->yield_color();
+              IndexSpaceNode *child = get_child(color);
+              children_volume += child->get_volume();
+              if (children_volume > parent_volume)
+                break;
+            }
+            delete itr;
+          }
+#ifdef DEBUG_LEGION
+          assert(parent_volume <= children_volume);
+#endif
+          if (parent_volume < children_volume)
+            disjoint = false;
+        }
+        else if (total_children == max_linearized_color)
         {
           for (LegionColor c1 = 0; disjoint && 
                 (c1 < max_linearized_color); c1++)
@@ -18652,7 +18732,7 @@ namespace Legion {
                 to_untrack.begin(); it != to_untrack.end(); it++)
           {
             it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/);
+                          local_space, NULL/*no collective mapping*/);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }
@@ -19854,7 +19934,8 @@ namespace Legion {
                                               const UniqueID opid,
                                               const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
-                                              const bool downward_only)
+                                              const bool downward_only,
+                                              const bool expr_covers)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
@@ -19874,14 +19955,14 @@ namespace Legion {
         {
           // Defer this computation until the version manager data is ready
           DeferComputeEquivalenceSetArgs args(this, ctx, context, target, 
-                                  target_space, expr, mask, opid, source);
+                    target_space, expr, mask, opid, source, expr_covers);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
           ready_events.insert(args.ready);
         }
         else
           compute_equivalence_sets(ctx, context, target, target_space, expr,
-                    mask, opid, source, ready_events, true/*downward only*/);
+            mask, opid, source, ready_events,true/*downward only*/,expr_covers);
       }
       if (!!parent_traversal)
       {
@@ -19891,14 +19972,16 @@ namespace Legion {
 #endif
         parent->compute_equivalence_sets(ctx, context, target, target_space,
                                          expr, parent_traversal, opid, source, 
-                                         ready_events, false/*downward only*/);
+                                         ready_events, false/*downward only*/,
+                                         false/*expr covers*/);
       }
       if (!children_traversal.empty())
       {
         for (FieldMaskSet<PartitionNode>::const_iterator it = 
               children_traversal.begin(); it != children_traversal.end(); it++)
           it->first->compute_equivalence_sets(ctx, context, target,target_space,
-           expr, it->second, opid, source, ready_events, true/*downward only*/);
+                                   expr, it->second, opid, source, ready_events,
+                                   true/*downward only*/, expr_covers);
       }
     }
 
@@ -19906,11 +19989,11 @@ namespace Legion {
     RegionNode::DeferComputeEquivalenceSetArgs::DeferComputeEquivalenceSetArgs(
           RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
           const AddressSpaceID ts, IndexSpaceExpression *e, const FieldMask &m, 
-          const UniqueID id, const AddressSpaceID s)
+          const UniqueID id, const AddressSpaceID s, const bool covers)
       : LgTaskArgs<DeferComputeEquivalenceSetArgs>(implicit_provenance),
         proxy_this(proxy), ctx(x), context(c), target(t), target_space(ts),
         expr(e), mask(new FieldMask(m)), opid(id), source(s),
-        ready(Runtime::create_rt_user_event())
+        ready(Runtime::create_rt_user_event()), expr_covers(covers)
     //--------------------------------------------------------------------------
     {
       expr->add_expression_reference();
@@ -19926,7 +20009,8 @@ namespace Legion {
       std::set<RtEvent> ready_events;
       dargs->proxy_this->compute_equivalence_sets(dargs->ctx, dargs->context,
           dargs->target, dargs->target_space, dargs->expr, *(dargs->mask), 
-          dargs->opid, dargs->source, ready_events, true/*downward only*/);
+          dargs->opid, dargs->source, ready_events, true/*downward only*/,
+          dargs->expr_covers);
       if (!ready_events.empty())
         Runtime::trigger_event(dargs->ready, 
             Runtime::merge_events(ready_events));
@@ -19945,6 +20029,9 @@ namespace Legion {
                                    bool nonexclusive_virtual_mapping_root)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!nonexclusive_virtual_mapping_root || (source_context != NULL));
+#endif
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       FieldMaskSet<EquivalenceSet> to_untrack;
@@ -19958,16 +20045,19 @@ namespace Legion {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
                 to_untrack.begin(); it != to_untrack.end(); it++)
           {
+            // do not invalidate trackers if we don't own the equivalence sets
             it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/);
+                local_space, NULL/*no collective mapping*/,
+                nonexclusive_virtual_mapping_root ? source_context : NULL);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }
         }
         else
         {
+          // do not invalidate trackers if we don't own the equivalence sets
           source_context->deduplicate_invalidate_trackers(to_untrack, 
-                                                          applied_events);
+                  applied_events, nonexclusive_virtual_mapping_root);
           for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
                 to_untrack.begin(); it != to_untrack.end(); it++)
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
@@ -21471,21 +21561,46 @@ namespace Legion {
                                               const UniqueID opid,
                                               const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
-                                              const bool downward_only)
+                                              const bool downward_only,
+                                              const bool expr_covers)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       if (downward_only)
       {
         std::vector<LegionColor> interfering_children;
-        row_source->find_interfering_children(expr, interfering_children);
+        if (expr_covers)
+        {
+          // Expr covers so all the children interfere
+          if (row_source->total_children == row_source->max_linearized_color)
+          {
+            interfering_children.resize(row_source->total_children);
+            for (LegionColor color = 0; 
+                  color < row_source->total_children; color++)
+              interfering_children[color] = color;
+          }
+          else
+          {
+            ColorSpaceIterator *iterator =
+              row_source->color_space->create_color_space_iterator();
+            while (iterator->is_valid())
+              interfering_children.push_back(iterator->yield_color());
+            delete iterator;
+          }
+        }
+        else
+          row_source->find_interfering_children(expr, interfering_children);
         for (std::vector<LegionColor>::const_iterator it = 
               interfering_children.begin(); it != 
               interfering_children.end(); it++)
         {
           RegionNode *child = get_child(*it);
-          child->compute_equivalence_sets(ctx,context,target,target_space,expr,
-                       mask, opid, source, ready_events, true/*downward only*/);
+          // Still need to filter empty children when traversing here
+          if (expr_covers && child->row_source->is_empty())
+            continue;
+          child->compute_equivalence_sets(ctx, context, target, target_space,
+                                expr, mask, opid, source, ready_events,
+                                true/*downward only*/, expr_covers);
         }
       }
       else
@@ -21499,19 +21614,43 @@ namespace Legion {
         if (!!parent_traversal)
           parent->compute_equivalence_sets(ctx, context, target, target_space,
                                            expr, parent_traversal, opid, source, 
-                                           ready_events,false/*downward only*/);
+                                           ready_events, false/*downward only*/,
+                                           false/*expr covers*/);
         if (!!children_traversal)
         {
           std::vector<LegionColor> interfering_children;
-          row_source->find_interfering_children(expr, interfering_children);
+          if (expr_covers)
+          {
+            // Expr covers so all the children interfere
+            if (row_source->total_children == row_source->max_linearized_color)
+            {
+              interfering_children.resize(row_source->total_children);
+              for (LegionColor color = 0;
+                    color < row_source->total_children; color++)
+                interfering_children[color] = color;
+            }
+            else
+            {
+              ColorSpaceIterator *iterator =
+                row_source->color_space->create_color_space_iterator();
+              while (iterator->is_valid())
+                interfering_children.push_back(iterator->yield_color());
+              delete iterator;
+            }
+          }
+          else
+            row_source->find_interfering_children(expr, interfering_children);
           for (std::vector<LegionColor>::const_iterator it = 
                 interfering_children.begin(); it != 
                 interfering_children.end(); it++)
           {
             RegionNode *child = get_child(*it);
-            child->compute_equivalence_sets(ctx, context, target, target_space,
-                                         expr, children_traversal, opid, source,
-                                         ready_events, true/*downward only*/);
+            // Still need to filter empty children when traversing here
+            if (expr_covers && child->row_source->is_empty())
+              continue;
+            child->compute_equivalence_sets(ctx, context, target, 
+                target_space, expr, children_traversal, opid, source,
+                ready_events, true/*downward only*/, expr_covers);
           }
         }
       }

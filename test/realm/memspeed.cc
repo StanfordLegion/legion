@@ -24,6 +24,10 @@ enum {
   COPYPROF_TASK,
 };
 
+enum {
+  FID_BASE = 44,
+};
+
 struct SpeedTestArgs {
   Memory mem;
   RegionInstance inst;
@@ -59,6 +63,10 @@ namespace TestConfig {
   bool do_tasks = true;   // should tasks accessing memories be tested
   bool do_copies = true;  // should DMAs between memories be tested
   int copy_reps = 0;      // if nonzero, average over #reps copies
+  int copy_fields = 1;    // number of distinct fields to copy
+  size_t sparse_chunk = 0;  // if nonzero, test sparse copies with chunk size
+  size_t sparse_gap = 16;   // gap between sparse chunks (if used)
+  bool copy_aos = false;   // if true, use an AOS memory layout
   bool slow_mems = false;  // show slow memories be tested?
 };
 
@@ -231,7 +239,8 @@ void top_level_task(const void *args, size_t arglen,
     Memory m = *it;
     size_t capacity = m.capacity();
     // we need two instances if we're doing copy testing
-    if(capacity < (TestConfig::buffer_size * (TestConfig::do_copies ? 2 : 1))) {
+    if(capacity < (TestConfig::buffer_size *
+		   (TestConfig::do_copies ? 2*TestConfig::copy_fields : 1))) {
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - insufficient capacity";
       continue;
     }
@@ -300,15 +309,23 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   if(TestConfig::do_copies) {
-    std::vector<size_t> field_sizes(1, sizeof(void *));
+    std::map<FieldID, size_t> field_sizes;
+    for(int i = 0; i < TestConfig::copy_fields; i++)
+      field_sizes[FID_BASE + i] = sizeof(void *);
 
-    void *fill_value = 0;
-    std::vector<CopySrcDstField> src(1);
-    src[0].field_id = 0;
-    src[0].size = sizeof(void *);
-    std::vector<CopySrcDstField> dst(1);
-    dst[0].field_id = 0;
-    dst[0].size = sizeof(void *);
+    // do we need a sparse index space?
+    IndexSpace<1> d_sparse;
+    size_t sparse_elements = 0;
+    if(TestConfig::sparse_chunk > 0) {
+      std::vector<Rect<1> > rects;
+      for(size_t ofs = 0;
+          ofs <= (elements - TestConfig::sparse_chunk);
+          ofs += (TestConfig::sparse_chunk + TestConfig::sparse_gap)) {
+        rects.push_back(Rect<1>(ofs, ofs + TestConfig::sparse_chunk - 1));
+        sparse_elements += TestConfig::sparse_chunk;
+      }
+      d_sparse = IndexSpace<1>(rects);
+    }
     
     for(std::vector<Memory>::const_iterator it = memories.begin();
 	it != memories.end();
@@ -316,15 +333,23 @@ void top_level_task(const void *args, size_t arglen,
       Memory m1 = *it;
 
       RegionInstance inst1;
-      RegionInstance::create_instance(inst1, m1, d,
-				      std::vector<size_t>(1, sizeof(void *)),
-				      0 /*SOA*/,
+      RegionInstance::create_instance(inst1, m1, d, field_sizes,
+				      (TestConfig::copy_aos ? 1 : 0),
 				      ProfilingRequestSet()).wait();
       assert(inst1.exists());
 
       // clear the instance first - this should also take care of faulting it in
-      src[0].inst = inst1;
-      d.fill(src, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
+      {
+        void *fill_value = 0;
+        std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
+        for(int i = 0; i < TestConfig::copy_fields; i++)
+          srcs[i].set_fill(fill_value);
+        std::vector<CopySrcDstField> dsts(TestConfig::copy_fields);
+        for(int i = 0; i < TestConfig::copy_fields; i++)
+          dsts[i].set_field(inst1, FID_BASE+i, sizeof(void *));
+
+        d.copy(srcs, dsts, ProfilingRequestSet()).wait();
+      }
 
       for(std::vector<Memory>::const_iterator it2 = memories.begin();
 	it2 != memories.end();
@@ -332,18 +357,34 @@ void top_level_task(const void *args, size_t arglen,
 	Memory m2 = *it2;
 
 	RegionInstance inst2;
-	RegionInstance::create_instance(inst2, m2, d,
-					std::vector<size_t>(1, sizeof(void *)),
-					0 /*SOA*/,
+	RegionInstance::create_instance(inst2, m2, d, field_sizes,
+					(TestConfig::copy_aos ? 1 : 0),
 					ProfilingRequestSet()).wait();
 	assert(inst2.exists());
 
 	// clear the instance first - this should also take care of faulting it in
-	dst[0].inst = inst2;
-	d.fill(dst, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
+        {
+          void *fill_value = 0;
+          std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
+          for(int i = 0; i < TestConfig::copy_fields; i++)
+            srcs[i].set_fill(fill_value);
+          std::vector<CopySrcDstField> dsts(TestConfig::copy_fields);
+          for(int i = 0; i < TestConfig::copy_fields; i++)
+            dsts[i].set_field(inst2, FID_BASE+i, sizeof(void *));
+          d.copy(srcs, dsts, ProfilingRequestSet()).wait();
+        }
 
 	long long total_full_copy_time = 0;
 	long long total_short_copy_time = 0;
+        long long total_sparse_copy_time = 0;
+
+        std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
+        for(int i = 0; i < TestConfig::copy_fields; i++)
+          srcs[i].set_field(inst1, FID_BASE+i, sizeof(void *));
+        std::vector<CopySrcDstField> dsts(TestConfig::copy_fields);
+        for(int i = 0; i < TestConfig::copy_fields; i++)
+          dsts[i].set_field(inst2, FID_BASE+i, sizeof(void *));
+
 	for(int rep = 0; rep <= TestConfig::copy_reps; rep++) {
 	  // now perform two instance-to-instance copies
 
@@ -357,7 +398,7 @@ void top_level_task(const void *args, size_t arglen,
 	    ProfilingRequestSet prs;
 	    prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
 	      .add_measurement<ProfilingMeasurements::OperationTimeline>();
-	    d.copy(src, dst, prs).wait();
+	    d.copy(srcs, dsts, prs).wait();
 	  }
 
 	  // copy #2 - single-element copy
@@ -370,7 +411,7 @@ void top_level_task(const void *args, size_t arglen,
 	    ProfilingRequestSet prs;
 	    prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
 	      .add_measurement<ProfilingMeasurements::OperationTimeline>();
-	    Rect<1>(0, 0).copy(src, dst, prs).wait();
+	    Rect<1>(0, 0).copy(srcs, dsts, prs).wait();
 	  }
 
 	  // wait for both results
@@ -381,21 +422,49 @@ void top_level_task(const void *args, size_t arglen,
 	    total_full_copy_time += full_copy_time;
 	    total_short_copy_time += short_copy_time;
 	  }
+
+          // optional copy #3 - sparse copy
+          if(TestConfig::sparse_chunk > 0) {
+            long long sparse_copy_time = -1;
+            UserEvent sparse_copy_done = UserEvent::create_user_event();
+            {
+              CopyProfResult result;
+              result.nanoseconds = &sparse_copy_time;
+              result.done = sparse_copy_done;
+              ProfilingRequestSet prs;
+              prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+                .add_measurement<ProfilingMeasurements::OperationTimeline>();
+              d_sparse.copy(srcs, dsts, prs).wait();
+            }
+
+            sparse_copy_done.wait();
+
+            if((rep > 0) || (TestConfig::copy_reps == 0))
+              total_sparse_copy_time += sparse_copy_time;
+          }
 	}
 
 	if(TestConfig::copy_reps > 1) {
 	  total_full_copy_time /= TestConfig::copy_reps;
 	  total_short_copy_time /= TestConfig::copy_reps;
+          total_sparse_copy_time /= TestConfig::copy_reps;
 	}
 
 	// latency is estimated as time to perfom single copy
 	double latency = total_short_copy_time;
 
 	// bandwidth is estimated based on extra time taken by full copy
-	double bw = (1.0 * elements * field_sizes[0] /
+	double bw = (1.0 * elements * TestConfig::copy_fields * sizeof(void *) /
 		     (total_full_copy_time - total_short_copy_time));
 
-	log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency;
+        if(TestConfig::sparse_chunk == 0) {
+          log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency;
+        } else {
+          double sparse_bw = (1.0 * sparse_elements * TestConfig::copy_fields * sizeof(void *) /
+                              (total_sparse_copy_time - total_short_copy_time));
+
+          log_app.info() << "copy " << m1 << " -> " << m2 << ": bw:" << bw << " lat:" << latency << " sparse_bw:" << sparse_bw;
+        }
 
 	inst2.destroy();
       }
@@ -419,6 +488,10 @@ int main(int argc, char **argv)
     .add_option_int("-tasks", TestConfig::do_tasks)
     .add_option_int("-copies", TestConfig::do_copies)
     .add_option_int("-reps", TestConfig::copy_reps)
+    .add_option_int("-fields", TestConfig::copy_fields)
+    .add_option_int("-sparse", TestConfig::sparse_chunk)
+    .add_option_int("-gap", TestConfig::sparse_gap)
+    .add_option_int("-aos", TestConfig::copy_aos)
     .add_option_int("-slowmem", TestConfig::slow_mems);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);

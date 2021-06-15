@@ -569,6 +569,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_merge_events(ApEvent &lhs,
+                                                const std::vector<ApEvent>& rhs,
+                                                Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
+      if (local_space != origin_space)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_MERGE_EVENTS);
+          rez.serialize(done);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize<size_t>(rhs.size());
+          for (std::vector<ApEvent>::const_iterator it = 
+                rhs.begin(); it != rhs.end(); it++)
+            rez.serialize(*it);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
+      }
+      else
+        remote_tpl->record_merge_events(lhs, rhs, memo);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
@@ -676,7 +710,10 @@ namespace Legion {
                              ApEvent &lhs, IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -685,12 +722,46 @@ namespace Legion {
 #endif
       if (local_space != origin_space)
       {
-        // TODO
-        assert(false);
+        RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_ISSUE_INDIRECT);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(&lhs);
+          rez.serialize(lhs);
+          expr->pack_expression(rez, origin_space);
+#ifdef DEBUG_LEGION
+          assert(src_fields.size() == dst_fields.size());
+#endif
+          rez.serialize<size_t>(src_fields.size());
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+          {
+            pack_src_dst_field(rez, src_fields[idx]);
+            pack_src_dst_field(rez, dst_fields[idx]);
+          }
+          rez.serialize<size_t>(indirections.size());
+          for (unsigned idx = 0; idx < indirections.size(); idx++)
+            indirections[idx]->serializer(rez);
+          rez.serialize(precondition);
+          rez.serialize(pred_guard);
+#ifdef LEGION_SPY
+          rez.serialize(unique_indirections_identifier);
+#endif
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        // Wait to see if lhs changes
+        done.wait();
       }
       else
-        remote_tpl->record_issue_indirect(memo, lhs, expr,src_fields,dst_fields,
-                                          indirections,precondition,pred_guard);
+        remote_tpl->record_issue_indirect(memo, lhs, expr, src_fields,
+                                          dst_fields, indirections,
+#ifdef LEGION_SPY
+                                          unique_indirections_identifier,
+#endif
+                                          precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -1182,12 +1253,11 @@ namespace Legion {
             }
             else
             {
-              std::set<ApEvent> rhs_events;
+              std::vector<ApEvent> rhs_events(num_rhs);
               for (unsigned idx = 0; idx < num_rhs; idx++)
               {
                 ApEvent event;
-                derez.deserialize(event);
-                rhs_events.insert(event);
+                derez.deserialize(rhs_events[idx]);
               }
               tpl->record_merge_events(lhs, rhs_events, memo);
             }
@@ -1326,6 +1396,65 @@ namespace Legion {
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else
               Runtime::trigger_event(done);
+            break;
+          }
+        case REMOTE_TRACE_ISSUE_INDIRECT:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApUserEvent *lhs_ptr;
+            derez.deserialize(lhs_ptr);
+            ApUserEvent lhs;
+            derez.deserialize(lhs);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
+            size_t num_fields;
+            derez.deserialize(num_fields);
+            std::vector<CopySrcDstField> src_fields(num_fields);
+            std::vector<CopySrcDstField> dst_fields(num_fields);
+            for (unsigned idx = 0; idx < num_fields; idx++)
+            {
+              unpack_src_dst_field(derez, src_fields[idx]);
+              unpack_src_dst_field(derez, dst_fields[idx]);
+            }
+            std::vector<CopyIndirection*> indirections;
+            expr->unpack_indirections(derez, indirections);
+            ApEvent precondition;
+            derez.deserialize(precondition);
+            PredEvent pred_guard;
+            derez.deserialize(pred_guard);
+#ifdef LEGION_SPY
+            unsigned unique_indirections_identifier;
+            derez.deserialize(unique_indirections_identifier);
+#endif
+            // Use this to track if lhs changes
+            const ApUserEvent lhs_copy = lhs;
+            // Do the base call
+            tpl->record_issue_indirect(memo, lhs, expr, src_fields,
+                                       dst_fields, indirections,
+#ifdef LEGION_SPY
+                                       unique_indirections_identifier,
+#endif
+                                       precondition, pred_guard);
+            if (lhs != lhs_copy)
+            {
+              Serializer rez;
+              {
+                RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_ISSUE_INDIRECT);
+                rez.serialize(lhs_ptr);
+                rez.serialize(lhs);
+                rez.serialize(done);
+              }
+              runtime->send_remote_trace_response(source, rez);
+            }
+            else // lhs was unchanged
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_FILL:
@@ -1717,6 +1846,7 @@ namespace Legion {
         case REMOTE_TRACE_REQUEST_TERM_EVENT:
         case REMOTE_TRACE_MERGE_EVENTS:
         case REMOTE_TRACE_ISSUE_COPY:
+        case REMOTE_TRACE_ISSUE_INDIRECT:
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
 #ifdef LEGION_GPU_REDUCTIONS
@@ -15953,9 +16083,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::InvalidateFunctor::InvalidateFunctor(DistributedID id,
               const FieldMask &m, std::set<RtEvent> &ap, AddressSpaceID o, 
-              const CollectiveMapping *mapping, Runtime *rt)
-      : did(id), mask(m), applied(ap), origin(o), invalidate_mapping(mapping),
-        runtime(rt)
+              UniqueID uid, const CollectiveMapping *mapping, Runtime *rt)
+      : did(id), mask(m), applied(ap), origin(o), ctx_uid(uid),
+        invalidate_mapping(mapping), runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -15973,6 +16103,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(mask);
         rez.serialize(origin);
+        rez.serialize(ctx_uid);
         rez.serialize(done_event);
       }
       runtime->send_equivalence_set_invalidate_trackers(target, rez);
@@ -15983,7 +16114,8 @@ namespace Legion {
     void EquivalenceSet::invalidate_trackers(const FieldMask &mask,
                                     std::set<RtEvent> &applied_events,
                                     const AddressSpaceID origin_space,
-                                    const CollectiveMapping *invalidate_mapping)
+                                    const CollectiveMapping *invalidate_mapping,
+                                    InnerContext *filter_context /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       // First send out any messages to remote nodes that need to be sent
@@ -16002,6 +16134,8 @@ namespace Legion {
             // requests to all the ones that will not get it automatically
             if ((*invalidate_mapping)[0] == runtime->address_space)
             {
+              const UniqueID ctx_uid = (filter_context == NULL) ? 0 :
+                filter_context->get_context_uid();
               for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
               {
                 const AddressSpace target = (*collective_mapping)[idx];
@@ -16014,6 +16148,7 @@ namespace Legion {
                   rez.serialize(did);
                   rez.serialize(mask);
                   rez.serialize(origin_space);
+                  rez.serialize(ctx_uid);
                   rez.serialize(done_event);
                 }
                 runtime->send_equivalence_set_invalidate_trackers(target, rez);
@@ -16027,6 +16162,8 @@ namespace Legion {
       {
         if (collective_mapping != NULL)
         {
+          const UniqueID ctx_uid = (filter_context == NULL) ? 0 :
+                filter_context->get_context_uid();
           // Send it to each of the children
           std::vector<AddressSpaceID> children;
           collective_mapping->get_children(origin_space, local_space, children);
@@ -16040,6 +16177,7 @@ namespace Legion {
               rez.serialize(did);
               rez.serialize(mask);
               rez.serialize(origin_space);
+              rez.serialize(ctx_uid);
               rez.serialize(done_event);
             }
             runtime->send_equivalence_set_invalidate_trackers(*it, rez);
@@ -16049,8 +16187,10 @@ namespace Legion {
       }
       if (is_owner() && has_remote_instances())
       {
+        const UniqueID ctx_uid = (filter_context == NULL) ? 0 :
+                filter_context->get_context_uid();
         InvalidateFunctor functor(did, mask, applied_events, origin_space,
-                                  invalidate_mapping, runtime);
+                                  ctx_uid, invalidate_mapping, runtime);
         map_over_remote_instances(functor);
       }
       // Finally perform our invalidation here
@@ -16061,7 +16201,8 @@ namespace Legion {
         if (recorded_trackers.empty() || 
             (mask * recorded_trackers.get_valid_mask()))
           return;
-        if (!(recorded_trackers.get_valid_mask() - mask))
+        if ((filter_context == NULL) &&
+            !(recorded_trackers.get_valid_mask() - mask))
         {
           // Mask dominates all trackers, so we can just grab them all
           // Add reference to them all to keep them alive until we 
@@ -16075,11 +16216,16 @@ namespace Legion {
         {
           // Filter out specific trackers
           std::vector<EqSetTracker*> to_delete;
+          const ContextID filter_id = 
+            (filter_context == NULL) ? 0 : filter_context->get_context_id();
           for (FieldMaskSet<EqSetTracker>::iterator it =
                 recorded_trackers.begin(); it != recorded_trackers.end(); it++)
           {
             const FieldMask overlap = mask & it->second;
             if (!overlap)
+              continue;
+            if ((filter_context != NULL) &&
+                !it->first->can_filter_context(filter_id))
               continue;
             if (to_remove.insert(it->first, overlap))
               it->first->add_tracker_reference();
@@ -16121,13 +16267,27 @@ namespace Legion {
       derez.deserialize(mask);
       AddressSpaceID origin;
       derez.deserialize(origin);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
       std::set<RtEvent> applied_events; 
+      InnerContext *local_ctx = NULL;
+      if (ctx_uid > 0)
+      {
+        local_ctx = runtime->find_context(ctx_uid, true/*null if not found*/);
+        if (local_ctx == NULL)
+        {
+          // If we don't have the context here we are done
+          Runtime::trigger_event(done_event, ready_event);
+          return;
+        }
+      }
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->invalidate_trackers(mask, applied_events, origin, NULL/*mapping*/);
+      set->invalidate_trackers(mask, applied_events, origin,
+                               NULL/*mapping*/, local_ctx);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event,
             Runtime::merge_events(applied_events));
@@ -18312,6 +18472,13 @@ namespace Legion {
       assert(mask * disjoint_complete);
 #endif
       pending_equivalence_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionManager::can_filter_context(ContextID filter_id) const
+    //--------------------------------------------------------------------------
+    {
+      return (filter_id == ctx);
     }
 
     //--------------------------------------------------------------------------

@@ -3929,7 +3929,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 
@@ -3942,7 +3943,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 
@@ -3955,7 +3957,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 
@@ -3968,7 +3971,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 
@@ -3981,7 +3985,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, fid, 
           LEGION_NAME_SEMANTIC_TAG, name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 
@@ -3994,7 +3999,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 
@@ -4007,7 +4013,8 @@ namespace Legion {
       const void *name; size_t dummy_size;
       runtime->retrieve_semantic_information(handle, LEGION_NAME_SEMANTIC_TAG,
                                              name, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(name);
+      static_assert(sizeof(result) == sizeof(name), "Fuck c++");
+      memcpy(&result, &name, sizeof(result));
       resume_mapper_call(ctx);
     }
 

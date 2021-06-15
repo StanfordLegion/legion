@@ -3944,7 +3944,9 @@ namespace Legion {
           }
           else
           {
+            unsigned read_only_count = 0;
             std::vector<unsigned> performed_regions;
+            performed_regions.reserve(region_count);
             std::set<RtEvent> registration_postconditions;
             std::vector<UpdateAnalysis*> analyses(region_count, NULL);
             std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
@@ -3981,6 +3983,42 @@ namespace Legion {
                                           unique_op_id,
 #endif
                                           record_valid);
+              if (IS_READ_ONLY(logical_regions[idx]))
+                read_only_count++;
+            }
+            // In order to avoid cycles when mapping multiple tasks in parallel
+            // with read-only requirements, we need to guarantee that all read-only
+            // copies are issued before we can perform any registrations for the
+            // task that will be using their results.
+            if (read_only_count > 1)
+            {
+              std::vector<RtEvent> read_only_preconditions;
+              read_only_preconditions.reserve(read_only_count);
+              std::vector<unsigned> read_only_regions;
+              read_only_regions.reserve(read_only_count);
+              for (std::vector<unsigned>::const_iterator it =
+                    performed_regions.begin(); it !=
+                    performed_regions.end(); it++)
+              {
+                if (!IS_READ_ONLY(logical_regions[*it]))
+                  continue;
+                read_only_regions.push_back(*it);
+                const RtEvent precondition = reg_pre[*it];
+                if (precondition.exists())
+                  read_only_preconditions.push_back(precondition);
+              }
+              if (!read_only_preconditions.empty())
+              {
+                const RtEvent read_only_precondition =
+                  Runtime::merge_events(read_only_preconditions);
+                if (read_only_precondition.exists())
+                {
+                  for (std::vector<unsigned>::const_iterator it =
+                        read_only_regions.begin(); it !=
+                        read_only_regions.end(); it++)
+                    reg_pre[*it] = read_only_precondition;
+                }
+              }
             }
 
             for (std::vector<unsigned>::const_iterator it = 
@@ -5911,6 +5949,9 @@ namespace Legion {
           it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(logical_regions.size());
@@ -8677,6 +8718,9 @@ namespace Legion {
       for (std::vector<FutureMap>::const_iterator it = 
             point_futures.begin(); it != point_futures.end(); it++)
         it->impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(logical_regions.size());

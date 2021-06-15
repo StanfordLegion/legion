@@ -46,7 +46,7 @@ namespace Legion {
      * A small helper calss for performing exchanges of
      * instances for indirection copies
      */
-    struct IndirectRecord {
+    struct IndirectRecord : public LegionHeapify<IndirectRecord> {
     public:
       IndirectRecord(void) { }
       IndirectRecord(const FieldMask &m, InstanceManager *p, 
@@ -1000,6 +1000,84 @@ namespace Legion {
       std::vector<Rect<DIM,T> > pieces;
     };
 
+
+    /**
+     * \class CopyIndirection
+     * This is a type-erased copy indirection representation
+     */
+    class CopyIndirection {
+    public:
+      CopyIndirection(TypeTag one, TypeTag two)
+        : t1(one), t2(two) { }
+      virtual ~CopyIndirection(void) { }
+    public:
+      template<int N, typename T>
+      typename Realm::CopyIndirection<N,T>::Base* to_base(void) const
+      {
+#ifdef DEBUG_LEGION
+        const TypeTag tag = NT_TemplateHelper::template encode_tag<N,T>();
+        assert(t1 == tag);
+#endif
+        void *ptr = get_base();
+        typename Realm::CopyIndirection<N,T>::Base *result = NULL;
+        static_assert(sizeof(ptr) == sizeof(result), "Fuck c++");
+        memcpy(&result, &ptr, sizeof(result));
+        return result;
+      }
+    public:
+      virtual CopyIndirection* clone(void) = 0;
+      virtual void serializer(Serializer &rez) const = 0;
+    protected:
+      virtual void* get_base(void) const = 0;
+    public:
+      const TypeTag t1;
+      const TypeTag t2;
+    };
+
+    /**
+     * This is the cross-product typed verison of a copy indirection
+     */
+    template<int N1, typename T1, int N2, typename T2>
+    class CopyIndirectionT : public CopyIndirection {
+    public:
+      CopyIndirectionT(typename 
+            Realm::CopyIndirection<N1,T1>::template Unstructured<N2,T2> *ptr)
+        : CopyIndirection(NT_TemplateHelper::template encode_tag<N1,T1>(),
+          NT_TemplateHelper::template encode_tag<N2,T2>()), indirection(ptr) { }
+      virtual ~CopyIndirectionT(void) { delete indirection; }
+    public:
+      virtual CopyIndirection* clone(void)
+      {
+        return new CopyIndirectionT<N1,T1,N2,T2>(
+            new typename Realm::CopyIndirection<N1,T1>::template
+              Unstructured<N2,T2>(*indirection));
+      }
+      virtual void serializer(Serializer &rez) const
+      {
+        rez.serialize(this->t2);
+        rez.serialize(indirection->field_id);
+        rez.serialize(indirection->inst);
+#ifdef DEBUG_LEGION
+        assert(indirection->spaces.size() == indirection->insts.size());
+#endif
+        rez.serialize<size_t>(indirection->spaces.size());
+        for (unsigned idx = 0; idx < indirection->spaces.size(); idx++)
+        {
+          rez.serialize(indirection->insts[idx]);
+          Domain domain(indirection->spaces[idx]);
+          rez.serialize(domain);
+        }
+        rez.serialize(indirection->is_ranges);
+        rez.serialize(indirection->oor_possible);
+        rez.serialize(indirection->aliasing_possible);
+      }
+    protected:
+      virtual void* get_base(void) const { return indirection; }
+    protected:
+      typename Realm::CopyIndirection<N1,T1>::template 
+        Unstructured<N2,T2> *const indirection;
+    };
+
     /**
      * \class IndexSpaceExpression
      * An IndexSpaceExpression represents a set computation
@@ -1054,13 +1132,13 @@ namespace Legion {
             indirect->spaces[index] = (*it)->domain;
             indirect->insts[index] = (*it)->inst; 
           }
-          helper->result = indirect;
+          helper->result = new CopyIndirectionT<N1,T1,N2::N,T2>(indirect);
         }
       public:
         const FieldID indirect_field;
         const PhysicalInstance indirect_inst;
         const std::set<IndirectRecord*> &records;
-        typename Realm::CopyIndirection<N1,T1>::Base *result;
+        CopyIndirection *result;
         const bool is_range;
         const bool possible_out_of_range;
         const bool possible_aliasing;
@@ -1122,7 +1200,7 @@ namespace Legion {
                            const PhysicalInstance indirect_instance,
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
-                           std::vector<void*> &indirections,
+                           std::vector<CopyIndirection*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
@@ -1130,11 +1208,12 @@ namespace Legion {
 #endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing) = 0;
-      virtual void destroy_indirections(std::vector<void*> &indirections) = 0;
+      virtual void unpack_indirections(Deserializer &derez,
+                           std::vector<CopyIndirection*> &indirections) = 0;
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<void*> &indirects,
+                           const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
@@ -1218,7 +1297,7 @@ namespace Legion {
                                const PhysicalInstance indirect_instance,
                                const LegionVector<
                                       IndirectRecord>::aligned &records,
-                               std::vector<void*> &indirections,
+                               std::vector<CopyIndirection*> &indirections,
                                std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                                unsigned unique_indirections_identifier,
@@ -1227,15 +1306,15 @@ namespace Legion {
                                const bool possible_out_of_range,
                                const bool possible_aliasing);
       template<int DIM, typename T>
-      inline void destroy_indirections_internal(
-                               std::vector<void*> &indirections);
+      inline void unpack_indirections_internal(Deserializer &derez,
+                               std::vector<CopyIndirection*> &indirections);
       template<int DIM, typename T>
       inline ApEvent issue_indirect_internal(RegionTreeForest *forest,
                                const Realm::IndexSpace<DIM,T> &space,
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
-                               const std::vector<void*> &indirects,
+                               const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                                unsigned unique_indirections_identifier,
 #endif
@@ -1411,7 +1490,7 @@ namespace Legion {
                            const PhysicalInstance indirect_instance,
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
-                           std::vector<void*> &indirections,
+                           std::vector<CopyIndirection*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
@@ -1419,11 +1498,12 @@ namespace Legion {
 #endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing);
-      virtual void destroy_indirections(std::vector<void*> &indirections);
+      virtual void unpack_indirections(Deserializer &derez,
+                           std::vector<CopyIndirection*> &indirections);
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<void*> &indirects,
+                           const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
@@ -2387,7 +2467,7 @@ namespace Legion {
                            const PhysicalInstance indirect_instance,
                            const LegionVector<
                                   IndirectRecord>::aligned &records,
-                           std::vector<void*> &indirections,
+                           std::vector<CopyIndirection*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
@@ -2395,11 +2475,12 @@ namespace Legion {
 #endif
                            const bool possible_out_of_range,
                            const bool possible_aliasing);
-      virtual void destroy_indirections(std::vector<void*> &indirections);
+      virtual void unpack_indirections(Deserializer &derez,
+                           std::vector<CopyIndirection*> &indirections);
       virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<void*> &indirects,
+                           const std::vector<CopyIndirection*> &indirects,
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
@@ -3824,7 +3905,7 @@ namespace Legion {
         DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
             InnerContext *c, EqSetTracker *t, const AddressSpaceID ts,
             IndexSpaceExpression *e, const FieldMask &m, 
-            const UniqueID id, const AddressSpaceID s);
+            const UniqueID id, const AddressSpaceID s, const bool covers);
       public:
         RegionNode *const proxy_this;
         const ContextID ctx;
@@ -3836,6 +3917,7 @@ namespace Legion {
         const UniqueID opid;
         const AddressSpaceID source;
         const RtUserEvent ready;
+        const bool expr_covers;
       };
       class InvalidFunctor {
       public:
@@ -3861,6 +3943,8 @@ namespace Legion {
         virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                                     const FieldMask &mask)
           { record_equivalence_set(set, mask); }
+        virtual bool can_filter_context(ContextID filter_id) const
+          { assert(false); return false; }
         virtual void remove_equivalence_set(EquivalenceSet *set,
                                             const FieldMask &mask)
           { assert(false); }
@@ -3992,7 +4076,8 @@ namespace Legion {
                                     const UniqueID opid,
                                     const AddressSpaceID original_source,
                                     std::set<RtEvent> &ready_events,
-                                    const bool downward_only);
+                                    const bool downward_only,
+                                    const bool expr_covers);
       static void handle_deferred_compute_equivalence_sets(const void *args);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,bool self,
                                  std::set<RtEvent> &applied_events, 
@@ -4110,7 +4195,8 @@ namespace Legion {
                                     const UniqueID opid,
                                     const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
-                                    const bool downward_only);
+                                    const bool downward_only,
+                                    const bool expr_covers);
       void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  std::set<RtEvent> &applied_events,
                                  std::vector<EquivalenceSet*> &to_release,

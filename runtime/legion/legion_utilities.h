@@ -1693,7 +1693,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!finalized);
 #endif
-      const uint8_t *data = reinterpret_cast<const uint8_t*>(&value); 
+      const T *ptr = &value;
+      const uint8_t *data = NULL;
+      static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
+      memcpy(&data, &ptr, sizeof(data));
       for (unsigned idx = 0; idx < sizeof(T); idx++)
       {
         blocks.b[bytes++] = data[idx];
@@ -1738,7 +1741,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!finalized);
 #endif
-      const uint8_t *data = reinterpret_cast<const uint8_t*>(value); 
+      const uint8_t *data = NULL;
+      static_assert(sizeof(data) == sizeof(value), "Fuck c++");
+      memcpy(&data, &value, sizeof(data));
       for (unsigned idx = 0; idx < size; idx++)
       {
         blocks.b[bytes++] = data[idx];
@@ -3353,9 +3358,11 @@ namespace Legion {
         // If we're empty return end
         if (entries.single_entry == NULL)
           return end();
-        return iterator(this, 
-            reinterpret_cast<std::pair<T*const,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)));
+        FieldMaskSet<T> *ptr = this;
+        std::pair<T*const,FieldMask> *result = NULL;
+        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        memcpy(&result, &ptr, sizeof(result));
+        return iterator(this, result); 
       }
       else
         return iterator(this, entries.multi_entries->begin());
@@ -3370,9 +3377,11 @@ namespace Legion {
       {
         if ((entries.single_entry == NULL) || (entries.single_entry != e))
           return end();
-        return iterator(this, 
-            reinterpret_cast<std::pair<T*const,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)));
+        FieldMaskSet<T> *ptr = this;
+        std::pair<T*const,FieldMask> *result = NULL;
+        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        memcpy(&result, &ptr, sizeof(result));
+        return iterator(this, result);
       }
       else
       {
@@ -3440,9 +3449,11 @@ namespace Legion {
         // If we're empty return end
         if (entries.single_entry == NULL)
           return end();
-        return const_iterator(this, 
-            reinterpret_cast<const std::pair<T*const,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)));
+        FieldMaskSet<T> *ptr = const_cast<FieldMaskSet<T>*>(this);
+        std::pair<T*const,FieldMask> *result = NULL;
+        static_assert(sizeof(ptr) == sizeof(result), "C++ is dumb");
+        memcpy(&result, &ptr, sizeof(result));
+        return const_iterator(this, result); 
       }
       else
         return const_iterator(this, entries.multi_entries->begin());
@@ -3458,9 +3469,11 @@ namespace Legion {
       {
         if ((entries.single_entry == NULL) || (entries.single_entry != e))
           return end();
-        return const_iterator(this, 
-            reinterpret_cast<const std::pair<T*const,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)));
+        FieldMaskSet<T> *ptr = const_cast<FieldMaskSet<T>*>(this);
+        std::pair<T*const,FieldMask> *result = NULL;
+        static_assert(sizeof(ptr) == sizeof(result), "C++ is dumb");
+        memcpy(&result, &ptr, sizeof(result));
+        return const_iterator(this, result);
       }
       else
       {

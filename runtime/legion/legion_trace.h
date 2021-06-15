@@ -646,8 +646,9 @@ namespace Legion {
         TraceConditionSet *const set;
       };
     public:
-      TraceConditionSet(RegionTreeForest *forest, IndexSpaceExpression *expr,
-                const FieldMask &mask, const std::set<RegionNode*> &regions); 
+      TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
+                        IndexSpaceExpression *expr, const FieldMask &mask,
+                        const std::set<RegionNode*> &regions); 
       TraceConditionSet(const TraceConditionSet &rhs);
       virtual ~TraceConditionSet(void);
     public:
@@ -660,6 +661,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
+      virtual bool can_filter_context(ContextID filter_id) const;
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
     public:
@@ -686,6 +688,7 @@ namespace Legion {
       RtEvent recompute_equivalence_sets(Operation *op);
       void finalize_computed_sets(void);
     public:
+      InnerContext *const context;
       RegionTreeForest *const forest;
       IndexSpaceExpression *const condition_expr;
       const FieldMask condition_mask;
@@ -913,6 +916,8 @@ namespace Legion {
                                        ApEvent e3, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
@@ -927,7 +932,10 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard);
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
@@ -1129,6 +1137,7 @@ namespace Legion {
       friend class AssignFenceCompletion;
       friend class IssueCopy;
       friend class IssueFill;
+      friend class IssueIndirect;
       friend class SetOpSyncEvent;
       friend class SetEffects;
       friend class CompleteReplay;
@@ -1233,6 +1242,8 @@ namespace Legion {
       using PhysicalTemplate::record_merge_events;
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -1246,7 +1257,10 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
@@ -1384,6 +1398,7 @@ namespace Legion {
       MERGE_EVENT,
       ISSUE_COPY,
       ISSUE_FILL,
+      ISSUE_INDIRECT,
       SET_OP_SYNC_EVENT,
       SET_EFFECTS,
       ASSIGN_FENCE_COMPLETION,
@@ -1420,6 +1435,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy(void) { return NULL; }
       virtual IssueFill* as_issue_fill(void) { return NULL; }
+      virtual IssueIndirect* as_issue_indirect(void) { return NULL; }
       virtual SetOpSyncEvent* as_set_op_sync_event(void) { return NULL; }
       virtual SetEffects* as_set_effects(void) { return NULL; }
       virtual CompleteReplay* as_complete_replay(void) { return NULL; }
@@ -1645,6 +1661,50 @@ namespace Legion {
       unsigned precondition_idx;
       ReductionOpID redop;
       bool reduction_fold;
+    };
+
+    /**
+     * \class IssueIndirect
+     * This instruction has the following semantics:
+     *  events[lhs] = expr->issue_indirect(dst_fields, src_fields,
+     *                                     indirections,
+     *                                     events[precondition_idx],
+     *                                     predicate_guard)
+     */
+    class IssueIndirect : public Instruction {
+    public:
+      IssueIndirect(PhysicalTemplate &tpl,
+                    unsigned lhs, IndexSpaceExpression *expr,
+                    const TraceLocalID &op_key,
+                    const std::vector<CopySrcDstField>& src_fields,
+                    const std::vector<CopySrcDstField>& dst_fields,
+                    const std::vector<CopyIndirection*>& indirects,
+#ifdef LEGION_SPY
+                    unsigned unique_indirections_identifier,
+#endif
+                    unsigned precondition_idx);
+      virtual ~IssueIndirect(void);
+      virtual void execute(std::vector<ApEvent> &events,
+                           std::map<unsigned,ApUserEvent> &user_events,
+                           std::map<TraceLocalID,Memoizable*> &operations);
+      virtual std::string to_string(
+                           std::map<TraceLocalID,Memoizable*> &operations);
+
+      virtual InstructionKind get_kind(void)
+        { return ISSUE_INDIRECT; }
+      virtual IssueIndirect* as_issue_indirect(void)
+        { return this; }
+    private:
+      friend class PhysicalTemplate;
+      unsigned lhs;
+      IndexSpaceExpression *expr;
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
+      std::vector<CopyIndirection*> indirections;
+#ifdef LEGION_SPY
+      unsigned unique_indirections_identifier;
+#endif
+      unsigned precondition_idx;
     };
 
 #ifdef LEGION_GPU_REDUCTIONS

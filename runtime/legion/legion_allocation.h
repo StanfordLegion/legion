@@ -433,15 +433,21 @@ namespace Legion {
 #if __cplusplus > 201703L
       inline pointer allocate(std::size_t cnt)
       {
-        void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
-        return reinterpret_cast<pointer>(result);
+        void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        pointer result = NULL;
+        static_assert(sizeof(ptr) == sizeof(result), "Fuck c++");
+        memcpy(&result, &ptr, sizeof(result));
+        return result;
       }
 #else
       inline pointer allocate(size_type cnt,
                               typename std::allocator<void>::const_pointer = 0)
       {
-        void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
-        return reinterpret_cast<pointer>(result);
+        void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        pointer result = NULL;
+        static_assert(sizeof(ptr) == sizeof(result), "Fuck c++");
+        memcpy(&result, &ptr, sizeof(result));
+        return result;
       }
 #endif
       inline void deallocate(pointer p, size_type size) {
@@ -546,12 +552,15 @@ namespace Legion {
 #ifdef TRACE_ALLOCATION
         LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
 #endif
-        void *result;
+        void *ptr;
         if (ALIGNED)
-          result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+          ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         else
-          result = malloc(cnt * sizeof(T));
-        return reinterpret_cast<pointer>(result);
+          ptr = malloc(cnt * sizeof(T));
+        pointer result = NULL;
+        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+        memcpy(&result, &ptr, sizeof(result));
+        return result;
       }
       inline void deallocate(pointer p, size_type size) {
 #ifdef TRACE_ALLOCATION

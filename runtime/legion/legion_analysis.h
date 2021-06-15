@@ -153,8 +153,10 @@ namespace Legion {
                                        ApEvent e2, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
                                        ApEvent e3, Memoizable *memo) = 0;
-      virtual void record_merge_events(ApEvent &lhs, 
+      virtual void record_merge_events(ApEvent &lhs,
                             const std::set<ApEvent>& rhs, Memoizable *memo) = 0;
+      virtual void record_merge_events(ApEvent &lhs,
+                         const std::vector<ApEvent>& rhs, Memoizable *memo) = 0;
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -169,7 +171,10 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<void*> &indirections,
+                           const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier, 
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
@@ -236,6 +241,7 @@ namespace Legion {
         REMOTE_TRACE_MERGE_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_VIEWS,
+        REMOTE_TRACE_ISSUE_INDIRECT,
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_FILL_VIEWS,
         REMOTE_TRACE_RECORD_OP_VIEW,
@@ -279,6 +285,8 @@ namespace Legion {
                                        ApEvent e3, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -293,7 +301,10 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<void*> &indirections,
+                           const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
@@ -411,6 +422,12 @@ namespace Legion {
         }
       inline void record_merge_events(ApEvent &result, 
                                       const std::set<ApEvent> &events) const
+        {
+          base_sanity_check();
+          rec->record_merge_events(result, events, memo);
+        }
+      inline void record_merge_events(ApEvent &result, 
+                                      const std::vector<ApEvent> &events) const
         {
           base_sanity_check();
           rec->record_merge_events(result, events, memo);
@@ -555,12 +572,19 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard) const
         {
           sanity_check();
-          rec->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
-                                     indirections, precondition, pred_guard);
+          rec->record_issue_indirect(memo, result, expr, src_fields,
+                                     dst_fields, indirections,
+#ifdef LEGION_SPY
+                                     unique_indirections_identifier,
+#endif
+                                     precondition, pred_guard);
         }
       inline void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
@@ -2204,6 +2228,7 @@ namespace Legion {
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
+      virtual bool can_filter_context(ContextID filter_id) const = 0;
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
     };
@@ -2238,7 +2263,8 @@ namespace Legion {
       public:
         InvalidateFunctor(DistributedID did, const FieldMask &mask,
                           std::set<RtEvent> &applied, AddressSpaceID origin,
-                          const CollectiveMapping *mapping, Runtime *runtime);
+                          UniqueID ctx_uid, const CollectiveMapping *mapping,
+                          Runtime *runtime);
       public:
         void apply(AddressSpaceID target);
       public:
@@ -2246,6 +2272,7 @@ namespace Legion {
         const FieldMask &mask;
         std::set<RtEvent> &applied;
         const AddressSpaceID origin;
+        const UniqueID ctx_uid;
         const CollectiveMapping *const invalidate_mapping;
         Runtime *const runtime;
       };
@@ -2443,7 +2470,8 @@ namespace Legion {
       void invalidate_trackers(const FieldMask &mask,
                                std::set<RtEvent> &applied_events,
                                const AddressSpaceID origin_space,
-                               const CollectiveMapping *collective_mapping);
+                               const CollectiveMapping *collective_mapping,
+                               InnerContext *filter_context = NULL);
       void clone_from(const AddressSpaceID target_space, EquivalenceSet *src,
                       const FieldMask &clone_mask,
                       const bool forward_to_owner,
@@ -2902,6 +2930,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
+      virtual bool can_filter_context(ContextID filter_id) const;
       virtual void remove_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           

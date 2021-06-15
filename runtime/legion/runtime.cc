@@ -5073,7 +5073,7 @@ namespace Legion {
 
       // This is safe to do as we require the deferred buffer to be 1-D.
       const Realm::InstanceLayout<1,coord_t> *layout =
-        reinterpret_cast<const Realm::InstanceLayout<1,coord_t>*>(
+        static_cast<const Realm::InstanceLayout<1,coord_t>*>(
             instance.get_layout());
 
       size_t num_elements = pnum_elements != NULL
@@ -13466,10 +13466,15 @@ namespace Legion {
       if (needs_lock)
       {
         // Do the request through the semantic information
-        const void *result = NULL; size_t dummy_size;
-        if (retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG, result, 
+        const void *ptr = NULL; size_t dummy_size;
+        if (retrieve_semantic_information(LEGION_NAME_SEMANTIC_TAG, ptr,
               dummy_size, true/*can fail*/, false/*wait until*/))
-          return reinterpret_cast<const char*>(result);
+        {
+          const char *result = NULL;
+          static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+          memcpy(&result, &ptr, sizeof(result));
+          return result;
+        }
       }
       else
       {
@@ -13478,7 +13483,13 @@ namespace Legion {
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
           semantic_infos.find(LEGION_NAME_SEMANTIC_TAG);
         if (finder != semantic_infos.end())
-          return reinterpret_cast<const char*>(finder->second.buffer);
+        {
+          const char *result = NULL;
+          static_assert(sizeof(result) == 
+              sizeof(finder->second.buffer), "Fuck c++");
+          memcpy(&result, &finder->second.buffer, sizeof(result)); 
+          return result;
+        }
       }
       // Couldn't find it so use the initial name
       return initial_name;
@@ -18540,167 +18551,6 @@ namespace Legion {
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context get predicate future!");
       return ctx->get_predicate_future(p);
-    }
-
-    //--------------------------------------------------------------------------
-    Lock Runtime::create_lock(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      Lock result(Reservation::create_reservation());
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_lock(Context ctx, Lock l)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      ctx->destroy_user_lock(l.reservation_lock);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
-    Grant Runtime::acquire_grant(Context ctx, 
-                                 const std::vector<LockRequest> &requests)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      // Kind of annoying, but we need to unpack and repack the
-      // Lock type here to build new requests because the C++
-      // type system is dumb with nested classes.
-      std::vector<GrantImpl::ReservationRequest> 
-        unpack_requests(requests.size());
-      for (unsigned idx = 0; idx < requests.size(); idx++)
-      {
-        unpack_requests[idx] = 
-          GrantImpl::ReservationRequest(requests[idx].lock.reservation_lock,
-                                        requests[idx].mode,
-                                        requests[idx].exclusive);
-      }
-      Grant result(new GrantImpl(unpack_requests));
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::release_grant(Context ctx, Grant grant)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      grant.impl->release_grant();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier Runtime::create_phase_barrier(Context ctx, unsigned arrivals) 
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create phase barrier!");
-      return PhaseBarrier(ctx->create_phase_barrier(arrivals));
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context destroy phase barrier!");
-      ctx->destroy_phase_barrier(pb.phase_barrier);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier Runtime::advance_phase_barrier(Context ctx, PhaseBarrier pb)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context advance phase barrier!");
-      return ctx->advance_phase_barrier(pb);
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective Runtime::create_dynamic_collective(Context ctx,
-                                                         unsigned arrivals,
-                                                         ReductionOpID redop,
-                                                         const void *init_value,
-                                                         size_t init_size)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create dynamic collective!");
-      return DynamicCollective(ctx->create_phase_barrier(arrivals, redop,
-                                             init_value, init_size), redop);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::destroy_dynamic_collective(Context ctx, DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context destroy dynamic collective!");
-      ctx->destroy_phase_barrier(dc.phase_barrier);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::arrive_dynamic_collective(Context ctx, DynamicCollective dc,
-                                            const void *buffer, size_t size,
-                                            unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context arrive dynamic collective!");
-      ctx->arrive_dynamic_collective(dc, buffer, size, count);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::defer_dynamic_collective_arrival(Context ctx, 
-                                                   DynamicCollective dc,
-                                                   const Future &f, 
-                                                   unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context defer dynamic collective arrival!");
-      ctx->defer_dynamic_collective_arrival(dc, f, count);
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::get_dynamic_collective_result(Context ctx, 
-                                                  DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context get dynamic collective result!");
-      return ctx->get_dynamic_collective_result(dc);
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective Runtime::advance_dynamic_collective(Context ctx,
-                                                          DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context advance dynamic collective!");
-      return ctx->advance_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------

@@ -184,9 +184,10 @@ def data_tsv_str(level, level_ready, ready, start, end, color, opacity, title,
     # replace None with ''
     def xstr(s):
         return str(s or '')
-    return xstr(level) + "\t" + xstr(level_ready) + "\t" + xstr(ready) + "\t" + \
-           xstr(start) + "\t" + \
-           xstr(end) + "\t" + \
+    return xstr(level) + "\t" + xstr(level_ready) + "\t" + \
+           xstr('%.3f' % ready if ready else ready) + "\t" + \
+           xstr('%.3f' % start if start else start) + "\t" + \
+           xstr('%.3f' % end if end else end) + "\t" + \
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
            xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\n"
@@ -627,24 +628,24 @@ class Processor(object):
         time_points_all = list()
         for task in self.tasks:
             if (task.stop-task.start > 10 and task.ready != None):
-                time_points_all.append(TimePoint(task.ready, task, True))
-                time_points_all.append(TimePoint(task.stop, task, False))
+                time_points_all.append(TimePoint(task.ready, task, True, task.start))
+                time_points_all.append(TimePoint(task.stop, task, False, 0))
             else:
-                time_points_all.append(TimePoint(task.start, task, True))
-                time_points_all.append(TimePoint(task.stop, task, False))
+                time_points_all.append(TimePoint(task.start, task, True, 0))
+                time_points_all.append(TimePoint(task.stop, task, False, 0))
 
-            self.time_points.append(TimePoint(task.start, task, True))
-            self.time_points.append(TimePoint(task.stop, task, False))
+            self.time_points.append(TimePoint(task.start, task, True, 0))
+            self.time_points.append(TimePoint(task.stop, task, False, 0))
 
-            self.util_time_points.append(TimePoint(task.start, task, True))
-            self.util_time_points.append(TimePoint(task.stop, task, False))
+            self.util_time_points.append(TimePoint(task.start, task, True, 0))
+            self.util_time_points.append(TimePoint(task.stop, task, False, 0))
             if isinstance(task, HasWaiters):
                 # wait intervals don't count for the util graph
                 for wait_interval in task.wait_intervals:
                     self.util_time_points.append(TimePoint(wait_interval.start, 
-                                                           task, False))
+                                                           task, False, 0))
                     self.util_time_points.append(TimePoint(wait_interval.end, 
-                                                           task, True))
+                                                           task, True, 0))
 
         self.util_time_points.sort(key=lambda p: p.time_key)
         self.time_points.sort(key=lambda p: p.time_key)
@@ -773,12 +774,15 @@ class Processor(object):
 
 class TimePoint(object):
     __slots__ = ['time', 'thing', 'first', 'time_key']
-    def __init__(self, time, thing, first):
+    def __init__(self, time, thing, first, secondary_sort_key):
         assert time != None
         self.time = time
         self.thing = thing
         self.first = first
-        self.time_key = 2*time + (0 if first is True else 1)
+        # secondary_sort_key is a parameter used for breaking ties in sorting.
+        # In practice, we plan for this to be a nanosecond timestamp,
+        # like the time field above.
+        self.time_key = (time, 0 if first is True else 1, secondary_sort_key)
     def __cmp__(a, b):
         if a.time_key < b.time_key:
             return -1
@@ -839,8 +843,8 @@ class Memory(object):
     def sort_time_range(self):
         self.max_live_instances = 0
         for inst in self.instances:
-            self.time_points.append(TimePoint(inst.start, inst, True))
-            self.time_points.append(TimePoint(inst.stop, inst, False))
+            self.time_points.append(TimePoint(inst.start, inst, True, 0))
+            self.time_points.append(TimePoint(inst.stop, inst, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
@@ -1019,8 +1023,8 @@ class Channel(object):
     def sort_time_range(self):
         self.max_live_copies = 0 
         for copy in self.copies:
-            self.time_points.append(TimePoint(copy.start, copy, True))
-            self.time_points.append(TimePoint(copy.stop, copy, False))
+            self.time_points.append(TimePoint(copy.start, copy, True, 0))
+            self.time_points.append(TimePoint(copy.stop, copy, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
@@ -1340,7 +1344,7 @@ class Operation(Base):
             else:
                 return 'Task '+str(self.task_kind.task_id)+' '+self.get_info()
         elif self.is_proftask:
-            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id > 0 else '')
+            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id >= 0 else '')
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
@@ -1572,12 +1576,12 @@ class MetaTask(Base, TimeRange, HasInitiationDependencies, HasWaiters):
 
 class ProfTask(Base, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['proftask_id', 'color', 'is_task', 'proc']
-    def __init__(self, op, create, ready, start, stop):
+    def __init__(self, op_id, create, ready, start, stop):
         Base.__init__(self)
         HasNoDependencies.__init__(self)
         TimeRange.__init__(self, None, ready, start, stop)
-        self.proftask_id = op.op_id
-        self.color = '#FFC0CB'  # Pink
+        self.proftask_id = op_id
+        self.color = '#ffc0cb'  # Pink
         self.is_task = True
 
     def get_color(self):
@@ -1618,7 +1622,7 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
         tsv_file.write(tsv_line)
 
     def __repr__(self):
-        return 'ProfTask' + (' <{:d}>'.format(self.proftask_id) if self.proftask_id > 0 else '')
+        return 'ProfTask' + (' <{:d}>'.format(self.proftask_id) if self.proftask_id >= 0 else '')
 
 class UserMarker(Base, TimeRange, HasNoDependencies):
     __slots__ = TimeRange._abstract_slots + HasNoDependencies._abstract_slots + ['name', 'color', 'is_task']
@@ -2829,7 +2833,7 @@ class State(object):
     def log_proftask_info(self, proc_id, op_id, start, stop):
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
-        proftask = ProfTask(Operation(op_id), start, start, start, stop) 
+        proftask = ProfTask(op_id, start, start, start, stop)
         proc = self.find_processor(proc_id)
         proc.add_task(proftask)
 
@@ -3151,9 +3155,9 @@ class State(object):
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
         op_colors = {}
-        for variant in itervalues(self.variants):
+        for variant in sorted(itervalues(self.variants), key=lambda v: (v.task_kind.task_id, v.variant_id)):
             variant.compute_color(lsfr.get_next(), num_colors)
-        for variant in itervalues(self.meta_variants):
+        for variant in sorted(itervalues(self.meta_variants), key=lambda v: v.variant_id):
             if variant.variant_id == 1: # Remote message
                 variant.assign_color('#006600') # Evergreen
             elif variant.variant_id == 2: # Post-Execution
@@ -3161,23 +3165,23 @@ class State(object):
             elif variant.variant_id == 6: # Garbage Collection
                 variant.assign_color('#990000') # Crimson
             elif variant.variant_id == 7: # Logical Dependence Analysis
-                variant.assign_color('#0000FF') # Duke Blue
+                variant.assign_color('#0000ff') # Duke Blue
             elif variant.variant_id == 8: # Operation Physical Analysis
                 variant.assign_color('#009900') # Green
             elif variant.variant_id == 9: # Task Physical Analysis
                 variant.assign_color('#009900') #Green
             else:
                 variant.compute_color(lsfr.get_next(), num_colors)
-        for kind in iterkeys(self.op_kinds):
+        for kind in sorted(iterkeys(self.op_kinds)):
             op_colors[kind] = color_helper(lsfr.get_next(), num_colors)
         # Now we need to assign all the operations colors
         for op in itervalues(self.operations):
             op.assign_color(op_colors)
         # Assign all the message kinds different colors
-        for kinds in (self.mapper_call_kinds,
-                      self.runtime_call_kinds):
-            for kind in itervalues(kinds):
-                kind.assign_color(color_helper(lsfr.get_next(), num_colors))
+        for kind in sorted(itervalues(self.mapper_call_kinds), key=lambda k: k.mapper_call_kind):
+            kind.assign_color(color_helper(lsfr.get_next(), num_colors))
+        for kind in sorted(itervalues(self.runtime_call_kinds), key=lambda k: k.runtime_call_kind):
+            kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def show_copy_matrix(self, output_prefix):
         template_file_name = os.path.join(root_dir, "legion_prof_copy.html.template")
@@ -3442,9 +3446,9 @@ class State(object):
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
             with open(util_tsv_filename, "w") as util_tsv_file:
                 util_tsv_file.write("time\tcount\n")
-                util_tsv_file.write("0.00\t0.00\n") # initial point
+                util_tsv_file.write("0.000\t0.00\n") # initial point
                 for util_point in utilization:
-                    util_tsv_file.write("%.2f\t%.2f\n" % util_point)
+                    util_tsv_file.write("%.3f\t%.2f\n" % util_point)
 
     def simplify_op(self, op_dependencies, op_existence_set, transitive_map, op_path, _dir):
         cur_op_id = op_path[-1]
