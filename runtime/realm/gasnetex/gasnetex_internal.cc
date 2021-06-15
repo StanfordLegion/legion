@@ -294,46 +294,46 @@ namespace Realm {
     PktType prev = pktbuf_pkt_types[pktidx].exchange(pkttype);
     assert(prev == PKTTYPE_INVALID);
 
-    // if we're not the oldest non-ready packet, no counter bumping for us
-    if(pktbuf_ready_packets.load() != pktidx)
-      return false;
-
-    // see if any newer-but-consecutive packets are ready to go
-    int new_ready = pktidx + 1;
-    while((new_ready < MAX_PACKETS) &&
-	  (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID))
-      new_ready++;
-
+    // try to append the known-ready range (i.e. [pktidx,new_ready) ) to the
+    //  ready packets counter
     int old_ready = pktidx;
-    bool ok = pktbuf_ready_packets.compare_exchange(old_ready, new_ready);
-    if(!ok) {
-      // if our compare-and-swap failed, it may have gotten caught up in
-      //  somebody else's fixup step below, but at least make sure it's
-      //  advanced to include us
-      assert(old_ready > pktidx);
-      // and since we didn't do an update, we're not responsible for the
-      //  fixup step ourselves
-      return true;
-    }
-
-    // each time we bump the count, it's possible the committer of the
-    //  now-oldest-unready packet lost the race to see our update, so do it for
-    //  them
-    while((new_ready < MAX_PACKETS) &&
-	  (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID)) {
-      old_ready = new_ready;
-      new_ready++;
-      // grab any consecutive ones too
+    while(true) {
+      // see if any newer-but-consecutive packets are ready to go
+      //  (note that the first round of this has no ordering w.r.t. other
+      //  committers, so is a best-effort check - if we succeed at a CAS below,
+      //  we'll recheck with the ordering benefits that the CAS provides)
+      int new_ready = pktidx + 1;
       while((new_ready < MAX_PACKETS) &&
-	    (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID))
-	new_ready++;
+            (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID))
+        new_ready++;
 
-      bool ok = pktbuf_ready_packets.compare_exchange(old_ready, new_ready);
-      if(!ok) {
-	// it's ok for this to fail - it means somebody else was already
-	//  doing it, and it's now their responsibility to keep the chain alive
-	break;
+      if(!pktbuf_ready_packets.compare_exchange(old_ready, new_ready)) {
+        // CAS failed - three cases to consider
+        if(old_ready < pktidx) {
+          // there are still some packets before us that aren't ready -
+          //  whoever bumps the counter for them will take care of us
+          return false;
+        } else if(old_ready >= new_ready) {
+          // somebody else has covered the entire range we wanted to add, so
+          //  everything has been taken care of
+          return false;
+        } else {
+          // somebody updated for part of the range, but not the whole
+          //  thing - we need to try again to do the rest (using the
+          //  updated value of old_ready)
+          continue;
+        }
       }
+
+      // each time we bump the count, it's possible the committer of the
+      //  now-oldest-unready packet lost the race to see our update, so check
+      //  the next packet - if it's invalid, our work is done
+      if((new_ready >= MAX_PACKETS) ||
+         (pktbuf_pkt_types[new_ready].load() == PKTTYPE_INVALID))
+        break;
+
+      // possible race - at least one new packet looks ready, so try again
+      old_ready = new_ready;
     }
 
     return true;
