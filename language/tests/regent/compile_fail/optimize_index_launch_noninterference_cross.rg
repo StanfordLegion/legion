@@ -13,12 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_noninterference_cross.rg:29: loop optimization failed: argument 2 interferes with argument 1
+-- optimize_index_launch_noninterference_cross.rg:30: loop optimization failed: argument 2 interferes with argument 1
+--        ^
 
 import "regent"
 
 task foo(r: region(ispace(int1d), int), s: region(ispace(int1d), int), t: region(ispace(int1d), int))
-where reads writes(r, s), reads (t) do
+where reads writes(r), reads (s, t) do
 end
 
 task main()
@@ -27,7 +28,7 @@ task main()
 
   __demand(__index_launch)
   for i in ispace(int1d, 5) do
-    foo(p[i/1], p[i], p[i%2])
+    foo(p[i], p[i/1], p[i/2])
   end
 end
 regentlib.start(main)

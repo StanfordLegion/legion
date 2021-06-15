@@ -12,8 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-findex-launch-dynamic", "0"]]
+
 -- fails-with:
--- optimize_index_launch_num_affine2.rg:37: loop optimization failed: argument 2 interferes with argument 1
+-- optimize_index_launch_num_affine2.rg:40: loop optimization failed: argument 2 interferes with argument 1
 --     g2(p[i], p[i+1])
 --       ^
 
