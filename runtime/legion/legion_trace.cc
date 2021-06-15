@@ -8069,9 +8069,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!replay_precondition.exists());
 #endif
-      // Peak at recurrent from the front, can do this safely without
-      // the lock since we're not actually modifying anything
-      const bool recurrent = pending_replays.front().second;
+      ApEvent completion; bool recurrent;
+      {
+        AutoLock t_lock(template_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(!pending_replays.empty());
+#endif
+        const std::pair<ApEvent,bool> &pending = pending_replays.front();
+        completion = pending.first;
+        recurrent = pending.second;
+      }
       // Now update all of our barrier information
       if (recurrent)
       {
@@ -8194,7 +8201,6 @@ namespace Legion {
       }
       else
       {
-        const ApEvent completion = pending_replays.front().first;
         for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
           events[it->second] = completion;
