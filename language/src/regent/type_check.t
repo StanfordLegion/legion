@@ -1965,31 +1965,35 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or
-           std.is_index_type(field_type) or std.is_rect_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
-  else
-    -- TODO: indexspaces should be parametrized by index types.
-    --       currently they only support 64-bit points, which is why we do this check here.
-    local function is_base_type_64bit(ty)
-      if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
-        return true
-      elseif ty:isstruct() then
-        for _, entry in pairs(ty:getentries()) do
-          local entry_type = entry[2] or entry.type
-          if not is_base_type_64bit(entry_type) then return false end
-        end
-        return true
-      else return false end
-    end
 
-    local index_type = field_type
-    if std.is_bounded_type(index_type) then
-      index_type = index_type.index_type
-    end
-    if not is_base_type_64bit(index_type.base_type) then
-      report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
-    end
+  local index_type = field_type
+  if std.is_bounded_type(index_type) then
+    index_type = index_type.index_type
+  end
+  if not (std.is_index_type(index_type) or std.is_rect_type(index_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
+  end
+
+  -- TODO: indexspaces should be parametrized by index types.
+  --       currently they only support 64-bit points, which is why we do this check here.
+  local function is_base_type_64bit(ty)
+    if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
+      return true
+    elseif ty:isstruct() then
+      for _, entry in pairs(ty:getentries()) do
+        local entry_type = entry[2] or entry.type
+        if not is_base_type_64bit(entry_type) then return false end
+      end
+      return true
+    else return false end
+  end
+
+  if not is_base_type_64bit(index_type.base_type) then
+    report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
+  end
+
+  if index_type.dim ~= parent_type:ispace().index_type.dim and not (index_type.dim <= 1 and parent_type:ispace().index_type.dim <= 1) then
+    report.error(node, "type mismatch in argument 3: expected field with dim " .. tostring(parent_type:ispace().index_type.dim) .. " but got " .. tostring(field_type))
   end
 
   local region_symbol

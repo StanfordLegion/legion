@@ -3509,8 +3509,7 @@ namespace Legion {
      * an operation to a mapping call.
      */
     class Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Mappable(void);
     public:
       // Return a globally unique ID for this operation
@@ -3576,8 +3575,7 @@ namespace Legion {
      * that mappers can make informed decisions.
      */
     class Task : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Task(void);
     public:
       // Check whether this task has a parent task
@@ -3625,8 +3623,7 @@ namespace Legion {
      * explicit copy region-to-region copy operation.
      */
     class Copy : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Copy(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3655,8 +3652,7 @@ namespace Legion {
      * inline mapping operation from its launcher
      */
     class InlineMapping : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       InlineMapping(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3677,8 +3673,7 @@ namespace Legion {
      * acquire operation from the original launcher.
      */
     class Acquire : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Acquire(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3700,8 +3695,7 @@ namespace Legion {
      * release operation from the original launcher.
      */
     class Release : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Release(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3727,8 +3721,7 @@ namespace Legion {
      * be READ_WRITE EXCLUSIVE.
      */
     class Close : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Close(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3746,8 +3739,7 @@ namespace Legion {
      * more information.
      */
     class Fill : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Fill(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3775,8 +3767,7 @@ namespace Legion {
      * the runtime such as 'create_partition_by_field'.
      */
     class Partition : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Partition(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3809,8 +3800,7 @@ namespace Legion {
      * epoch launcher for more information.
      */
     class MustEpoch : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       MustEpoch(void);
     public:
       virtual MappableType get_mappable_type(void) const 
