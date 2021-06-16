@@ -57,7 +57,7 @@ struct DataRecord<'a> {
     color: &'a str,
     opacity: f64,
     title: &'a str,
-    initiation: &'a str,
+    initiation: Option<u64>,
     #[serde(rename = "in")]
     in_: &'a str,
     out: &'a str,
@@ -191,6 +191,24 @@ impl Proc {
         };
         let color = format!("#{:06x}", color);
 
+        let initiation = match point.entry {
+            ProcEntry::Task(op_id) => None,
+            ProcEntry::MetaTask(op_id, variant_id, idx) => {
+                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
+                Some(task.deps.op_id.0)
+            }
+            ProcEntry::MapperCall(idx) => {
+                let dep = self.mapper_calls[idx].deps.op_id.0;
+                if dep > 0 {
+                    Some(dep)
+                } else {
+                    None
+                }
+            }
+            ProcEntry::RuntimeCall(idx) => None,
+            ProcEntry::ProfTask(_) => None,
+        };
+
         let level = self.max_levels + 1 - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready + 1 - l);
 
@@ -203,7 +221,7 @@ impl Proc {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: "",
+            initiation,
             in_: "",
             out: "",
             children: "",
@@ -332,7 +350,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: "",
+            initiation: None,
             in_: "",
             out: "",
             children: "",

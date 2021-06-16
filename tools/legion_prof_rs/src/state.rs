@@ -1418,7 +1418,7 @@ pub struct MetaTask {
     op_id: OpID,
     pub variant_id: VariantID,
     time_range: TimeRange,
-    deps: InitiationDependencies,
+    pub deps: InitiationDependencies,
     waiters: Waiters,
 }
 
