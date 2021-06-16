@@ -10,8 +10,8 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry, ProcID, ProcKind,
-    ProcPoint, State, TimePoint, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry,
+    ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -51,7 +51,7 @@ impl Serialize for Count {
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
-    ready: Timestamp,
+    ready: Option<Timestamp>,
     start: Timestamp,
     end: Timestamp,
     color: &'a str,
@@ -173,7 +173,7 @@ impl Proc {
                 .unwrap()
                 .color
                 .unwrap(),
-            ProcEntry::ProfTask(idx) => {
+            ProcEntry::ProfTask(_) => {
                 // proftask color is hardcoded to
                 // self.color = '#FFC0CB'  # Pink
                 // FIXME don't hardcode this here
@@ -188,7 +188,7 @@ impl Proc {
         let default = DataRecord {
             level,
             level_ready,
-            ready: Timestamp(0),
+            ready: None,
             start: Timestamp(0),
             end: Timestamp(0),
             color: &color,
@@ -206,7 +206,7 @@ impl Proc {
         if !waiters.wait_intervals.is_empty() {
             for wait in &waiters.wait_intervals {
                 f.serialize(DataRecord {
-                    ready: start,
+                    ready: Some(start),
                     start: start,
                     end: wait.start,
                     opacity: 1.0,
@@ -215,7 +215,7 @@ impl Proc {
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
-                    ready: wait.start,
+                    ready: Some(wait.start),
                     start: wait.start,
                     end: wait.ready,
                     opacity: 0.15,
@@ -223,7 +223,7 @@ impl Proc {
                 })?;
                 f.serialize(DataRecord {
                     title: &format!("{} (ready)", &name),
-                    ready: wait.ready,
+                    ready: Some(wait.ready),
                     start: wait.ready,
                     end: wait.end,
                     opacity: 0.45,
@@ -233,7 +233,7 @@ impl Proc {
             }
             if start < time_range.stop.unwrap() {
                 f.serialize(DataRecord {
-                    ready: start,
+                    ready: Some(start),
                     start: start,
                     end: time_range.stop.unwrap(),
                     opacity: 1.0,
@@ -243,7 +243,7 @@ impl Proc {
             }
         } else {
             f.serialize(DataRecord {
-                ready: time_range.ready.unwrap_or(start),
+                ready: Some(time_range.ready.unwrap_or(start)),
                 start: start,
                 end: time_range.stop.unwrap(),
                 ..default
@@ -267,11 +267,132 @@ impl Proc {
             }
         }
 
-        let level = max(self.max_levels, 1) + 1;
+        let level = max(self.max_levels, 1);
 
         Ok(ProcessorRecord {
             full_text: format!("{:?} Processor 0x{:x}", self.kind, self.proc_id),
             text: format!("{:?} Proc {}", self.kind, self.proc_id.proc_in_node()),
+            tsv: filename,
+            levels: level,
+        })
+    }
+}
+
+impl Chan {
+    fn emit_tsv_point(
+        &self,
+        f: &mut csv::Writer<File>,
+        point: &ChanPoint,
+        state: &State,
+    ) -> io::Result<()> {
+        let (base, time_range, waiters) = self.entry(point.entry);
+        let name = match point.entry {
+            ChanEntry::Copy(idx) => {
+                let copy = &self.copies[idx];
+                format!("size={}, num reqs={}", copy.size, copy.copy_info.len())
+            }
+            ChanEntry::Fill(_) => {
+                format!("fill")
+            }
+            ChanEntry::DepPart(_) => {
+                format!("deppart")
+            }
+        };
+
+        let color = match point.entry {
+            ChanEntry::Copy(_) => {
+                Color(0xFFFFFF) // FIXME: need initiation op to do this
+            }
+            ChanEntry::Fill(_) => {
+                Color(0xFFFFFF) // FIXME: need initiation op to do this
+            }
+            ChanEntry::DepPart(_) => {
+                Color(0xFFFFFF) // FIXME: need initiation op to do this
+            }
+        };
+        let color = format!("#{:06x}", color);
+
+        let level = max(self.max_levels + 1, 4) - base.level.unwrap();
+
+        f.serialize(DataRecord {
+            level,
+            level_ready: None,
+            ready: None,
+            start: time_range.start.unwrap(),
+            end: time_range.stop.unwrap(),
+            color: &color,
+            opacity: 1.0,
+            title: &name,
+            initiation: "",
+            in_: "",
+            out: "",
+            children: "",
+            parents: "",
+            prof_uid: base.prof_uid.0,
+        })?;
+
+        Ok(())
+    }
+
+    fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
+        let mem_kind = |mem_id: MemID| state.mems.get(&mem_id).unwrap().kind;
+        let slug = match (self.channel_id.src, self.channel_id.dst) {
+            (Some(src), Some(dst)) => format!(
+                "({}_Memory_0x{:x},_{}_Memory_0x{:x})",
+                mem_kind(src),
+                &src,
+                mem_kind(dst),
+                &dst
+            ),
+            (None, Some(dst)) => format!("{}_Memory_0x{:x}", mem_kind(dst), dst),
+            (None, None) => format!("None"),
+            _ => unreachable!(),
+        };
+
+        let long_name = match (self.channel_id.src, self.channel_id.dst) {
+            (Some(src), Some(dst)) => format!(
+                "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
+                mem_kind(src),
+                &src,
+                mem_kind(dst),
+                &dst
+            ),
+            (None, Some(dst)) => format!("Fill {} Memory 0x{:x} Channel", mem_kind(dst), dst),
+            (None, None) => format!("Dependent Partition Channel"),
+            _ => unreachable!(),
+        };
+
+        let short_name = match (self.channel_id.src, self.channel_id.dst) {
+            (Some(src), Some(dst)) => format!(
+                "[n{}] {} to [n{}] {}",
+                src.node_id().0,
+                mem_kind(src),
+                dst.node_id().0,
+                mem_kind(dst)
+            ),
+            (None, Some(dst)) => format!("[n{}] {}", dst.node_id().0, mem_kind(dst)),
+            (None, None) => format!("Dependent Partition Channel"),
+            _ => unreachable!(),
+        };
+
+        let mut filename = PathBuf::new();
+        filename.push("tsv");
+        filename.push(format!("{}.tsv", slug));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(path.as_ref().join(&filename))?;
+
+        for point in &self.time_points {
+            if point.first {
+                self.emit_tsv_point(&mut f, point, state)?;
+            }
+        }
+
+        let level = max(self.max_levels, 4) - 1;
+
+        Ok(ProcessorRecord {
+            full_text: long_name,
+            text: short_name,
             tsv: filename,
             levels: level,
         })
@@ -501,29 +622,6 @@ impl State {
         utilization
     }
 
-    fn get_nodes(&self) -> BTreeSet<Option<NodeID>> {
-        let mut nodes = BTreeSet::new();
-        for proc in self.procs.values() {
-            if !proc.time_points.is_empty() {
-                nodes.insert(Some(proc.proc_id.node_id()));
-            }
-        }
-        if nodes.len() > 1 {
-            nodes.insert(None);
-        }
-        nodes
-    }
-
-    fn get_kinds(&self) -> BTreeSet<ProcKind> {
-        let mut kinds = BTreeSet::new();
-        for proc in self.procs.values() {
-            if !proc.time_points.is_empty() {
-                kinds.insert(proc.kind);
-            }
-        }
-        kinds
-    }
-
     fn emit_utilization_tsv_proc<P: AsRef<Path>>(
         &self,
         path: P,
@@ -683,27 +781,47 @@ impl State {
 
     fn emit_utilization_tsv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let (timepoint_proc, proc_count) = self.group_node_proc_kind_timepoints();
-
-        let nodes = self.get_nodes();
-        let kinds = self.get_kinds();
+        let timepoint_mem = self.group_node_mem_kind_timepoints();
+        let timepoint_chan = self.group_node_chan_kind_timepoints();
 
         let mut stats = BTreeMap::new();
 
-        for node in nodes {
-            for kind in &kinds {
-                let group = (node, *kind);
-                let node_name = match node {
-                    None => "all".to_owned(),
-                    Some(node_id) => format!("{}", node_id.0),
-                };
-                let group_name = format!("{} ({:?})", &node_name, kind);
-                if timepoint_proc.contains_key(&group) {
-                    stats
-                        .entry(node_name)
-                        .or_insert_with(|| Vec::new())
-                        .push(group_name);
-                }
-            }
+        for group in timepoint_proc.keys() {
+            let (node, kind) = group;
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} ({:?})", &node_name, kind);
+            stats
+                .entry(node_name)
+                .or_insert_with(|| Vec::new())
+                .push(group_name);
+        }
+
+        for group in timepoint_mem.keys() {
+            let (node, kind) = group;
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} ({} Memory)", &node_name, kind);
+            stats
+                .entry(node_name)
+                .or_insert_with(|| Vec::new())
+                .push(group_name);
+        }
+
+        for node in timepoint_chan.keys() {
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} (Channel)", &node_name);
+            stats
+                .entry(node_name)
+                .or_insert_with(|| Vec::new())
+                .push(group_name);
         }
 
         let path = path.as_ref();
@@ -712,9 +830,6 @@ impl State {
             let file = File::create(filename)?;
             serde_json::to_writer(&file, &stats)?;
         }
-
-        let timepoint_mem = self.group_node_mem_kind_timepoints();
-        let timepoint_chan = self.group_node_chan_kind_timepoints();
 
         let mut result_proc = Ok(());
         let mut result_mem = Ok(());
@@ -808,11 +923,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     create_dir(path.join("json"))?;
 
     // generate tsv data
-    let mut base_level = 0;
-    let proc_records: BTreeMap<_, _> = state
-        .procs
-        .values()
-        .collect::<Vec<_>>()
+    let procs = state.procs.values().collect::<Vec<_>>();
+    let proc_records: BTreeMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty())
         .map(|proc| {
@@ -821,9 +933,20 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         })
         .collect::<io::Result<_>>()?;
 
+    let mut base_level = 0;
     for record in proc_records.values() {
         base_level += record.levels;
     }
+
+    let channels = state.channels.values().collect::<Vec<_>>();
+    let chan_records: BTreeMap<_, _> = channels
+        .par_iter()
+        .filter(|chan| !chan.is_empty())
+        .map(|chan| {
+            chan.emit_tsv(&path, state)
+                .map(|record| (chan.channel_id, record))
+        })
+        .collect::<io::Result<_>>()?;
 
     state.emit_utilization_tsv(&path)?;
 
@@ -833,6 +956,9 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for record in proc_records.values() {
+            file.serialize(record)?;
+        }
+        for record in chan_records.values() {
             file.serialize(record)?;
         }
     }

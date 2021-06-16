@@ -187,6 +187,7 @@ pub struct NodeID(pub u64);
 pub struct EventID(pub u64);
 
 impl ProcID {
+    // Important: keep this in sync with realm/id.h
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
     // owner_node = proc_id[55:40]
     // proc_idx = proc_id[11:0]
@@ -443,15 +444,18 @@ pub type MemEntry = (InstID, OpID);
 
 pub type MemPoint = TimePoint<MemEntry, ()>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct MemID(pub u64);
 
 impl MemID {
+    // Important: keep this in sync with realm/id.h
+    // MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
+    // owner_node = mem_id[55:40]
     pub fn node_id(&self) -> NodeID {
         NodeID((self.0 >> 40) & ((1 << 16) - 1))
     }
     pub fn mem_in_node(&self) -> u64 {
-        (self.0) & ((1 << 12) - 1)
+        (self.0) & ((1 << 8) - 1)
     }
 }
 
@@ -573,11 +577,11 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub channel_id: ChanID,
-    copies: Vec<Copy>,
-    fills: Vec<Fill>,
-    depparts: Vec<DepPart>,
+    pub copies: Vec<Copy>,
+    pub fills: Vec<Fill>,
+    pub depparts: Vec<DepPart>,
     pub time_points: Vec<ChanPoint>,
-    max_levels: u32,
+    pub max_levels: u32,
 }
 
 impl Chan {
@@ -591,6 +595,11 @@ impl Chan {
             max_levels: 0,
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.copies.is_empty() && self.fills.is_empty() && self.depparts.is_empty()
+    }
+
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
         for copy in &mut self.copies {
             copy.trim_time_range(start, stop);
@@ -605,6 +614,7 @@ impl Chan {
         }
         self.depparts.retain(|t| !t.time_range.was_removed);
     }
+
     fn sort_time_range(&mut self, last_time: Timestamp) {
         fn add(time: &TimeRange, entry: ChanEntry, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
@@ -655,6 +665,23 @@ impl Chan {
                     ChanEntry::DepPart(idx) => self.depparts[idx].base.level.unwrap(),
                 };
                 free_levels.push(Reverse(level));
+            }
+        }
+    }
+
+    pub fn entry(&self, entry: ChanEntry) -> (&Base, &TimeRange, &InitiationDependencies) {
+        match entry {
+            ChanEntry::Copy(idx) => {
+                let copy = &self.copies[idx];
+                (&copy.base, &copy.time_range, &copy.deps)
+            }
+            ChanEntry::Fill(idx) => {
+                let fill = &self.fills[idx];
+                (&fill.base, &fill.time_range, &fill.deps)
+            }
+            ChanEntry::DepPart(idx) => {
+                let deppart = &self.depparts[idx];
+                (&deppart.base, &deppart.time_range, &deppart.deps)
             }
         }
     }
@@ -1497,12 +1524,12 @@ pub struct Copy {
     base: Base,
     src: MemID,
     dst: MemID,
-    size: u64,
+    pub size: u64,
     time_range: TimeRange,
     deps: InitiationDependencies,
     fevent: EventID,
     num_requests: u32,
-    copy_info: Vec<CopyInfo>,
+    pub copy_info: Vec<CopyInfo>,
 }
 
 impl Copy {
