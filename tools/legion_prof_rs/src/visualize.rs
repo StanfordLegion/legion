@@ -127,12 +127,21 @@ impl Proc {
                     .name
                     .clone()
             }
-            ProcEntry::MapperCall(idx) => state
-                .mapper_call_kinds
-                .get(&self.mapper_calls[idx].kind)
-                .unwrap()
-                .name
-                .clone(),
+            ProcEntry::MapperCall(idx) => {
+                let mapper_call = &self.mapper_calls[idx];
+                if mapper_call.deps.op_id.0 > 0 {
+                    format!(
+                        "Mapper Call {} for {}",
+                        state.mapper_call_kinds.get(&mapper_call.kind).unwrap().name,
+                        mapper_call.deps.op_id.0
+                    )
+                } else {
+                    format!(
+                        "Mapper Call {}",
+                        state.mapper_call_kinds.get(&mapper_call.kind).unwrap().name
+                    )
+                }
+            }
             ProcEntry::RuntimeCall(idx) => state
                 .runtime_call_kinds
                 .get(&self.runtime_calls[idx].kind)

@@ -917,7 +917,7 @@ impl Dependencies {
 #[derive(Debug)]
 pub struct InitiationDependencies {
     deps: Dependencies,
-    op_id: OpID,
+    pub op_id: OpID,
 }
 
 impl InitiationDependencies {
@@ -1441,7 +1441,7 @@ pub struct MapperCall {
     pub kind: MapperCallKindID,
     op_id: OpID,
     pub time_range: TimeRange,
-    deps: InitiationDependencies,
+    pub deps: InitiationDependencies,
     pub waiters: Waiters,
 }
 
