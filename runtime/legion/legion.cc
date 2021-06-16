@@ -82,7 +82,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Task::Task(void)
-      : Mappable(), args(NULL), arglen(0), local_args(NULL), local_arglen(0)
+      : Mappable(), task_id(0), args(NULL), arglen(0), is_index_space(false),
+        must_epoch_task(false), local_args(NULL), local_arglen(0),
+        steal_count(0), stealable(false), speculated(false),
+        local_function(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -93,7 +96,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Copy::Copy(void)
-      : Mappable()
+      : Mappable(), is_index_space(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -104,7 +107,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineMapping::InlineMapping(void)
-      : Mappable()
+      : Mappable(), layout_constraint_id(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -148,7 +151,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Fill::Fill(void)
-      : Mappable()
+      : Mappable(), is_index_space(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -159,7 +162,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Partition::Partition(void)
-      : Mappable()
+      : Mappable(), is_index_space(false)
     //--------------------------------------------------------------------------
     {
     }
