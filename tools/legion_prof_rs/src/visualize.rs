@@ -622,29 +622,6 @@ impl State {
         utilization
     }
 
-    fn get_nodes(&self) -> BTreeSet<Option<NodeID>> {
-        let mut nodes = BTreeSet::new();
-        for proc in self.procs.values() {
-            if !proc.time_points.is_empty() {
-                nodes.insert(Some(proc.proc_id.node_id()));
-            }
-        }
-        if nodes.len() > 1 {
-            nodes.insert(None);
-        }
-        nodes
-    }
-
-    fn get_kinds(&self) -> BTreeSet<ProcKind> {
-        let mut kinds = BTreeSet::new();
-        for proc in self.procs.values() {
-            if !proc.time_points.is_empty() {
-                kinds.insert(proc.kind);
-            }
-        }
-        kinds
-    }
-
     fn emit_utilization_tsv_proc<P: AsRef<Path>>(
         &self,
         path: P,
@@ -804,27 +781,47 @@ impl State {
 
     fn emit_utilization_tsv<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let (timepoint_proc, proc_count) = self.group_node_proc_kind_timepoints();
-
-        let nodes = self.get_nodes();
-        let kinds = self.get_kinds();
+        let timepoint_mem = self.group_node_mem_kind_timepoints();
+        let timepoint_chan = self.group_node_chan_kind_timepoints();
 
         let mut stats = BTreeMap::new();
 
-        for node in nodes {
-            for kind in &kinds {
-                let group = (node, *kind);
-                let node_name = match node {
-                    None => "all".to_owned(),
-                    Some(node_id) => format!("{}", node_id.0),
-                };
-                let group_name = format!("{} ({:?})", &node_name, kind);
-                if timepoint_proc.contains_key(&group) {
-                    stats
-                        .entry(node_name)
-                        .or_insert_with(|| Vec::new())
-                        .push(group_name);
-                }
-            }
+        for group in timepoint_proc.keys() {
+            let (node, kind) = group;
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} ({:?})", &node_name, kind);
+            stats
+                .entry(node_name)
+                .or_insert_with(|| Vec::new())
+                .push(group_name);
+        }
+
+        for group in timepoint_mem.keys() {
+            let (node, kind) = group;
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} ({} Memory)", &node_name, kind);
+            stats
+                .entry(node_name)
+                .or_insert_with(|| Vec::new())
+                .push(group_name);
+        }
+
+        for node in timepoint_chan.keys() {
+            let node_name = match node {
+                None => "all".to_owned(),
+                Some(node_id) => format!("{}", node_id.0),
+            };
+            let group_name = format!("{} (Channel)", &node_name);
+            stats
+                .entry(node_name)
+                .or_insert_with(|| Vec::new())
+                .push(group_name);
         }
 
         let path = path.as_ref();
@@ -833,9 +830,6 @@ impl State {
             let file = File::create(filename)?;
             serde_json::to_writer(&file, &stats)?;
         }
-
-        let timepoint_mem = self.group_node_mem_kind_timepoints();
-        let timepoint_chan = self.group_node_chan_kind_timepoints();
 
         let mut result_proc = Ok(());
         let mut result_mem = Ok(());
