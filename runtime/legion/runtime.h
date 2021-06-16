@@ -278,7 +278,8 @@ namespace Legion {
       bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,
-                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
+                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT,
+                       size_t upper_bound_size = SIZE_MAX);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
       // The return event for this method indicates when the resources have
       // been allocated for the instance and we can consider it mapped
@@ -316,8 +317,8 @@ namespace Legion {
       // The return event here will indicate when we have local data
       // that is valid to access for this particular future
       RtEvent subscribe(void);
-      void get_future_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates) const;
+      size_t get_upper_bound_size(void);
+      void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
       void pack_future(Serializer &rez) const;
       static FutureImpl* unpack_future(Runtime *runtime, 
           Deserializer &derez, ReferenceMutator *mutator, 

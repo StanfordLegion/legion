@@ -338,7 +338,9 @@ namespace Legion {
         if (tpl == NULL)
         {
           OP::trace->set_state_record();
-          tpl = physical_trace->start_new_template();
+          TaskTreeCoordinates coordinates;
+          this->compute_task_tree_coordinates(coordinates);
+          tpl = physical_trace->start_new_template(std::move(coordinates));
           assert(tpl != NULL);
         }
 

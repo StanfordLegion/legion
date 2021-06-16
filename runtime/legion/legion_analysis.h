@@ -217,6 +217,8 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
+                         const std::vector<size_t> &future_size_bounds,
+                         const std::vector<TaskTreeCoordinates> &coordinates,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
@@ -347,6 +349,8 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          const std::vector<size_t> &future_size_bounds,
+                          const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
@@ -440,10 +444,13 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          const std::vector<size_t> &future_size_bounds,
+                          const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(tlid, output, physical_instances, applied);
+          rec->record_mapper_output(tlid, output, physical_instances,
+                            future_size_bounds, coordinates, applied);
         }
       inline void record_set_effects(Memoizable *memo, ApEvent &rhs) const
         {

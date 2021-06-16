@@ -1275,12 +1275,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::compute_future_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+    void Operation::compute_task_tree_coordinates(TaskTreeCoordinates &coords)
     //--------------------------------------------------------------------------
     {
-      parent_ctx->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(std::make_pair(context_index, DomainPoint()));
+      parent_ctx->compute_task_tree_coordinates(coords);
+      coords.push_back(std::make_pair(context_index, DomainPoint()));
     }
 
     //--------------------------------------------------------------------------

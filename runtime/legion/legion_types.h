@@ -2160,6 +2160,7 @@ namespace Legion {
     typedef unsigned long long CollectiveID;
     typedef unsigned long long IndexSpaceExprID;
     typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+    typedef std::vector<std::pair<size_t,DomainPoint> > TaskTreeCoordinates;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 

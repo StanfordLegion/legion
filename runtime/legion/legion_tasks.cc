@@ -3409,26 +3409,33 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
+      std::vector<size_t> future_bounds_sizes;
       if (runtime->separate_runtime_instances)
       {
         std::vector<Processor> procs;
         tpl->get_mapper_output(this, selected_variant, task_priority,
-          perform_postmap, procs, future_memories, physical_instances);
+          perform_postmap, procs, future_memories, future_bounds_sizes,
+          physical_instances);
         target_processors.resize(1);
         target_processors[0] = this->target_proc;
       }
       else
         tpl->get_mapper_output(this, selected_variant, task_priority,
-          perform_postmap,target_processors,future_memories,physical_instances);
+          perform_postmap, target_processors, future_memories,
+          future_bounds_sizes, physical_instances);
       // Then request any future mappings in advance
       if (!futures.empty())
       {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           const Memory memory = future_memories[idx];
+          size_t bounds = SIZE_MAX;
+          if (idx < future_bounds_sizes.size())
+            bounds = future_bounds_sizes[idx];
           const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-              memory, this, unique_op_id, memory.address_space());
+            futures[idx].impl->request_application_instance(memory, this,
+                unique_op_id, memory.address_space(),
+                ApUserEvent::NO_AP_USER_EVENT, bounds);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }
@@ -3579,13 +3586,25 @@ namespace Legion {
         // here if we're going to record it
         if (!futures.empty())
           output.future_locations = future_memories;
+        std::vector<size_t> future_size_bounds(futures.size(), SIZE_MAX);
+        std::vector<TaskTreeCoordinates> future_coordinates(futures.size());
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl;
+          if (impl == NULL)
+            continue;
+          future_size_bounds[idx] = impl->get_upper_bound_size();
+          if (future_size_bounds[idx] < SIZE_MAX)
+            impl->get_future_coordinates(future_coordinates[idx]);
+        }
         const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
           remote_trace_recorder->record_mapper_output(tlid, output,
-              physical_instances, map_applied_conditions);
+              physical_instances, future_size_bounds, future_coordinates,
+              map_applied_conditions);
         else
-          tpl->record_mapper_output(tlid, output, 
-              physical_instances, map_applied_conditions);
+          tpl->record_mapper_output(tlid, output, physical_instances,
+              future_size_bounds, future_coordinates, map_applied_conditions);
       }
     }
 

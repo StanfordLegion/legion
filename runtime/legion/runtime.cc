@@ -1044,8 +1044,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent FutureImpl::request_application_instance(Memory target,
-                                  SingleTask *task, UniqueID task_uid,
-                                  AddressSpaceID source, ApUserEvent inst_ready)
+                     SingleTask *task, UniqueID task_uid, AddressSpaceID source,
+                     ApUserEvent inst_ready, size_t known_upper_bound_size)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1115,14 +1115,15 @@ namespace Legion {
             {
               // See if we have a size yet that we can use to try
               // to make the allocation, if not we'll need to wait
-              if (future_size_set)
+              if (future_size_set || (known_upper_bound_size < SIZE_MAX))
               {
                 // Try to make the instance now
                 MemoryManager *manager = runtime->find_memory_manager(target); 
                 if (!inst_ready.exists())
                   inst_ready = Runtime::create_ap_user_event(NULL);
                 FutureInstance *instance = manager->create_future_instance(task,
-                    task_uid, inst_ready, future_size, false/*eager*/);
+                    task_uid, inst_ready, future_size_set ? future_size :
+                      known_upper_bound_size, false/*eager*/);
                 pending_instances[target] =
                   PendingInstance(instance, inst_ready);
               }
@@ -1176,6 +1177,7 @@ namespace Legion {
           rez.serialize(task_uid);
           rez.serialize(send_event);
           rez.serialize(source);
+          rez.serialize(known_upper_bound_size);
         }
         runtime->send_future_create_instance_request(target_space, rez);
         return send_event;
@@ -2020,16 +2022,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::get_future_coordinates(
-                 std::vector<std::pair<size_t,DomainPoint> > &coordinates) const
+    size_t FutureImpl::get_upper_bound_size(void)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock f_lock(future_lock,1,false/*exclusive*/);
+        if (!empty || future_size_set)
+          return upper_bound_size;
+      }
+      const RtEvent subscribed = subscribe();
+      if (subscribed.exists() && !subscribed.has_triggered())
+        subscribed.wait();
+      AutoLock f_lock(future_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(!empty || future_size_set);
+#endif
+      return upper_bound_size;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::get_future_coordinates(TaskTreeCoordinates &coords) const
     //--------------------------------------------------------------------------
     {
       // No coordinates if we are an application-generated future
       if (producer_context_index == SIZE_MAX)
         return;
-      context->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(
-          std::make_pair(producer_context_index, producer_point));
+      context->compute_task_tree_coordinates(coords);
+      coords.push_back(std::make_pair(producer_context_index, producer_point));
     }
 
     //--------------------------------------------------------------------------
@@ -2461,8 +2480,11 @@ namespace Legion {
       derez.deserialize(mapped_event);
       AddressSpaceID source;
       derez.deserialize(source);
+      size_t upper_bound_size;
+      derez.deserialize(upper_bound_size);
       RtEvent mapped = 
-        impl->request_application_instance(target, NULL, creator_uid, source);
+        impl->request_application_instance(target, NULL, creator_uid, source,
+                            ApUserEvent::NO_AP_USER_EVENT, upper_bound_size);
       if (mapped.exists())
         mutator.record_reference_mutation_effect(mapped);
       Runtime::trigger_event(mapped_event, mutator.get_done_event());

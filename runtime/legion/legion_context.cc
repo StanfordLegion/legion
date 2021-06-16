@@ -4022,7 +4022,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::compute_task_tree_coordinates(
-                 std::vector<std::pair<size_t,DomainPoint> > &coordinates) const
+                                         TaskTreeCoordinates &coordinates) const
     //--------------------------------------------------------------------------
     {
       // Reserve an extra level for the common case
@@ -21246,7 +21246,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::compute_task_tree_coordinates(
-                 std::vector<std::pair<size_t,DomainPoint> > &coordinates) const
+                                         TaskTreeCoordinates &coordinates) const
     //--------------------------------------------------------------------------
     {
       TaskContext *owner_ctx = owner_task->get_context();

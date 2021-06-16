@@ -664,8 +664,7 @@ namespace Legion {
       InnerContext* find_physical_context(unsigned index);
     public:
       // Support for operations that compute futures
-      void compute_future_coordinates(
-                     std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+      void compute_task_tree_coordinates(TaskTreeCoordinates &coordinates);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
