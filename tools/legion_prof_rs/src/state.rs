@@ -1186,9 +1186,9 @@ pub struct Base {
 }
 
 impl Base {
-    fn new(state: &mut State) -> Self {
+    fn new(allocator: &mut ProfUIDAllocator) -> Self {
         Base {
-            prof_uid: state.get_prof_uid(),
+            prof_uid: allocator.get_prof_uid(),
             level: None,
             level_ready: None,
         }
@@ -1697,8 +1697,20 @@ impl LFSR {
 }
 
 #[derive(Debug, Default)]
-pub struct State {
+struct ProfUIDAllocator {
     next_prof_uid: ProfUID,
+}
+
+impl ProfUIDAllocator {
+    fn get_prof_uid(&mut self) -> ProfUID {
+        self.next_prof_uid.0 += 1;
+        self.next_prof_uid
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct State {
+    prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
@@ -1709,7 +1721,7 @@ pub struct State {
     pub meta_variants: BTreeMap<VariantID, Variant>,
     meta_tasks: BTreeMap<(OpID, VariantID), ProcID>,
     op_kinds: BTreeMap<OpKind, String>,
-    operations: BTreeMap<OpID, Operation>,
+    operations: BTreeSet<OpID>,
     prof_uid_map: BTreeMap<u64, u64>,
     tasks: BTreeMap<OpID, ProcID>,
     multi_tasks: BTreeMap<u64, u64>,
@@ -1730,16 +1742,13 @@ pub struct State {
 }
 
 impl State {
-    fn get_prof_uid(&mut self) -> ProfUID {
-        self.next_prof_uid.0 += 1;
-        self.next_prof_uid
-    }
-
-    fn find_op(&mut self, op_id: OpID) -> &mut Operation {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
-        self.operations
-            .entry(op_id)
-            .or_insert_with(|| Operation::new(base, op_id))
+    fn find_op(&mut self, op_id: OpID) {
+        // Hack: we don't actually want to fully expand the operation
+        // table, so just build the Base object to trigger the
+        // prof_uid increment and leave it at that.
+        if self.operations.insert(op_id) {
+            Base::new(&mut self.prof_uid_allocator);
+        }
     }
 
     fn create_task(
@@ -1750,17 +1759,19 @@ impl State {
         variant_id: VariantID,
         time_range: TimeRange,
     ) -> &mut Task {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
-        self.tasks.insert(op_id, proc_id);
+        self.find_op(op_id);
+        let new = self.tasks.insert(op_id, proc_id);
+        let alloc = &mut self.prof_uid_allocator;
         self.procs
             .get_mut(&proc_id)
             .unwrap()
             .tasks
             .entry(op_id)
-            .or_insert_with(|| Task::new(base, op_id, task_id, variant_id, time_range))
+            .or_insert_with(|| Task::new(Base::new(alloc), op_id, task_id, variant_id, time_range))
     }
 
     fn find_task(&mut self, op_id: OpID) -> &mut Task {
+        self.find_op(op_id);
         self.procs
             .get_mut(&self.tasks.get(&op_id).unwrap())
             .unwrap()
@@ -1776,7 +1787,7 @@ impl State {
         proc_id: ProcID,
         time_range: TimeRange,
     ) -> &mut MetaTask {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        self.find_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let tasks = self
             .procs
@@ -1785,7 +1796,13 @@ impl State {
             .meta_tasks
             .entry((op_id, variant_id))
             .or_insert_with(|| Vec::new());
-        tasks.push(MetaTask::new(base, op_id, variant_id, time_range));
+        let alloc = &mut self.prof_uid_allocator;
+        tasks.push(MetaTask::new(
+            Base::new(alloc),
+            op_id,
+            variant_id,
+            time_range,
+        ));
         tasks.last_mut().unwrap()
     }
 
@@ -1807,12 +1824,13 @@ impl State {
         op_id: OpID,
         time_range: TimeRange,
     ) {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        self.find_op(op_id);
+        let alloc = &mut self.prof_uid_allocator;
         self.procs
             .get_mut(&proc_id)
             .unwrap()
             .mapper_calls
-            .push(MapperCall::new(base, kind, op_id, time_range));
+            .push(MapperCall::new(Base::new(alloc), kind, op_id, time_range));
     }
 
     fn create_runtime_call(
@@ -1821,21 +1839,21 @@ impl State {
         proc_id: ProcID,
         time_range: TimeRange,
     ) {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        let alloc = &mut self.prof_uid_allocator;
         self.procs
             .get_mut(&proc_id)
             .unwrap()
             .runtime_calls
-            .push(RuntimeCall::new(base, kind, time_range));
+            .push(RuntimeCall::new(Base::new(alloc), kind, time_range));
     }
 
     fn create_prof_task(&mut self, proc_id: ProcID, op_id: OpID, time_range: TimeRange) {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        let alloc = &mut self.prof_uid_allocator;
         self.procs
             .get_mut(&proc_id)
             .unwrap()
             .prof_tasks
-            .push(ProfTask::new(base, op_id, time_range));
+            .push(ProfTask::new(Base::new(alloc), op_id, time_range));
     }
 
     fn create_copy(
@@ -1848,7 +1866,8 @@ impl State {
         fevent: EventID,
         num_requests: u32,
     ) {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        self.find_op(op_id);
+        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let channel = self.find_copy_channel(src, dst);
         channel.copies.push(Copy::new(
             base,
@@ -1864,13 +1883,15 @@ impl State {
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        self.find_op(op_id);
+        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let channel = self.find_fill_channel(dst);
         channel.fills.push(Fill::new(base, dst, op_id, time_range));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        self.find_op(op_id);
+        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let channel = self.find_deppart_channel();
         channel
             .depparts
@@ -1905,10 +1926,11 @@ impl State {
     }
 
     fn create_instance(&mut self, inst_id: InstID, op_id: OpID) -> &mut Inst {
-        let base = Base::new(self); // FIXME: construct here to avoid mutability conflict
+        self.find_op(op_id);
+        let alloc = &mut self.prof_uid_allocator;
         self.instances
             .entry((inst_id, op_id))
-            .or_insert_with(|| Inst::new(base, inst_id, op_id))
+            .or_insert_with(|| Inst::new(Base::new(alloc), inst_id, op_id))
     }
 
     fn update_last_time(&mut self, value: Timestamp) {
@@ -1984,12 +2006,6 @@ impl State {
         let mut op_colors = BTreeMap::new();
         for kind in self.op_kinds.keys() {
             op_colors.insert(kind, compute_color(lfsr.next(), num_colors));
-        }
-        for op in self.operations.values_mut() {
-            op.set_color(
-                op.kind
-                    .map_or(Color(0), |kind| *op_colors.get(&kind).unwrap()),
-            );
         }
         for kind in self.mapper_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
@@ -2240,16 +2256,16 @@ fn process_record(record: &Record, state: &mut State) {
         }
         Record::OperationInstance { op_id, kind } => {
             let kind = OpKind(*kind);
-            state.find_op(*op_id).set_kind(kind);
+            state.find_op(*op_id); //.set_kind(kind);
         }
         Record::MultiTask { op_id, task_id } => {
-            state
-                .find_op(*op_id)
-                .set_op_impl(OpImpl::Multi(Multi::new(*task_id)));
+            state.find_op(*op_id);
+            // .set_op_impl(OpImpl::Multi(Multi::new(*task_id)));
         }
         Record::SliceOwner { parent_id, op_id } => {
             let parent_id = OpID(*parent_id);
-            state.find_op(*op_id).set_owner(parent_id);
+            state.find_op(parent_id);
+            state.find_op(*op_id); //.set_owner(parent_id);
         }
         Record::TaskWaitInfo {
             op_id,
@@ -2271,6 +2287,7 @@ fn process_record(record: &Record, state: &mut State) {
             wait_ready: ready,
             wait_end: end,
         } => {
+            state.find_op(*op_id);
             state
                 .find_meta(*op_id, *lg_id)
                 .waiters
