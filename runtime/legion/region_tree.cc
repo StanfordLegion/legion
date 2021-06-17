@@ -3797,9 +3797,19 @@ namespace Legion {
         assert(r.field_space == parent->handle.field_space);
         assert(r.tree_id == parent->handle.tree_id);
       }
-      // Should have a pre-selected DID for each root node
-      assert((parent != NULL) || (did > 0));
 #endif
+      // Special case for root nodes without dids, we better find them
+      if ((parent == NULL) && (did == 0))
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        // Check to see if it already exists
+        std::map<LogicalRegion,RegionNode*>::const_iterator finder =
+          region_nodes.find(r);
+#ifdef DEBUG_LEGION
+        assert(finder != region_nodes.end());
+#endif
+        return finder->second;
+      }
       RtEvent row_ready, col_ready;
       IndexSpaceNode *row_src = get_node(r.index_space, &row_ready);
       FieldSpaceNode *col_src = get_node(r.field_space, &col_ready);
