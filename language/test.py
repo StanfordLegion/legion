@@ -175,7 +175,6 @@ def compare_prof_results(verbose, py_exe_path, profile_dirs):
            '--file-pattern', 'tsv/*Channel*_util.tsv',
            '--file-pattern', 'tsv/*Memory*_util.tsv',
            '--exclude-field', 'tsv/*Memory_0x*.tsv:title',
-           '--exclude-field', 'tsv/None.tsv:title',
            ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(

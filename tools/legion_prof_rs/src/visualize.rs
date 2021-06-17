@@ -325,10 +325,10 @@ impl Chan {
                 format!("size={}, num reqs={}", copy.size, copy.copy_info.len())
             }
             ChanEntry::Fill(_) => {
-                format!("fill")
+                format!("Fill")
             }
-            ChanEntry::DepPart(_) => {
-                format!("deppart")
+            ChanEntry::DepPart(idx) => {
+                format!("{}", self.depparts[idx].part_op)
             }
         };
 

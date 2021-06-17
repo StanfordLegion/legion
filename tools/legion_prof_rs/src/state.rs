@@ -75,6 +75,24 @@ pub enum DepPartKind {
     PartitionByWeights = 15,
 }
 
+impl fmt::Display for DepPartKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DepPartKind::UnionReduction => write!(f, "Union Reduction"),
+            DepPartKind::IntersectionReduction => write!(f, "Intersection Reduction"),
+            DepPartKind::EqualPartition => write!(f, "Equal Partition"),
+            DepPartKind::PartitionByField => write!(f, "Partition By Field"),
+            DepPartKind::PartitionByImage => write!(f, "Partition By Image"),
+            DepPartKind::PartitionByImageRange => write!(f, "Partition By Image Range"),
+            DepPartKind::PartitionByPreimage => write!(f, "Partition By Preimage"),
+            DepPartKind::PartitionByPreimage => write!(f, "Partition By Preimage Range"),
+            DepPartKind::CreateAssociation => write!(f, "Create Association"),
+            DepPartKind::PartitionByWeights => write!(f, "Partition By Weights"),
+            _ => write!(f, "{:?}", self),
+        }
+    }
+}
+
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u32)]
@@ -1562,7 +1580,7 @@ impl Fill {
 #[derive(Debug)]
 pub struct DepPart {
     base: Base,
-    part_op: DepPartKind,
+    pub part_op: DepPartKind,
     time_range: TimeRange,
     pub deps: InitiationDependencies,
 }
