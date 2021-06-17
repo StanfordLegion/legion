@@ -5804,8 +5804,8 @@ namespace Legion {
 #ifndef NDEBUG
         // If the size of the coordinates are the same we better
         // be inside the same parent task or something is really wrong
-        for (unsigned idx = 0; idx < (future_coords.size()-1); idx++)
-          assert(future_coords[idx] == coordinates[idx]);
+        for (unsigned idx2 = 0; idx2 < (future_coords.size()-1); idx2++)
+          assert(future_coords[idx2] == coordinates[idx2]);
 #endif
 #endif
         // check to see if it came after the start of the trace
