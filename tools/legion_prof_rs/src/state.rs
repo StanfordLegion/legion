@@ -1658,7 +1658,7 @@ struct LFSR {
 
 impl LFSR {
     fn new(size: u64) -> Self {
-        let needed_bits = (size as f64).log2().ceil() as u32;
+        let needed_bits = (size as f64).log2().floor() as u32 + 1;
         let seed_configuration = 0b1010010011110011;
         LFSR {
             register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits)))
