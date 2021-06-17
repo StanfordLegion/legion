@@ -167,14 +167,19 @@ def compare_prof_results(verbose, py_exe_path, profile_dirs):
            os.path.join(regent.root_dir(), 'tools', 'profile_diff.py'),
            '--check',
            '--file-pattern', 'tsv/Proc_*.tsv',
+           '--file-pattern', 'tsv/*Memory_0x*.tsv',
+           '--file-pattern', 'tsv/None.tsv',
            '--file-pattern', 'tsv/*CPU*_util.tsv',
            '--file-pattern', 'tsv/*GPU*_util.tsv',
            '--file-pattern', 'tsv/*Utility*_util.tsv',
            '--file-pattern', 'tsv/*Channel*_util.tsv',
            '--file-pattern', 'tsv/*Memory*_util.tsv',
-           '--exclude-field', 'tsv/Proc*.tsv:title',
-           '--exclude-field', 'tsv/Proc*.tsv:prof_uid',
-           '--exclude-field', 'tsv/Proc*.tsv:initiation',
+           '--exclude-field', 'tsv/*Memory_0x*.tsv:title',
+           '--exclude-field', 'tsv/*Memory_0x*.tsv:color',
+           '--exclude-field', 'tsv/*Memory_0x*.tsv:initiation',
+           '--exclude-field', 'tsv/None.tsv:title',
+           '--exclude-field', 'tsv/None.tsv:color',
+           '--exclude-field', 'tsv/None.tsv:initiation',
            ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
