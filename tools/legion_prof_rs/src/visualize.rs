@@ -338,10 +338,21 @@ impl Chan {
             ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
         };
 
-        let color = state
-            .tasks
-            .get(&initiation)
-            .map_or(Color(0xFFFFFF), |proc_id| {
+        let color = state.tasks.get(&initiation).map_or_else(
+            || {
+                state
+                    .operations
+                    .get(&initiation)
+                    .map_or(Color(0xFFFFFF), |op| {
+                        state
+                            .op_kinds
+                            .get(&op.kind.unwrap())
+                            .unwrap()
+                            .color
+                            .unwrap()
+                    })
+            },
+            |proc_id| {
                 let task = state
                     .procs
                     .get(proc_id)
@@ -355,7 +366,8 @@ impl Chan {
                     .unwrap()
                     .color
                     .unwrap()
-            });
+            },
+        );
         let color = format!("#{:06x}", color);
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();

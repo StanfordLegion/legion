@@ -1308,9 +1308,6 @@ impl Waiters {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OpID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct OpKind(u32);
-
 #[derive(Debug)]
 pub struct Task {
     pub base: Base,
@@ -1343,33 +1340,31 @@ impl Task {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OpKindID(u32);
+
 #[derive(Debug)]
-pub struct Multi {
-    task_id: TaskID,
+pub struct OpKind {
+    pub name: String,
+    pub color: Option<Color>,
 }
 
-impl Multi {
-    fn new(task_id: TaskID) -> Self {
-        Multi { task_id }
+impl OpKind {
+    fn new(name: String) -> Self {
+        OpKind { name, color: None }
     }
-}
-
-#[derive(Debug)]
-pub enum OpImpl {
-    Undefined,
-    Task(Task),
-    Multi(Multi),
+    fn set_color(&mut self, color: Color) -> &mut Self {
+        self.color = Some(color);
+        self
+    }
 }
 
 #[derive(Debug)]
 pub struct Operation {
     base: Base,
     op_id: OpID,
-    kind: Option<OpKind>,
-    op_impl: OpImpl,
-    name: String,
-    color: Option<Color>,
-    owner: Option<OpID>,
+    pub kind: Option<OpKindID>,
+    // owner: Option<OpID>,
 }
 
 impl Operation {
@@ -1378,38 +1373,19 @@ impl Operation {
             base,
             op_id,
             kind: None,
-            op_impl: OpImpl::Undefined,
-            name: format!("Operation {}", op_id.0),
-            color: None,
-            owner: None,
+            // owner: None,
         }
     }
-    fn set_kind(&mut self, kind: OpKind) -> &mut Self {
+    fn set_kind(&mut self, kind: OpKindID) -> &mut Self {
         assert_eq!(self.kind, None);
         self.kind = Some(kind);
         self
     }
-    fn set_op_impl(&mut self, op_impl: OpImpl) -> &mut Self {
-        match self.op_impl {
-            OpImpl::Undefined => {}
-            _ => {
-                dbg!(op_impl);
-                dbg!(self);
-                unreachable!("operation impl already set")
-            }
-        }
-        self.op_impl = op_impl;
-        self
-    }
-    fn set_color(&mut self, color: Color) -> &mut Self {
-        self.color = Some(color);
-        self
-    }
-    fn set_owner(&mut self, owner: OpID) -> &mut Self {
-        assert_eq!(self.owner, None);
-        self.owner = Some(owner);
-        self
-    }
+    // fn set_owner(&mut self, owner: OpID) -> &mut Self {
+    //     assert_eq!(self.owner, None);
+    //     self.owner = Some(owner);
+    //     self
+    // }
 }
 
 #[derive(Debug)]
@@ -1720,8 +1696,8 @@ pub struct State {
     pub variants: BTreeMap<(TaskID, VariantID), Variant>,
     pub meta_variants: BTreeMap<VariantID, Variant>,
     meta_tasks: BTreeMap<(OpID, VariantID), ProcID>,
-    op_kinds: BTreeMap<OpKind, String>,
-    operations: BTreeSet<OpID>,
+    pub op_kinds: BTreeMap<OpKindID, OpKind>,
+    pub operations: BTreeMap<OpID, Operation>,
     prof_uid_map: BTreeMap<u64, u64>,
     pub tasks: BTreeMap<OpID, ProcID>,
     multi_tasks: BTreeMap<u64, u64>,
@@ -1742,13 +1718,11 @@ pub struct State {
 }
 
 impl State {
-    fn find_op(&mut self, op_id: OpID) {
-        // Hack: we don't actually want to fully expand the operation
-        // table, so just build the Base object to trigger the
-        // prof_uid increment and leave it at that.
-        if self.operations.insert(op_id) {
-            Base::new(&mut self.prof_uid_allocator);
-        }
+    fn find_op(&mut self, op_id: OpID) -> &mut Operation {
+        let alloc = &mut self.prof_uid_allocator;
+        self.operations
+            .entry(op_id)
+            .or_insert_with(|| Operation::new(Base::new(alloc), op_id))
     }
 
     fn create_task(
@@ -2003,9 +1977,8 @@ impl State {
                 _ => compute_color(lfsr.next(), num_colors),
             });
         }
-        let mut op_colors = BTreeMap::new();
-        for kind in self.op_kinds.keys() {
-            op_colors.insert(kind, compute_color(lfsr.next(), num_colors));
+        for op_kind in self.op_kinds.values_mut() {
+            op_kind.set_color(compute_color(lfsr.next(), num_colors));
         }
         for kind in self.mapper_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
@@ -2037,8 +2010,11 @@ fn process_record(record: &Record, state: &mut State) {
                 .or_insert_with(|| Variant::new(*kind, name));
         }
         Record::OpDesc { kind, name } => {
-            let kind = OpKind(*kind);
-            state.op_kinds.entry(kind).or_insert_with(|| name.clone());
+            let kind = OpKindID(*kind);
+            state
+                .op_kinds
+                .entry(kind)
+                .or_insert_with(|| OpKind::new(name.clone()));
         }
         Record::ProcDesc { proc_id, kind } => {
             let kind = match ProcKind::try_from(*kind) {
@@ -2255,8 +2231,8 @@ fn process_record(record: &Record, state: &mut State) {
                 .set_task(*task_id);
         }
         Record::OperationInstance { op_id, kind } => {
-            let kind = OpKind(*kind);
-            state.find_op(*op_id); //.set_kind(kind);
+            let kind = OpKindID(*kind);
+            state.find_op(*op_id).set_kind(kind);
         }
         Record::MultiTask { op_id, task_id } => {
             state.find_op(*op_id);
