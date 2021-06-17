@@ -196,7 +196,7 @@ impl Proc {
         let color = format!("#{:06x}", color);
 
         let initiation = match point.entry {
-            ProcEntry::Task(op_id) => None,
+            ProcEntry::Task(_) => None,
             ProcEntry::MetaTask(op_id, variant_id, idx) => {
                 let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
                 Some(task.deps.op_id.0)
@@ -209,7 +209,7 @@ impl Proc {
                     None
                 }
             }
-            ProcEntry::RuntimeCall(idx) => None,
+            ProcEntry::RuntimeCall(_) => None,
             ProcEntry::ProfTask(_) => None,
         };
 
@@ -343,6 +343,12 @@ impl Chan {
         };
         let color = format!("#{:06x}", color);
 
+        let initiation = match point.entry {
+            ChanEntry::Copy(idx) => Some(self.copies[idx].deps.op_id.0),
+            ChanEntry::Fill(idx) => Some(self.fills[idx].deps.op_id.0),
+            ChanEntry::DepPart(idx) => Some(self.depparts[idx].deps.op_id.0),
+        };
+
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();
 
         f.serialize(DataRecord {
@@ -354,7 +360,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: None,
+            initiation,
             in_: "",
             out: "",
             children: "",

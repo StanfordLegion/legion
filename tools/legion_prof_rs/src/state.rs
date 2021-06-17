@@ -1526,7 +1526,7 @@ pub struct Copy {
     dst: MemID,
     pub size: u64,
     time_range: TimeRange,
-    deps: InitiationDependencies,
+    pub deps: InitiationDependencies,
     fevent: EventID,
     num_requests: u32,
     pub copy_info: Vec<CopyInfo>,
@@ -1566,7 +1566,7 @@ pub struct Fill {
     base: Base,
     dst: MemID,
     time_range: TimeRange,
-    deps: InitiationDependencies,
+    pub deps: InitiationDependencies,
 }
 
 impl Fill {
@@ -1588,7 +1588,7 @@ pub struct DepPart {
     base: Base,
     part_op: DepPartKind,
     time_range: TimeRange,
-    deps: InitiationDependencies,
+    pub deps: InitiationDependencies,
 }
 
 impl DepPart {
