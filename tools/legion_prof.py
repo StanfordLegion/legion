@@ -1718,6 +1718,8 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
 
     def __repr__(self):
         val =  'size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
+        if len(self.copy_info) > 0:
+            val += ', '
         cnt = 0
         for node in self.copy_info:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()

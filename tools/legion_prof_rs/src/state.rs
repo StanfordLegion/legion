@@ -1513,6 +1513,37 @@ pub struct CopyInfo {
     num_hops: u32,
 }
 
+impl fmt::Display for CopyInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "src_inst=0x{:x}, dst_inst=0x{:x}, fields={}, type={}, hops={}",
+            self.src_inst.0,
+            self.dst_inst.0,
+            self.num_fields,
+            match self.request_type {
+                0 => "fill",
+                1 => "reduc",
+                2 => "copy",
+                _ => unreachable!(),
+            },
+            self.num_hops
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct CopyInfoVec(pub Vec<CopyInfo>);
+
+impl fmt::Display for CopyInfoVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            write!(f, "$req[{}]: {}", i, elt)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
@@ -1523,7 +1554,7 @@ pub struct Copy {
     pub deps: InitiationDependencies,
     fevent: EventID,
     num_requests: u32,
-    pub copy_info: Vec<CopyInfo>,
+    pub copy_info: CopyInfoVec,
 }
 
 impl Copy {
@@ -1547,7 +1578,7 @@ impl Copy {
             deps: InitiationDependencies::new(op_id),
             fevent,
             num_requests,
-            copy_info,
+            copy_info: CopyInfoVec(copy_info),
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
@@ -2381,6 +2412,7 @@ fn process_record(record: &Record, state: &mut State) {
             let (channel_id, channel_idx) = *state.copy_map.get(fevent).unwrap();
             state.find_channel(channel_id).copies[channel_idx]
                 .copy_info
+                .0
                 .push(copy_info);
         }
         Record::FillInfo {

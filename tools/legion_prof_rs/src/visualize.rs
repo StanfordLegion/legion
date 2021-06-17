@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs::{create_dir, remove_dir_all, File};
 use std::io;
 use std::io::{Cursor, Write};
@@ -311,6 +312,26 @@ impl Proc {
     }
 }
 
+struct CopySize(u64);
+
+impl fmt::Display for CopySize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0 >= (1024 * 1024 * 1024) {
+            // GBs
+            write!(f, "{:.3} GiB", self.0 as f64 / (1024.0 * 1024.0 * 1024.0))
+        } else if self.0 >= (1024 * 1024) {
+            // MBs
+            write!(f, "{:.3} MiB", self.0 as f64 / (1024.0 * 1024.0))
+        } else if self.0 >= 1024 {
+            // KBs
+            write!(f, "{:.3} KiB", self.0 as f64 / 1024.0)
+        } else {
+            // Bytes
+            write!(f, "{} B", self.0)
+        }
+    }
+}
+
 impl Chan {
     fn emit_tsv_point(
         &self,
@@ -322,7 +343,17 @@ impl Chan {
         let name = match point.entry {
             ChanEntry::Copy(idx) => {
                 let copy = &self.copies[idx];
-                format!("size={}, num reqs={}", copy.size, copy.copy_info.len())
+                let nreqs = copy.copy_info.0.len();
+                if nreqs > 0 {
+                    format!(
+                        "size={}, num reqs={}, {}",
+                        CopySize(copy.size),
+                        nreqs,
+                        copy.copy_info
+                    )
+                } else {
+                    format!("size={}, num reqs={}", CopySize(copy.size), nreqs)
+                }
             }
             ChanEntry::Fill(_) => {
                 format!("Fill")
