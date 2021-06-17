@@ -8633,11 +8633,18 @@ namespace Legion {
           local_frontiers.find(it->second); 
         if (finder == local_frontiers.end())
           continue;
+        std::map<unsigned,std::set<ShardID> >::iterator subscription_finder =
+          local_subscriptions.find(it->second);
 #ifdef DEBUG_LEGION
         assert(local_frontiers.find(it->first) == local_frontiers.end());
+        assert(subscription_finder != local_subscriptions.end());
+        assert(local_subscriptions.find(it->first) ==
+                local_subscriptions.end());
 #endif
         local_frontiers[it->first] = finder->second;
-        local_frontiers.erase(finder); 
+        local_frontiers.erase(finder);
+        local_subscriptions[it->first].swap(subscription_finder->second);
+        local_subscriptions.erase(subscription_finder);
       }
     }
 
