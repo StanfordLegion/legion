@@ -359,6 +359,7 @@ namespace Legion {
 				      const CodeDescriptor &codedesc,
 				      const void *user_data,
 				      size_t user_len,
+                                      size_t return_type_size,
                                       bool has_return_type);
     public:
       void filter_variants(MappingCallInfo *ctx, const Task &task,

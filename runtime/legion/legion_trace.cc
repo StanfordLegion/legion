@@ -2107,15 +2107,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(void)
+    PhysicalTemplate* PhysicalTrace::start_new_template(
+                                              TaskTreeCoordinates &&coordinates)
     //--------------------------------------------------------------------------
     {
       // If we have a replicated context then we are making sharded templates
       if (repl_ctx != NULL)
-        current_template = 
-          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
+        current_template = new ShardedPhysicalTemplate(this, 
+            execution_fence_event, std::move(coordinates), repl_ctx);
       else
-        current_template = new PhysicalTemplate(this, execution_fence_event);
+        current_template = new PhysicalTemplate(this, execution_fence_event,
+                                                std::move(coordinates));
       return current_template;
     }
 
@@ -3839,9 +3841,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
-      : trace(t), recording(true), replayable(false, "uninitialized"),
-        fence_completion_id(0),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
+                                       TaskTreeCoordinates &&coords)
+      : trace(t), coordinates(std::move(coords)), recording(true),
+        replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), last_fence(NULL),
         recording_done(Runtime::create_rt_user_event()),
@@ -3858,8 +3861,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : trace(NULL), recording(true), replayable(false, "uninitialized"),
-        fence_completion_id(0),
+      : trace(NULL), coordinates(rhs.coordinates), recording(true),
+        replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -5758,6 +5761,8 @@ namespace Legion {
     void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
+                              const std::vector<size_t> &future_size_bounds,
+                              const std::vector<TaskTreeCoordinates> &coords,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -5774,6 +5779,42 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.future_locations = output.future_locations;
+      mapping.future_size_bounds = future_size_bounds;
+      // Check to see if the future coordinates are inside of our trace
+      // They have to be inside of our trace in order for it to be safe
+      // for use to be able to re-use their upper bound sizes (because
+      // we know those tasks are reusing the same variants)
+      for (unsigned idx = 0; idx < future_size_bounds.size(); idx++)
+      {
+        // If there's no upper bound then no need to check if the
+        // future is inside 
+        if (future_size_bounds[idx] == SIZE_MAX)
+          continue;
+        const TaskTreeCoordinates &future_coords = coords[idx];
+#ifdef DEBUG_LEGION
+        assert(future_coords.size() <= coordinates.size()); 
+#endif
+        if (future_coords.empty() ||
+            (future_coords.size() < coordinates.size()))
+        {
+          mapping.future_size_bounds[idx] = SIZE_MAX;
+          continue;
+        }
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        // If the size of the coordinates are the same we better
+        // be inside the same parent task or something is really wrong
+        for (unsigned idx2 = 0; idx2 < (future_coords.size()-1); idx2++)
+          assert(future_coords[idx2] == coordinates[idx2]);
+#endif
+#endif
+        // check to see if it came after the start of the trace
+        if (coordinates[idx].first <= future_coords[idx].first)
+          continue;
+        // Otherwise not inside the trace and therefore we cannot
+        // record the bounds for the future
+        mapping.future_size_bounds[idx] = SIZE_MAX;
+      }
       mapping.physical_instances = physical_instances;
       WrapperReferenceMutator mutator(applied_events);
       for (std::deque<InstanceSet>::iterator it =
@@ -5798,6 +5839,7 @@ namespace Legion {
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
                               std::vector<Memory> &future_locations,
+                              std::vector<size_t> &future_size_bounds,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
@@ -5815,6 +5857,7 @@ namespace Legion {
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
       future_locations = finder->second.future_locations;
+      future_size_bounds = finder->second.future_size_bounds;
       physical_instances = finder->second.physical_instances;
     }
 
@@ -6775,8 +6818,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
-                                     ApEvent fence_event, ReplicateContext *ctx)
-      : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
+       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplicateContext *ctx)
+      : PhysicalTemplate(trace, fence_event, std::move(coords)), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),

@@ -353,8 +353,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_collective == NULL);
 #endif
-      mapped_collective = 
-        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
+      mapped_collective = new SingleTaskTree(repl_ctx, owner_shard,
+                                mapped_collective_id, result.impl);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -372,11 +372,27 @@ namespace Legion {
       }
       else // We own it, so it goes on the ready queue
       {
-        // Signal the tree when we are done our mapping
-        mapped_collective->signal_tree(mapped_event);
+        // Don't signal the tree yet, we need to wait to see how big
+        // the result future size is first
         // Then we can do the normal analysis
         IndividualTask::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::handle_future_size(size_t return_type_size,
+                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((mapped_collective != NULL) || (must_epoch != NULL));
+#endif
+      // Signal that we are done with our mapping with the future size
+      if (mapped_collective != NULL)
+        mapped_collective->broadcast_future_size(mapped_event,
+                      return_type_size, has_return_type_size);
+      IndividualTask::handle_future_size(return_type_size, 
+                      has_return_type_size, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -3706,7 +3722,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplPendingPartitionOp::request_future_buffers(
-                                                std::set<RtEvent> &ready_events)
+              std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3717,8 +3733,11 @@ namespace Legion {
       for (std::map<DomainPoint,Future>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent ready =
+        const RtEvent mapped =
           it->second.impl->request_internal_buffer(this, false/*eager*/);
+        if (mapped.exists())
+          mapped_events.insert(mapped);
+        const RtEvent ready = it->second.impl->subscribe();
         if (ready.exists())
           ready_events.insert(ready);
       } 
@@ -5396,23 +5415,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTunableOp::deferred_execute(void)
+    void ReplTunableOp::process_result(MapperManager *mapper, 
+                                       void *buffer, size_t size) const
     //--------------------------------------------------------------------------
     {
-      MapperManager *mapper =
-        runtime->find_mapper(parent_ctx->get_executing_processor(), mapper_id);
-      Mapper::SelectTunableInput input;
-      Mapper::SelectTunableOutput output;
-      input.tunable_id = tunable_id;
-      input.mapping_tag = tag;
-      input.futures = futures;
-      input.args = arg;
-      input.size = argsize;
-      output.value = NULL;
-      output.size = 0;
-      output.take_ownership = true;
-      mapper->invoke_select_tunable_value(parent_ctx->get_owner_task(), 
-                                          &input, &output);
       if (!runtime->unsafe_mapper)
       {
 #ifdef DEBUG_LEGION
@@ -5425,10 +5431,10 @@ namespace Legion {
 #endif
         if (repl_ctx->owner_shard->shard_id != value_broadcast->origin)
         {
-          size_t size = 0;
-          const void *buffer = value_broadcast->get_buffer(size);
-          if ((size != output.size) ||
-              (memcmp(buffer, output.value, size) != 0))
+          size_t expected_size = 0;
+          const void *expected_buffer = value_broadcast->get_buffer(size);
+          if ((expected_size != size) ||
+              (memcmp(buffer, expected_buffer, size) != 0))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                 "Mapper %s returned different values for selection of "
                 "tunable value %d in parent task %s (UID %lld)",
@@ -5436,14 +5442,8 @@ namespace Legion {
                 parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
         else
-          value_broadcast->broadcast(output.value, output.size);
+          value_broadcast->broadcast(buffer, size);
       }
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
-                        tunable_index, output.value, output.size);
-      // Set and complete the future
-      result.impl->set_local(output.value, output.size, output.take_ownership);
-      complete_execution();
     }
 
     /////////////////////////////////////////////////////////////
@@ -12030,6 +12030,61 @@ namespace Legion {
       RtEvent precondition;
       derez.deserialize(precondition);
       Runtime::trigger_event(local_event, precondition);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Single Task Tree 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    SingleTaskTree::SingleTaskTree(ReplicateContext *ctx, ShardID origin, 
+                                   CollectiveID id, FutureImpl *impl)
+      : ShardEventTree(ctx, origin, id), future(impl), future_size(0),
+        has_future_size(false)
+    //--------------------------------------------------------------------------
+    {
+      if (future != NULL)
+        future->add_base_gc_ref(PENDING_COLLECTIVE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTaskTree::~SingleTaskTree(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((future != NULL) && 
+          future->remove_base_gc_ref(PENDING_COLLECTIVE_REF))
+        delete future;
+    }
+    
+    //--------------------------------------------------------------------------
+    void SingleTaskTree::broadcast_future_size(RtEvent precondition,
+                                               size_t size, bool has_size)
+    //--------------------------------------------------------------------------
+    {
+      future_size = size;
+      has_future_size = has_size;
+      signal_tree(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTaskTree::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      ShardEventTree::pack_collective(rez);
+      rez.serialize(future_size);
+      rez.serialize(has_future_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTaskTree::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardEventTree::unpack_collective(derez);
+      derez.deserialize(future_size);
+      derez.deserialize(has_future_size);
+      if ((future != NULL) && has_future_size)
+        future->set_future_result_size(future_size, 
+                  context->runtime->address_space);
     }
 
     /////////////////////////////////////////////////////////////
