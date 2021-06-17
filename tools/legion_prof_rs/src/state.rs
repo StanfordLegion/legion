@@ -1723,7 +1723,7 @@ pub struct State {
     op_kinds: BTreeMap<OpKind, String>,
     operations: BTreeSet<OpID>,
     prof_uid_map: BTreeMap<u64, u64>,
-    tasks: BTreeMap<OpID, ProcID>,
+    pub tasks: BTreeMap<OpID, ProcID>,
     multi_tasks: BTreeMap<u64, u64>,
     first_times: BTreeMap<u64, u64>,
     last_times: BTreeMap<u64, u64>,

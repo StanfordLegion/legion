@@ -114,10 +114,12 @@ impl Proc {
                     .unwrap()
                     .name;
                 match task_name {
-                    Some(task_name) => if task_name != variant_name {
-                        format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
-                    } else {
-                        format!("{} <{}>", task_name, op_id.0)
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
+                        } else {
+                            format!("{} <{}>", task_name, op_id.0)
+                        }
                     }
                     None => variant_name.clone(),
                 }
@@ -330,24 +332,31 @@ impl Chan {
             }
         };
 
-        let color = match point.entry {
-            ChanEntry::Copy(_) => {
-                Color(0xFFFFFF) // FIXME: need initiation op to do this
-            }
-            ChanEntry::Fill(_) => {
-                Color(0xFFFFFF) // FIXME: need initiation op to do this
-            }
-            ChanEntry::DepPart(_) => {
-                Color(0xFFFFFF) // FIXME: need initiation op to do this
-            }
-        };
-        let color = format!("#{:06x}", color);
-
         let initiation = match point.entry {
-            ChanEntry::Copy(idx) => Some(self.copies[idx].deps.op_id.0),
-            ChanEntry::Fill(idx) => Some(self.fills[idx].deps.op_id.0),
-            ChanEntry::DepPart(idx) => Some(self.depparts[idx].deps.op_id.0),
+            ChanEntry::Copy(idx) => self.copies[idx].deps.op_id,
+            ChanEntry::Fill(idx) => self.fills[idx].deps.op_id,
+            ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
         };
+
+        let color = state
+            .tasks
+            .get(&initiation)
+            .map_or(Color(0xFFFFFF), |proc_id| {
+                let task = state
+                    .procs
+                    .get(proc_id)
+                    .unwrap()
+                    .tasks
+                    .get(&initiation)
+                    .unwrap();
+                state
+                    .variants
+                    .get(&(task.task_id, task.variant_id))
+                    .unwrap()
+                    .color
+                    .unwrap()
+            });
+        let color = format!("#{:06x}", color);
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();
 
@@ -360,7 +369,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation,
+            initiation: Some(initiation.0),
             in_: "",
             out: "",
             children: "",
