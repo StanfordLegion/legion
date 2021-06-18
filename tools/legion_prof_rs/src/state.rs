@@ -85,7 +85,7 @@ impl fmt::Display for DepPartKind {
             DepPartKind::PartitionByImage => write!(f, "Partition by Image"),
             DepPartKind::PartitionByImageRange => write!(f, "Partition by Image Range"),
             DepPartKind::PartitionByPreimage => write!(f, "Partition by Preimage"),
-            DepPartKind::PartitionByPreimage => write!(f, "Partition by Preimage Range"),
+            DepPartKind::PartitionByPreimageRange => write!(f, "Partition by Preimage Range"),
             DepPartKind::CreateAssociation => write!(f, "Create Association"),
             DepPartKind::PartitionByWeights => write!(f, "Partition by Weights"),
             _ => write!(f, "{:?}", self),
