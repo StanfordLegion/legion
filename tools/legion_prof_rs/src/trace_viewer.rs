@@ -46,7 +46,7 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
     for proc in state.procs.values() {
         for point in &proc.time_points {
             if point.first {
-                let (base, time_range, waiters) = proc.entry(point.entry);
+                let (_base, time_range, waiters) = proc.entry(point.entry);
 
                 let name = match point.entry {
                     ProcEntry::Task(op_id) => {
@@ -83,11 +83,7 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                         .unwrap()
                         .name
                         .clone(),
-                    ProcEntry::ProfTask(idx) => {
-                        unimplemented!(
-                            "There is not a simple way to display the name of a ProfTask"
-                        )
-                    }
+                    ProcEntry::ProfTask(_) => "ProfTask".to_owned(),
                 };
 
                 let default = Event {
