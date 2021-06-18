@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs::{create_dir, remove_dir_all, File};
 use std::io;
 use std::io::{Cursor, Write};
@@ -114,10 +115,12 @@ impl Proc {
                     .unwrap()
                     .name;
                 match task_name {
-                    Some(task_name) => if task_name != variant_name {
-                        format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
-                    } else {
-                        format!("{} <{}>", task_name, op_id.0)
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
+                        } else {
+                            format!("{} <{}>", task_name, op_id.0)
+                        }
                     }
                     None => variant_name.clone(),
                 }
@@ -196,7 +199,7 @@ impl Proc {
         let color = format!("#{:06x}", color);
 
         let initiation = match point.entry {
-            ProcEntry::Task(op_id) => None,
+            ProcEntry::Task(_) => None,
             ProcEntry::MetaTask(op_id, variant_id, idx) => {
                 let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
                 Some(task.deps.op_id.0)
@@ -209,7 +212,7 @@ impl Proc {
                     None
                 }
             }
-            ProcEntry::RuntimeCall(idx) => None,
+            ProcEntry::RuntimeCall(_) => None,
             ProcEntry::ProfTask(_) => None,
         };
 
@@ -309,6 +312,26 @@ impl Proc {
     }
 }
 
+struct CopySize(u64);
+
+impl fmt::Display for CopySize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0 >= (1024 * 1024 * 1024) {
+            // GBs
+            write!(f, "{:.3} GiB", self.0 as f64 / (1024.0 * 1024.0 * 1024.0))
+        } else if self.0 >= (1024 * 1024) {
+            // MBs
+            write!(f, "{:.3} MiB", self.0 as f64 / (1024.0 * 1024.0))
+        } else if self.0 >= 1024 {
+            // KBs
+            write!(f, "{:.3} KiB", self.0 as f64 / 1024.0)
+        } else {
+            // Bytes
+            write!(f, "{} B", self.0)
+        }
+    }
+}
+
 impl Chan {
     fn emit_tsv_point(
         &self,
@@ -320,27 +343,62 @@ impl Chan {
         let name = match point.entry {
             ChanEntry::Copy(idx) => {
                 let copy = &self.copies[idx];
-                format!("size={}, num reqs={}", copy.size, copy.copy_info.len())
+                let nreqs = copy.copy_info.0.len();
+                if nreqs > 0 {
+                    format!(
+                        "size={}, num reqs={}, {}",
+                        CopySize(copy.size),
+                        nreqs,
+                        copy.copy_info
+                    )
+                } else {
+                    format!("size={}, num reqs={}", CopySize(copy.size), nreqs)
+                }
             }
             ChanEntry::Fill(_) => {
-                format!("fill")
+                format!("Fill")
             }
-            ChanEntry::DepPart(_) => {
-                format!("deppart")
+            ChanEntry::DepPart(idx) => {
+                format!("{}", self.depparts[idx].part_op)
             }
         };
 
-        let color = match point.entry {
-            ChanEntry::Copy(_) => {
-                Color(0xFFFFFF) // FIXME: need initiation op to do this
-            }
-            ChanEntry::Fill(_) => {
-                Color(0xFFFFFF) // FIXME: need initiation op to do this
-            }
-            ChanEntry::DepPart(_) => {
-                Color(0xFFFFFF) // FIXME: need initiation op to do this
-            }
+        let initiation = match point.entry {
+            ChanEntry::Copy(idx) => self.copies[idx].deps.op_id,
+            ChanEntry::Fill(idx) => self.fills[idx].deps.op_id,
+            ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
         };
+
+        let color = state.tasks.get(&initiation).map_or_else(
+            || {
+                state
+                    .operations
+                    .get(&initiation)
+                    .map_or(Color(0xFFFFFF), |op| {
+                        state
+                            .op_kinds
+                            .get(&op.kind.unwrap())
+                            .unwrap()
+                            .color
+                            .unwrap()
+                    })
+            },
+            |proc_id| {
+                let task = state
+                    .procs
+                    .get(proc_id)
+                    .unwrap()
+                    .tasks
+                    .get(&initiation)
+                    .unwrap();
+                state
+                    .variants
+                    .get(&(task.task_id, task.variant_id))
+                    .unwrap()
+                    .color
+                    .unwrap()
+            },
+        );
         let color = format!("#{:06x}", color);
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();
@@ -354,7 +412,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: None,
+            initiation: Some(initiation.0),
             in_: "",
             out: "",
             children: "",

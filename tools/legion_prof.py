@@ -109,9 +109,9 @@ dep_part_kinds = {
     6 : 'Difference',
     7 : 'Differences',
     8 : 'Equal Partition',
-    9 : 'Partition By Field',
+    9 : 'Partition by Field',
     10 : 'Partition by Image',
-    11 : 'Partition By Image Range',
+    11 : 'Partition by Image Range',
     12 : 'Partition by Preimage',
     13 : 'Partition by Preimage Range',
     14 : 'Create Association',
@@ -1718,6 +1718,8 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
 
     def __repr__(self):
         val =  'size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
+        if len(self.copy_info) > 0:
+            val += ', '
         cnt = 0
         for node in self.copy_info:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
