@@ -1533,18 +1533,6 @@ impl fmt::Display for CopyInfo {
 }
 
 #[derive(Debug)]
-pub struct CopyInfoVec(pub Vec<CopyInfo>);
-
-impl fmt::Display for CopyInfoVec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "$req[{}]: {}", i, elt)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
 pub struct Copy {
     base: Base,
     src: MemID,
@@ -1554,7 +1542,7 @@ pub struct Copy {
     pub deps: InitiationDependencies,
     fevent: EventID,
     num_requests: u32,
-    pub copy_info: CopyInfoVec,
+    pub copy_info: Vec<CopyInfo>,
 }
 
 impl Copy {
@@ -1578,7 +1566,7 @@ impl Copy {
             deps: InitiationDependencies::new(op_id),
             fevent,
             num_requests,
-            copy_info: CopyInfoVec(copy_info),
+            copy_info,
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
@@ -1767,11 +1755,15 @@ pub struct State {
 }
 
 impl State {
-    fn find_op(&mut self, op_id: OpID) -> &mut Operation {
+    fn create_op(&mut self, op_id: OpID) -> &mut Operation {
         let alloc = &mut self.prof_uid_allocator;
         self.operations
             .entry(op_id)
             .or_insert_with(|| Operation::new(Base::new(alloc), op_id))
+    }
+
+    pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
+        self.operations.get(&op_id)
     }
 
     fn create_task(
@@ -1782,7 +1774,7 @@ impl State {
         variant_id: VariantID,
         time_range: TimeRange,
     ) -> &mut Task {
-        self.find_op(op_id);
+        self.create_op(op_id);
         let new = self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
         self.procs
@@ -1793,14 +1785,16 @@ impl State {
             .or_insert_with(|| Task::new(Base::new(alloc), op_id, task_id, variant_id, time_range))
     }
 
-    fn find_task(&mut self, op_id: OpID) -> &mut Task {
-        self.find_op(op_id);
+    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut Task> {
+        self.create_op(op_id);
         self.procs
-            .get_mut(&self.tasks.get(&op_id).unwrap())
-            .unwrap()
+            .get_mut(self.tasks.get(&op_id)?)?
             .tasks
             .get_mut(&op_id)
-            .unwrap()
+    }
+
+    pub fn find_task(&self, op_id: OpID) -> Option<&Task> {
+        self.procs.get(self.tasks.get(&op_id)?)?.tasks.get(&op_id)
     }
 
     fn create_meta(
@@ -1810,7 +1804,7 @@ impl State {
         proc_id: ProcID,
         time_range: TimeRange,
     ) -> &mut MetaTask {
-        self.find_op(op_id);
+        self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let tasks = self
             .procs
@@ -1829,15 +1823,12 @@ impl State {
         tasks.last_mut().unwrap()
     }
 
-    fn find_meta(&mut self, op_id: OpID, variant_id: VariantID) -> &mut MetaTask {
+    fn find_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut MetaTask> {
         self.procs
-            .get_mut(&self.meta_tasks.get(&(op_id, variant_id)).unwrap())
-            .unwrap()
+            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?
             .meta_tasks
-            .get_mut(&(op_id, variant_id))
-            .unwrap()
+            .get_mut(&(op_id, variant_id))?
             .last_mut()
-            .unwrap()
     }
 
     fn create_mapper_call(
@@ -1847,7 +1838,7 @@ impl State {
         op_id: OpID,
         time_range: TimeRange,
     ) {
-        self.find_op(op_id);
+        self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         self.procs
             .get_mut(&proc_id)
@@ -1889,9 +1880,13 @@ impl State {
         fevent: EventID,
         num_requests: u32,
     ) {
-        self.find_op(op_id);
+        self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_copy_channel(src, dst);
+
+        let channel_id = ChanID::new_copy(src, dst);
+        let channel = self.find_channel_mut(channel_id);
+
+        let copy_id = channel.copies.len();
         channel.copies.push(Copy::new(
             base,
             src,
@@ -1903,45 +1898,47 @@ impl State {
             num_requests,
             Vec::new(),
         ));
+
+        self.copy_map
+            .entry(fevent)
+            .or_insert_with(|| (channel_id, copy_id));
+    }
+
+    fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
+        let (channel_id, channel_idx) = *self.copy_map.get(&fevent)?;
+        Some(&mut self.find_channel_mut(channel_id).copies[channel_idx])
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
-        self.find_op(op_id);
+        self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_fill_channel(dst);
+        let channel = self.find_fill_channel_mut(dst);
         channel.fills.push(Fill::new(base, dst, op_id, time_range));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
-        self.find_op(op_id);
+        self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_deppart_channel();
+        let channel = self.find_deppart_channel_mut();
         channel
             .depparts
             .push(DepPart::new(base, part_op, op_id, time_range));
     }
 
-    fn find_channel(&mut self, channel_id: ChanID) -> &mut Chan {
+    fn find_channel_mut(&mut self, channel_id: ChanID) -> &mut Chan {
         self.channels
             .entry(channel_id)
             .or_insert_with(|| Chan::new(channel_id))
     }
 
-    fn find_copy_channel(&mut self, src: MemID, dst: MemID) -> &mut Chan {
-        let channel_id = ChanID::new_copy(src, dst);
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
-    }
-
-    fn find_fill_channel(&mut self, dst: MemID) -> &mut Chan {
+    fn find_fill_channel_mut(&mut self, dst: MemID) -> &mut Chan {
         let channel_id = ChanID::new_fill(dst);
         self.channels
             .entry(channel_id)
             .or_insert_with(|| Chan::new(channel_id))
     }
 
-    fn find_deppart_channel(&mut self) -> &mut Chan {
+    fn find_deppart_channel_mut(&mut self) -> &mut Chan {
         let channel_id = ChanID::new_deppart();
         self.channels
             .entry(channel_id)
@@ -1949,7 +1946,7 @@ impl State {
     }
 
     fn create_instance(&mut self, inst_id: InstID, op_id: OpID) -> &mut Inst {
-        self.find_op(op_id);
+        self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         self.instances
             .entry((inst_id, op_id))
@@ -2281,16 +2278,16 @@ fn process_record(record: &Record, state: &mut State) {
         }
         Record::OperationInstance { op_id, kind } => {
             let kind = OpKindID(*kind);
-            state.find_op(*op_id).set_kind(kind);
+            state.create_op(*op_id).set_kind(kind);
         }
         Record::MultiTask { op_id, task_id } => {
-            state.find_op(*op_id);
+            state.create_op(*op_id);
             // .set_op_impl(OpImpl::Multi(Multi::new(*task_id)));
         }
         Record::SliceOwner { parent_id, op_id } => {
             let parent_id = OpID(*parent_id);
-            state.find_op(parent_id);
-            state.find_op(*op_id); //.set_owner(parent_id);
+            state.create_op(parent_id);
+            state.create_op(*op_id); //.set_owner(parent_id);
         }
         Record::TaskWaitInfo {
             op_id,
@@ -2301,7 +2298,8 @@ fn process_record(record: &Record, state: &mut State) {
             wait_end: end,
         } => {
             state
-                .find_task(*op_id)
+                .find_task_mut(*op_id)
+                .unwrap()
                 .waiters
                 .add_wait_interval(WaitInterval::new(*start, *ready, *end));
         }
@@ -2312,9 +2310,10 @@ fn process_record(record: &Record, state: &mut State) {
             wait_ready: ready,
             wait_end: end,
         } => {
-            state.find_op(*op_id);
+            state.create_op(*op_id);
             state
-                .find_meta(*op_id, *lg_id)
+                .find_meta_mut(*op_id, *lg_id)
+                .unwrap()
                 .waiters
                 .add_wait_interval(WaitInterval::new(*start, *ready, *end));
         }
@@ -2373,13 +2372,6 @@ fn process_record(record: &Record, state: &mut State) {
             fevent,
             num_requests,
         } => {
-            let channel_id = ChanID::new_copy(*src, *dst);
-            let copy_id = state.find_copy_channel(*src, *dst).copies.len();
-            state
-                .copy_map
-                .entry(*fevent)
-                .or_insert_with(|| (channel_id, copy_id));
-
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_copy(
                 *op_id,
@@ -2409,10 +2401,10 @@ fn process_record(record: &Record, state: &mut State) {
                 request_type: *request_type,
                 num_hops: *num_hops,
             };
-            let (channel_id, channel_idx) = *state.copy_map.get(fevent).unwrap();
-            state.find_channel(channel_id).copies[channel_idx]
+            state
+                .find_copy_mut(*fevent)
+                .unwrap()
                 .copy_info
-                .0
                 .push(copy_info);
         }
         Record::FillInfo {

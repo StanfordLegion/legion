@@ -11,8 +11,8 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Chan, ChanEntry, ChanID, ChanPoint, Color, MemID, MemKind, MemPoint, NodeID, Proc, ProcEntry,
-    ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, MemID, MemKind, MemPoint, NodeID, Proc,
+    ProcEntry, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -332,6 +332,18 @@ impl fmt::Display for CopySize {
     }
 }
 
+#[derive(Debug)]
+pub struct CopyInfoVec<'a>(pub &'a Vec<CopyInfo>);
+
+impl fmt::Display for CopyInfoVec<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            write!(f, "$req[{}]: {}", i, elt)?;
+        }
+        Ok(())
+    }
+}
+
 impl Chan {
     fn emit_tsv_point(
         &self,
@@ -343,13 +355,13 @@ impl Chan {
         let name = match point.entry {
             ChanEntry::Copy(idx) => {
                 let copy = &self.copies[idx];
-                let nreqs = copy.copy_info.0.len();
+                let nreqs = copy.copy_info.len();
                 if nreqs > 0 {
                     format!(
                         "size={}, num reqs={}, {}",
                         CopySize(copy.size),
                         nreqs,
-                        copy.copy_info
+                        CopyInfoVec(&copy.copy_info)
                     )
                 } else {
                     format!("size={}, num reqs={}", CopySize(copy.size), nreqs)
@@ -369,28 +381,18 @@ impl Chan {
             ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
         };
 
-        let color = state.tasks.get(&initiation).map_or_else(
+        let color = state.find_task(initiation).map_or_else(
             || {
-                state
-                    .operations
-                    .get(&initiation)
-                    .map_or(Color(0xFFFFFF), |op| {
-                        state
-                            .op_kinds
-                            .get(&op.kind.unwrap())
-                            .unwrap()
-                            .color
-                            .unwrap()
-                    })
+                state.find_op(initiation).map_or(Color(0xFFFFFF), |op| {
+                    state
+                        .op_kinds
+                        .get(&op.kind.unwrap())
+                        .unwrap()
+                        .color
+                        .unwrap()
+                })
             },
-            |proc_id| {
-                let task = state
-                    .procs
-                    .get(proc_id)
-                    .unwrap()
-                    .tasks
-                    .get(&initiation)
-                    .unwrap();
+            |task| {
                 state
                     .variants
                     .get(&(task.task_id, task.variant_id))
