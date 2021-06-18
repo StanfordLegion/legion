@@ -958,6 +958,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       report_fail(call, "loop optimization failed: function is not a task")
       return
     end
+    if call.fn.value.is_local then
+      report_fail(call, "loop optimization failed: local task cannot be used in an index launch")
+      return
+    end
   end
 
   if #call.conditions > 0 then
@@ -1521,14 +1525,18 @@ function optimize_index_launches.top_task(cx, node)
 end
 
 function optimize_index_launches.top(cx, node)
-  if node:is(ast.typed.top.Task) and
-     not node.config_options.leaf
-  then
-    return optimize_index_launches.top_task(cx, node)
-
-  else
-    return node
+  if node:is(ast.typed.top.Task) then
+    -- Always run the optimization, just throw away the result if this
+    -- is a leaf task. This is important because local tasks can be
+    -- called inside of leaf tasks, but that cannot lead to an index
+    -- launch.
+    local result = optimize_index_launches.top_task(cx, node)
+    if not node.config_options.leaf then
+      return result
+    end
   end
+
+  return node
 end
 
 function optimize_index_launches.entry(node)

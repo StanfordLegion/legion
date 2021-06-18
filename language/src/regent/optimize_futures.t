@@ -157,6 +157,7 @@ end
 
 function analyze_var_flow.expr_call(cx, node)
   if std.is_task(node.fn.value) and
+    not node.fn.value.is_local and
     node.expr_type ~= terralib.types.unit
   then
     return flow_future()
@@ -642,7 +643,10 @@ function optimize_futures.expr_call(cx, node)
     end)
   end
   local expr_type = node.expr_type
-  if std.is_task(node.fn.value) and expr_type ~= terralib.types.unit then
+  if std.is_task(node.fn.value) and
+    not node.fn.value.is_local and
+    expr_type ~= terralib.types.unit
+  then
     expr_type = std.future(expr_type)
   end
 

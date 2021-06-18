@@ -3181,6 +3181,25 @@ local function expr_call_setup_region_arg(
   end
 end
 
+local function expr_call_setup_region_arg_local(
+    cx, task, arg_value, arg_type, param_type, physical_regions)
+  local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
+    std.find_task_privileges(param_type, task)
+
+  for i, privilege in ipairs(privileges) do
+    local field_paths = privilege_field_paths[i]
+
+    local physical_region
+    for _, field_path in ipairs(field_paths) do
+      if not physical_region then
+        physical_region = cx:region(arg_type).physical_regions[field_path:hash()]
+      end
+      -- Better hope all the fields are in the same physical region...
+    end
+    physical_regions:insert(physical_region)
+  end
+end
+
 local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, field_types, add_requirement, get_requirement,
@@ -3464,6 +3483,134 @@ local function expr_call_setup_partition_arg(
   end
 end
 
+local function expr_call_setup_remote(cx, node, task, arg_values, arg_types, param_types, conditions, launcher, args_setup)
+  -- Pass futures.
+  for i, arg_type in ipairs(arg_types) do
+    if std.is_future(arg_type) then
+      local arg_value = arg_values[i]
+      expr_call_setup_future_arg(
+        cx, task, arg_value,
+        launcher, false, args_setup)
+    end
+  end
+
+  -- Pass phase barriers (from annotations on parameters).
+  local param_conditions = task:get_conditions()
+  for condition, args_enabled in pairs(param_conditions) do
+    for i, arg_type in ipairs(arg_types) do
+      if args_enabled[i] then
+        assert(std.is_phase_barrier(arg_type) or
+          (std.is_list(arg_type) and std.is_phase_barrier(arg_type.element_type)))
+        local arg_value = arg_values[i]
+        expr_call_setup_phase_barrier_arg(
+          cx, task, arg_value, condition,
+          launcher, false, args_setup, arg_type)
+      end
+    end
+  end
+
+  -- Pass phase barriers (from extra conditions).
+  for i, condition in ipairs(node.conditions) do
+    local condition_expr = conditions[i]
+    for _, condition_kind in ipairs(condition.conditions) do
+      expr_call_setup_phase_barrier_arg(
+        cx, task, condition_expr.value, condition_kind,
+        launcher, false, args_setup, std.as_read(condition.expr_type))
+    end
+  end
+
+  -- Pass index spaces through index requirements.
+  for i, arg_type in ipairs(arg_types) do
+    if std.is_ispace(arg_type) then
+      local param_type = param_types[i]
+
+      expr_call_setup_ispace_arg(
+        cx, task, arg_type, param_type, launcher, false, args_setup)
+    end
+  end
+
+  -- Pass regions through region requirements.
+  local fn_type = task:get_type()
+  for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+    local arg_value = arg_values[i]
+    local arg_type = arg_types[i]
+    local param_type = param_types[i]
+
+    expr_call_setup_region_arg(
+      cx, task, node.args[i], arg_type, param_type, launcher, false, args_setup)
+  end
+
+  -- Pass regions through lists of region requirements.
+  for _, i in ipairs(std.fn_param_lists_of_regions_by_index(fn_type)) do
+    local arg_type = arg_types[i]
+    local param_type = param_types[i]
+
+    expr_call_setup_list_of_regions_arg(
+      cx, task, arg_type, param_type, launcher, false, args_setup)
+  end
+end
+
+local function expr_call_setup_local(cx, node, task, arg_values, arg_types, param_types, args_setup)
+  -- Pass futures.
+  local futures = terralib.newlist()
+  for i, arg_type in ipairs(arg_types) do
+    if std.is_future(arg_type) then
+      local arg_value = arg_values[i]
+      futures:insert(`([arg_value].__result))
+    end
+  end
+
+  -- No phase barriers.
+  assert(#task:get_conditions() == 0)
+  assert(#node.conditions == 0)
+
+  -- Don't need special setup for index spaces.
+
+  -- Pass regions.
+  local physical_regions = terralib.newlist()
+  local fn_type = task:get_type()
+  for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+    local arg_type = arg_types[i]
+    local param_type = param_types[i]
+
+    expr_call_setup_region_arg_local(
+      cx, task, node.args[i], arg_type, param_type, physical_regions)
+  end
+
+  -- Pass lists of regions.
+  for _, i in ipairs(std.fn_param_lists_of_regions_by_index(fn_type)) do
+    assert(false) -- Not supported.
+  end
+
+  return futures, physical_regions
+end
+
+local function expr_call_setup_predicate(cx, node, predicate, predicate_else_value, launcher, args_setup, task_args_setup)
+  -- Setup predicate.
+  local predicate_symbol = terralib.newsymbol(c.legion_predicate_t, "predicate")
+  local predicate_value
+  if predicate then
+    predicate_value = `c.legion_predicate_create([cx.runtime], [cx.context], [predicate.value].__result)
+  else
+    predicate_value = `c.legion_predicate_true()
+  end
+  task_args_setup:insert(
+    quote
+      var [predicate_symbol] = [predicate_value]
+    end)
+
+  if predicate_else_value then
+    assert(std.is_future(std.as_read(node.predicate_else_value.expr_type)))
+    args_setup:insert(
+      quote
+        c.legion_task_launcher_set_predicate_false_future(
+          [launcher], [predicate_else_value.value].__result)
+      end)
+  end
+
+  return predicate_symbol
+end
+
 local function loop_bounds_to_domain_or_index_space(cx, values, value_type)
   if terralib.islist(values) then
     return `((rect1d {
@@ -3554,94 +3701,26 @@ function codegen.expr_call(cx, node)
       params_struct_type, fn.value:has_params_map_label(), fn.value:has_params_map_type(),
       task_args, task_args_setup, task_args_cleanup)
 
-    local launcher = terralib.newsymbol(c.legion_task_launcher_t, "launcher")
+    local is_local = fn.value.is_local
+    local launcher
+    if not is_local then
+      launcher = terralib.newsymbol(c.legion_task_launcher_t, "launcher")
+    end
 
-    -- Pass futures.
     local args_setup = terralib.newlist()
-    for i, arg_type in ipairs(arg_types) do
-      if std.is_future(arg_type) then
-        local arg_value = arg_values[i]
-        expr_call_setup_future_arg(
-          cx, fn.value, arg_value,
-          launcher, false, args_setup)
-      end
-    end
-
-    -- Pass phase barriers (from annotations on parameters).
-    local param_conditions = fn.value:get_conditions()
-    for condition, args_enabled in pairs(param_conditions) do
-      for i, arg_type in ipairs(arg_types) do
-        if args_enabled[i] then
-          assert(std.is_phase_barrier(arg_type) or
-            (std.is_list(arg_type) and std.is_phase_barrier(arg_type.element_type)))
-          local arg_value = arg_values[i]
-          expr_call_setup_phase_barrier_arg(
-            cx, fn.value, arg_value, condition,
-            launcher, false, args_setup, arg_type)
-        end
-      end
-    end
-
-    -- Pass phase barriers (from extra conditions).
-    for i, condition in ipairs(node.conditions) do
-      local condition_expr = conditions[i]
-      for _, condition_kind in ipairs(condition.conditions) do
-        expr_call_setup_phase_barrier_arg(
-          cx, fn.value, condition_expr.value, condition_kind,
-          launcher, false, args_setup, std.as_read(condition.expr_type))
-      end
-    end
-
-    -- Pass index spaces through index requirements.
-    for i, arg_type in ipairs(arg_types) do
-      if std.is_ispace(arg_type) then
-        local param_type = param_types[i]
-
-        expr_call_setup_ispace_arg(
-          cx, fn.value, arg_type, param_type, launcher, false, args_setup)
-      end
-    end
-
-    -- Pass regions through region requirements.
-    local fn_type = fn.value:get_type()
-    for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
-      local arg_value = arg_values[i]
-      local arg_type = arg_types[i]
-      local param_type = param_types[i]
-
-      expr_call_setup_region_arg(
-        cx, fn.value, node.args[i], arg_type, param_type, launcher, false, args_setup)
-    end
-
-    -- Pass regions through lists of region requirements.
-    for _, i in ipairs(std.fn_param_lists_of_regions_by_index(fn_type)) do
-      local arg_type = arg_types[i]
-      local param_type = param_types[i]
-
-      expr_call_setup_list_of_regions_arg(
-        cx, fn.value, arg_type, param_type, launcher, false, args_setup)
-    end
-
-    -- Setup predicate.
-    local predicate_symbol = terralib.newsymbol(c.legion_predicate_t, "predicate")
-    local predicate_value
-    if predicate then
-      predicate_value = `c.legion_predicate_create([cx.runtime], [cx.context], [predicate.value].__result)
+    local predicate_symbol
+    local local_futures, local_regions
+    if not is_local then
+      expr_call_setup_remote(
+        cx, node, fn.value, arg_values, arg_types, param_types, conditions,
+        launcher, args_setup)
+      predicate_symbol = expr_call_setup_predicate(
+        cx, node, predicate, predicate_else_value,
+        launcher, args_setup, task_args_setup)
     else
-      predicate_value = `c.legion_predicate_true()
-    end
-    task_args_setup:insert(
-      quote
-        var [predicate_symbol] = [predicate_value]
-      end)
-
-    if predicate_else_value then
-      assert(std.is_future(std.as_read(node.predicate_else_value.expr_type)))
-      args_setup:insert(
-        quote
-          c.legion_task_launcher_set_predicate_false_future(
-            [launcher], [predicate_else_value.value].__result)
-        end)
+      local_futures, local_regions = expr_call_setup_local(
+        cx, node, fn.value, arg_values, arg_types, param_types, args_setup)
+      assert(not predicate) -- Predication is not supported.
     end
 
     local future
@@ -3649,7 +3728,7 @@ function codegen.expr_call(cx, node)
       future = terralib.newsymbol(c.legion_future_t, "future")
     end
 
-    if cx.loop_point then
+    if cx.loop_point and not is_local then
       local point
       if cx.loop_point.type:isintegral() then
         point = `(int1d([cx.loop_point]):to_domain_point())
@@ -3664,7 +3743,7 @@ function codegen.expr_call(cx, node)
         end)
     end
 
-    if cx.loop_domain and
+    if cx.loop_domain and not is_local and
       -- Skip doing this if we have a stride in the loop.
       (not terralib.islist(cx.loop_domain) or #cx.loop_domain == 2)
     then
@@ -3678,34 +3757,102 @@ function codegen.expr_call(cx, node)
         end)
     end
 
-    local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-    local launcher_setup = quote
-      var [task_args]
-      [task_args_setup]
-      var mapper = [fn.value:has_mapper_id() or 0]
-      var [tag] = [fn.value:has_mapping_tag_id() or 0]
-      [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
-      var [launcher] = c.legion_task_launcher_create(
-        [fn.value:get_task_id()], [task_args],
-        [predicate_symbol], [mapper], [tag])
-      [args_setup]
+    local launcher_setup
+    if not is_local then
+      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
+      launcher_setup = quote
+        var [task_args]
+        [task_args_setup]
+        var mapper = [fn.value:has_mapper_id() or 0]
+        var [tag] = [fn.value:has_mapping_tag_id() or 0]
+        [codegen_hooks.gen_update_mapping_tag(tag, fn.value:has_mapping_tag_id(), cx.task)]
+        var [launcher] = c.legion_task_launcher_create(
+          [fn.value:get_task_id()], [task_args],
+          [predicate_symbol], [mapper], [tag])
+        [args_setup]
+      end
+    else
+      launcher_setup = quote
+        var [task_args]
+        [task_args_setup]
+        [args_setup]
+      end
     end
 
     local launcher_execute
-    if not cx.must_epoch then
+    local local_result
+    if not is_local and not cx.must_epoch then
       launcher_execute = quote
         var [future] = c.legion_task_launcher_execute(
           [cx.runtime], [cx.context], [launcher])
         c.legion_task_launcher_destroy(launcher)
         [task_args_cleanup]
       end
-    else
+    elseif not is_local then
       launcher_execute = quote
         c.legion_must_epoch_launcher_add_single_task(
           [cx.must_epoch],
           [int1d]([cx.must_epoch_point]),
           [launcher])
         [cx.must_epoch_point] = [cx.must_epoch_point] + 1
+      end
+    else
+      local region_array = terralib.newsymbol(c.legion_physical_region_t[#local_regions], "physical_regions")
+      local result = terralib.newsymbol(std.serialized_value, "result")
+
+      local c_task = terralib.newsymbol(c.legion_task_t, "task")
+      local c_regions = terralib.newsymbol(&c.legion_physical_region_t, "regions")
+      local c_num_regions = #local_regions
+      local c_context = cx.context
+      local c_runtime = cx.runtime
+      local c_result = `(&result)
+      local c_params = terralib.newlist({
+        c_task, c_regions, c_num_regions, c_context, c_runtime, c_result })
+
+      local variant
+      if cx.variant:is_cuda() then
+        variant = fn.value:get_cuda_variant()
+        assert(variant)
+      elseif cx.variant:is_openmp() then
+        for _, v in ipairs(fn.value:get_variants()) do
+          if v:is_openmp() then
+            variant = v
+          end
+        end
+        assert(variant)
+      else
+        variant = fn.value:get_primary_variant()
+      end
+      launcher_execute = quote
+        var [region_array]
+        [data.mapi(
+           function(i, pr)
+             return quote
+               [region_array][ [i-1] ] = [pr]
+             end
+           end,
+           local_regions)]
+
+        var task_mut = c.legion_task_create_empty()
+        c.legion_task_set_args(task_mut, [task_args].args)
+        c.legion_task_set_arglen(task_mut, [task_args].arglen)
+        [local_futures:map(
+           function(future)
+             return quote
+               c.legion_task_add_future(task_mut, [future])
+             end
+           end)]
+        var [c_task] = c.legion_task_mut_as_task(task_mut)
+        var [c_regions] = [region_array]
+        var [result] = std.serialized_value { nil, 0 }
+        [variant:get_definition()]([c_params])
+        c.legion_task_destroy(task_mut)
+        [task_args_cleanup]
+        -- This is a hack, but it's actually easier to drive the
+        -- serialization infrastructure if we go through the same
+        -- future code path as remote task launches.
+        var [future] = c.legion_future_from_untyped_pointer([cx.runtime], [result].value, [result].size)
+        c.free([result].value)
       end
     end
 
@@ -10704,16 +10851,19 @@ function codegen.top_task(cx, node)
       actions = quote
         [actions]
         std.assert([physical_region_index] < c_num_regions, "too few physical regions in task setup")
-        var req = c.legion_task_get_requirement(c_task, [physical_region_index])
-        if c.legion_region_requirement_get_handle_type(req) == c.SINGULAR then
-          var new_r = c.legion_region_requirement_get_region(req)
-          if new_r.tree_id ~= 0 then
-            [r].impl = new_r
+        -- Important: local tasks do not have region requirements filled out, so we have to avoid pulling this in that case.
+        if c.legion_task_get_is_index_space(c_task) then
+          var req = c.legion_task_get_requirement(c_task, [physical_region_index])
+          if c.legion_region_requirement_get_handle_type(req) == c.SINGULAR then
+            var new_r = c.legion_region_requirement_get_region(req)
+            if new_r.tree_id ~= 0 then
+              [r].impl = new_r
+            else
+              std.assert(false, "corrupted tree_id in region argument unpack")
+            end
           else
-            std.assert(false, "corrupted tree_id in region argument unpack")
+            std.assert(false, "non-singular region requirement in region argument unpack")
           end
-        else
-          std.assert(false, "non-singular region requirement in region argument unpack")
         end
       end
     end
@@ -10933,6 +11083,7 @@ function codegen.top_task(cx, node)
     end
     [guard]
   end
+  proto:setinlined(false)
   proto:setname(tostring(task:get_name()))
   if node.annotations.optimize:is(ast.annotation.Forbid) then
     proto:setoptimized(false)
