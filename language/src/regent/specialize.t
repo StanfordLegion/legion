@@ -2114,7 +2114,7 @@ function specialize.top_task(cx, node)
     local variant = task:make_variant("primary")
     task:set_primary_variant(variant)
     variant:set_is_external(node.annotations.external:is(ast.annotation.Demand))
-    variant:set_is_inline(node.annotations.inline)
+    variant:set_is_inline(node.annotations.inline:is(ast.annotation.Demand))
   end
 
   if #node.name == 1 then
