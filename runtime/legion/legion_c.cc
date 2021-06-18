@@ -6425,6 +6425,27 @@ legion_context_get_unique_id(legion_context_t ctx_)
   return task->get_unique_id();
 }
 
+legion_task_mut_t
+legion_task_create_empty()
+{
+  TaskMut *task = new TaskMut();
+  return CObjectWrapper::wrap(task);
+}
+
+void
+legion_task_destroy(legion_task_mut_t handle_)
+{
+  TaskMut *handle = CObjectWrapper::unwrap(handle_);
+  delete handle;
+}
+
+legion_task_t
+legion_task_mut_as_task(legion_task_mut_t task_)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+  return CObjectWrapper::wrap(static_cast<Task *>(task));
+}
+
 legion_unique_id_t
 legion_task_get_unique_id(legion_task_t task_)
 {
@@ -6507,12 +6528,28 @@ legion_task_get_args(legion_task_t task_)
   return task->args;
 }
 
+void
+legion_task_set_args(legion_task_mut_t task_, void *args)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+
+  task->args = args;
+}
+
 size_t
 legion_task_get_arglen(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
   return task->arglen;
+}
+
+void
+legion_task_set_arglen(legion_task_mut_t task_, size_t arglen)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+
+  task->arglen = arglen;
 }
 
 legion_domain_t
@@ -6587,6 +6624,15 @@ legion_task_get_future(legion_task_t task_, unsigned idx)
   Future future = task->futures[idx];
 
   return CObjectWrapper::wrap(new Future(future));
+}
+
+void
+legion_task_add_future(legion_task_mut_t task_, legion_future_t future_)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  task->futures.push_back(*future);
 }
 
 legion_task_id_t

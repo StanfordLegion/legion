@@ -34,6 +34,7 @@
 namespace Legion {
 
     class CContext;
+    class TaskMut;
 
     class CObjectWrapper {
     public:
@@ -123,6 +124,7 @@ namespace Legion {
       LEGION_FOREACH_N(ACCESSOR_ARRAY)
 #undef ACCESSOR_ARRAY
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
+      NEW_OPAQUE_WRAPPER(legion_task_mut_t, TaskMut *);
       NEW_OPAQUE_WRAPPER(legion_copy_t, Copy *);
       NEW_OPAQUE_WRAPPER(legion_fill_t, Fill *);
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
@@ -690,6 +692,34 @@ namespace Legion {
       std::vector<legion_physical_region_t> physical_regions;
     };
 
+    class TaskMut : public Task {
+    public:
+      virtual ~TaskMut() {}
+      virtual UniqueID get_unique_id(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual size_t get_context_index(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual int get_depth(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual const Task* get_parent_task(void) const {
+        assert(false);
+        return NULL;
+      }
+      virtual bool has_parent_task(void) const {
+        assert(false);
+        return false;
+      }
+      virtual const char* get_task_name(void) const {
+        assert(false);
+        return NULL;
+      }
+    };
 };
 
 #endif // __LEGION_C_UTIL_H__
