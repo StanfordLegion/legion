@@ -48,6 +48,7 @@ function context:new_local_scope(must_epoch, breakable_loop)
     constraints = self.constraints,
     region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
+    is_cuda = self.is_cuda,
     fixup_nodes = self.fixup_nodes,
     must_epoch = must_epoch,
     breakable_loop = breakable_loop,
@@ -57,13 +58,14 @@ function context:new_local_scope(must_epoch, breakable_loop)
   return cx
 end
 
-function context:new_task_scope(expected_return_type)
+function context:new_task_scope(expected_return_type, is_cuda)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
     constraints = data.new_recursive_map(2),
     region_universe = data.newmap(),
     expected_return_type = {expected_return_type},
+    is_cuda = is_cuda,
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
     breakable_loop = false,
@@ -1003,6 +1005,17 @@ function type_check.expr_call(cx, node)
     node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false, true)
 
   if std.is_task(fn.value) then
+    if fn.value.is_local then
+      if not fn.value:has_primary_variant() then
+        report.error(node, "cannot call a local task that does not have a variant defined")
+      end
+      local variant_ast = fn.value:get_primary_variant():get_ast()
+      local variant_is_cuda = variant_ast.annotations.cuda:is(ast.annotation.Demand)
+      if cx.is_cuda and not variant_is_cuda then
+        report.error(node, "calling a local task without a CUDA variant from a CUDA variant")
+      end
+    end
+
     if cx.must_epoch then
       -- Inside a must epoch tasks are not allowed to return.
       expr_type = terralib.types.unit
@@ -4621,7 +4634,8 @@ end
 
 function type_check.top_task(cx, node)
   local return_type = node.return_type
-  local cx = cx:new_task_scope(return_type)
+  local is_cuda = node.annotations.cuda:is(ast.annotation.Demand)
+  local cx = cx:new_task_scope(return_type, is_cuda)
 
   local is_defined = node.prototype:has_primary_variant()
   if is_defined then

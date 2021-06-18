@@ -2117,6 +2117,8 @@ function specialize.top_task(cx, node)
     variant:set_is_inline(node.annotations.inline:is(ast.annotation.Demand))
   end
 
+  task:set_is_local(node.annotations.local_launch:is(ast.annotation.Demand))
+
   if #node.name == 1 then
     cx.env:insert(node, node.name[1], task)
   end

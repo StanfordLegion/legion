@@ -1621,6 +1621,10 @@ function base.task:set_is_inline(is_inline)
   self.is_inline = is_inline
 end
 
+function base.task:set_is_local(is_local)
+  self.is_local = is_local
+end
+
 function base.task:set_optimization_thunk(optimization_thunk)
   self.optimization_thunk = optimization_thunk
 end
@@ -1702,6 +1706,7 @@ do
       is_complete = false,
       optimization_thunk = false,
       is_inline = false,
+      is_local = false,
     }, base.task)
   end
 end

@@ -87,9 +87,9 @@ local node_is_side_effect_free = {
 
   [ast.typed.expr.Call] = function(cx, node)
     -- IMPORTANT: Tasks are ok (we can predicate them), but non-tasks
-    -- are not (we have no way to mitigate or analyze potential
-    -- side-effects).
-    return {std.is_task(node.fn.value), node}
+    -- (or local tasks) are not (we have no way to mitigate or analyze
+    -- potential side-effects).
+    return {std.is_task(node.fn.value) and not node.fn.value.is_local, node}
   end,
 
   [ast.typed.expr.MethodCall]                 = always_false,
