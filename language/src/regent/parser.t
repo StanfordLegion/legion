@@ -71,6 +71,8 @@ function parser.annotation_name(p, required)
     return "inner"
   elseif p:nextif("__leaf") then
     return "leaf"
+  elseif p:nextif("__local") then
+    return "local_launch"
   elseif p:nextif("__openmp") then
     return "openmp"
   elseif p:nextif("__optimize") then

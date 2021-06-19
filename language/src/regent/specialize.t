@@ -2114,8 +2114,10 @@ function specialize.top_task(cx, node)
     local variant = task:make_variant("primary")
     task:set_primary_variant(variant)
     variant:set_is_external(node.annotations.external:is(ast.annotation.Demand))
-    variant:set_is_inline(node.annotations.inline)
+    variant:set_is_inline(node.annotations.inline:is(ast.annotation.Demand))
   end
+
+  task:set_is_local(node.annotations.local_launch:is(ast.annotation.Demand))
 
   if #node.name == 1 then
     cx.env:insert(node, node.name[1], task)

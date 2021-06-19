@@ -76,6 +76,7 @@ local language = {
     "__inline",
     "__inner",
     "__leaf",
+    "__local",
     "__line",
     "__mapping",
     "__openmp",

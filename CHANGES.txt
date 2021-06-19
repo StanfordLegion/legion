@@ -12,6 +12,8 @@ Version 21.06.0 (June ??, 2021)
   * Regent
     - Support for dynamic checks on projection functors, enabling a
         much larger class of loops to be supported as index launches
+    - Support for local tasks (i.e., without going through the
+      runtime) via `__demand(__local)`
   * Realm
     - Windows (MSVC) builds are now tested in CI and and therefore more likely
         to work

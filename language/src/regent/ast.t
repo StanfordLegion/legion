@@ -39,7 +39,7 @@ ast.annotation:leaf("Unroll", {"value"}, true)
 -- Annotation: Sets
 ast.annotation:leaf("Set", {"constant_time_launch", "cuda", "external",
                             "idempotent", "index_launch", "inline", "inner",
-                            "leaf", "openmp", "optimize", "parallel",
+                            "leaf", "local_launch", "openmp", "optimize", "parallel",
                             "predicate", "replicable", "spmd", "trace",
                             "vectorize"},
                     false, true)
@@ -55,6 +55,7 @@ function ast.default_annotations()
     inline = allow,
     inner = allow,
     leaf = allow,
+    local_launch = allow,
     openmp = allow,
     optimize = allow,
     parallel = allow,
