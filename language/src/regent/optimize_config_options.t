@@ -127,7 +127,6 @@ local node_is_leaf = {
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
   [ast.typed.expr.ImportPartition]            = always_false,
-  [ast.typed.expr.Projection]                 = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
@@ -160,6 +159,7 @@ local node_is_leaf = {
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
   [ast.typed.expr.AddressOf]       = always_true,
+  [ast.typed.expr.Projection]      = always_true,
 
   [ast.typed.expr.Internal]        = unreachable,
 
