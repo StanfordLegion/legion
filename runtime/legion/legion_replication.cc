@@ -5432,7 +5432,8 @@ namespace Legion {
         if (repl_ctx->owner_shard->shard_id != value_broadcast->origin)
         {
           size_t expected_size = 0;
-          const void *expected_buffer = value_broadcast->get_buffer(size);
+          const void *expected_buffer =
+            value_broadcast->get_buffer(expected_size);
           if ((expected_size != size) ||
               (memcmp(buffer, expected_buffer, size) != 0))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
