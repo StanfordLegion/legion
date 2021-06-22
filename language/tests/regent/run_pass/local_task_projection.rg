@@ -23,7 +23,7 @@ fspace fs {
   c : int,
 }
 
-__demand(__local)
+__demand(__local, __leaf)
 task f(r : region(ispace(int1d), int), v : int)
 where reads writes(r) do
   for x in r do
@@ -31,6 +31,7 @@ where reads writes(r) do
   end
 end
 
+__demand(__leaf)
 task call_f(r : region(ispace(int1d), fs))
 where reads writes(r) do
   f(r.{a}, 1)

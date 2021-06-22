@@ -160,6 +160,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.ListIspace]                 = normalize_access.pass_through_expr,
   [ast.typed.expr.ListFromElement]            = normalize_access.pass_through_expr,
   [ast.typed.expr.RegionRoot]                 = normalize_access.pass_through_expr,
+  [ast.typed.expr.Projection]                 = normalize_access.pass_through_expr,
 
   -- Normal expressions
   [ast.typed.expr.ID]                         = normalize_access.pass_through_expr,
@@ -212,7 +213,6 @@ local normalize_access_expr_table = {
   [ast.typed.expr.ImportIspace]               = unreachable,
   [ast.typed.expr.ImportRegion]               = unreachable,
   [ast.typed.expr.ImportPartition]            = unreachable,
-  [ast.typed.expr.Projection]                 = unreachable,
 }
 
 local normalize_access_expr = ast.make_single_dispatch(
