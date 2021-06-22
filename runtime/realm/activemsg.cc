@@ -156,7 +156,7 @@ namespace Realm {
 	size_t maxval = stats.maxval.load();
 	double avg = double(sum) / double(count);
 	double stddev = sqrt((double(sum2) / double(count)) - (avg * avg));
-	log_amhandler.print() << "handler " << std::hex << i << std::dec << ": " << handlers[i].name
+	log_amhandler.print() << "handler " << i << ": " << handlers[i].name
 			      << " count=" << count
 			      << " avg=" << avg
 			      << " dev=" << stddev
@@ -199,7 +199,7 @@ namespace Realm {
     // handler ids are the same everywhere, so only log on node 0
     if(Network::my_node_id == 0)
       for(size_t i = 0; i < handlers.size(); i++)
-	log_amhandler.info() << "handler " << std::hex << i << std::dec
+	log_amhandler.info() << "handler " << i
 			     << ": " << handlers[i].name
 			     << (handlers[i].handler ? " (timeout)" : "")
 			     << (handlers[i].handler_inline ? " (inline)" : "");
