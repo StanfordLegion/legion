@@ -4674,6 +4674,9 @@ extern "C" {
   legion_shard_id_t
   legion_runtime_local_shard(legion_runtime_t runtime, legion_context_t ctx);
 
+  legion_shard_id_t
+  legion_runtime_local_shard_without_context(void);
+
   /**
    * @see Legion::Runtime::total_shards()
    */

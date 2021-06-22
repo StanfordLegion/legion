@@ -5925,6 +5925,16 @@ legion_runtime_local_shard(legion_runtime_t runtime_, legion_context_t ctx_)
   return runtime->local_shard(ctx);
 }
 
+legion_shard_id_t
+legion_runtime_local_shard_without_context(void)
+{
+  Context ctx = Runtime::get_context();
+  if (ctx == NULL)
+    return 0; // no shard if we're not inside a task
+  Runtime *runtime = Runtime::get_runtime();
+  return runtime->local_shard(ctx);
+}
+
 size_t
 legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
 {
