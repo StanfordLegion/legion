@@ -7363,6 +7363,7 @@ class Operation(object):
             ALL_REDUCE_OP_KIND : "cyan",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
+            TUNABLE_OP_KIND : "lightcoral",
             }[self.kind]
 
     @property
