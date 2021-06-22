@@ -119,6 +119,7 @@ void *deferred_frees[DEFERRED_FREE_COUNT];
 
 gasnet_seginfo_t *segment_info = 0;
 atomic<size_t> total_messages_sent(0);
+atomic<size_t> total_messages_rcvd(0);
 
 static bool is_registered(void *ptr)
 {
@@ -2558,6 +2559,8 @@ static void handle_new_activemsg(gasnet_token_t token,
   bool handle_now = ((frag_info == 0) ||
 		     adjust_long_msgsize(src, buf, nbytes, frag_info));
   if(handle_now) {
+    total_messages_rcvd.fetch_add(1);
+
     unsigned short msgid = arg4 & 0xffff;
 
     MessageHeader header;
@@ -3053,18 +3056,26 @@ QuiescenceChecker::QuiescenceChecker()
   , is_quiescent(true)
 {}
 
-bool QuiescenceChecker::perform_check(void)
+size_t QuiescenceChecker::sample_messages_received_count(void)
+{
+  return total_messages_rcvd.load();
+}
+
+bool QuiescenceChecker::perform_check(size_t sampled_receive_count)
 {
   // figure out if we are quiescent - did we send any messages since last time?
   size_t total_sent = total_messages_sent.load();
   bool any_messages_sent = (total_sent != last_message_count);
+  bool new_messages_rcvd = (sampled_receive_count != total_messages_rcvd.load());
 
   log_amsg.info() << "local quiescence: prev=" << last_message_count
-		  << " cur=" << total_sent;
+		  << " cur=" << total_sent
+                  << " new_rcvd=" << new_messages_rcvd;
 
   last_message_count = total_sent;
 
-  endpoint_manager->flush_message_channels(!any_messages_sent);
+  bool local_quiescence = (!any_messages_sent && !new_messages_rcvd);
+  endpoint_manager->flush_message_channels(local_quiescence);
 
   // now take the lock and wait for the responses to come back
   bool result;
@@ -3072,7 +3083,7 @@ bool QuiescenceChecker::perform_check(void)
     AutoLock<> al(mutex);
 
     // clear the flag if we sent any messages either
-    if(any_messages_sent)
+    if(!local_quiescence)
       is_quiescent = false;
 
     while(messages_received < int(gasnet_nodes() - 1))

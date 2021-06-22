@@ -344,6 +344,8 @@ namespace Realm {
     , shutdown_flag(0)
     , handlers_active(0)
     , drain_pending(false)
+    , drain_min_count(0)
+    , total_messages_handled(0)
     , condvar(mutex)
     , drain_condvar(mutex)
     , available_blocks(0)
@@ -419,6 +421,17 @@ namespace Realm {
 	}
 	if(payload_mode == PAYLOAD_FREE)
 	  free(const_cast<void *>(payload));
+        // see if we need to wake up a thread waiting on a drain
+        {
+          AutoLock<> al(mutex);
+          total_messages_handled += 1;
+          if(drain_pending &&
+             (todo_oldest == todo_newest) && (handlers_active == 0) &&
+             (total_messages_handled >= drain_min_count)) {
+            drain_pending = false;
+            drain_condvar.broadcast();
+          }
+        }
 	return true;
       }
     }
@@ -551,11 +564,13 @@ namespace Realm {
   }
 
   // stalls caller until all incoming messages have been handled
-  void IncomingMessageManager::drain_incoming_messages(void)
+  void IncomingMessageManager::drain_incoming_messages(size_t min_messages_handled)
   {
     AutoLock<> al(mutex);
 
-    while((todo_oldest != todo_newest) || (handlers_active > 0)) {
+    while((todo_oldest != todo_newest) || (handlers_active > 0) ||
+          (total_messages_handled < min_messages_handled)) {
+      drain_min_count = min_messages_handled;
       drain_pending = true;
       drain_condvar.wait();
     }
@@ -627,10 +642,12 @@ namespace Realm {
   }
 
   bool IncomingMessageManager::return_messages(int sender,
+                                               size_t num_handled,
 					       IncomingMessageManager::Message *head,
 					       IncomingMessageManager::Message **tail)
   {
     AutoLock<> al(mutex);
+    total_messages_handled += num_handled;
     in_handler[sender] = false;
     handlers_active--;
 
@@ -671,7 +688,9 @@ namespace Realm {
     }
 
     // was somebody waiting for the queue to go (perhaps temporarily) empty?
-    if(drain_pending && (todo_oldest == todo_newest) && (handlers_active == 0)) {
+    if(drain_pending &&
+       (todo_oldest == todo_newest) && (handlers_active == 0) &&
+       (total_messages_handled >= drain_min_count)) {
       drain_pending = false;
       drain_condvar.broadcast();
     }
@@ -702,6 +721,7 @@ namespace Realm {
 
     Message *skipped_messages = 0;
     Message **skipped_tail = &skipped_messages;
+    size_t num_handled = 0;
 
     while(current_msg) {
       Message *next_msg = current_msg->next_msg;
@@ -777,6 +797,7 @@ namespace Realm {
       current_msg->block->recycle_message(current_msg, this);
 
       current_msg = next_msg;
+      num_handled += 1;
 
       // do we need to stop early?
       if(current_msg && work_until.is_expired())
@@ -793,7 +814,7 @@ namespace Realm {
       *skipped_tail = 0;
 
     // put back whatever we had left, if anything - request requeue if needed
-    return return_messages(sender, skipped_messages, skipped_tail);
+    return return_messages(sender, num_handled, skipped_messages, skipped_tail);
   }
 
   void IncomingMessageManager::handler_thread_loop(void)
@@ -814,6 +835,7 @@ namespace Realm {
 #ifdef DETAILED_MESSAGE_TIMING
       int count = 0;
 #endif
+      size_t num_handled = 0;
       while(current_msg) {
 	Message *next_msg = current_msg->next_msg;
 #ifdef DETAILED_MESSAGE_TIMING
@@ -860,9 +882,10 @@ namespace Realm {
         current_msg->block->recycle_message(current_msg, this);
 
 	current_msg = next_msg;
+        num_handled += 1;
       }
       // we always handle all the messages, but still indicate we're done
-      return_messages(sender, 0, 0);
+      return_messages(sender, num_handled, 0, 0);
     }
   }
 

@@ -757,9 +757,14 @@ namespace Realm {
 		       GASNET_COLL_FLAGS);
   }
 
-  bool GASNet1Module::check_for_quiescence(void)
+  size_t GASNet1Module::sample_messages_received_count(void)
   {
-    return quiescence_checker.perform_check();
+    return quiescence_checker.sample_messages_received_count();
+  }
+
+  bool GASNet1Module::check_for_quiescence(size_t sampled_receive_count)
+  {
+    return quiescence_checker.perform_check(sampled_receive_count);
   }
 
   // used to create a remote proxy for a memory
