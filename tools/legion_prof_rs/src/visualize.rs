@@ -383,13 +383,10 @@ impl Chan {
 
         let color = state.find_task(initiation).map_or_else(
             || {
-                state.find_op(initiation).map_or(Color(0xFFFFFF), |op| {
-                    state
-                        .op_kinds
-                        .get(&op.kind.unwrap())
-                        .unwrap()
-                        .color
-                        .unwrap()
+                state.find_op(initiation).map_or(Color(0x000000), |op| {
+                    op.kind.map_or(Color(0x000000), |kind| {
+                        state.op_kinds.get(&kind).unwrap().color.unwrap()
+                    })
                 })
             },
             |task| {
