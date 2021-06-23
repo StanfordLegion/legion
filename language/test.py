@@ -166,14 +166,8 @@ def compare_prof_results(verbose, py_exe_path, profile_dirs):
     cmd = ['python3',
            os.path.join(regent.root_dir(), 'tools', 'profile_diff.py'),
            '--check',
-           '--file-pattern', 'tsv/Proc_*.tsv',
-           '--file-pattern', 'tsv/*Memory_0x*.tsv',
-           '--file-pattern', 'tsv/None.tsv',
-           '--file-pattern', 'tsv/*CPU*_util.tsv',
-           '--file-pattern', 'tsv/*GPU*_util.tsv',
-           '--file-pattern', 'tsv/*Utility*_util.tsv',
-           '--file-pattern', 'tsv/*Channel*_util.tsv',
-           '--file-pattern', 'tsv/*Memory*_util.tsv',
+           '--file-pattern', 'tsv/*.tsv',
+           '--exclude-field', 'tsv/Mem_*.tsv:title',
            ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(

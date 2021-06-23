@@ -484,7 +484,7 @@ pub struct Mem {
     pub capacity: u64,
     instances: BTreeSet<(InstID, OpID)>,
     pub time_points: Vec<MemPoint>,
-    max_live_instances: Option<u64>,
+    pub max_live_instances: u32,
     last_time: Option<Timestamp>,
     affinity: Option<u64>,
 }
@@ -497,19 +497,43 @@ impl Mem {
             capacity,
             instances: BTreeSet::new(),
             time_points: Vec::new(),
-            max_live_instances: None,
+            max_live_instances: 0,
             last_time: None,
             affinity: None,
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {}
+
+    pub fn is_empty(&self) -> bool {
+        self.instances.is_empty()
+    }
+
+    fn trim_time_range(
+        &mut self,
+        start: Timestamp,
+        stop: Timestamp,
+        instances: &mut BTreeMap<(InstID, OpID), Inst>,
+    ) {
+        let mut removed = Vec::new();
+        for inst_key in &self.instances {
+            let inst = instances.get_mut(inst_key).unwrap();
+            inst.trim_time_range(start, stop);
+            if inst.time_range.was_removed {
+                removed.push(*inst_key);
+            }
+        }
+        for inst_key in &removed {
+            self.instances.remove(&inst_key);
+        }
+        for inst_key in removed {
+            instances.remove(&inst_key);
+        }
+    }
 
     fn sort_time_range(
         &mut self,
         last_time: Timestamp,
-        instances: &BTreeMap<(InstID, OpID), Inst>,
+        instances: &mut BTreeMap<(InstID, OpID), Inst>,
     ) {
-        self.max_live_instances = Some(0);
         for key in &self.instances {
             let inst = instances.get(&key).unwrap();
             self.time_points.push(MemPoint::new(
@@ -527,6 +551,27 @@ impl Mem {
         }
         self.time_points
             .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+
+        // Hack: This is a max heap so reverse the values as they go in.
+        let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
+        for point in &self.time_points {
+            if point.first {
+                let level = if let Some(level) = free_levels.pop() {
+                    level.0
+                } else {
+                    self.max_live_instances += 1;
+                    self.max_live_instances
+                };
+                instances
+                    .get_mut(&point.entry)
+                    .unwrap()
+                    .base
+                    .set_level(level);
+            } else {
+                let level = instances.get(&point.entry).unwrap().base.level.unwrap();
+                free_levels.push(Reverse(level));
+            }
+        }
     }
 }
 
@@ -989,12 +1034,12 @@ pub struct Dim(u32);
 
 #[derive(Debug)]
 pub struct Inst {
-    base: Base,
+    pub base: Base,
     inst_id: InstID,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
-    time_range: TimeRange,
-    deps: InitiationDependencies,
+    pub time_range: TimeRange,
+    pub deps: InitiationDependencies,
     ispace_ids: Vec<ISpaceID>,
     fspace_ids: Vec<FSpaceID>,
     tree_id: Option<TreeID>,
@@ -1079,6 +1124,9 @@ impl Inst {
     fn set_tree(&mut self, tree_id: TreeID) -> &mut Self {
         self.tree_id = Some(tree_id);
         self
+    }
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
+        self.time_range.trim_time_range(start, stop);
     }
 }
 
@@ -1978,7 +2026,7 @@ impl State {
             proc.trim_time_range(start, stop);
         }
         for mem in self.mems.values_mut() {
-            mem.trim_time_range(start, stop);
+            mem.trim_time_range(start, stop, &mut self.instances);
         }
         for channel in self.channels.values_mut() {
             channel.trim_time_range(start, stop);
@@ -1989,12 +2037,13 @@ impl State {
 
     pub fn sort_time_range(&mut self) {
         let last_time = self.last_time;
-        let instances = &self.instances;
+        let instances = &mut self.instances;
         self.procs
             .par_iter_mut()
             .for_each(|(_, proc)| proc.sort_time_range(last_time));
+        // FIXME: can't parallelize this one since the instances are global
         self.mems
-            .par_iter_mut()
+            .iter_mut()
             .for_each(|(_, mem)| mem.sort_time_range(last_time, instances));
         self.channels
             .par_iter_mut()
