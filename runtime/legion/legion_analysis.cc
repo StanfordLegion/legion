@@ -13014,11 +13014,11 @@ namespace Legion {
                 }
               }
             }
-          }
-          if (finder->second.empty())
-          {
-            reduction_instances.erase(finder);
-            reduction_fields.unset_bit(fidx);
+            if (finder->second.empty())
+            {
+              reduction_instances.erase(finder);
+              reduction_fields.unset_bit(fidx);
+            }
           }
         }
         fidx = filter_mask.find_next_set(fidx+1);
