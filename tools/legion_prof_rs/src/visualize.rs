@@ -485,7 +485,7 @@ impl Mem {
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
 
-        let level = max(self.max_live_instances + 1, 1) - base.level.unwrap();
+        let level = max(self.max_live_instances + 1, 4) - base.level.unwrap();
 
         f.serialize(DataRecord {
             level,
@@ -528,7 +528,7 @@ impl Mem {
             }
         }
 
-        let level = max(self.max_live_instances, 1) - 1;
+        let level = max(self.max_live_instances, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
