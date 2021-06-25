@@ -528,7 +528,7 @@ impl Mem {
             }
         }
 
-        let level = max(self.max_live_instances, 4) - 1;
+        let level = max(self.max_live_instances + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
