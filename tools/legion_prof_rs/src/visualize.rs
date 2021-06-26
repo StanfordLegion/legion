@@ -11,8 +11,8 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, MemID, MemKind, MemPoint, NodeID, Proc,
-    ProcEntry, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, Mem, MemID, MemKind, MemPoint, NodeID,
+    OpID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -381,24 +381,7 @@ impl Chan {
             ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
         };
 
-        let color = state.find_task(initiation).map_or_else(
-            || {
-                state.find_op(initiation).map_or(Color(0x000000), |op| {
-                    op.kind.map_or(Color(0x000000), |kind| {
-                        state.op_kinds.get(&kind).unwrap().color.unwrap()
-                    })
-                })
-            },
-            |task| {
-                state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .color
-                    .unwrap()
-            },
-        );
-        let color = format!("#{:06x}", color);
+        let color = format!("#{:06x}", state.get_op_color(initiation));
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();
 
@@ -487,7 +470,95 @@ impl Chan {
     }
 }
 
+impl Mem {
+    fn emit_tsv_point(
+        &self,
+        f: &mut csv::Writer<File>,
+        point: &MemPoint,
+        state: &State,
+    ) -> io::Result<()> {
+        let inst = state.instances.get(&point.entry).unwrap();
+        let (base, time_range, deps) = (&inst.base, &inst.time_range, &inst.deps);
+        let name = format!("size={}", CopySize(inst.size.unwrap()));
+
+        let initiation = deps.op_id;
+
+        let color = format!("#{:06x}", state.get_op_color(initiation));
+
+        let level = max(self.max_live_instances + 1, 4) - base.level.unwrap();
+
+        f.serialize(DataRecord {
+            level,
+            level_ready: None,
+            ready: None,
+            start: time_range.start.unwrap(),
+            end: time_range.stop.unwrap(),
+            color: &color,
+            opacity: 1.0,
+            title: &name,
+            initiation: Some(initiation.0),
+            in_: "",
+            out: "",
+            children: "",
+            parents: "",
+            prof_uid: base.prof_uid.0,
+        })?;
+
+        Ok(())
+    }
+
+    fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
+        let mem_kind = |mem_id: MemID| state.mems.get(&mem_id).unwrap().kind;
+        let slug = format!("Mem_0x{:x}", &self.mem_id);
+
+        let long_name = format!("{} Memory 0x{:x}", mem_kind(self.mem_id), &self.mem_id);
+
+        let short_name = format!("[n{}] {}", self.mem_id.node_id().0, mem_kind(self.mem_id));
+
+        let mut filename = PathBuf::new();
+        filename.push("tsv");
+        filename.push(format!("{}.tsv", slug));
+        let mut f = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_path(path.as_ref().join(&filename))?;
+
+        for point in &self.time_points {
+            if point.first {
+                self.emit_tsv_point(&mut f, point, state)?;
+            }
+        }
+
+        let level = max(self.max_live_instances + 1, 4) - 1;
+
+        Ok(ProcessorRecord {
+            full_text: long_name,
+            text: short_name,
+            tsv: filename,
+            levels: level,
+        })
+    }
+}
+
 impl State {
+    fn get_op_color(&self, op_id: OpID) -> Color {
+        self.find_task(op_id).map_or_else(
+            || {
+                self.find_op(op_id).map_or(Color(0x000000), |op| {
+                    op.kind.map_or(Color(0x000000), |kind| {
+                        self.op_kinds.get(&kind).unwrap().color.unwrap()
+                    })
+                })
+            },
+            |task| {
+                self.variants
+                    .get(&(task.task_id, task.variant_id))
+                    .unwrap()
+                    .color
+                    .unwrap()
+            },
+        )
+    }
+
     fn group_node_proc_kind_timepoints(
         &self,
     ) -> (
@@ -1036,6 +1107,16 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         })
         .collect::<io::Result<_>>()?;
 
+    let mems = state.mems.values().collect::<Vec<_>>();
+    let mem_records: BTreeMap<_, _> = mems
+        .par_iter()
+        .filter(|mem| !mem.is_empty())
+        .map(|mem| {
+            mem.emit_tsv(&path, state)
+                .map(|record| (mem.mem_id, record))
+        })
+        .collect::<io::Result<_>>()?;
+
     state.emit_utilization_tsv(&path)?;
 
     {
@@ -1047,6 +1128,9 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             file.serialize(record)?;
         }
         for record in chan_records.values() {
+            file.serialize(record)?;
+        }
+        for record in mem_records.values() {
             file.serialize(record)?;
         }
     }

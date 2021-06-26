@@ -853,7 +853,8 @@ class Memory(object):
             if point.first:
                 # Find a level to assign this to
                 if len(free_levels) > 0:
-                    point.thing.set_level(free_levels.pop())
+                    point.thing.set_level(min(free_levels))
+                    free_levels.remove(point.thing.level)
                 else:
                     point.thing.set_level(self.max_live_instances + 1)
                     self.max_live_instances += 1
