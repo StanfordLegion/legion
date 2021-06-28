@@ -530,11 +530,17 @@ namespace Realm {
 
     virtual bool do_work(TimeLimit work_until);
 
+    // causes calling thread to wait for a full call to gasnet_AMPoll() to
+    //  be performed by the poller
+    void wait_for_full_poll_cycle();
+
   protected:
     GASNetEXInternal *internal;
     Mutex mutex;
     atomic<bool> shutdown_flag;  // set/cleared inside mutex, but tested outside
     CondVar shutdown_cond;
+    atomic<bool> pollwait_flag;  // set/cleared inside mutex, but tested outside
+    CondVar pollwait_cond;
     XmitSrcDestPair::XmitPairList critical_xpairs;
     GASNetEXEvent::EventList pending_events;
   };
@@ -613,7 +619,8 @@ namespace Realm {
     void broadcast(gex_Rank_t root, const void *val_in, void *val_out, size_t bytes);
     void gather(gex_Rank_t root, const void *val_in, void *vals_out, size_t bytes);
 
-    bool check_for_quiescence();
+    size_t sample_messages_received_count();
+    bool check_for_quiescence(size_t sampled_receive_count);
 
     PendingCompletion *get_available_comp();
     PendingCompletion *early_local_completion(PendingCompletion *comp);

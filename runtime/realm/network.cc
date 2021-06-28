@@ -18,6 +18,7 @@
 #include "realm/network.h"
 #include "realm/cmdline.h"
 #include "realm/logging.h"
+#include "realm/activemsg.h"
 
 #ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
@@ -50,6 +51,20 @@ namespace Realm {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID max_node_id = 0;
     NodeSet all_peers;
     NetworkModule *single_network = 0;
+
+    bool check_for_quiescence(IncomingMessageManager *message_manager)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+	return false;
+      } else
+#endif
+      {
+        size_t messages_received = single_network->sample_messages_received_count();
+        message_manager->drain_incoming_messages(messages_received);
+	return single_network->check_for_quiescence(messages_received);
+      }
+    }
   }
 
 
@@ -150,7 +165,9 @@ namespace Realm {
 			   const void *val_in, void *val_out, size_t bytes);
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes);
-    virtual bool check_for_quiescence(void);
+
+    virtual size_t sample_messages_received_count(void);
+    virtual bool check_for_quiescence(size_t sampled_receive_count);
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
@@ -298,7 +315,12 @@ namespace Realm {
     memcpy(vals_out, val_in, bytes);
   }
 
-  bool LoopbackNetworkModule::check_for_quiescence(void)
+  size_t LoopbackNetworkModule::sample_messages_received_count(void)
+  {
+    return 0;
+  }
+
+  bool LoopbackNetworkModule::check_for_quiescence(size_t sampled_receive_count)
   {
     return true;
   }

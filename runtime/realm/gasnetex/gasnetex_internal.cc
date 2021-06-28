@@ -2298,6 +2298,8 @@ namespace Realm {
     , internal(_internal)
     , shutdown_flag(false)
     , shutdown_cond(mutex)
+    , pollwait_flag(false)
+    , pollwait_cond(mutex)
   {}
 
   void GASNetEXPoller::begin_polling()
@@ -2419,10 +2421,21 @@ namespace Realm {
 	break;
     }
 
+    // sample pollwait flag before we perform gasnet_AMPoll
+    bool pollwait_snapshot = pollwait_flag.load();
+
     // no gex version of this?
     gasnet_AMPoll();
 
     ThreadLocal::gex_work_until = nullptr;
+
+    // if there was a pollwaiter before we started the poll, we can wake it
+    //  now
+    if(pollwait_snapshot) {
+      AutoLock<> al(mutex);
+      pollwait_flag.store(false);
+      pollwait_cond.broadcast();
+    }
 
     // if a shutdown has been requested, wake the waiter - if not, requeue
     if(shutdown_flag.load()) {
@@ -2432,6 +2445,13 @@ namespace Realm {
       return false;
     } else
       return true;
+  }
+
+  void GASNetEXPoller::wait_for_full_poll_cycle()
+  {
+    AutoLock<> al(mutex);
+    pollwait_flag.store(true);
+    pollwait_cond.wait();
   }
 
 
@@ -2857,7 +2877,12 @@ namespace Realm {
     }
   }
 
-  bool GASNetEXInternal::check_for_quiescence()
+  size_t GASNetEXInternal::sample_messages_received_count()
+  {
+    return total_packets_received.load();
+  }
+
+  bool GASNetEXInternal::check_for_quiescence(size_t sampled_receive_count)
   {
     // in order to be quiescent, the following things should be true:
     // 1) no unsent packets in any xpair
@@ -2906,7 +2931,11 @@ namespace Realm {
 	  }
 	}
     }
-    local_counts[2] = total_packets_received.load();
+    // use the receive count that was sampled before the incoming message
+    //  manager was drained - if the actual 'total_packets_received' has
+    //  increased since, we're obviously not quiescent, but we need every
+    //  other rank to know that too
+    local_counts[2] = sampled_receive_count;
 
     log_gex_quiesce.debug() << "local counts: " << local_counts[0]
 			    << " " << local_counts[1] << " " << local_counts[2];
@@ -2923,14 +2952,16 @@ namespace Realm {
     //  and complain if it takes too long
     long long t_start = Clock::current_time_in_nanoseconds();
     long long t_complain = t_start;
-    while(gex_Event_Test(done) != GASNET_OK) {
+    do {
       long long t_now = Clock::current_time_in_nanoseconds();
       if(t_now >= (t_complain + 1000000000 /*1 sec*/)) {
 	log_gex_quiesce.info() << "allreduce not done after " << (t_now - t_start) << " ns";
 	t_complain = t_now;
       }
-      gasnet_AMPoll();
-    }
+      // we can't perform the poll ourselves, but make sure at least one full
+      //  poll succeeds before we continue
+      poller.wait_for_full_poll_cycle();
+    } while(gex_Event_Test(done) != GASNET_OK);
 
     if(prim_rank == 0)
       log_gex_quiesce.info() << "total counts: " << total_counts[0]

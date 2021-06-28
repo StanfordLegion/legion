@@ -7711,6 +7711,52 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::add_pending_send(AutoLock &n_lock,
+                                         AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pending_sends.find(target) == pending_sends.end());
+#endif
+      pending_sends[target] = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::wait_for_pending_send(AutoLock &n_lock,
+                                              AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      std::map<AddressSpaceID,RtUserEvent>::iterator send_finder =
+        pending_sends.find(target);
+      while (send_finder != pending_sends.end())
+      {
+        if (!send_finder->second.exists())
+          send_finder->second = Runtime::create_rt_user_event();
+        const RtEvent wait_on = send_finder->second;
+        n_lock.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        n_lock.reacquire();
+        send_finder = pending_sends.find(target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::remove_pending_send(AutoLock &n_lock,
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      std::map<AddressSpaceID,RtUserEvent>::iterator send_finder =
+        pending_sends.find(target);
+#ifdef DEBUG_LEGION
+      assert(send_finder != pending_sends.end());
+#endif
+      if (send_finder->second.exists())
+        Runtime::trigger_event(send_finder->second);
+      pending_sends.erase(send_finder);
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Space Node 
     /////////////////////////////////////////////////////////////
@@ -8486,6 +8532,9 @@ namespace Legion {
       // Do our check to see if we're still valid
       {
         AutoLock n_lock(node_lock);
+        // While we have a pending send we need to wait for that to
+        // process first before we traverse any more of this node
+        wait_for_pending_send(n_lock, target); 
         // Check to see if it is already in the remote set, if so we're done
         if (has_remote_instance(target))
         {
@@ -8527,6 +8576,9 @@ namespace Legion {
           // yet so we need one to be there when it arrives
           add_remote_reference = true;
         }
+        // Record a pending send so anything that comes later to send to
+        // the target node will wait for the send to be put on the wire
+        add_pending_send(n_lock, target);
         update_remote_instances(target);
         // Have to record this atomically with recording as a remote instance
         pack_space = index_space_set;
@@ -8566,6 +8618,14 @@ namespace Legion {
               if (!functor.applied.empty())
                 send_effects = Runtime::merge_events(functor.applied);
             }
+            // Remove our pending send
+            remove_pending_send(n_lock, target); 
+          }
+          else
+          {
+            // Still need to remove our pending send
+            AutoLock n_lock(node_lock);
+            remove_pending_send(n_lock, target);
           }
           if (remove_reference && parent->remove_nested_resource_ref(did))
             delete parent;
@@ -8630,6 +8690,8 @@ namespace Legion {
               send_effects = Runtime::merge_events(functor.applied);
           }
         }
+        // remove the pending send before we release the lock
+        remove_pending_send(n_lock, target);
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
         delete parent;
@@ -10622,6 +10684,9 @@ namespace Legion {
       // Do our check to see if we're still valid
       {
         AutoLock n_lock(node_lock);
+        // While we have a pending send we need to wait for that to
+        // process first before we traverse any more of this node
+        wait_for_pending_send(n_lock, target); 
         // Always update the effects if we're sending this
         if (tree_valid)
         {
@@ -10636,6 +10701,9 @@ namespace Legion {
         if (has_remote_instance(target))
           return true;
         send_count++;
+        // Record a pending send so anything that comes later to send to
+        // the target node will wait for the send to be put on the wire
+        add_pending_send(n_lock, target);
         update_remote_instances(target);
       }
       if (!parent->send_node(target, done, true/*above*/))
@@ -10649,6 +10717,7 @@ namespace Legion {
           Runtime::trigger_event(send_done);
           send_done = RtUserEvent::NO_RT_USER_EVENT;
         }
+        remove_pending_send(n_lock, target);
         return false;
       }
       color_space->send_node(target, done, false/*above*/);
@@ -10709,6 +10778,7 @@ namespace Legion {
         }
       }
       context->runtime->send_index_partition_node(target, rez);
+      remove_pending_send(n_lock, target);
       return true;
     }
 

@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 21.06.0 (June ??, 2021)
+Version 21.06.0 (June 24, 2021)
   * Build
     - Version information is now compiled into Realm and Legion.  This takes
         the form of a string (e.g. "legion-21.06.0") rather than anything

@@ -35,6 +35,7 @@ namespace Realm {
   class IBMemory;
   class ByteArray;
   class ActiveMessageImpl;
+  class IncomingMessageManager;
 
   // a RemoteAddress is used to name the target of an RDMA operation - in some
   //  cases it's as simple as a pointer, but in others additional info is needed
@@ -67,7 +68,7 @@ namespace Realm {
 
     // a quiescence check across all nodes (i.e. has anybody sent anything
     //  since the previous quiescence check)
-    bool check_for_quiescence(void);
+    bool check_for_quiescence(IncomingMessageManager *message_manager);
 
     // collective communication across all nodes (TODO: subcommunicators?)
     template <typename T>
@@ -179,7 +180,8 @@ namespace Realm {
     virtual void gather(NodeID root,
 			const void *val_in, void *vals_out, size_t bytes) = 0;
 
-    virtual bool check_for_quiescence(void) = 0;
+    virtual size_t sample_messages_received_count(void) = 0;
+    virtual bool check_for_quiescence(size_t sampled_receive_count) = 0;
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
