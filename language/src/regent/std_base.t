@@ -1473,7 +1473,11 @@ end
 
 -- TODO: This is actually safe once we make task ids global variables
 function base.task:set_task_id_unsafe(task_id)
-  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  if base.config["separate"] then
+    self.taskid:setinitializer(task_id)
+  else
+    self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  end
 end
 
 function base.task:get_task_id()
