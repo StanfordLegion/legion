@@ -1537,17 +1537,28 @@ namespace Legion {
         for (std::map<Memory,PendingInstance>::iterator it = 
               pending_instances.begin(); it != pending_instances.end(); it++)
         {
+          if (it->second.instance == NULL)
+          {
 #ifdef DEBUG_LEGION
-          assert(it->second.instance == NULL);
-          assert(it->second.alloc_ready.exists());
+            assert(it->second.alloc_ready.exists());
 #endif
-          MemoryManager *manager = runtime->find_memory_manager(it->first); 
-          if (!it->second.inst_ready.exists())
-            it->second.inst_ready = Runtime::create_ap_user_event(NULL);
-          it->second.instance = manager->create_future_instance(
-              it->second.op, it->second.uid, it->second.inst_ready,
-              future_size, it->second.eager);
-          Runtime::trigger_event(it->second.alloc_ready); 
+            MemoryManager *manager = runtime->find_memory_manager(it->first);
+            if (!it->second.inst_ready.exists())
+              it->second.inst_ready = Runtime::create_ap_user_event(NULL);
+            it->second.instance = manager->create_future_instance(
+                it->second.op, it->second.uid, it->second.inst_ready,
+                future_size, it->second.eager);
+            Runtime::trigger_event(it->second.alloc_ready);
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            // This can happend when replaying a trace which already
+            // knows exactly how big the future is going to be
+            assert(it->second.instance->size <= future_size);
+            assert(it->second.inst_ready.exists());
+          }
+#endif
         }
       }
       else
@@ -1555,8 +1566,11 @@ namespace Legion {
         for (std::map<Memory,PendingInstance>::iterator it = 
               pending_instances.begin(); it != pending_instances.end(); it++)
         {
+          // If we made an instance because we were replaying a trace
+          // with a known upper bound then we can delete it now
+          if (it->second.instance != NULL)
+            delete it->second.instance;
 #ifdef DEBUG_LEGION
-          assert(it->second.instance == NULL);
           assert(it->second.alloc_ready.exists());
 #endif
           if (it->second.inst_ready.exists())
