@@ -1649,6 +1649,7 @@ namespace Legion {
       struct SelectTunableInput {
         TunableID                               tunable_id;
         MappingTagID                            mapping_tag;
+        std::vector<Future>                     futures;
         const void*                             args;
         size_t                                  size;
       };
@@ -2091,6 +2092,8 @@ namespace Legion {
 				      const CodeDescriptor &codedesc,
 				      const void *user_data = NULL,
 				      size_t user_len = 0,
+                                      size_t return_type_size =
+                                              LEGION_MAX_RETURN_SIZE,
                                       bool has_return_type = false);
     public:
       //------------------------------------------------------------------------

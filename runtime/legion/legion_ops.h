@@ -134,6 +134,7 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
+        TUNABLE_OP_KIND,
         ALL_REDUCE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
@@ -171,6 +172,7 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
+        "Tunable",                  \
         "All Reduce Op",            \
         "Trace Capture",            \
         "Trace Complete",           \
@@ -662,8 +664,7 @@ namespace Legion {
       InnerContext* find_physical_context(unsigned index);
     public:
       // Support for operations that compute futures
-      void compute_future_coordinates(
-                     std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+      void compute_task_tree_coordinates(TaskTreeCoordinates &coordinates);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
@@ -2458,8 +2459,8 @@ namespace Legion {
       OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
     protected:
       Future future;
     };
@@ -3141,7 +3142,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
+      virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
+                                          std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
@@ -3994,6 +3996,48 @@ namespace Legion {
       TimingMeasurement measurement;
       std::set<Future> preconditions;
       Future result;
+    };
+
+    /**
+     * \class TunableOp
+     * Operation for performing tunable requests
+     */
+    class TunableOp : public Operation, public LegionHeapify<TunableOp> {
+    public:
+      TunableOp(Runtime *rt);
+      TunableOp(const TunableOp &rhs);
+      virtual ~TunableOp(void);
+    public:
+      TunableOp& operator=(const TunableOp &rhs);
+    public:
+      void activate_tunable(void);
+      void deactivate_tunable(void);
+      Future initialize(InnerContext *ctx, const TunableLauncher &launcher);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+      // virtual method for control replication
+      virtual void process_result(MapperManager *mapper,
+                                  void *buffer, size_t size) const { }
+    protected:
+      TunableID tunable_id;
+      MapperID mapper_id;
+      MappingTagID tag;
+      void *arg;
+      size_t argsize;
+      size_t tunable_index;
+      size_t return_type_size;
+      Future result;
+      FutureInstance *instance;
+      std::vector<Future> futures;
     };
 
     /**

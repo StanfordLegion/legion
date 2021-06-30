@@ -2612,7 +2612,7 @@ do
       local ispace = self.ispace_symbol:gettype()
       assert(terralib.types.istype(ispace) and
                std.is_ispace(ispace),
-             "Partition type requires ispace")
+             "Region type requires ispace")
       return ispace
     end
 

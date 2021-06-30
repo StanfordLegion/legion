@@ -20,6 +20,7 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
 #include "legion/legion_replication.h"
+#include "realm/id.h"
 
 #define SWAP_PART_KINDS(k1, k2) \
   {                             \
@@ -173,7 +174,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
+      Future result = 
+        runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
       // Set the future result
       RtEvent done;
       FutureInstance *instance = NULL;
@@ -216,21 +218,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to do a match here, there is just one shard
-      memcpy(output, input, num_elements * element_size);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
-      result.impl->set_local(&num_elements, sizeof(num_elements));
+      const size_t future_size = sizeof(num_elements);
+      memcpy(output, input, num_elements*future_size);
+      Future result = 
+        runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &future_size);
+      result.impl->set_local(&num_elements, future_size);
       return result;
     }
 
     //--------------------------------------------------------------------------
     VariantID TaskContext::register_variant(
             const TaskVariantRegistrar &registrar, const void *user_data,
-            size_t user_data_size, const CodeDescriptor &desc, bool ret,
-            VariantID vid, bool check_task_id)
+            size_t user_data_size, const CodeDescriptor &desc, size_t ret_size,
+            bool has_ret_size, VariantID vid, bool check_task_id)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_data_size,
-          desc, ret, vid, check_task_id, false/*check context*/);
+          desc,ret_size,has_ret_size,vid,check_task_id,false/*check context*/);
     }
 
     //--------------------------------------------------------------------------
@@ -834,24 +838,6 @@ namespace Legion {
         output_region.impl->finalize();
       }
     }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::destroy_user_lock(Reservation r)
-    //--------------------------------------------------------------------------
-    {
-      // Can only be called from user land so no
-      // need to hold the lock
-      context_locks.push_back(r);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::destroy_user_barrier(ApBarrier b)
-    //--------------------------------------------------------------------------
-    {
-      // Can only be called from user land so no 
-      // need to hold the lock
-      context_barriers.push_back(b);
-    } 
 
     //--------------------------------------------------------------------------
     void TaskContext::add_created_region(LogicalRegion handle, 
@@ -2446,6 +2432,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Lock TaskContext::create_lock(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return Lock(Reservation::create_reservation());
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier TaskContext::create_phase_barrier(unsigned arrivals)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return PhaseBarrier(ApBarrier(Realm::Barrier::create_barrier(arrivals)));
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::initialize_overhead_tracker(void)
     //--------------------------------------------------------------------------
     {
@@ -2584,29 +2586,15 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
+      const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
         runtime->get_available_distributed_id(), 
-        runtime->address_space, ApEvent::NO_AP_EVENT);
-      if (launcher.predicate_false_result.get_size() > 0)
+        runtime->address_space, ApEvent::NO_AP_EVENT, &future_size);
+      if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
-      {
-        // We need to check to make sure that the task actually
-        // does expect to have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK,
-            "Predicated task launch for task %s in parent "
-                        "task %s (UID %lld) has non-void return type "
-                        "but no default value for its future if the task "
-                        "predicate evaluates to false.  Please set either "
-                        "the 'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "TaskLauncher struct.", impl->get_name(), 
-                        get_task_name(), get_unique_id())
         result->set_result(NULL);
-      }
       return Future(result);
     }
 
@@ -2652,20 +2640,6 @@ namespace Legion {
       }
       if (launcher.predicate_false_result.get_size() == 0)
       {
-        // Check to make sure the task actually does expect to
-        // have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-            "Predicated index task launch for task %s "
-                        "in parent task %s (UID %lld) has non-void "
-                        "return type but no default value for its "
-                        "future if the task predicate evaluates to "
-                        "false.  Please set either the "
-                        "'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(),
-                        get_task_name(), get_unique_id())
         // Just initialize all the futures
         for (Domain::DomainPointIterator itr(launcher.launch_domain);
               itr; itr++)
@@ -2698,30 +2672,15 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
+      const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
         runtime->get_available_distributed_id(), 
-        runtime->address_space, ApEvent::NO_AP_EVENT);
-      if (launcher.predicate_false_result.get_size() > 0)
+        runtime->address_space, ApEvent::NO_AP_EVENT, &future_size);
+      if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
             launcher.predicate_false_result.get_size(), false/*own*/);
       else
-      {
-        // We need to check to make sure that the task actually
-        // does expect to have a void return type
-        TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
-        if (impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
-                        "Predicated index task launch for task %s "
-                        "in parent task %s (UID %lld) has non-void "
-                        "return type but no default value for its "
-                        "future if the task predicate evaluates to "
-                        "false.  Please set either the "
-                        "'predicate_false_result' or "
-                        "'predicate_false_future' fields of the "
-                        "IndexTaskLauncher struct.", impl->get_name(), 
-                        get_task_name(), get_unique_id())
         result->set_result(NULL);
-      }
       return Future(result);
     }
 
@@ -3774,7 +3733,7 @@ namespace Legion {
       const ContextID ctx = get_context_id();
       region->compute_equivalence_sets(ctx, this, target, target_space,
                                        region->row_source, mask, opid, source, 
-                                       ready, false/*down only*/);
+                                       ready,false/*down only*/,true/*covers*/);
       if (!ready.empty())
         return Runtime::merge_events(ready);
       else
@@ -3931,14 +3890,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::deduplicate_invalidate_trackers(
-                                 const FieldMaskSet<EquivalenceSet> &to_untrack,
-                                 std::set<RtEvent> &applied_events)
+                             const FieldMaskSet<EquivalenceSet> &to_untrack,
+                             std::set<RtEvent> &applied_events, bool local_only)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             to_untrack.begin(); it != to_untrack.end(); it++)
         it->first->invalidate_trackers(it->second, applied_events,
-            runtime->address_space, NULL/*no collective mapping*/);
+            runtime->address_space, NULL/*no collective mapping*/,
+            local_only ? this : NULL/*filter everything*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4068,9 +4028,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::compute_task_tree_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+                                         TaskTreeCoordinates &coordinates) const
     //--------------------------------------------------------------------------
     {
+      // Reserve an extra level for the common case
+      coordinates.reserve(context_coordinates.size() + 1);
       coordinates = context_coordinates;
     } 
 
@@ -4821,7 +4783,7 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool skip_check)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6384,7 +6346,8 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT,
+          &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6423,7 +6386,8 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT,
+          &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6461,10 +6425,11 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
+        const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
-            ApEvent::NO_AP_EVENT);
-        future->set_local(it->second.get_ptr(), it->second.get_size());
+            ApEvent::NO_AP_EVENT, &future_size);
+        future->set_local(it->second.get_ptr(), future_size);
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
@@ -7312,6 +7277,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future InnerContext::select_tunable_value(const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      TunableOp *tunable_op = runtime->get_available_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      add_to_dependence_queue(tunable_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future InnerContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -7457,15 +7437,19 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
+        const size_t size = sizeof(value);
+        Future result = 
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
+        const size_t size = sizeof(value);
+        Future result =
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
@@ -7899,117 +7883,6 @@ namespace Legion {
       }
       // If we didn't launch a next op, then we can remove the reference
       return (next_ctx == NULL);
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier InnerContext::create_phase_barrier(unsigned arrivals,
-                                                 ReductionOpID redop,
-                                                 const void *init_value,
-                                                 size_t init_size)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Creating application barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      return ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                      init_value, init_size));
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::destroy_phase_barrier(ApBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      destroy_user_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Advancing phase barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      PhaseBarrier result = bar;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(bar.phase_barrier, result.phase_barrier);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::arrive_dynamic_collective(DynamicCollective dc,
-                                                 const void *buffer,
-                                                 size_t size, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT, 
-                                    buffer, size);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::defer_dynamic_collective_arrival(DynamicCollective dc,
-                                                        const Future &f,
-                                                        unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Defer dynamic collective arrival in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      // Record this future as a contribution to the collective
-      // for future dependence analysis
-      record_dynamic_collective_contribution(dc, f);
-      f.impl->contribute_to_collective(dc, count);
-    }
-
-    //--------------------------------------------------------------------------
-    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      DynamicCollectiveOp *collective = 
-        runtime->get_available_dynamic_collective_op();
-      Future result = collective->initialize(this, dc);
-      add_to_dependence_queue(collective);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective InnerContext::advance_dynamic_collective( 
-                                                           DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-#ifdef DEBUG_LEGION
-      log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      DynamicCollective result = dc;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
-#endif
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9410,29 +9283,203 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f) 
+    void InnerContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
-      AutoLock col_lock(collective_lock);
-      collective_contributions[dc.phase_barrier].push_back(f);
+      AutoRuntimeCall call(this);
+      // Can only be called from user land so no need to hold the lock
+      context_locks.push_back(l.reservation_lock);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::find_collective_contributions(DynamicCollective dc, 
-                                             std::vector<Future> &contributions)
+    Grant InnerContext::acquire_grant(const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
-      // Find any future contributions and record dependences for the op
-      // Contributions were made to the previous phase
-      ApEvent previous = Runtime::get_previous_phase(dc.phase_barrier);
-      AutoLock col_lock(collective_lock);
-      std::map<ApEvent,std::vector<Future> >::iterator finder = 
-          collective_contributions.find(previous);
-      if (finder == collective_contributions.end())
+      AutoRuntimeCall call(this);
+      // Kind of annoying, but we need to unpack and repack the
+      // Lock type here to build new requests because the C++
+      // type system is dumb with nested classes.
+      std::vector<GrantImpl::ReservationRequest> 
+        unpack_requests(requests.size());
+      for (unsigned idx = 0; idx < requests.size(); idx++)
+      {
+        unpack_requests[idx] = 
+          GrantImpl::ReservationRequest(requests[idx].lock.reservation_lock,
+                                        requests[idx].mode,
+                                        requests[idx].exclusive);
+      }
+      return Grant(new GrantImpl(unpack_requests));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::release_grant(Grant grant)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      grant.impl->release_grant();
+    } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Can only be called from user land so no need to hold the lock
+      context_barriers.push_back(pb.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      PhaseBarrier result = pb;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InnerContext::create_dynamic_collective(
+                                       unsigned arrivals, ReductionOpID redop,
+                                       const void *init_value, size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return DynamicCollective(
+          ApBarrier(Realm::Barrier::create_barrier(arrivals, redop, 
+                                    init_value, init_size)), redop);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_dynamic_collective(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Can only be called from user land so no need to hold the lock
+      context_barriers.push_back(dc.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::arrive_dynamic_collective(DynamicCollective dc,
+                                const void *buffer, size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      Runtime::phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                           const Future &future, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      future.impl->contribute_to_collective(dc, count);
+      // No need to register anything if this future is an application future
+      // or it was made in a context above this in the region tree
+      if ((future.impl->producer_op == NULL) ||
+          (future.impl->producer_depth < get_depth()))
         return;
-      contributions = finder->second;
-      collective_contributions.erase(finder);
+      // Record this future as a contribution to the collective
+      // for future dependence analysis
+      const size_t barrier_gen = 
+        Realm::ID(dc.phase_barrier.id).event_generation();
+      const size_t barrier_name = dc.phase_barrier.id - barrier_gen;
+      AutoLock pb_lock(phase_barrier_lock);
+      barrier_contributions[barrier_name].push_back(
+          BarrierContribution(future.impl->producer_op, future.impl->op_gen,
+#ifdef LEGION_SPY
+            future.impl->producer_uid,
+#else
+            0/*no uid*/,
+#endif
+            0/*no muid*/, barrier_gen));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::perform_barrier_dependence_analysis(Operation *op,
+                            const std::vector<PhaseBarrier> &wait_barriers,
+                            const std::vector<PhaseBarrier> &arrive_barriers,
+                            MustEpochOp *must_epoch)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock pb_lock(phase_barrier_lock);
+      if (!wait_barriers.empty())
+        analyze_barrier_dependences(op, wait_barriers, must_epoch, true);
+      if (!arrive_barriers.empty())
+        analyze_barrier_dependences(op, arrive_barriers, must_epoch, false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::analyze_barrier_dependences(Operation *op,
+                              const std::vector<PhaseBarrier> &barriers,
+                              MustEpochOp *must_epoch_op, bool previous_gen)
+    //--------------------------------------------------------------------------
+    {
+      const UniqueID uid = op->get_unique_op_id();
+      const GenerationID gen = op->get_generation();
+      const UniqueID muid = (must_epoch_op == NULL) ? 0 :
+        must_epoch_op->get_unique_op_id();
+      // Record our barriers for future uses
+      for (std::vector<PhaseBarrier>::const_iterator ait =
+            barriers.begin(); ait != barriers.end(); ait++)
+      {
+        // Figure out the generic barrier ID
+        const ApBarrier barrier = previous_gen ? ait->phase_barrier :
+          Runtime::get_previous_phase(ait->phase_barrier);
+        const size_t barrier_gen = Realm::ID(barrier.id).event_generation();
+        const size_t barrier_name = barrier.id - barrier_gen;
+        std::list<BarrierContribution> &previous =
+          barrier_contributions[barrier_name];
+        for (std::list<BarrierContribution>::iterator it =
+              previous.begin(); it != previous.end(); /*nothing*/)
+        {
+          // skip anything with a larger barrier generation
+          if (it->bargen >= barrier_gen)
+          {
+            it++;
+            continue;
+          }
+          // If must epoch and same uid then skip it
+          if ((muid > 0) && (muid == it->muid))
+          {
+            it++;
+            continue;
+          }
+#ifdef LEGION_SPY
+          // No pruning for Legion Spy
+          op->register_dependence(it->op, it->gen);
+          LegionSpy::log_mapping_dependence(get_unique_id(), 
+              it->uid, 0, uid, 0, TRUE_DEPENDENCE);
+          it++;
+#else
+          if (op->register_dependence(it->op, it->gen))
+            it++;
+          else
+            it = previous.erase(it);
+#endif        
+        }
+        previous.push_back(BarrierContribution(op,gen,uid,muid,barrier_gen));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      DynamicCollectiveOp *collective =
+        runtime->get_available_dynamic_collective_op();
+      Future result = collective->initialize(this, dc);
+      add_to_dependence_queue(collective);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9442,6 +9489,20 @@ namespace Legion {
       // Should only be called by inherited classes
       assert(false);
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective InnerContext::advance_dynamic_collective(
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      DynamicCollective result = dc;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11337,7 +11398,8 @@ namespace Legion {
         verify_replicable(hasher, "consensus_match");
       }
       ApUserEvent complete = Runtime::create_ap_user_event(NULL);
-      Future result = runtime->help_create_future(this, complete);
+      const size_t future_size = sizeof(num_elements);
+      Future result = runtime->help_create_future(this, complete, &future_size);
       switch (element_size)
       {
         case 1:
@@ -11386,15 +11448,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VariantID ReplicateContext::register_variant(
-                const TaskVariantRegistrar &registrar, const void *user_data,
-                size_t user_data_size, const CodeDescriptor &desc, bool ret,
-                VariantID vid, bool check_task_id)
+          const TaskVariantRegistrar &registrar, const void *user_data,
+          size_t user_data_size, const CodeDescriptor &desc, 
+          size_t ret_size, bool has_ret_size, VariantID vid, bool check_task_id)
     //--------------------------------------------------------------------------
     {
       // If we're inside a registration callback we don't care
       if (inside_registration_callback)
         return TaskContext::register_variant(registrar, user_data, 
-            user_data_size, desc, ret, vid, check_task_id);
+            user_data_size, desc, ret_size, has_ret_size, vid, check_task_id);
       if (runtime->safe_control_replication &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
@@ -11417,6 +11479,8 @@ namespace Legion {
         hasher.hash(registrar.inner_variant);
         hasher.hash(registrar.idempotent_variant);
         hasher.hash(registrar.replicable_variant);
+        if (has_ret_size)
+          hasher.hash(ret_size);
         if ((user_data != NULL) && (runtime->safe_control_replication > 1))
           hasher.hash(user_data, user_data_size);
         hasher.hash(vid);
@@ -11429,7 +11493,7 @@ namespace Legion {
         // Have this shard do the registration, and then broadcast the
         // resulting variant to all the other shards
         result = runtime->register_variant(registrar, user_data, user_data_size,
-                         desc, ret, vid, check_task_id, false/*check context*/);
+           desc,ret_size,has_ret_size,vid,check_task_id,false/*check context*/);
         collective.broadcast(result);
       }
       else
@@ -11757,8 +11821,8 @@ namespace Legion {
     {
       if (future.impl == NULL)
         return;
-      const std::vector<std::pair<size_t,DomainPoint> > &coordinates =
-        future.impl->get_future_coordinates();
+      std::vector<std::pair<size_t,DomainPoint> > coordinates;
+      future.impl->get_future_coordinates(coordinates);
       if (!coordinates.empty())
       {
         for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
@@ -13936,7 +14000,7 @@ namespace Legion {
       }
       future_map.impl->set_all_futures(shard_futures);
       return create_partition_by_domain(parent, future_map, color_space, 
-                                        perform_intersections, part_kind,color);
+            perform_intersections, part_kind, color, true/*skip check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13946,11 +14010,11 @@ namespace Legion {
                                                     IndexSpace color_space,
                                                     bool perform_intersections,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,bool skip_check)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (runtime->safe_control_replication &&
+      if (runtime->safe_control_replication && !skip_check &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
@@ -16689,8 +16753,8 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->get_available_distributed_id(), runtime->address_space,
+          ApEvent::NO_AP_EVENT, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -16744,7 +16808,8 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT);
+          runtime->address_space, ApEvent::NO_AP_EVENT,
+          &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -16849,10 +16914,11 @@ namespace Legion {
             "Point passed into future map construction is not contained "
             "within the bounds of the domain in task %s (UID %lld)",
             get_task_name(), get_unique_id())
+        const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
-            ApEvent::NO_AP_EVENT);
-        future->set_local(it->second.get_ptr(), it->second.get_size());
+            ApEvent::NO_AP_EVENT, &future_size);
+        future->set_local(it->second.get_ptr(), future_size);
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
@@ -17790,6 +17856,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplicateContext::select_tunable_value(
+                                                const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_TUNABLE_SELECTION);
+        hasher.hash(launcher.tunable);
+        hasher.hash(launcher.mapper);
+        hasher.hash(launcher.tag);
+        hash_argument(hasher, runtime->safe_control_replication, launcher.arg);
+        for (std::vector<Future>::const_iterator it =
+              launcher.futures.begin(); it != launcher.futures.end(); it++)
+          hash_future(hasher, runtime->safe_control_replication, *it);
+        verify_replicable(hasher, "select_tunable_value");
+      }
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing a tunable request in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplTunableOp *tunable_op = runtime->get_available_repl_tunable_op();
+      Future result = tunable_op->initialize(this, launcher);
+      tunable_op->initialize_replication(this);
+      add_to_dependence_queue(tunable_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future ReplicateContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -18144,32 +18242,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f)
+    Lock ReplicateContext::create_lock(void)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
-                    "Illegal dynamic collective operation used in "
-                    "control replicated task %s (UID %lld)", 
+                    "Illegal create lock performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
+      return Lock();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_lock(Lock l)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal destroy lock performed in "
+                    "control replicated task %s (UID %lld)",
                     get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::find_collective_contributions(DynamicCollective dc,
-                                             std::vector<Future> &contributions)
+    Grant ReplicateContext::acquire_grant(
+                                       const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
-                    "Illegal dynamic collective operation used in "
+                    "Illegal acquire grant performed in "
                     "control replicated task %s (UID %lld)",
                     get_task_name(), get_unique_id())
-    } 
+      return Grant();
+    }
 
     //--------------------------------------------------------------------------
-    ApBarrier ReplicateContext::create_phase_barrier(unsigned arrivals,
-                                                     ReductionOpID redop,
-                                                     const void *init_value,
-                                                     size_t init_size)
+    void ReplicateContext::release_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal release grant performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier ReplicateContext::create_phase_barrier(unsigned arrivals)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -18179,18 +18295,14 @@ namespace Legion {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CREATE_PHASE_BARRIER);
         hasher.hash(arrivals);
-        hasher.hash(redop);
-        if (runtime->safe_control_replication > 1)
-          hasher.hash(init_value, init_size);
         verify_replicable(hasher, "create_phase_barrier");
       }
-      ValueBroadcast<ApBarrier> bar_collective(this, 0/*origin*/,
-                                               COLLECTIVE_LOC_71); 
+      ValueBroadcast<PhaseBarrier> bar_collective(this, 0/*origin*/,
+                                                  COLLECTIVE_LOC_71); 
       // Shard 0 will make the barrier and broadcast it
       if (owner_shard->shard_id == 0)
       {
-        ApBarrier result = InnerContext::create_phase_barrier(arrivals, redop,
-                                                        init_value, init_size);
+        PhaseBarrier result = InnerContext::create_phase_barrier(arrivals);
         bar_collective.broadcast(result);
         return result;
       }
@@ -18199,7 +18311,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_phase_barrier(ApBarrier bar)
+    void ReplicateContext::destroy_phase_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -18208,20 +18320,23 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_PHASE_BARRIER);
-        hasher.hash(bar);
+        hasher.hash(pb.phase_barrier);
         verify_replicable(hasher, "destroy_phase_barrier");
       }
       // Shard 0 has to wait for all the other shards to get here
       // too before it can do the deletion
       ShardSyncTree sync_point(this, 0/*origin*/, COLLECTIVE_LOC_72);
       if (owner_shard->shard_id == 0)
-        InnerContext::destroy_phase_barrier(bar);
+        InnerContext::destroy_phase_barrier(pb);
     }
 
     //--------------------------------------------------------------------------
     PhaseBarrier ReplicateContext::advance_phase_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      // For now we issue a mapping fence whenever we do this because
+      // we do not have any logical dependence analysis on phase barriers
+      issue_mapping_fence();
       AutoRuntimeCall call(this);
       if (runtime->safe_control_replication &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
@@ -18243,6 +18358,29 @@ namespace Legion {
         LegionSpy::log_event_dependence(bar.phase_barrier,result.phase_barrier);
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective ReplicateContext::create_dynamic_collective(
+                                       unsigned arrivals, ReductionOpID redop,
+                                       const void *init_value, size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal create dynamic collective performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
+      return DynamicCollective();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_dynamic_collective(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+                    "Illegal destroy dynamic collective performed in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -18286,6 +18424,9 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
+      // For now we issue a mapping fence whenever we do this because
+      // we do not have any logical dependence analysis on phase barriers
+      issue_mapping_fence();
       AutoRuntimeCall call(this);
       if (runtime->safe_control_replication && 
           ((current_trace == NULL) || !current_trace->is_fixed()))
@@ -20010,8 +20151,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplicateContext::deduplicate_invalidate_trackers(
-                                 const FieldMaskSet<EquivalenceSet> &to_untrack,
-                                 std::set<RtEvent> &applied_events)
+                             const FieldMaskSet<EquivalenceSet> &to_untrack,
+                             std::set<RtEvent> &applied_events, bool local_only)
     //--------------------------------------------------------------------------
     {
       // check to see if we're the first shard on this node
@@ -20029,7 +20170,8 @@ namespace Legion {
           // each node with the collective manager map
           if (first_local_shard)
             it->first->invalidate_trackers(it->second, applied_events,
-                runtime->address_space, &collective_mapping);
+                runtime->address_space, &collective_mapping,
+                local_only ? this : NULL/*filter everything*/);
         }
         else
         {
@@ -20054,7 +20196,8 @@ namespace Legion {
             target_shard = color % total_shards;
           if (target_shard == owner_shard->shard_id)
             it->first->invalidate_trackers(it->second, applied_events,
-                  runtime->address_space, NULL/*collective manager*/);
+                  runtime->address_space, NULL/*collective manager*/,
+                  local_only ? this : NULL/*filter everything*/);
         }
       }
     }
@@ -21109,7 +21252,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::compute_task_tree_coordinates(
-                       std::vector<std::pair<size_t,DomainPoint> > &coordinates)
+                                         TaskTreeCoordinates &coordinates) const
     //--------------------------------------------------------------------------
     {
       TaskContext *owner_ctx = owner_task->get_context();
@@ -21535,7 +21678,7 @@ namespace Legion {
                                                 IndexSpace color_space,
                                                 bool perform_intersections,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color, bool skip_check)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_BY_DOMAIN,
@@ -22340,6 +22483,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future LeafContext::select_tunable_value(const TunableLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal tunable value operation request in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
     Future LeafContext::issue_mapping_fence(void)
     //--------------------------------------------------------------------------
     {
@@ -22374,8 +22527,8 @@ namespace Legion {
     {
       if (f.impl == NULL)
         return Predicate::FALSE_PRED;
-      const RtEvent ready = 
-        f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      f.impl->request_internal_buffer(owner_task, true/*eager*/);
+      const RtEvent ready = f.impl->subscribe(); 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       // Always eagerly evaluate predicates in leaf contexts
@@ -22452,100 +22605,25 @@ namespace Legion {
     {
       if (p == Predicate::TRUE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = true;
+        const size_t size = sizeof(value);
+        Future result =
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT);
         const bool value = false;
+        const size_t size = sizeof(value);
+        Future result =
+          runtime->help_create_future(this, ApEvent::NO_AP_EVENT, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else // should never get here, all predicates should be eagerly evaluated
         assert(false);
       return Future();
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier LeafContext::create_phase_barrier(unsigned arrivals,
-                                                ReductionOpID redop,
-                                                const void *init_value,
-                                                size_t init_size)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      log_run.debug("Creating application barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      return ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
-                                                      init_value, init_size));
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::destroy_phase_barrier(ApBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
-                      get_task_name(), get_unique_id());
-#endif
-      destroy_user_barrier(bar);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier LeafContext::advance_phase_barrier(PhaseBarrier bar)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal advance phase barrier call performed in leaf task %s "
-          "(UID %lld)", get_task_name(), get_unique_id());
-      return bar;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::arrive_dynamic_collective(DynamicCollective dc,
-                                                const void *buffer,
-                                                size_t size, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal arrive dynamic collective call performed in leaf task %s "
-          "(UID %lld)", get_task_name(), get_unique_id());
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::defer_dynamic_collective_arrival(DynamicCollective dc,
-                                                       const Future &f,
-                                                       unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal defer dynamic collective call performed in leaf task %s "
-          "(UID %lld)", get_task_name(), get_unique_id());
-    }
-
-    //--------------------------------------------------------------------------
-    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal get dynamic collective result call performed in leaf task %s"
-          " (UID %lld)", get_task_name(), get_unique_id());
-      return Future();
-    }
-
-    //--------------------------------------------------------------------------
-    DynamicCollective LeafContext::advance_dynamic_collective( 
-                                                           DynamicCollective dc)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal advance dynamic collective call performed in leaf task %s "
-          "(UID %lld)", get_task_name(), get_unique_id());
-      return dc;
     }
 
     //--------------------------------------------------------------------------
@@ -22936,19 +23014,112 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_dynamic_collective_contribution(
-                                          DynamicCollective dc, const Future &f) 
+    void LeafContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy lock performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::find_collective_contributions(DynamicCollective dc, 
-                                             std::vector<Future> &contributions) 
+    Grant LeafContext::acquire_grant(const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal acquire grant performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return Grant();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::release_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal release grant performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy phase barrier performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier LeafContext::advance_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal advance phase barrier performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return PhaseBarrier();
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective LeafContext::create_dynamic_collective(
+                                       unsigned arrivals, ReductionOpID redop,
+                                       const void *init_value, size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal create dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+      return DynamicCollective();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_dynamic_collective(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal destroy dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::arrive_dynamic_collective(DynamicCollective dc,
+                                const void *buffer, size_t size, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal arrive dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::defer_dynamic_collective_arrival(DynamicCollective dc,
+                                           const Future &future, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal defer dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal get dynamic collective performed in leaf task %s (UID %lld)",
+          get_task_name(), get_unique_id())
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective LeafContext::advance_dynamic_collective(
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+          "Illegal advance dynamic collective performed in leaf task %s "
+          "(UID %lld)", get_task_name(), get_unique_id())
+      return DynamicCollective();
     }
 
     //--------------------------------------------------------------------------

@@ -596,9 +596,14 @@ namespace Realm {
     internal->gather(root, val_in, vals_out, bytes);
   }
 
-  bool GASNetEXModule::check_for_quiescence(void)
+  size_t GASNetEXModule::sample_messages_received_count(void)
   {
-    return internal->check_for_quiescence();
+    return internal->sample_messages_received_count();
+  }
+
+  bool GASNetEXModule::check_for_quiescence(size_t sampled_receive_count)
+  {
+    return internal->check_for_quiescence(sampled_receive_count);
   }
 
   // used to create a remote proxy for a memory

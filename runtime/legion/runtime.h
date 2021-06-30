@@ -224,25 +224,31 @@ namespace Legion {
       struct PendingInstance {
       public:
         PendingInstance(void)
-          : op(NULL), uid(0), eager(false) { }
-        PendingInstance(Operation *o, UniqueID id, bool e)
-          : op(o), uid(id), eager(e) { }
-        PendingInstance(Operation *o, UniqueID id, ApUserEvent r, bool e)
-          : op(o), uid(id), inst_ready(r), eager(e) { }
+          : instance(NULL), op(NULL), uid(0), eager(false) { }
+        PendingInstance(FutureInstance *i, ApUserEvent r)
+          : instance(i), op(NULL), uid(0), inst_ready(r), eager(false) { }
+        PendingInstance(Operation *o, UniqueID id, ApUserEvent r, 
+                        RtUserEvent a, bool e)
+          : instance(NULL), op(o), uid(id), inst_ready(r),
+            alloc_ready(a), eager(e) { }
       public:
+        FutureInstance *instance;
         Operation *op;
         UniqueID uid;
         ApUserEvent inst_ready;
+        RtUserEvent alloc_ready;
         std::set<AddressSpaceID> remote_requests;
         bool eager;
       };
     public:
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
-                 DistributedID did, AddressSpaceID owner_space,ApEvent complete,
-                 Operation *op = NULL, bool compute_coordinates = true);
+                 DistributedID did, AddressSpaceID owner_space,
+                 ApEvent complete, const size_t *future_size = NULL,
+                 Operation *op = NULL);
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
                  DistributedID did, AddressSpaceID owner_space,
                  ApEvent complete, Operation *op, GenerationID gen,
+                 size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
                  UniqueID op_uid,
 #endif
@@ -272,8 +278,11 @@ namespace Legion {
       bool find_or_create_application_instance(Memory target, UniqueID uid);
       RtEvent request_application_instance(Memory target, SingleTask *task,
                        UniqueID uid, AddressSpaceID source,
-                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT);
+                       ApUserEvent ready_event = ApUserEvent::NO_AP_USER_EVENT,
+                       size_t upper_bound_size = SIZE_MAX);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
+      // The return event for this method indicates when the resources have
+      // been allocated for the instance and we can consider it mapped
       RtEvent request_internal_buffer(Operation *op, bool eager);
       const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
       FutureInstance* get_canonical_instance(void);
@@ -305,12 +314,11 @@ namespace Legion {
       // computation for resiliency reasons
       bool reset_future(void);
       // Request that we get meta data for the future on this node
+      // The return event here will indicate when we have local data
+      // that is valid to access for this particular future
       RtEvent subscribe(void);
-      // Set the task tree coordinates for this future
-      void set_future_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
-      const std::vector<std::pair<size_t,DomainPoint> >&
-        get_future_coordinates(void) const;
+      size_t get_upper_bound_size(void);
+      void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
       void pack_future(Serializer &rez) const;
       static FutureImpl* unpack_future(Runtime *runtime, 
           Deserializer &derez, ReferenceMutator *mutator, 
@@ -327,13 +335,15 @@ namespace Legion {
     public:
       void register_dependence(Operation *consumer_op);
       void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
+      void set_future_result_size(size_t size, AddressSpaceID source);
     protected:
       void finish_set_future(void); // must be holding lock
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
                         UniqueID op_uid, bool eager, bool need_lock = true,
                         ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
-                        bool create_instance = false);
+                        bool create_instance = false,
+                        FutureInstance *existing = NULL);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
                             const bool need_lock);
@@ -346,6 +356,8 @@ namespace Legion {
     public:
       void record_future_registered(ReferenceMutator *mutator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
+      static void handle_future_result_size(Deserializer &derez,
+                                  Runtime *runtime, AddressSpaceID source);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
       static void handle_future_notification(Deserializer &derez, Runtime *rt,
@@ -370,6 +382,8 @@ namespace Legion {
 #ifdef LEGION_SPY
       const UniqueID producer_uid;
 #endif
+      const size_t producer_context_index;
+      const DomainPoint producer_point;
       const ApEvent future_complete;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -377,16 +391,19 @@ namespace Legion {
       RtUserEvent subscription_event;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
-      // These are the coordinates in the task tree for the operation
-      // that produced this future. Currently it is only valid if we
-      // are running with -lg:safe_ctrlrepl but we could relax that
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
       AddressSpaceID result_set_space; // space on which the result was set
       std::map<Memory,FutureInstance*> instances;
       FutureInstance *canonical_instance;
     private:
       void *metadata;
       size_t metasize;
+    private:
+      // The determined size of this future to this point
+      // This is only an upper bound until it is solidifed
+      size_t future_size;
+      // This is the upper bound size prior to being refined
+      // down to a precise size when the future is finally set
+      size_t upper_bound_size; 
     private:
       // Instances that need to be made once canonical instance is set
       std::map<Memory,PendingInstance> pending_instances;
@@ -397,6 +414,9 @@ namespace Legion {
       Processor callback_proc;
       FutureFunctor *callback_functor;
       bool own_callback_functor;
+    private:
+      // Whether this future has a size set yet
+      bool future_size_set;
     private:
       volatile bool empty;
       volatile bool sampled;
@@ -1818,7 +1838,8 @@ namespace Legion {
      */
     class PendingVariantRegistration {
     public:
-      PendingVariantRegistration(VariantID vid, bool has_return,
+      PendingVariantRegistration(VariantID vid, size_t return_type_size,
+                                 bool has_return_type_size,
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc, 
@@ -1832,7 +1853,8 @@ namespace Legion {
       void perform_registration(Runtime *runtime);
     private:
       VariantID vid;
-      bool has_return;
+      size_t return_type_size;
+      bool has_return_type_size;
       TaskVariantRegistrar registrar;
       void *user_data;
       size_t user_data_size;
@@ -1867,8 +1889,6 @@ namespace Legion {
       ~TaskImpl(void);
     public:
       TaskImpl& operator=(const TaskImpl &rhs);
-    public:
-      inline bool returns_value(void) const { return has_return_type; }
     public:
       VariantID get_unique_variant_id(void);
       void add_variant(VariantImpl *impl);
@@ -1910,8 +1930,6 @@ namespace Legion {
       // VariantIDs that we've handed out but haven't registered yet
       std::set<VariantID> pending_variants;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
-      // Track whether all these variants have a return type or not
-      bool has_return_type;
       // Track whether all these variants are idempotent or not
       bool all_idempotent;
     };
@@ -1926,7 +1944,8 @@ namespace Legion {
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
       VariantImpl(Runtime *runtime, VariantID vid, TaskImpl *owner, 
-                  const TaskVariantRegistrar &registrar, bool ret_val, 
+                  const TaskVariantRegistrar &registrar, 
+                  size_t return_type_size, bool has_return_type_size,
                   const CodeDescriptor &realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
@@ -1938,7 +1957,6 @@ namespace Legion {
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool is_replicable(void) const { return replicable_variant; }
-      inline bool returns_value(void) const { return has_return_value; }
       inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&
         get_execution_constraints(void) const { return execution_constraints; }
@@ -1964,7 +1982,8 @@ namespace Legion {
       TaskImpl *const owner;
       Runtime *const runtime;
       const bool global; // globally valid variant
-      const bool has_return_value; // has a return value
+      const bool has_return_type_size;
+      const size_t return_type_size;
     public:
       const CodeDescriptorID descriptor_id;
       CodeDescriptor realm_descriptor;
@@ -2449,28 +2468,6 @@ namespace Legion {
         const ApEvent event;
         TopLevelContext *const ctx;
       }; 
-      struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
-      public:
-        SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
-                          TunableID tune, const void *arg, size_t size,
-                          TaskContext *c, FutureImpl *f, ApUserEvent trig)
-          : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
-            tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
-            argsize(size), ctx(c), result(f), to_trigger(trig)
-            { if (argsize > 0) memcpy(args, arg, argsize); }
-      public:
-        const MapperID mapper_id;
-        const MappingTagID tag;
-        const TunableID tunable_id;
-        void *const args;
-        const size_t argsize;
-        unsigned tunable_index; // only valid for LegionSpy
-        TaskContext *const ctx;
-        FutureImpl *const result;
-        const ApUserEvent to_trigger;
-      }; 
     public:
       struct ProcessorGroupInfo {
       public:
@@ -2750,32 +2747,6 @@ namespace Legion {
       Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
       Future get_predicate_future(Context ctx, const Predicate &p);
     public:
-      Lock create_lock(Context ctx);
-      void destroy_lock(Context ctx, Lock l);
-      Grant acquire_grant(Context ctx, 
-                          const std::vector<LockRequest> &requests);
-      void release_grant(Context ctx, Grant grant);
-    public:
-      PhaseBarrier create_phase_barrier(Context ctx, unsigned arrivals);
-      void destroy_phase_barrier(Context ctx, PhaseBarrier pb);
-      PhaseBarrier advance_phase_barrier(Context ctx, PhaseBarrier pb);
-    public:
-      DynamicCollective create_dynamic_collective(Context ctx,
-                                                  unsigned arrivals,
-                                                  ReductionOpID redop,
-                                                  const void *init_value,
-                                                  size_t init_size);
-      void destroy_dynamic_collective(Context ctx, DynamicCollective dc);
-      void arrive_dynamic_collective(Context ctx, DynamicCollective dc,
-                                     const void *buffer, size_t size,
-                                     unsigned count);
-      void defer_dynamic_collective_arrival(Context ctx, 
-                                            DynamicCollective dc,
-                                            const Future &f, unsigned count);
-      Future get_dynamic_collective_result(Context ctx, DynamicCollective dc);
-      DynamicCollective advance_dynamic_collective(Context ctx,
-                                                   DynamicCollective dc);
-    public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       Future issue_mapping_fence(Context ctx);
@@ -2789,13 +2760,6 @@ namespace Legion {
                                    const MustEpochLauncher &launcher);
       Future issue_timing_measurement(Context ctx,
                                       const TimingLauncher &launcher);
-    public:
-      Future select_tunable_value(Context ctx, TunableID tid,
-                                  MapperID mid, MappingTagID tag,
-                                  const void *args, size_t argsize);
-      int get_tunable_value(Context ctx, TunableID tid, 
-                            MapperID mid, MappingTagID tag);
-      void perform_tunable_selection(const SelectTunableArgs *args);
     public:
       void* get_local_task_variable(Context ctx, LocalVariableID id);
       void set_local_task_variable(Context ctx, LocalVariableID id,
@@ -2919,8 +2883,9 @@ namespace Legion {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  const CodeDescriptor &realm_desc,
-                                 bool ret, VariantID vid = 
-                                                      LEGION_AUTO_GENERATE_ID,
+                                 size_t return_type_size,
+                                 bool has_return_type_size,
+                                 VariantID vid = LEGION_AUTO_GENERATE_ID,
                                  bool check_task_id = true,
                                  bool check_context = true,
                                  bool preregistered = false);
@@ -3053,6 +3018,7 @@ namespace Legion {
       void send_logical_region_destruction(LogicalRegion handle, 
                                            AddressSpaceID target,
                                            std::set<RtEvent> &applied);
+      void send_individual_remote_future_size(Processor target,Serializer &rez);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -3112,6 +3078,7 @@ namespace Legion {
       void send_view_replication_removal(AddressSpaceID target,Serializer &rez);
 #endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
+      void send_future_result_size(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_notification(AddressSpaceID target, Serializer &rez);
       void send_future_broadcast(AddressSpaceID target, Serializer &rez);
@@ -3372,6 +3339,7 @@ namespace Legion {
       void handle_index_partition_destruction(Deserializer &derez);
       void handle_field_space_destruction(Deserializer &derez);
       void handle_logical_region_destruction(Deserializer &derez);
+      void handle_individual_remote_future_size(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
@@ -3433,6 +3401,8 @@ namespace Legion {
 #endif
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
+      void handle_future_result_size(Deserializer &derez,
+                                     AddressSpaceID source);
       void handle_future_subscription(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_future_notification(Deserializer &derez,
@@ -3712,9 +3682,10 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did, UniqueID uid,
+      FutureImpl* find_or_create_future(DistributedID did, UniqueID ctx_uid,
                                         ReferenceMutator *mutator,
-                      std::vector<std::pair<size_t,DomainPoint> > &coordinates,
+                                        size_t op_ctx_index,
+                                        const DomainPoint &point,
                                         Operation *op = NULL,
                                         GenerationID op_gen = 0, 
 #ifdef LEGION_SPY
@@ -3800,6 +3771,7 @@ namespace Legion {
       IndexDetachOp*        get_available_index_detach_op(void);
       PointDetachOp*        get_available_point_detach_op(void);
       TimingOp*             get_available_timing_op(void);
+      TunableOp*            get_available_tunable_op(void);
       AllReduceOp*          get_available_all_reduce_op(void);
     public: // Control replication operations
       ReplIndividualTask*   get_available_repl_individual_task(void);
@@ -3815,6 +3787,7 @@ namespace Legion {
       ReplDependentPartitionOp* get_available_repl_dependent_partition_op(void);
       ReplMustEpochOp*      get_available_repl_epoch_op(void);
       ReplTimingOp*         get_available_repl_timing_op(void);
+      ReplTunableOp*        get_available_repl_tunable_op(void);
       ReplAllReduceOp*      get_available_repl_all_reduce_op(void);
       ReplFenceOp*          get_available_repl_fence_op(void);
       ReplMapOp*            get_available_repl_map_op(void);
@@ -3871,6 +3844,7 @@ namespace Legion {
       void free_index_detach_op(IndexDetachOp *op);
       void free_point_detach_op(PointDetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_tunable_op(TunableOp *op);
       void free_all_reduce_op(AllReduceOp *op);
     public: // Control replication operations
       void free_repl_individual_task(ReplIndividualTask *task);
@@ -3886,6 +3860,7 @@ namespace Legion {
       void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
       void free_repl_epoch_op(ReplMustEpochOp *op);
       void free_repl_timing_op(ReplTimingOp *op);
+      void free_repl_tunable_op(ReplTunableOp *op);
       void free_repl_all_reduce_op(ReplAllReduceOp *op);
       void free_repl_fence_op(ReplFenceOp *op);
       void free_repl_map_op(ReplMapOp *op);
@@ -3945,6 +3920,7 @@ namespace Legion {
     public:
       // Methods for helping with dumb nested class scoping problems
       Future help_create_future(TaskContext *ctx, ApEvent complete,
+                                const size_t *future_size = NULL,
                                 Operation *op = NULL);
       bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
@@ -4273,6 +4249,7 @@ namespace Legion {
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
+      mutable LocalLock tunable_op_lock;
       mutable LocalLock all_reduce_op_lock;
     protected:
       std::deque<IndividualTask*>       available_individual_tasks;
@@ -4318,6 +4295,7 @@ namespace Legion {
       std::deque<IndexDetachOp*>        available_index_detach_ops;
       std::deque<PointDetachOp*>        available_point_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      std::deque<TunableOp*>            available_tunable_ops;
       std::deque<AllReduceOp*>          available_all_reduce_ops;
     protected: // Control replication operations
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
@@ -4335,6 +4313,7 @@ namespace Legion {
                                         available_repl_dependent_partition_ops;
       std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
       std::deque<ReplTimingOp*>         available_repl_timing_ops;
+      std::deque<ReplTunableOp*>        available_repl_tunable_ops;
       std::deque<ReplAllReduceOp*>      available_repl_all_reduce_ops;
       std::deque<ReplFenceOp*>          available_repl_fence_ops;
       std::deque<ReplMapOp*>            available_repl_map_ops;
@@ -4472,8 +4451,9 @@ namespace Legion {
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      const CodeDescriptor &realm_desc, bool has_ret, 
-                      const char *task_name,VariantID vid,bool check_id = true);
+                      const CodeDescriptor &realm_desc, size_t return_type_size,
+                      bool has_return_type_size, const char *task_name,
+                      VariantID vid, bool check_id = true);
     public:
       static ReductionOpID& get_current_static_reduction_id(void);
       static ReductionOpID generate_static_reduction_id(void);
@@ -4524,10 +4504,13 @@ namespace Legion {
                                          ApEvent e1, ApEvent e2, ApEvent e3);
       static inline ApEvent merge_events(const TraceInfo *info,
                                          const std::set<ApEvent> &events);
+      static inline ApEvent merge_events(const TraceInfo *info,
+                                         const std::vector<ApEvent> &events);
     public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
+      static inline RtEvent merge_events(const std::vector<RtEvent> &events);
     public:
       static inline ApUserEvent create_ap_user_event(const TraceInfo *info);
       static inline void trigger_event(const TraceInfo *info, 
@@ -4800,8 +4783,11 @@ namespace Legion {
           return *(events.begin());
       }
 #endif
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      // Fuck C++
+      const std::set<ApEvent> *legion_events = &events;
+      const std::set<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists() || (events.find(result) != events.end()))
@@ -4816,6 +4802,74 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, result);
+#endif
+      if ((info != NULL) && info->recording)
+        info->record_merge_events(result, events);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events(
+                      const TraceInfo *info, const std::vector<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (events.empty())
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result;
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
+      if (events.size() == 1)
+      {
+        // Still need to do this for tracing because of merge filter code
+        if ((info != NULL) && info->recording)
+        {
+          ApEvent result = events.front();
+          info->record_merge_events(result, events);
+          return result;
+        }
+        else
+          return events.front();
+      }
+#endif
+      // Fuck C++
+      const std::vector<ApEvent> *legion_events = &events;
+      const std::vector<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
+      ApEvent result(Realm::Event::merge_events(*realm_events));
+#ifdef LEGION_DISABLE_EVENT_PRUNING 
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      else
+      {
+        // Check to make sure it isn't a rename
+        for (unsigned idx = 0; idx < events.size(); idx++)
+        {
+          if (events[idx] != result)
+            continue;
+          Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+          rename.trigger(result);
+          result = ApEvent(rename);
+          break;
+        }
+      }
+#endif
+#ifdef LEGION_SPY
+      for (std::vector<ApEvent>::const_iterator it = events.begin();
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
@@ -4852,9 +4906,32 @@ namespace Legion {
       if (events.size() == 1)
         return *(events.begin());
 #endif
+      // Fuck C++
+      const std::set<RtEvent> *legion_events = &events;
+      const std::set<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      return RtEvent(Realm::Event::merge_events(*realm_events));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(
+                                             const std::vector<RtEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (events.empty())
+        return RtEvent::NO_RT_EVENT;
+      if (events.size() == 1)
+        return events.front();
+#endif
+      // Fuck C++
+      const std::vector<RtEvent> *legion_events = &events;
+      const std::vector<Realm::Event> *realm_events;
+      static_assert(sizeof(legion_events) == sizeof(realm_events), "Fuck C++");
+      memcpy(&realm_events, &legion_events, sizeof(legion_events));
+      // No logging for runtime operations currently
       return RtEvent(Realm::Event::merge_events(*realm_events));
     }
 
@@ -5009,8 +5086,10 @@ namespace Legion {
                                                 const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      const std::set<ApEvent> *ptr = &events;
+      const std::set<Realm::Event> *realm_events = NULL;
+      static_assert(sizeof(realm_events) == sizeof(ptr), "Fuck c++");
+      memcpy(&realm_events, &ptr, sizeof(realm_events));
       return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
     }
 

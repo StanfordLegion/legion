@@ -512,6 +512,33 @@ namespace Legion {
     };
 
     /**
+     * \class SingleTaskTree
+     * This collective is an extension of ShardEventTree that also
+     * provides a broadcasting mechanism for the size of the future
+     */
+    class SingleTaskTree : public ShardEventTree {
+    public:
+      SingleTaskTree(ReplicateContext *ctx, ShardID origin, 
+                     CollectiveID id, FutureImpl *impl);
+      SingleTaskTree(const SingleTaskTree &rhs)
+        : ShardEventTree(rhs), future(NULL) { assert(false); }
+      virtual ~SingleTaskTree(void);
+    public:
+      SingleTaskTree & operator=(const SingleTaskTree &rhs) 
+        { assert(false); return *this; }
+    public:
+      void broadcast_future_size(RtEvent precondition, 
+          size_t future_size, bool has_size);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    protected:
+      FutureImpl *const future;
+      size_t future_size;
+      bool has_future_size;
+    };
+
+    /**
      * \class CrossProductExchange
      * A class for exchanging the names of partitions created by
      * a call for making cross-product partitions
@@ -1221,6 +1248,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual void prepare_map_must_epoch(void);
+      virtual void handle_future_size(size_t return_type_size,
+          bool has_return_type_size, std::set<RtEvent> &applied_events);
     public:
       // Override these so we can broadcast the future result
       virtual void trigger_task_complete(void);
@@ -1233,7 +1262,7 @@ namespace Legion {
       ShardingFunction *sharding_function;
       CollectiveID mapped_collective_id; // id for mapped event broadcast
       CollectiveID future_collective_id; // id for the future broadcast 
-      ShardEventTree *mapped_collective;
+      SingleTaskTree *mapped_collective;
       FutureBroadcast *future_collective;
 #ifdef DEBUG_LEGION
     public:
@@ -1592,7 +1621,8 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
+      virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
+                                          std::set<RtEvent> &ready_events);
       virtual void trigger_complete(void);
     };
 
@@ -1852,6 +1882,29 @@ namespace Legion {
     protected:
       ValueBroadcast<long long> *timing_collective;
     }; 
+
+    /**
+     * \class ReplTunableOp
+     * A tunable operation that is aware that it is
+     * being executed in a control replicated context
+     */
+    class ReplTunableOp : public TunableOp {
+    public:
+      ReplTunableOp(Runtime *rt);
+      ReplTunableOp(const ReplTunableOp &rhs);
+      virtual ~ReplTunableOp(void);
+    public:
+      ReplTunableOp& operator=(const ReplTunableOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *context);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void process_result(MapperManager *mapper, 
+                                  void *buffer, size_t size) const;
+    protected:
+      BufferBroadcast *value_broadcast;       
+    };
 
     /**
      * \class ReplAllReduceOp

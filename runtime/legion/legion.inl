@@ -358,7 +358,41 @@ namespace Legion {
               redop_id, permit_duplicates);
       }
 
-    };
+      template<typename T>
+      struct HasSerdezBound {
+        typedef char yes; typedef long no;
+
+        template <typename C>
+        static yes test(decltype(&C::legion_upper_bound_size));
+        template <typename C> static no test(...);
+
+        static constexpr bool value =
+          sizeof(test<T>(nullptr)) == sizeof(yes);
+      };
+
+      template<typename T, bool HAS_BOUND>
+      struct SerdezBound {
+        static constexpr size_t value = T::legion_upper_bound_size();
+      };
+
+      template<typename T>
+      struct SerdezBound<T,false> {
+        static constexpr size_t value = LEGION_MAX_RETURN_SIZE;
+      };
+
+      template<typename T>
+      struct SizeBound {
+        static constexpr size_t value = sizeof(T);
+      };
+
+      template<typename T>
+      struct ReturnSize {
+        static constexpr size_t value = 
+          std::conditional<IsSerdezType<T>::value,
+           SerdezBound<T,HasSerdezBound<T>::value>, SizeBound<T> >::type::value;
+      };
+
+    }; // Serialization namespace
 
     // Special namespace for providing multi-dimensional 
     // array syntax on accessors 
@@ -21262,7 +21296,9 @@ namespace Legion {
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
-      const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
+      const UDT *user_data = NULL;
+      static_assert(sizeof(user_data) == sizeof(userdata), "C++ is dumb");
+      memcpy(&user_data, &userdata, sizeof(user_data));
 
       // Invoke the task with the given context
       T return_value = (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
@@ -21286,7 +21322,9 @@ namespace Legion {
       const std::vector<PhysicalRegion> *regions;
       Runtime::legion_task_preamble(args, arglen, p, task, regions, ctx, rt);
 
-      const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
+      const UDT *user_data = NULL;
+      static_assert(sizeof(user_data) == sizeof(userdata), "C++ is dumb");
+      memcpy(&user_data, &userdata, sizeof(user_data));
 
       (*TASK_PTR)(task, *regions, ctx, rt, *user_data); 
 
@@ -21328,8 +21366,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
-      return register_task_variant(registrar, desc, NULL/*UDT*/,
-                               0/*sizeof(UDT)*/, true/*has return type*/, vid);
+      return register_task_variant(registrar, desc,NULL/*UDT*/,
+          0/*sizeof(UDT)*/, LegionSerialization::ReturnSize<T>::value, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21343,7 +21381,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                   true/*has return type*/, vid);
+                            LegionSerialization::ReturnSize<T>::value, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21356,7 +21394,7 @@ namespace Legion {
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       return register_task_variant(registrar, desc, NULL/*UDT*/, 
-                           0/*sizeof(UDT)*/, false/*has return type*/, vid);
+                                   0/*sizeof(UDT)*/, 0/*return size*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21370,7 +21408,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       return register_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                   false/*has return type*/, vid);
+                                   0/*return size*/, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -21384,7 +21422,8 @@ namespace Legion {
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
       return preregister_task_variant(registrar, desc, NULL/*UDT*/, 
-          0/*sizeof(UDT)*/, task_name, vid, true/*has return type*/);
+                                  0/*sizeof(UDT)*/, task_name, vid, 
+                                  LegionSerialization::ReturnSize<T>::value);
     }
 
     //--------------------------------------------------------------------------
@@ -21400,7 +21439,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       return preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                      task_name, vid, true/*has return type*/);
+                    task_name, vid, LegionSerialization::ReturnSize<T>::value);
     }
 
     //--------------------------------------------------------------------------
@@ -21414,7 +21453,7 @@ namespace Legion {
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       return preregister_task_variant(registrar, desc, NULL/*UDT*/,
-                0/*sizeof(UDT)*/, task_name, vid, false/*has return type*/);
+                0/*sizeof(UDT)*/, task_name, vid, 0/*return size*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21430,7 +21469,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       return preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                                      task_name, vid, false/*has return type*/);
+                                      task_name, vid, 0/*return size*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21458,7 +21497,7 @@ namespace Legion {
       registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
       preregister_task_variant(registrar, desc, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                               task_name, vid, true/*has ret*/, check_task_id);
+      task_name, vid, LegionSerialization::ReturnSize<T>::value, check_task_id);
       return id;
     }
 
@@ -21487,7 +21526,7 @@ namespace Legion {
       registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
       preregister_task_variant(registrar, desc, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                               task_name, vid, false/*has ret*/, check_task_id);
+                               task_name, vid, 0/*return size*/, check_task_id);
       return id;
     }
 
@@ -21518,7 +21557,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
       preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                               task_name, vid, true/*has ret*/, check_task_id);
+      task_name, vid, LegionSerialization::ReturnSize<T>::value, check_task_id);
       return id;
     }
 
@@ -21549,7 +21588,7 @@ namespace Legion {
       CodeDescriptor desc(
           LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
       preregister_task_variant(registrar, desc, &user_data, sizeof(UDT),
-                               task_name, vid, false/*has ret*/, check_task_id);
+                               task_name, vid, 0/*return size*/, check_task_id);
       return id;
     }
 

@@ -341,7 +341,6 @@ namespace Legion {
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
       LG_INDEX_PART_DEFER_CHILD_TASK_ID,
-      LG_SELECT_TUNABLE_TASK_ID,
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
@@ -468,7 +467,6 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
         "Defer Index Partition Child Request",                    \
-        "Select Tunable",                                         \
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
@@ -773,6 +771,7 @@ namespace Legion {
       INDEX_PARTITION_DESTRUCTION_MESSAGE,
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
+      INDIVIDUAL_REMOTE_FUTURE_SIZE,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -814,6 +813,7 @@ namespace Legion {
       SEND_VIEW_REPLICATION_REMOVAL,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
+      SEND_FUTURE_RESULT_SIZE,
       SEND_FUTURE_SUBSCRIPTION,
       SEND_FUTURE_NOTIFICATION,
       SEND_FUTURE_BROADCAST,
@@ -992,6 +992,7 @@ namespace Legion {
         "Index Partition Destruction",                                \
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
+        "Individual Remote Future Size",                              \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \
@@ -1033,6 +1034,7 @@ namespace Legion {
         "Send View Replication Removal",                              \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
+        "Send Future Result Size",                                    \
         "Send Future Subscription",                                   \
         "Send Future Notification",                                   \
         "Send Future Broadcast",                                      \
@@ -1581,6 +1583,7 @@ namespace Legion {
       COLLECTIVE_LOC_97 = 97,
       COLLECTIVE_LOC_98 = 98,
       COLLECTIVE_LOC_99 = 99,
+      COLLECTIVE_LOC_100 = 100,
     };
 
     // legion_types.h
@@ -1684,6 +1687,7 @@ namespace Legion {
     class IndexDetachOp;
     class PointDetachOp;
     class TimingOp;
+    class TunableOp;
     class AllReduceOp;
     class ExternalMappable;
     class RemoteOp;
@@ -1779,6 +1783,7 @@ namespace Legion {
     class AssignFenceCompletion;
     class IssueCopy;
     class IssueFill;
+    class IssueIndirect;
     class GetOpTermEvent;
     class SetOpSyncEvent;
     class SetEffects;
@@ -1793,6 +1798,7 @@ namespace Legion {
 
     // region_tree.h
     class RegionTreeForest;
+    class CopyIndirection;
     class IndexSpaceExpression;
     class IndexSpaceOperation;
     template<int DIM, typename T> class IndexSpaceOperationT;
@@ -1897,6 +1903,7 @@ namespace Legion {
     class ReplDependentPartitionOp;
     class ReplMustEpochOp;
     class ReplTimingOp;
+    class ReplTunableOp;
     class ReplAllReduceOp;
     class ReplFenceOp;
     class ReplMapOp;
@@ -1976,6 +1983,7 @@ namespace Legion {
     friend class Internal::ReplIndexDetachOp;               \
     friend class Internal::PointDetachOp;                   \
     friend class Internal::TimingOp;                        \
+    friend class Internal::TunableOp;                       \
     friend class Internal::AllReduceOp;                     \
     friend class Internal::TraceSummaryOp;                  \
     friend class Internal::ExternalMappable;                \
@@ -1999,6 +2007,7 @@ namespace Legion {
     friend class Internal::ReplMustEpochOp;                 \
     friend class Internal::ReplMapOp;                       \
     friend class Internal::ReplTimingOp;                    \
+    friend class Internal::ReplTunableOp;                   \
     friend class Internal::ReplAllReduceOp;                 \
     friend class Internal::ReplFenceOp;                     \
     friend class Internal::ReplAttachOp;                    \
@@ -2151,6 +2160,7 @@ namespace Legion {
     typedef unsigned long long CollectiveID;
     typedef unsigned long long IndexSpaceExprID;
     typedef std::pair<unsigned, DomainPoint> TraceLocalID;
+    typedef std::vector<std::pair<size_t,DomainPoint> > TaskTreeCoordinates;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 

@@ -31,16 +31,16 @@ module legion_fortran_types
 #define MAX_RECT_DIM_F LEGION_MAX_DIM
 
   ! legion_privilege_mode_t
-  integer(c_int), parameter :: NO_ACCESS = Z'00000000'
-  integer(c_int), parameter :: READ_PRIV = Z'00000001'
-  integer(c_int), parameter :: READ_ONLY = Z'00000001'
-  integer(c_int), parameter :: WRITE_PRIV = Z'00000002'
-  integer(c_int), parameter :: REDUCE_PRIV = Z'00000004'
-  integer(c_int), parameter :: REDUCE = Z'00000004'
-  integer(c_int), parameter :: READ_WRITE = Z'00000007'
-  integer(c_int), parameter :: DISCARD_MASK = Z'10000000'
-  integer(c_int), parameter :: WRITE_ONLY = Z'10000002'
-  integer(c_int), parameter :: WRITE_DISCARD = Z'10000007'
+  integer(c_int), parameter :: NO_ACCESS = int(Z'00000000', c_int)
+  integer(c_int), parameter :: READ_PRIV = int(Z'00000001', c_int)
+  integer(c_int), parameter :: READ_ONLY = int(Z'00000001', c_int)
+  integer(c_int), parameter :: WRITE_PRIV = int(Z'00000002', c_int)
+  integer(c_int), parameter :: REDUCE_PRIV = int(Z'00000004', c_int)
+  integer(c_int), parameter :: REDUCE = int(Z'00000004', c_int)
+  integer(c_int), parameter :: READ_WRITE = int(Z'00000007', c_int)
+  integer(c_int), parameter :: DISCARD_MASK = int(Z'10000000', c_int)
+  integer(c_int), parameter :: WRITE_ONLY = int(Z'10000002', c_int)
+  integer(c_int), parameter :: WRITE_DISCARD = int(Z'10000007', c_int)
 
   ! legion_coherence_property_t
   integer(c_int), parameter :: EXCLUSIVE = 0

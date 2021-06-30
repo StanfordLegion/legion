@@ -2590,7 +2590,7 @@ namespace Legion {
       if (reduction)
         return LEGION_GC_FIRST_PRIORITY;
       if (meets_fill_constraints && (kind == TASK_MAPPING))
-        return LEGION_GC_NEVER_PRIORITY;
+        return LEGION_GC_NEVER_PRIORITY + 1;
       return LEGION_GC_DEFAULT_PRIORITY;
     }
 
