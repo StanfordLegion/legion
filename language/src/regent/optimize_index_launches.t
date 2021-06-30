@@ -34,6 +34,13 @@ local function get_source_location(node)
   return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
 end
 
+local function get_partition_symbol(expr)
+  if expr:is(ast.typed.expr.Projection) then
+    return expr.region.value.value
+  end
+  return expr.value.value
+end
+
 function context:__index (field)
   local value = context [field]
   if value ~= nil then
@@ -1161,13 +1168,13 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           if not passed then
             if emit_dynamic_check then
               for _, failure in pairs(failures_i) do
-                if arg.value.value == args[failure].value.value then
+                if get_partition_symbol(arg) == get_partition_symbol(args[failure]) then
                   table.insert(args_need_dynamic_check, { i, failure })
                 end
               end
             else
               report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
-                  " interferes with argument " .. tostring(failure_i))
+                   " interferes with argument " .. tostring(failures_i[1]))
               return
             end
           end
@@ -1277,23 +1284,23 @@ local function collect_and_sort_args(args, call_args, task, param_region_types)
   local collected = {}
   for _, arg in pairs(args) do
     if type(arg) == "number" then
-      local pname = call_args[arg].value.value
-      collected[pname] = collected[pname] or {}
-      collected[pname][arg] = true
+      local psym = get_partition_symbol(call_args[arg])
+      collected[psym] = collected[psym] or {}
+      collected[psym][arg] = true
     else
       -- Cross-check args are pairs
-      local pname = call_args[arg[1]].value.value
-      collected[pname] = collected[pname] or {}
-      collected[pname][arg[1]] = true
-      collected[pname][arg[2]] = true
+      local psym = get_partition_symbol(call_args[arg[1]])
+      collected[psym] = collected[psym] or {}
+      collected[psym][arg[1]] = true
+      collected[psym][arg[2]] = true
     end
   end
 
   local array = {}
-  for pname, args in pairs(collected) do
-    array[pname] = {}
+  for psym, args in pairs(collected) do
+    array[psym] = {}
     for arg, v in pairs(args) do
-      if v then table.insert(array[pname], arg) end
+      if v then table.insert(array[psym], arg) end
     end 
   end
 
@@ -1353,11 +1360,11 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   for _, args in pairs(collected_args) do
     local stats = terralib.newlist()
 
-    local dim = call_args[args[1]].expr_type:ispace().dim
+    local dim = std.as_read(call_args[args[1]].value.expr_type).colors_symbol.symbol_type.dim
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
-      util.mk_expr_id(call_args[args[1]].value.value), "colors", std.ispace(index_types[dim]))
+      util.mk_expr_id(get_partition_symbol(call_args[args[1]])), "colors", std.ispace(index_types[dim]))
     local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
     local volume = std.newsymbol(int64, "volume")
     stats:insert(
@@ -1390,7 +1397,11 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
         index_expr = call_args[arg].index.arg
       else
-        index_expr = call_args[arg].index
+        if call_args[arg]:is(ast.typed.expr.Projection) then
+          index_expr = call_args[arg].region.index
+        else
+          index_expr = call_args[arg].index
+        end
       end
 
       -- Assign: value = collapse(index_expr)
