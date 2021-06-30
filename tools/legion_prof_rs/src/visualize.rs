@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
+use std::convert::TryFrom;
 use std::fmt;
 use std::fs::{create_dir, remove_dir_all, File};
 use std::io;
@@ -11,8 +12,9 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, Mem, MemID, MemKind, MemPoint, NodeID,
-    OpID, Proc, ProcEntry, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpace, Inst,
+    Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry, ProcID,
+    ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -90,9 +92,9 @@ struct ProcessorRecord {
 }
 
 #[derive(Serialize, Copy, Clone)]
-struct ScaleRecord<'a> {
-    start: &'a str,
-    end: &'a str,
+struct ScaleRecord {
+    start: f64,
+    end: f64,
     stats_levels: u64,
     max_level: u32,
 }
@@ -312,9 +314,9 @@ impl Proc {
     }
 }
 
-struct CopySize(u64);
+struct SizePretty(u64);
 
-impl fmt::Display for CopySize {
+impl fmt::Display for SizePretty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.0 >= (1024 * 1024 * 1024) {
             // GBs
@@ -344,6 +346,73 @@ impl fmt::Display for CopyInfoVec<'_> {
     }
 }
 
+#[derive(Debug)]
+pub struct MemKindShort(pub MemKind);
+
+impl fmt::Display for MemKindShort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            MemKind::NoMemKind => write!(f, "none"),
+            MemKind::Global => write!(f, "glob"),
+            MemKind::System => write!(f, "sys"),
+            MemKind::Registered => write!(f, "reg"),
+            MemKind::Socket => write!(f, "sock"),
+            MemKind::ZeroCopy => write!(f, "zcpy"),
+            MemKind::Framebuffer => write!(f, "fb"),
+            MemKind::Disk => write!(f, "disk"),
+            MemKind::HDF5 => write!(f, "hdf5"),
+            MemKind::File => write!(f, "file"),
+            MemKind::L3Cache => write!(f, "l3"),
+            MemKind::L2Cache => write!(f, "l2"),
+            MemKind::L1Cache => write!(f, "l1"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MemShort<'a>(pub &'a Mem, pub &'a MemProcAffinity, pub &'a State);
+
+impl fmt::Display for MemShort<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (mem, affinity, state) = (self.0, self.1, self.2);
+
+        let proc = state.procs.get(&affinity.proc_ids[0]).unwrap();
+
+        match mem.kind {
+            MemKind::NoMemKind | MemKind::Global => write!(f, "[all n]"),
+            MemKind::System
+            | MemKind::Registered
+            | MemKind::Socket
+            | MemKind::ZeroCopy
+            | MemKind::Disk
+            | MemKind::HDF5
+            | MemKind::File
+            | MemKind::L3Cache => {
+                write!(
+                    f,
+                    "[n{}] {}",
+                    mem.mem_id.node_id().0,
+                    MemKindShort(mem.kind)
+                )
+            }
+            MemKind::Framebuffer => write!(
+                f,
+                "[n{}][gpu{}] {}",
+                proc.proc_id.node_id().0,
+                proc.proc_id.proc_in_node(),
+                MemKindShort(mem.kind)
+            ),
+            MemKind::L2Cache | MemKind::L1Cache => write!(
+                f,
+                "[n{}][cpu{}] {}",
+                proc.proc_id.node_id().0,
+                proc.proc_id.proc_in_node(),
+                MemKindShort(mem.kind)
+            ),
+        }
+    }
+}
+
 impl Chan {
     fn emit_tsv_point(
         &self,
@@ -351,20 +420,20 @@ impl Chan {
         point: &ChanPoint,
         state: &State,
     ) -> io::Result<()> {
-        let (base, time_range, waiters) = self.entry(point.entry);
+        let (base, time_range, _) = self.entry(point.entry);
         let name = match point.entry {
             ChanEntry::Copy(idx) => {
                 let copy = &self.copies[idx];
                 let nreqs = copy.copy_info.len();
                 if nreqs > 0 {
                     format!(
-                        "size={}, num reqs={}, {}",
-                        CopySize(copy.size),
+                        "size={}, num reqs={}{}",
+                        SizePretty(copy.size),
                         nreqs,
                         CopyInfoVec(&copy.copy_info)
                     )
                 } else {
-                    format!("size={}, num reqs={}", CopySize(copy.size), nreqs)
+                    format!("size={}, num reqs={}", SizePretty(copy.size), nreqs)
                 }
             }
             ChanEntry::Fill(_) => {
@@ -435,13 +504,26 @@ impl Chan {
 
         let short_name = match (self.channel_id.src, self.channel_id.dst) {
             (Some(src), Some(dst)) => format!(
-                "[n{}] {} to [n{}] {}",
-                src.node_id().0,
-                mem_kind(src),
-                dst.node_id().0,
-                mem_kind(dst)
+                "{} to {}",
+                MemShort(
+                    state.mems.get(&src).unwrap(),
+                    state.mem_proc_affinity.get(&src).unwrap(),
+                    state
+                ),
+                MemShort(
+                    state.mems.get(&dst).unwrap(),
+                    state.mem_proc_affinity.get(&dst).unwrap(),
+                    state
+                )
             ),
-            (None, Some(dst)) => format!("[n{}] {}", dst.node_id().0, mem_kind(dst)),
+            (None, Some(dst)) => format!(
+                "{}",
+                MemShort(
+                    state.mems.get(&dst).unwrap(),
+                    state.mem_proc_affinity.get(&dst).unwrap(),
+                    state
+                )
+            ),
             (None, None) => format!("Dependent Partition Channel"),
             _ => unreachable!(),
         };
@@ -459,7 +541,7 @@ impl Chan {
             }
         }
 
-        let level = max(self.max_levels, 4) - 1;
+        let level = max(self.max_levels + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
@@ -470,6 +552,224 @@ impl Chan {
     }
 }
 
+#[derive(Debug)]
+pub struct ISpacePretty<'a>(pub &'a ISpace, pub &'a State);
+
+impl fmt::Display for ISpacePretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ISpacePretty(ispace, state) = self;
+
+        match &ispace.bounds {
+            Bounds::Empty => {
+                write!(f, "empty index space")?;
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        if let Some(name) = &ispace.name {
+            write!(f, "{}", name)?;
+        } else {
+            let parent = ispace.parent.and_then(|p_id| {
+                state
+                    .index_partitions
+                    .get(&p_id)
+                    .unwrap()
+                    .parent
+                    .map(|gp_id| state.index_spaces.get(&gp_id).unwrap())
+            });
+            if let Some(name) = parent.and_then(|p| p.name.as_ref()) {
+                write!(f, "{}", name)?;
+            } else if let Some(parent_id) = parent.map(|p| p.ispace_id) {
+                write!(f, "ispace:{}", parent_id.0)?;
+            } else {
+                write!(f, "ispace:{}", ispace.ispace_id.0)?;
+            }
+        }
+        if let Some(size) = &ispace.size {
+            if size.is_sparse {
+                write!(
+                    f,
+                    "[sparse:({} of {} points)]",
+                    size.sparse_size, size.dense_size
+                )?;
+                return Ok(());
+            }
+        }
+        match &ispace.bounds {
+            Bounds::Point { point, dim } => {
+                for x in &point[..*dim as usize] {
+                    write!(f, "[{}]", x)?;
+                }
+            }
+            Bounds::Rect { lo, hi, dim } => {
+                for (l, h) in lo.iter().zip(hi.iter()).take(*dim as usize) {
+                    write!(f, "[{}:{}]", l, h)?;
+                }
+            }
+            Bounds::Empty => unreachable!(),
+            Bounds::Unknown => {}
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FSpacePretty<'a>(pub &'a FSpace, pub &'a Inst);
+
+impl fmt::Display for FSpacePretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FSpacePretty(fspace, inst) = self;
+
+        if let Some(name) = &fspace.name {
+            write!(f, "{}", name)?;
+        } else {
+            write!(f, "fspace:{}", fspace.fspace_id.0)?;
+        }
+
+        let align_desc = inst.align_desc.get(&fspace.fspace_id).unwrap();
+        let fields = inst.fields.get(&fspace.fspace_id).unwrap();
+
+        let mut fields = fields.iter().enumerate().peekable();
+        if fields.peek().is_some() {
+            write!(f, "$Fields: [")?;
+            while let Some((i, field)) = fields.next() {
+                let align = &align_desc[i];
+                if let Some(fld) = fspace.fields.get(field) {
+                    write!(f, "{}", fld.name)?;
+                } else {
+                    write!(f, "fid:{}", field.0)?;
+                }
+                if align.has_align {
+                    write!(f, ":align={}", align.align_desc)?;
+                }
+                if fields.peek().is_some() {
+                    write!(f, ",")?;
+                }
+            }
+            write!(f, "]")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct DimOrderPretty<'a>(pub &'a Inst);
+
+impl fmt::Display for DimOrderPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inst = self.0;
+
+        let mut aos = false;
+        let mut soa = false;
+        let mut cmpx_order = false;
+        let mut column_major = 0;
+        let mut row_major = 0;
+        let dim_first = inst.dim_order.iter().next();
+        let dim_last = inst.dim_order.iter().last();
+        for (dim, dim_order) in &inst.dim_order {
+            if dim.0 == 0 {
+                if *dim_order == DimKind::DimF {
+                    aos = true;
+                }
+            } else {
+                if dim == dim_last.unwrap().0 {
+                    if *dim_order == DimKind::DimF {
+                        soa = true;
+                    }
+                } else {
+                    if *dim_order == DimKind::DimF {
+                        cmpx_order = true;
+                    }
+                }
+            }
+
+            // SOA + order -> DIM_X, DIM_Y,.. DIM_F-> column_major
+            // or .. DIM_Y, DIM_X, DIM_F? -> row_major
+            if *dim_last.unwrap().1 == DimKind::DimF {
+                if *dim_order != DimKind::DimF {
+                    if *dim_order == DimKind::try_from(dim.0).unwrap() {
+                        column_major += 1;
+                    }
+                    if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap()
+                    {
+                        row_major += 1;
+                    }
+                }
+            }
+
+            // AOS + order -> DIM_F, DIM_X, DIM_Y -> column_major
+            // or DIM_F, DIM_Y, DIM_X -> row_major?
+            if *dim_first.unwrap().1 == DimKind::DimF {
+                if *dim_order != DimKind::DimF {
+                    if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
+                        column_major += 1;
+                    }
+                    if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
+                        row_major += 1;
+                    }
+                }
+            }
+        }
+        if dim_last.map_or(false, |(d, _)| d.0 != 1) {
+            if column_major == dim_last.unwrap().0 .0 && !cmpx_order {
+                write!(f, "[Column Major]")?;
+            } else if row_major == dim_last.unwrap().0 .0 && !cmpx_order {
+                write!(f, "[Row Major]")?;
+            }
+        }
+        if cmpx_order {
+            for (dim, dim_order) in &inst.dim_order {
+                write!(f, "[{:?}]", dim_order)?;
+                if (dim.0 + 1) % 4 == 0 && dim != dim_last.unwrap().0 {
+                    write!(f, "$")?;
+                }
+            }
+        } else if aos {
+            write!(f, "[Array-of-structs (AOS)]")?;
+        } else if soa {
+            write!(f, "[Struct-of-arrays (SOA)]")?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct InstPretty<'a>(pub &'a Inst, pub &'a State);
+
+impl fmt::Display for InstPretty<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let InstPretty(inst, state) = self;
+
+        let mut ispace_ids = inst.ispace_ids.iter().enumerate().peekable();
+        while let Some((i, ispace_id)) = ispace_ids.next() {
+            let ispace = state.index_spaces.get(&ispace_id).unwrap();
+            let fspace_id = inst.fspace_ids[i];
+            let fspace = state.field_spaces.get(&fspace_id).unwrap();
+
+            write!(
+                f,
+                "Region: {} x {}",
+                ISpacePretty(&ispace, state),
+                FSpacePretty(fspace, inst),
+            )?;
+            if ispace_ids.peek().is_some() {
+                write!(f, "$")?;
+            }
+        }
+        write!(
+            f,
+            "$Layout Order: {} $Inst: 0x{:x} $Size: {}",
+            DimOrderPretty(inst),
+            inst.inst_id.0,
+            SizePretty(inst.size.unwrap())
+        )?;
+
+        Ok(())
+    }
+}
+
 impl Mem {
     fn emit_tsv_point(
         &self,
@@ -477,9 +777,9 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
-        let inst = state.instances.get(&point.entry).unwrap();
+        let inst = self.instances.get(&point.entry).unwrap();
         let (base, time_range, deps) = (&inst.base, &inst.time_range, &inst.deps);
-        let name = format!("size={}", CopySize(inst.size.unwrap()));
+        let name = format!("{}", InstPretty(inst, state));
 
         let initiation = deps.op_id;
 
@@ -513,7 +813,14 @@ impl Mem {
 
         let long_name = format!("{} Memory 0x{:x}", mem_kind(self.mem_id), &self.mem_id);
 
-        let short_name = format!("[n{}] {}", self.mem_id.node_id().0, mem_kind(self.mem_id));
+        let short_name = format!(
+            "{}",
+            MemShort(
+                self,
+                state.mem_proc_affinity.get(&self.mem_id).unwrap(),
+                state
+            )
+        );
 
         let mut filename = PathBuf::new();
         filename.push("tsv");
@@ -557,6 +864,23 @@ impl State {
                     .unwrap()
             },
         )
+    }
+
+    fn has_multiple_nodes(&self) -> bool {
+        let mut node = None;
+        for proc in self.procs.values() {
+            match node {
+                Some(n) => {
+                    if n != proc.proc_id.node_id() {
+                        return true;
+                    }
+                }
+                None => {
+                    node = Some(proc.proc_id.node_id());
+                }
+            }
+        }
+        false
     }
 
     fn group_node_proc_kind_timepoints(
@@ -715,7 +1039,9 @@ impl State {
         let mut last_time = None;
 
         for point in points {
-            let inst = self.instances.get(&point.entry).unwrap();
+            let mem_id = self.instances.get(&point.entry).unwrap();
+            let mem = self.mems.get(&mem_id).unwrap();
+            let inst = mem.instances.get(&point.entry).unwrap();
             if point.first {
                 count += inst.size.unwrap();
             } else {
@@ -945,42 +1271,49 @@ impl State {
 
         let mut stats = BTreeMap::new();
 
+        let multinode = self.has_multiple_nodes();
         for group in timepoint_proc.keys() {
             let (node, kind) = group;
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} ({:?})", &node_name, kind);
-            stats
-                .entry(node_name)
-                .or_insert_with(|| Vec::new())
-                .push(group_name);
+            if node.is_some() || multinode {
+                let node_name = match node {
+                    None => "all".to_owned(),
+                    Some(node_id) => format!("{}", node_id.0),
+                };
+                let group_name = format!("{} ({:?})", &node_name, kind);
+                stats
+                    .entry(node_name)
+                    .or_insert_with(|| Vec::new())
+                    .push(group_name);
+            }
         }
 
         for group in timepoint_mem.keys() {
             let (node, kind) = group;
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} ({} Memory)", &node_name, kind);
-            stats
-                .entry(node_name)
-                .or_insert_with(|| Vec::new())
-                .push(group_name);
+            if node.is_some() || multinode {
+                let node_name = match node {
+                    None => "all".to_owned(),
+                    Some(node_id) => format!("{}", node_id.0),
+                };
+                let group_name = format!("{} ({} Memory)", &node_name, kind);
+                stats
+                    .entry(node_name)
+                    .or_insert_with(|| Vec::new())
+                    .push(group_name);
+            }
         }
 
         for node in timepoint_chan.keys() {
-            let node_name = match node {
-                None => "all".to_owned(),
-                Some(node_id) => format!("{}", node_id.0),
-            };
-            let group_name = format!("{} (Channel)", &node_name);
-            stats
-                .entry(node_name)
-                .or_insert_with(|| Vec::new())
-                .push(group_name);
+            if node.is_some() || multinode {
+                let node_name = match node {
+                    None => "all".to_owned(),
+                    Some(node_id) => format!("{}", node_id.0),
+                };
+                let group_name = format!("{} (Channel)", &node_name);
+                stats
+                    .entry(node_name)
+                    .or_insert_with(|| Vec::new())
+                    .push(group_name);
+            }
         }
 
         let path = path.as_ref();
@@ -1094,7 +1427,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     let mut base_level = 0;
     for record in proc_records.values() {
-        base_level += record.levels;
+        base_level += record.levels + 1;
     }
 
     let channels = state.channels.values().collect::<Vec<_>>();
@@ -1107,6 +1440,10 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         })
         .collect::<io::Result<_>>()?;
 
+    for record in chan_records.values() {
+        base_level += record.levels + 1;
+    }
+
     let mems = state.mems.values().collect::<Vec<_>>();
     let mem_records: BTreeMap<_, _> = mems
         .par_iter()
@@ -1116,6 +1453,10 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                 .map(|record| (mem.mem_id, record))
         })
         .collect::<io::Result<_>>()?;
+
+    for record in mem_records.values() {
+        base_level += record.levels + 1;
+    }
 
     state.emit_utilization_tsv(&path)?;
 
@@ -1168,8 +1509,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     {
         let stats_levels = 4;
         let scale_data = ScaleRecord {
-            start: "0",
-            end: &format!("{:.3}", state.last_time.0 as f64 * 1.01 / 1000.),
+            start: 0.0,
+            end: (state.last_time.0 as f64 * 1.01).ceil() / 1000.0,
             stats_levels: stats_levels,
             max_level: base_level + 1,
         };
@@ -1177,6 +1518,12 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let filename = path.join("json").join("scale.json");
         let file = File::create(filename)?;
         serde_json::to_writer(&file, &scale_data)?;
+    }
+
+    {
+        let filename = path.join("json").join("critical_path.json");
+        let mut file = File::create(filename)?;
+        write!(file, "[]")?;
     }
 
     Ok(())

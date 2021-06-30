@@ -817,7 +817,7 @@ class Memory(object):
         if self.affinity is not None:
             return self.affinity.get_short_text()
         else:
-            return " [n" + str(self.node_id) + "]" + memory_kinds_abbr[self.kind]
+            return "[n" + str(self.node_id) + "]" + memory_kinds_abbr[self.kind]
 
     def add_instance(self, inst):
         self.instances.add(inst)
@@ -944,11 +944,11 @@ class MemProcAffinity(object):
         if memory_node_proc[self.mem.kind] == "None":
             return "[all n]"
         elif memory_node_proc[self.mem.kind] == "Node_id":
-            return " [n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "GPU_proc_id":
-            return " [n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "Proc_id":
-            return " [n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         else:
             return ""
 
@@ -1103,16 +1103,37 @@ class Channel(object):
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
     def __cmp__(a, b):
-        if a.dst:
-            if b.dst:
-                return a.dst.__cmp__(b.dst)
+        if a.src:
+            if b.src:
+                x = a.src.__cmp__(b.src)
+                if x != 0:
+                    return x
+                if a.dst:
+                    if b.dst:
+                        return a.dst.__cmp__(b.dst)
+                    else:
+                        return 1
+                else:
+                    if b.dst:
+                        return -1
+                    else:
+                        return 0
             else:
                 return 1
         else:
-            if b.dst:
+            if b.src:
                 return -1
             else:
-                return 0
+                if a.dst:
+                    if b.dst:
+                        return a.dst.__cmp__(b.dst)
+                    else:
+                        return 1
+                else:
+                    if b.dst:
+                        return -1
+                    else:
+                        return 0
 
     def __lt__(self, other):
         return self.__cmp__(other) < 0
@@ -1719,8 +1740,6 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
 
     def __repr__(self):
         val =  'size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
-        if len(self.copy_info) > 0:
-            val += ', '
         cnt = 0
         for node in self.copy_info:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -1918,7 +1937,6 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         for pos in range(0, len(self.ispace)):
             output_str = output_str + "Region: " + self.ispace[pos].get_short_text()
             output_str = output_str + " x " + str(self.fspace[pos])
-            max_len = 40
             key = self.fspace[pos]
             fieldlist = []
             count = 0
@@ -1933,13 +1951,10 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                     else:
                         align_str = ""
                     if count == 0:
-                        output_str = output_str + '[' + str(f) + align_str
+                        output_str = output_str + '$Fields: [' + str(f) + align_str
                     else:
                         output_str = output_str + ',' + str(f) + align_str
                     count = count + 1
-                    if len(output_str) > max_len and len(fieldlist) > 1:
-                        output_str = output_str + '$'
-                        max_len = len(output_str) + 40
                 if (count > 0):
                     output_str = output_str + ']'
             pend =len(self.ispace)-1
@@ -2836,6 +2851,8 @@ class State(object):
     def log_proftask_info(self, proc_id, op_id, start, stop):
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
+        if stop > self.last_time:
+            self.last_time = stop
         proftask = ProfTask(op_id, start, start, start, stop)
         proc = self.find_processor(proc_id)
         proc.add_task(proftask)
@@ -3400,7 +3417,7 @@ class State(object):
         # now we compute the structure of the stats (the parent-child
         # relationships
         nodes = self.get_nodes()
-        stats_structure = {node: [] for node in nodes}
+        stats_structure = {node: [] for node in sorted(nodes)}
 
         # for each node grouping, add all the subtypes of processors
         for node in nodes:
@@ -3420,7 +3437,7 @@ class State(object):
 
         with open(json_file_name, "w") as json_file:
             # json.dump(timepoints_dict.keys(), json_file)
-            json.dump(stats_structure, json_file)
+            json.dump(stats_structure, json_file, separators=(',', ':'))
 
         # here we write out the actual tsv stats files
         for tp_group in timepoints_dict:
@@ -3922,14 +3939,14 @@ class State(object):
         stats_levels = 4
 
         scale_data = {
-            'start': 0,
-            'end': last_time * 1.01,
+            'start': 0.0,
+            'end': math.ceil(last_time * 1000. * 1.01)/1000.,
             'stats_levels': stats_levels,
             'max_level': base_level + 1
         }
 
         with open(scale_json_file_name, "w") as scale_json_file:
-            json.dump(scale_data, scale_json_file)
+            json.dump(scale_data, scale_json_file, separators=(',', ':'))
 
 def main():
     class MyParser(argparse.ArgumentParser):
