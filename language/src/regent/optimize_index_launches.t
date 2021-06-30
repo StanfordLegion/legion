@@ -41,6 +41,14 @@ local function get_partition_symbol(expr)
   return expr.value.value
 end
 
+local function get_partition_dim(expr)
+  if expr:is(ast.typed.expr.Projection) then
+    return std.as_read(expr.region.value.expr_type).colors_symbol.symbol_type.dim
+  else
+    return std.as_read(expr.value.expr_type).colors_symbol.symbol_type.dim
+  end
+end
+
 function context:__index (field)
   local value = context [field]
   if value ~= nil then
@@ -1307,10 +1315,17 @@ local function collect_and_sort_args(args, call_args, task, param_region_types)
   for _, args in pairs(array) do
     table.sort(args, function(p, q)
       local p_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[p], task)
-      if p_privileges[1] == "reads_writes" or string.find(p_privileges[1], "reduces") then
+      local q_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[q], task)
+
+      local p_has_WR = p_privileges[1] == "reads_writes" or string.find(p_privileges[1], "reduces")
+      local q_has_WR = q_privileges[1] == "reads_writes" or string.find(q_privileges[1], "reduces")
+
+      if p_has_WR and not q_has_WR then
         return true
+      elseif q_has_WR and not p_has_WR then
+        return false
       end
-      return false
+      return p < q
     end)
   end
 
@@ -1360,7 +1375,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   for _, args in pairs(collected_args) do
     local stats = terralib.newlist()
 
-    local dim = std.as_read(call_args[args[1]].value.expr_type).colors_symbol.symbol_type.dim
+    local dim = get_partition_dim(call_args[args[1]])
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
