@@ -769,7 +769,7 @@ namespace Legion {
 #endif
       while ((index + sizeof(T)) > total_bytes)
         resize();
-      memcpy(buffer+index, &element, sizeof(T));
+      memcpy(buffer+index, (const void*)&element, sizeof(T));
       index += sizeof(T);
 #ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
@@ -784,7 +784,7 @@ namespace Legion {
       static_assert(sizeof(bool) <= 4, "huge bool");
       while ((index + 4) > total_bytes)
         resize();
-      memcpy(buffer+index, &element, sizeof(bool));
+      memcpy(buffer+index, (const void*)&element, sizeof(bool));
       index += 4;
 #ifdef DEBUG_LEGION
       context_bytes += 4;
