@@ -218,8 +218,6 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    app_ranges: Vec<()>,
-    last_time: Option<Timestamp>,
     pub tasks: BTreeMap<OpID, Task>,
     pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<MetaTask>>,
     pub mapper_calls: Vec<MapperCall>,
@@ -236,8 +234,6 @@ impl Proc {
         Proc {
             proc_id,
             kind,
-            app_ranges: Vec::new(),
-            last_time: None,
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
             mapper_calls: Vec::new(),
@@ -480,11 +476,9 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub instances: BTreeMap<(InstID, OpID), Inst>,
+    pub insts: BTreeMap<(InstID, OpID), Inst>,
     pub time_points: Vec<MemPoint>,
-    pub max_live_instances: u32,
-    last_time: Option<Timestamp>,
-    affinity: Option<u64>,
+    pub max_live_insts: u32,
 }
 
 impl Mem {
@@ -493,34 +487,32 @@ impl Mem {
             mem_id,
             kind,
             capacity,
-            instances: BTreeMap::new(),
+            insts: BTreeMap::new(),
             time_points: Vec::new(),
-            max_live_instances: 0,
-            last_time: None,
-            affinity: None,
+            max_live_insts: 0,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.instances.is_empty()
+        self.insts.is_empty()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
         // BTreeMap::retain requires Rust 1.53
         let mut removed_insts = Vec::new();
-        for (key, inst) in self.instances.iter_mut() {
+        for (key, inst) in self.insts.iter_mut() {
             inst.trim_time_range(start, stop);
             if inst.time_range.was_removed {
                 removed_insts.push(*key);
             }
         }
         for op_id in removed_insts {
-            self.instances.remove(&op_id);
+            self.insts.remove(&op_id);
         }
     }
 
     fn sort_time_range(&mut self) {
-        for (key, inst) in &self.instances {
+        for (key, inst) in &self.insts {
             self.time_points.push(MemPoint::new(
                 inst.time_range.start.unwrap(),
                 *key,
@@ -544,22 +536,16 @@ impl Mem {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
                 } else {
-                    self.max_live_instances += 1;
-                    self.max_live_instances
+                    self.max_live_insts += 1;
+                    self.max_live_insts
                 };
-                self.instances
+                self.insts
                     .get_mut(&point.entry)
                     .unwrap()
                     .base
                     .set_level(level);
             } else {
-                let level = self
-                    .instances
-                    .get(&point.entry)
-                    .unwrap()
-                    .base
-                    .level
-                    .unwrap();
+                let level = self.insts.get(&point.entry).unwrap().base.level.unwrap();
                 free_levels.push(Reverse(level));
             }
         }
@@ -630,7 +616,7 @@ impl ChanID {
 
 #[derive(Debug)]
 pub struct Chan {
-    pub channel_id: ChanID,
+    pub chan_id: ChanID,
     pub copies: Vec<Copy>,
     pub fills: Vec<Fill>,
     pub depparts: Vec<DepPart>,
@@ -639,9 +625,9 @@ pub struct Chan {
 }
 
 impl Chan {
-    fn new(channel_id: ChanID) -> Self {
+    fn new(chan_id: ChanID) -> Self {
         Chan {
-            channel_id,
+            chan_id,
             copies: Vec::new(),
             fills: Vec::new(),
             depparts: Vec::new(),
@@ -1220,7 +1206,6 @@ pub struct VariantID(pub u32);
 pub struct Variant {
     variant_id: VariantID,
     pub name: String,
-    op: BTreeMap<u64, ()>,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
 }
@@ -1229,7 +1214,6 @@ impl Variant {
     fn new(variant_id: VariantID, name: &String) -> Self {
         Variant {
             variant_id,
-            op: BTreeMap::new(),
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -1786,7 +1770,7 @@ pub struct State {
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
     pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
-    pub channels: BTreeMap<ChanID, Chan>,
+    pub chans: BTreeMap<ChanID, Chan>,
     pub task_kinds: BTreeMap<TaskID, TaskKind>,
     pub variants: BTreeMap<(TaskID, VariantID), Variant>,
     pub meta_variants: BTreeMap<VariantID, Variant>,
@@ -1798,7 +1782,7 @@ pub struct State {
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub instances: BTreeMap<(InstID, OpID), MemID>,
+    pub insts: BTreeMap<(InstID, OpID), MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
@@ -1937,11 +1921,11 @@ impl State {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
 
-        let channel_id = ChanID::new_copy(src, dst);
-        let channel = self.find_channel_mut(channel_id);
+        let chan_id = ChanID::new_copy(src, dst);
+        let chan = self.find_chan_mut(chan_id);
 
-        let copy_id = channel.copies.len();
-        channel.copies.push(Copy::new(
+        let copy_id = chan.copies.len();
+        chan.copies.push(Copy::new(
             base,
             src,
             dst,
@@ -1955,59 +1939,58 @@ impl State {
 
         self.copy_map
             .entry(fevent)
-            .or_insert_with(|| (channel_id, copy_id));
+            .or_insert_with(|| (chan_id, copy_id));
     }
 
     fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
-        let (channel_id, channel_idx) = *self.copy_map.get(&fevent)?;
-        Some(&mut self.find_channel_mut(channel_id).copies[channel_idx])
+        let (chan_id, copy_idx) = *self.copy_map.get(&fevent)?;
+        Some(&mut self.find_chan_mut(chan_id).copies[copy_idx])
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_fill_channel_mut(dst);
-        channel.fills.push(Fill::new(base, dst, op_id, time_range));
+        let chan = self.find_fill_chan_mut(dst);
+        chan.fills.push(Fill::new(base, dst, op_id, time_range));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_deppart_channel_mut();
-        channel
-            .depparts
+        let chan = self.find_deppart_chan_mut();
+        chan.depparts
             .push(DepPart::new(base, part_op, op_id, time_range));
     }
 
-    fn find_channel_mut(&mut self, channel_id: ChanID) -> &mut Chan {
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
+    fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
+        self.chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_fill_channel_mut(&mut self, dst: MemID) -> &mut Chan {
-        let channel_id = ChanID::new_fill(dst);
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
+    fn find_fill_chan_mut(&mut self, dst: MemID) -> &mut Chan {
+        let chan_id = ChanID::new_fill(dst);
+        self.chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_deppart_channel_mut(&mut self) -> &mut Chan {
-        let channel_id = ChanID::new_deppart();
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
+    fn find_deppart_chan_mut(&mut self) -> &mut Chan {
+        let chan_id = ChanID::new_deppart();
+        self.chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn create_instance<'a>(
+    fn create_inst<'a>(
         &'a mut self,
         inst_id: InstID,
         op_id: OpID,
-        instances: &'a mut BTreeMap<(InstID, OpID), Inst>,
+        insts: &'a mut BTreeMap<(InstID, OpID), Inst>,
     ) -> &'a mut Inst {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        instances
+        insts
             .entry((inst_id, op_id))
             .or_insert_with(|| Inst::new(Base::new(alloc), inst_id, op_id))
     }
@@ -2039,14 +2022,14 @@ impl State {
         // immediately linked to their associated memory from the
         // logs. Therefore we defer this process until all records
         // have been processed.
-        let mut instances = BTreeMap::new();
+        let mut insts = BTreeMap::new();
         for record in records {
-            process_record(record, self, &mut instances);
+            process_record(record, self, &mut insts);
         }
-        for (key, inst) in instances {
+        for (key, inst) in insts {
             if let Some(mem_id) = inst.mem_id {
                 let mem = self.mems.get_mut(&mem_id).unwrap();
-                mem.instances.insert(key, inst);
+                mem.insts.insert(key, inst);
             } else {
                 unreachable!();
             }
@@ -2070,8 +2053,8 @@ impl State {
         for mem in self.mems.values_mut() {
             mem.trim_time_range(start, stop);
         }
-        for channel in self.channels.values_mut() {
-            channel.trim_time_range(start, stop);
+        for chan in self.chans.values_mut() {
+            chan.trim_time_range(start, stop);
         }
 
         self.last_time = stop - start;
@@ -2084,9 +2067,9 @@ impl State {
         self.mems
             .par_iter_mut()
             .for_each(|(_, mem)| mem.sort_time_range());
-        self.channels
+        self.chans
             .par_iter_mut()
-            .for_each(|(_, channel)| channel.sort_time_range());
+            .for_each(|(_, chan)| chan.sort_time_range());
     }
 
     pub fn assign_colors(&mut self) {
@@ -2123,11 +2106,7 @@ impl State {
     }
 }
 
-fn process_record(
-    record: &Record,
-    state: &mut State,
-    instances: &mut BTreeMap<(InstID, OpID), Inst>,
-) {
+fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(InstID, OpID), Inst>) {
     match record {
         Record::MapperCallDesc { kind, name } => {
             state
@@ -2285,7 +2264,7 @@ fn process_record(
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_instance(*inst_id, *op_id, instances)
+                .create_inst(*inst_id, *op_id, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
@@ -2302,7 +2281,7 @@ fn process_record(
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_instance(*inst_id, *op_id, instances)
+                .create_inst(*inst_id, *op_id, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
@@ -2318,7 +2297,7 @@ fn process_record(
                 Err(_) => unreachable!("bad dim kind"),
             };
             state
-                .create_instance(*inst_id, *op_id, instances)
+                .create_inst(*inst_id, *op_id, insts)
                 .add_dim_order(dim, dim_kind);
         }
         Record::TaskKind {
@@ -2490,7 +2469,7 @@ fn process_record(
             create,
         } => {
             state
-                .create_instance(*inst_id, *op_id, instances)
+                .create_inst(*inst_id, *op_id, insts)
                 .set_start(*create);
         }
         Record::InstUsageInfo {
@@ -2500,11 +2479,11 @@ fn process_record(
             size,
         } => {
             state
-                .instances
+                .insts
                 .entry((*inst_id, *op_id))
                 .or_insert_with(|| *mem_id);
             state
-                .create_instance(*inst_id, *op_id, instances)
+                .create_inst(*inst_id, *op_id, insts)
                 .set_mem(*mem_id)
                 .set_size(*size);
         }
@@ -2515,7 +2494,7 @@ fn process_record(
             destroy,
         } => {
             state
-                .create_instance(*inst_id, *op_id, instances)
+                .create_inst(*inst_id, *op_id, insts)
                 .set_start_stop(*create, *destroy);
             state.update_last_time(*destroy);
         }

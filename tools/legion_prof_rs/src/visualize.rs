@@ -476,7 +476,7 @@ impl Chan {
 
     fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
         let mem_kind = |mem_id: MemID| state.mems.get(&mem_id).unwrap().kind;
-        let slug = match (self.channel_id.src, self.channel_id.dst) {
+        let slug = match (self.chan_id.src, self.chan_id.dst) {
             (Some(src), Some(dst)) => format!(
                 "({}_Memory_0x{:x},_{}_Memory_0x{:x})",
                 mem_kind(src),
@@ -489,7 +489,7 @@ impl Chan {
             _ => unreachable!(),
         };
 
-        let long_name = match (self.channel_id.src, self.channel_id.dst) {
+        let long_name = match (self.chan_id.src, self.chan_id.dst) {
             (Some(src), Some(dst)) => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
                 mem_kind(src),
@@ -502,7 +502,7 @@ impl Chan {
             _ => unreachable!(),
         };
 
-        let short_name = match (self.channel_id.src, self.channel_id.dst) {
+        let short_name = match (self.chan_id.src, self.chan_id.dst) {
             (Some(src), Some(dst)) => format!(
                 "{} to {}",
                 MemShort(
@@ -777,7 +777,7 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
-        let inst = self.instances.get(&point.entry).unwrap();
+        let inst = self.insts.get(&point.entry).unwrap();
         let (base, time_range, deps) = (&inst.base, &inst.time_range, &inst.deps);
         let name = format!("{}", InstPretty(inst, state));
 
@@ -785,7 +785,7 @@ impl Mem {
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
 
-        let level = max(self.max_live_instances + 1, 4) - base.level.unwrap();
+        let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
 
         f.serialize(DataRecord {
             level,
@@ -835,7 +835,7 @@ impl Mem {
             }
         }
 
-        let level = max(self.max_live_instances + 1, 4) - 1;
+        let level = max(self.max_live_insts + 1, 4) - 1;
 
         Ok(ProcessorRecord {
             full_text: long_name,
@@ -934,7 +934,7 @@ impl State {
     ) -> BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>> {
         let mut result = BTreeMap::new();
 
-        for (chan_id, chan) in &self.channels {
+        for (chan_id, chan) in &self.chans {
             if !chan.time_points.is_empty() {
                 if chan_id.node_id().is_some() {
                     let mut nodes = vec![
@@ -1039,9 +1039,9 @@ impl State {
         let mut last_time = None;
 
         for point in points {
-            let mem_id = self.instances.get(&point.entry).unwrap();
+            let mem_id = self.insts.get(&point.entry).unwrap();
             let mem = self.mems.get(&mem_id).unwrap();
-            let inst = mem.instances.get(&point.entry).unwrap();
+            let inst = mem.insts.get(&point.entry).unwrap();
             if point.first {
                 count += inst.size.unwrap();
             } else {
@@ -1430,13 +1430,13 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         base_level += record.levels + 1;
     }
 
-    let channels = state.channels.values().collect::<Vec<_>>();
-    let chan_records: BTreeMap<_, _> = channels
+    let chans = state.chans.values().collect::<Vec<_>>();
+    let chan_records: BTreeMap<_, _> = chans
         .par_iter()
         .filter(|chan| !chan.is_empty())
         .map(|chan| {
             chan.emit_tsv(&path, state)
-                .map(|record| (chan.channel_id, record))
+                .map(|record| (chan.chan_id, record))
         })
         .collect::<io::Result<_>>()?;
 
