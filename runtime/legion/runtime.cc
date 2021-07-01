@@ -3336,17 +3336,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::set_future_map_coordinates(
-                            std::vector<std::pair<size_t,DomainPoint> > &coords)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(coordinates.empty());
-#endif
-      coordinates.swap(coords);
-    }
-
-    //--------------------------------------------------------------------------
     void FutureMapImpl::pack_future_map(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -3354,16 +3343,6 @@ namespace Legion {
       rez.serialize(future_map_domain);
       rez.serialize(get_ready_event());
       rez.serialize(op_ctx_index);
-      if (runtime->safe_control_replication)
-      {
-        rez.serialize<size_t>(coordinates.size());
-        for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
-              coordinates.begin(); it != coordinates.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -3381,21 +3360,8 @@ namespace Legion {
       derez.deserialize(ready_event);
       size_t index;
       derez.deserialize(index);
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
-      if (runtime->safe_control_replication)
-      {
-        size_t num_coordinates;
-        derez.deserialize(num_coordinates);
-        coordinates.resize(num_coordinates);
-        for (unsigned idx = 0; idx < num_coordinates; idx++)
-        {
-          std::pair<size_t,DomainPoint> &coord = coordinates[idx];
-          derez.deserialize(coord.first);
-          derez.deserialize(coord.second);
-        }
-      }
       return runtime->find_or_create_future_map(future_map_did, ctx, index,
-                      future_map_domain, ready_event, mutator, coordinates);
+                                  future_map_domain, ready_event, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -25904,8 +25870,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
                           TaskContext *ctx, size_t index, const Domain &domain,
-                          RtEvent complete, ReferenceMutator *mutator,
-                          std::vector<std::pair<size_t,DomainPoint> > &coords)
+                          RtEvent complete, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -25970,8 +25935,6 @@ namespace Legion {
           return result;
         }
         result->record_future_map_registered(mutator);
-        if (!coords.empty())
-          result->set_future_map_coordinates(coords);
         dist_collectables[did] = result;
       }
       return result;
