@@ -201,9 +201,6 @@ pub struct ProcID(pub u64);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EventID(pub u64);
-
 impl ProcID {
     // Important: keep this in sync with realm/id.h
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
@@ -221,8 +218,6 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    app_ranges: Vec<()>,
-    last_time: Option<Timestamp>,
     pub tasks: BTreeMap<OpID, Task>,
     pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<MetaTask>>,
     pub mapper_calls: Vec<MapperCall>,
@@ -239,8 +234,6 @@ impl Proc {
         Proc {
             proc_id,
             kind,
-            app_ranges: Vec::new(),
-            last_time: None,
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
             mapper_calls: Vec::new(),
@@ -320,6 +313,7 @@ impl Proc {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
+        // BTreeMap::retain requires Rust 1.53
         let mut removed_tasks = Vec::new();
         for (op_id, task) in self.tasks.iter_mut() {
             task.trim_time_range(start, stop);
@@ -344,7 +338,7 @@ impl Proc {
         self.prof_tasks.retain(|t| !t.time_range.was_removed);
     }
 
-    fn sort_time_range(&mut self, last_time: Timestamp) {
+    fn sort_time_range(&mut self) {
         fn add(
             time: &TimeRange,
             entry: ProcEntry,
@@ -482,11 +476,9 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    instances: BTreeSet<(InstID, OpID)>,
+    pub insts: BTreeMap<(InstID, OpID), Inst>,
     pub time_points: Vec<MemPoint>,
-    pub max_live_instances: u32,
-    last_time: Option<Timestamp>,
-    affinity: Option<u64>,
+    pub max_live_insts: u32,
 }
 
 impl Mem {
@@ -495,47 +487,32 @@ impl Mem {
             mem_id,
             kind,
             capacity,
-            instances: BTreeSet::new(),
+            insts: BTreeMap::new(),
             time_points: Vec::new(),
-            max_live_instances: 0,
-            last_time: None,
-            affinity: None,
+            max_live_insts: 0,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.instances.is_empty()
+        self.insts.is_empty()
     }
 
-    fn trim_time_range(
-        &mut self,
-        start: Timestamp,
-        stop: Timestamp,
-        instances: &mut BTreeMap<(InstID, OpID), Inst>,
-    ) {
-        let mut removed = Vec::new();
-        for inst_key in &self.instances {
-            let inst = instances.get_mut(inst_key).unwrap();
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
+        // BTreeMap::retain requires Rust 1.53
+        let mut removed_insts = Vec::new();
+        for (key, inst) in self.insts.iter_mut() {
             inst.trim_time_range(start, stop);
             if inst.time_range.was_removed {
-                removed.push(*inst_key);
+                removed_insts.push(*key);
             }
         }
-        for inst_key in &removed {
-            self.instances.remove(&inst_key);
-        }
-        for inst_key in removed {
-            instances.remove(&inst_key);
+        for op_id in removed_insts {
+            self.insts.remove(&op_id);
         }
     }
 
-    fn sort_time_range(
-        &mut self,
-        last_time: Timestamp,
-        instances: &mut BTreeMap<(InstID, OpID), Inst>,
-    ) {
-        for key in &self.instances {
-            let inst = instances.get(&key).unwrap();
+    fn sort_time_range(&mut self) {
+        for (key, inst) in &self.insts {
             self.time_points.push(MemPoint::new(
                 inst.time_range.start.unwrap(),
                 *key,
@@ -559,16 +536,16 @@ impl Mem {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
                 } else {
-                    self.max_live_instances += 1;
-                    self.max_live_instances
+                    self.max_live_insts += 1;
+                    self.max_live_insts
                 };
-                instances
+                self.insts
                     .get_mut(&point.entry)
                     .unwrap()
                     .base
                     .set_level(level);
             } else {
-                let level = instances.get(&point.entry).unwrap().base.level.unwrap();
+                let level = self.insts.get(&point.entry).unwrap().base.level.unwrap();
                 free_levels.push(Reverse(level));
             }
         }
@@ -578,7 +555,7 @@ impl Mem {
 #[derive(Debug)]
 pub struct MemProcAffinity {
     mem_id: MemID,
-    proc_ids: Vec<ProcID>,
+    pub proc_ids: Vec<ProcID>,
 }
 
 impl MemProcAffinity {
@@ -639,7 +616,7 @@ impl ChanID {
 
 #[derive(Debug)]
 pub struct Chan {
-    pub channel_id: ChanID,
+    pub chan_id: ChanID,
     pub copies: Vec<Copy>,
     pub fills: Vec<Fill>,
     pub depparts: Vec<DepPart>,
@@ -648,9 +625,9 @@ pub struct Chan {
 }
 
 impl Chan {
-    fn new(channel_id: ChanID) -> Self {
+    fn new(chan_id: ChanID) -> Self {
         Chan {
-            channel_id,
+            chan_id,
             copies: Vec::new(),
             fills: Vec::new(),
             depparts: Vec::new(),
@@ -678,7 +655,7 @@ impl Chan {
         self.depparts.retain(|t| !t.time_range.was_removed);
     }
 
-    fn sort_time_range(&mut self, last_time: Timestamp) {
+    fn sort_time_range(&mut self) {
         fn add(time: &TimeRange, entry: ChanEntry, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
@@ -750,21 +727,26 @@ impl Chan {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Stat {
-    total_calls: BTreeMap<(), i64>,
-    total_execution_time: BTreeMap<(), i64>,
-    all_calls: BTreeMap<(), Vec<()>>,
-    max_call: BTreeMap<(), i64>,
-    min_call: BTreeMap<(), i64>,
-}
-
 #[derive(Debug, Eq, PartialEq)]
-enum Bounds {
-    Point(Vec<u64>, u32),
-    Rect(Vec<u64>, Vec<u64>, u32),
+pub enum Bounds {
+    Point {
+        point: Vec<u64>,
+        dim: u32,
+    },
+    Rect {
+        lo: Vec<u64>,
+        hi: Vec<u64>,
+        dim: u32,
+    },
     Empty,
     Unknown,
+}
+
+#[derive(Debug)]
+pub struct ISpaceSize {
+    pub dense_size: u64,
+    pub sparse_size: u64,
+    pub is_sparse: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -772,45 +754,51 @@ pub struct ISpaceID(pub u64);
 
 #[derive(Debug)]
 pub struct ISpace {
-    stat: Stat,
-    ispace_id: ISpaceID,
-    bounds: Bounds,
-    name: Option<String>,
-    parent: Option<IPartID>,
+    pub ispace_id: ISpaceID,
+    pub bounds: Bounds,
+    pub name: Option<String>,
+    pub parent: Option<IPartID>,
+    pub size: Option<ISpaceSize>,
 }
 
 impl ISpace {
     fn new(ispace_id: ISpaceID) -> Self {
         ISpace {
-            stat: Stat::default(),
             ispace_id,
             bounds: Bounds::Unknown,
             name: None,
             parent: None,
+            size: None,
         }
     }
+
+    // Important: these methods can get called multiple times in a
+    // sparse instance. In this case the bounds will NOT be
+    // accurate. But we don't use bounds in such cases anyway since we
+    // refer to the dense/sparse sizes.
     fn set_point(&mut self, dim: u32, values: &Vec<u64>) -> &mut Self {
-        let new_bounds = Bounds::Point(values.clone(), dim);
-        assert!(self.bounds == Bounds::Unknown || self.bounds == new_bounds);
+        let new_bounds = Bounds::Point {
+            point: values.clone(),
+            dim,
+        };
         self.bounds = new_bounds;
         self
     }
     fn set_rect(&mut self, dim: u32, values: &Vec<u64>, max_dim: i32) -> &mut Self {
-        let new_bounds = Bounds::Rect(
-            values[0..(dim as usize)].to_owned(),
-            values[(max_dim as usize)..(max_dim as usize) + (dim as usize)].to_owned(),
+        let new_bounds = Bounds::Rect {
+            lo: values[0..(dim as usize)].to_owned(),
+            hi: values[(max_dim as usize)..(max_dim as usize) + (dim as usize)].to_owned(),
             dim,
-        );
-        assert!(self.bounds == Bounds::Unknown || self.bounds == new_bounds);
+        };
         self.bounds = new_bounds;
         self
     }
     fn set_empty(&mut self) -> &mut Self {
         let new_bounds = Bounds::Empty;
-        assert!(self.bounds == Bounds::Unknown || self.bounds == new_bounds);
         self.bounds = new_bounds;
         self
     }
+
     fn set_name(&mut self, name: &String) -> &mut Self {
         assert!(self.name.is_none());
         self.name = Some(name.to_owned());
@@ -821,6 +809,15 @@ impl ISpace {
         self.parent = Some(parent);
         self
     }
+    fn set_size(&mut self, dense_size: u64, sparse_size: u64, is_sparse: bool) -> &mut Self {
+        assert!(self.size.is_none());
+        self.size = Some(ISpaceSize {
+            dense_size,
+            sparse_size,
+            is_sparse,
+        });
+        self
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -828,10 +825,9 @@ pub struct IPartID(pub u64);
 
 #[derive(Debug)]
 pub struct IPart {
-    stat: Stat,
     ipart_id: IPartID,
     name: Option<String>,
-    parent: Option<ISpaceID>,
+    pub parent: Option<ISpaceID>,
     disjoint: Option<bool>,
     point0: Option<u64>,
 }
@@ -839,7 +835,6 @@ pub struct IPart {
 impl IPart {
     fn new(ipart_id: IPartID) -> Self {
         IPart {
-            stat: Stat::default(),
             ipart_id,
             name: None,
             parent: None,
@@ -870,41 +865,45 @@ impl IPart {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FSpaceID(u64);
+pub struct FSpaceID(pub u64);
 
 #[derive(Debug)]
 pub struct FSpace {
-    stat: Stat,
-    fspace_id: FSpaceID,
-    name: String,
+    pub fspace_id: FSpaceID,
+    pub name: Option<String>,
+    pub fields: BTreeMap<FieldID, Field>,
 }
 
 impl FSpace {
-    fn new(fspace_id: FSpaceID, name: &String) -> Self {
+    fn new(fspace_id: FSpaceID) -> Self {
         FSpace {
-            stat: Stat::default(),
             fspace_id,
-            name: name.to_owned(),
+            name: None,
+            fields: BTreeMap::new(),
         }
+    }
+    fn set_name(&mut self, name: &String) -> &mut Self {
+        let new_name = Some(name.to_owned());
+        assert!(self.name.is_none() || self.name == new_name);
+        self.name = new_name;
+        self
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FieldID(u32);
+pub struct FieldID(pub u32);
 
 #[derive(Debug)]
 pub struct Field {
-    stat: Stat,
     fspace_id: FSpaceID,
     field_id: FieldID,
     size: u64,
-    name: String,
+    pub name: String,
 }
 
 impl Field {
     fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &String) -> Self {
         Field {
-            stat: Stat::default(),
             fspace_id,
             field_id,
             size,
@@ -914,11 +913,10 @@ impl Field {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TreeID(u64);
+pub struct TreeID(pub u32);
 
 #[derive(Debug)]
 pub struct Region {
-    stat: Stat,
     ispace_id: ISpaceID,
     fspace_id: FSpaceID,
     tree_id: TreeID,
@@ -928,7 +926,6 @@ pub struct Region {
 impl Region {
     fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &String) -> Self {
         Region {
-            stat: Stat::default(),
             ispace_id,
             fspace_id,
             tree_id,
@@ -1007,17 +1004,15 @@ impl NoDependencies {
 
 #[derive(Debug)]
 pub struct Align {
-    stat: Stat,
     field_id: FieldID,
     eqk: u32,
-    align_desc: u32,
-    has_align: bool,
+    pub align_desc: u32,
+    pub has_align: bool,
 }
 
 impl Align {
     fn new(field_id: FieldID, eqk: u32, align_desc: u32, has_align: bool) -> Self {
         Align {
-            stat: Stat::default(),
             field_id,
             eqk,
             align_desc,
@@ -1030,22 +1025,22 @@ impl Align {
 pub struct InstID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Dim(u32);
+pub struct Dim(pub u32);
 
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
-    inst_id: InstID,
+    pub inst_id: InstID,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
     pub time_range: TimeRange,
     pub deps: InitiationDependencies,
-    ispace_ids: Vec<ISpaceID>,
-    fspace_ids: Vec<FSpaceID>,
+    pub ispace_ids: Vec<ISpaceID>,
+    pub fspace_ids: Vec<FSpaceID>,
     tree_id: Option<TreeID>,
-    fields: BTreeMap<FSpaceID, Vec<FieldID>>,
-    align_desc: BTreeMap<FSpaceID, Vec<Align>>,
-    dim_order: BTreeMap<Dim, DimKind>,
+    pub fields: BTreeMap<FSpaceID, Vec<FieldID>>,
+    pub align_desc: BTreeMap<FSpaceID, Vec<Align>>,
+    pub dim_order: BTreeMap<Dim, DimKind>,
 }
 
 impl Inst {
@@ -1209,10 +1204,8 @@ pub struct VariantID(pub u32);
 
 #[derive(Debug)]
 pub struct Variant {
-    stat: Stat,
     variant_id: VariantID,
     pub name: String,
-    op: BTreeMap<u64, ()>,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
 }
@@ -1220,9 +1213,7 @@ pub struct Variant {
 impl Variant {
     fn new(variant_id: VariantID, name: &String) -> Self {
         Variant {
-            stat: Stat::default(),
             variant_id,
-            op: BTreeMap::new(),
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -1551,6 +1542,9 @@ impl ProfTask {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EventID(pub u64);
+
 #[derive(Debug)]
 pub struct CopyInfo {
     src_inst: InstID,
@@ -1775,8 +1769,8 @@ pub struct State {
     max_dim: i32,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
-    mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
-    pub channels: BTreeMap<ChanID, Chan>,
+    pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
+    pub chans: BTreeMap<ChanID, Chan>,
     pub task_kinds: BTreeMap<TaskID, TaskKind>,
     pub variants: BTreeMap<(TaskID, VariantID), Variant>,
     pub meta_variants: BTreeMap<VariantID, Variant>,
@@ -1785,18 +1779,14 @@ pub struct State {
     pub operations: BTreeMap<OpID, Operation>,
     prof_uid_map: BTreeMap<u64, u64>,
     pub tasks: BTreeMap<OpID, ProcID>,
-    multi_tasks: BTreeMap<u64, u64>,
-    first_times: BTreeMap<u64, u64>,
-    last_times: BTreeMap<u64, u64>,
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub instances: BTreeMap<(InstID, OpID), Inst>,
-    index_spaces: BTreeMap<ISpaceID, ISpace>,
-    index_partitions: BTreeMap<IPartID, IPart>,
+    pub insts: BTreeMap<(InstID, OpID), MemID>,
+    pub index_spaces: BTreeMap<ISpaceID, ISpace>,
+    pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
-    field_spaces: BTreeMap<FSpaceID, FSpace>,
-    fields: BTreeMap<(FSpaceID, FieldID), Field>,
+    pub field_spaces: BTreeMap<FSpaceID, FSpace>,
     copy_map: BTreeMap<EventID, (ChanID, usize)>,
     has_spy_data: bool,
     spy_state: (), // TODO
@@ -1823,7 +1813,7 @@ impl State {
         time_range: TimeRange,
     ) -> &mut Task {
         self.create_op(op_id);
-        let new = self.tasks.insert(op_id, proc_id);
+        self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
         self.procs
             .get_mut(&proc_id)
@@ -1931,11 +1921,11 @@ impl State {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
 
-        let channel_id = ChanID::new_copy(src, dst);
-        let channel = self.find_channel_mut(channel_id);
+        let chan_id = ChanID::new_copy(src, dst);
+        let chan = self.find_chan_mut(chan_id);
 
-        let copy_id = channel.copies.len();
-        channel.copies.push(Copy::new(
+        let copy_id = chan.copies.len();
+        chan.copies.push(Copy::new(
             base,
             src,
             dst,
@@ -1949,56 +1939,78 @@ impl State {
 
         self.copy_map
             .entry(fevent)
-            .or_insert_with(|| (channel_id, copy_id));
+            .or_insert_with(|| (chan_id, copy_id));
     }
 
     fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
-        let (channel_id, channel_idx) = *self.copy_map.get(&fevent)?;
-        Some(&mut self.find_channel_mut(channel_id).copies[channel_idx])
+        let (chan_id, copy_idx) = *self.copy_map.get(&fevent)?;
+        Some(&mut self.find_chan_mut(chan_id).copies[copy_idx])
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_fill_channel_mut(dst);
-        channel.fills.push(Fill::new(base, dst, op_id, time_range));
+        let chan = self.find_fill_chan_mut(dst);
+        chan.fills.push(Fill::new(base, dst, op_id, time_range));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let channel = self.find_deppart_channel_mut();
-        channel
-            .depparts
+        let chan = self.find_deppart_chan_mut();
+        chan.depparts
             .push(DepPart::new(base, part_op, op_id, time_range));
     }
 
-    fn find_channel_mut(&mut self, channel_id: ChanID) -> &mut Chan {
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
+    fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
+        self.chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_fill_channel_mut(&mut self, dst: MemID) -> &mut Chan {
-        let channel_id = ChanID::new_fill(dst);
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
+    fn find_fill_chan_mut(&mut self, dst: MemID) -> &mut Chan {
+        let chan_id = ChanID::new_fill(dst);
+        self.chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn find_deppart_channel_mut(&mut self) -> &mut Chan {
-        let channel_id = ChanID::new_deppart();
-        self.channels
-            .entry(channel_id)
-            .or_insert_with(|| Chan::new(channel_id))
+    fn find_deppart_chan_mut(&mut self) -> &mut Chan {
+        let chan_id = ChanID::new_deppart();
+        self.chans
+            .entry(chan_id)
+            .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn create_instance(&mut self, inst_id: InstID, op_id: OpID) -> &mut Inst {
+    fn create_inst<'a>(
+        &'a mut self,
+        inst_id: InstID,
+        op_id: OpID,
+        insts: &'a mut BTreeMap<(InstID, OpID), Inst>,
+    ) -> &'a mut Inst {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        self.instances
+        insts
             .entry((inst_id, op_id))
             .or_insert_with(|| Inst::new(Base::new(alloc), inst_id, op_id))
+    }
+
+    fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
+        self.index_spaces
+            .entry(ispace_id)
+            .or_insert_with(|| ISpace::new(ispace_id))
+    }
+
+    fn find_index_partition_mut(&mut self, ipart_id: IPartID) -> &mut IPart {
+        self.index_partitions
+            .entry(ipart_id)
+            .or_insert_with(|| IPart::new(ipart_id))
+    }
+
+    fn find_field_space_mut(&mut self, fspace_id: FSpaceID) -> &mut FSpace {
+        self.field_spaces
+            .entry(fspace_id)
+            .or_insert_with(|| FSpace::new(fspace_id))
     }
 
     fn update_last_time(&mut self, value: Timestamp) {
@@ -2006,8 +2018,21 @@ impl State {
     }
 
     pub fn process_records(&mut self, records: &Vec<Record>) {
+        // We need a separate table here because instances can't be
+        // immediately linked to their associated memory from the
+        // logs. Therefore we defer this process until all records
+        // have been processed.
+        let mut insts = BTreeMap::new();
         for record in records {
-            process_record(record, self);
+            process_record(record, self, &mut insts);
+        }
+        for (key, inst) in insts {
+            if let Some(mem_id) = inst.mem_id {
+                let mem = self.mems.get_mut(&mem_id).unwrap();
+                mem.insts.insert(key, inst);
+            } else {
+                unreachable!();
+            }
         }
     }
 
@@ -2026,28 +2051,25 @@ impl State {
             proc.trim_time_range(start, stop);
         }
         for mem in self.mems.values_mut() {
-            mem.trim_time_range(start, stop, &mut self.instances);
+            mem.trim_time_range(start, stop);
         }
-        for channel in self.channels.values_mut() {
-            channel.trim_time_range(start, stop);
+        for chan in self.chans.values_mut() {
+            chan.trim_time_range(start, stop);
         }
 
         self.last_time = stop - start;
     }
 
     pub fn sort_time_range(&mut self) {
-        let last_time = self.last_time;
-        let instances = &mut self.instances;
         self.procs
             .par_iter_mut()
-            .for_each(|(_, proc)| proc.sort_time_range(last_time));
-        // FIXME: can't parallelize this one since the instances are global
+            .for_each(|(_, proc)| proc.sort_time_range());
         self.mems
-            .iter_mut()
-            .for_each(|(_, mem)| mem.sort_time_range(last_time, instances));
-        self.channels
             .par_iter_mut()
-            .for_each(|(_, channel)| channel.sort_time_range(last_time));
+            .for_each(|(_, mem)| mem.sort_time_range());
+        self.chans
+            .par_iter_mut()
+            .for_each(|(_, chan)| chan.sort_time_range());
     }
 
     pub fn assign_colors(&mut self) {
@@ -2084,7 +2106,7 @@ impl State {
     }
 }
 
-fn process_record(record: &Record, state: &mut State) {
+fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(InstID, OpID), Inst>) {
     match record {
         Record::MapperCallDesc { kind, name } => {
             state
@@ -2150,76 +2172,50 @@ fn process_record(record: &Record, state: &mut State) {
             dim,
             rem,
         } => {
-            // FIXME: Elliott: This is broken right now, skip it for the moment...
-            // state
-            //     .index_spaces
-            //     .entry(*ispace_id)
-            //     .or_insert_with(|| ISpace::new(*ispace_id))
-            //     .set_point(*dim, &rem.0);
+            state
+                .find_index_space_mut(*ispace_id)
+                .set_point(*dim, &rem.0);
         }
         Record::IndexSpaceRectDesc {
             ispace_id,
             dim,
             rem,
         } => {
-            // FIXME: Elliott: This is broken right now, skip it for the moment...
-            // let max_dim = state.max_dim;
-            // state
-            //     .index_spaces
-            //     .entry(*ispace_id)
-            //     .or_insert_with(|| ISpace::new(*ispace_id))
-            //     .set_rect(*dim, &rem.0, max_dim);
+            let max_dim = state.max_dim;
+            state
+                .find_index_space_mut(*ispace_id)
+                .set_rect(*dim, &rem.0, max_dim);
         }
         Record::IndexSpaceEmptyDesc { ispace_id } => {
-            // FIXME: Elliott: This is broken right now, skip it for the moment...
-            // state
-            //     .index_spaces
-            //     .entry(*ispace_id)
-            //     .or_insert_with(|| ISpace::new(*ispace_id))
-            //     .set_empty();
+            state.find_index_space_mut(*ispace_id).set_empty();
         }
         Record::FieldDesc {
-            unique_id,
+            fspace_id,
             field_id,
             size,
             name,
         } => {
-            let fspace_id = FSpaceID(*unique_id);
-            let field_id = FieldID(*field_id);
             state
+                .find_field_space_mut(*fspace_id)
                 .fields
-                .entry((fspace_id, field_id))
-                .or_insert_with(|| Field::new(fspace_id, field_id, *size, name));
+                .entry(*field_id)
+                .or_insert_with(|| Field::new(*fspace_id, *field_id, *size, name));
         }
-        Record::FieldSpaceDesc { unique_id, name } => {
-            let id = FSpaceID(*unique_id);
-            state
-                .field_spaces
-                .entry(id)
-                .or_insert_with(|| FSpace::new(id, name));
+        Record::FieldSpaceDesc { fspace_id, name } => {
+            state.find_field_space_mut(*fspace_id).set_name(name);
         }
         Record::PartDesc { unique_id, name } => {
-            state
-                .index_partitions
-                .entry(*unique_id)
-                .or_insert_with(|| IPart::new(*unique_id))
-                .set_name(name);
+            state.find_index_partition_mut(*unique_id).set_name(name);
         }
         Record::IndexSpaceDesc { ispace_id, name } => {
-            state
-                .index_spaces
-                .entry(*ispace_id)
-                .or_insert_with(|| ISpace::new(*ispace_id))
-                .set_name(name);
+            state.find_index_space_mut(*ispace_id).set_name(name);
         }
         Record::IndexSubSpaceDesc {
             parent_id,
             ispace_id,
         } => {
             state
-                .index_spaces
-                .entry(*ispace_id)
-                .or_insert_with(|| ISpace::new(*ispace_id))
+                .find_index_space_mut(*ispace_id)
                 .set_parent(*parent_id);
         }
         Record::IndexPartitionDesc {
@@ -2228,10 +2224,9 @@ fn process_record(record: &Record, state: &mut State) {
             disjoint,
             point0,
         } => {
+            state.find_index_space_mut(*parent_id);
             state
-                .index_partitions
-                .entry(*unique_id)
-                .or_insert_with(|| IPart::new(*unique_id))
+                .find_index_partition_mut(*unique_id)
                 .set_parent(*parent_id)
                 .set_disjoint(*disjoint)
                 .set_point0(*point0);
@@ -2242,7 +2237,9 @@ fn process_record(record: &Record, state: &mut State) {
             sparse_size,
             is_sparse,
         } => {
-            // FIXME: ignore this for now
+            state
+                .find_index_space_mut(*ispace_id)
+                .set_size(*dense_size, *sparse_size, *is_sparse);
         }
         Record::LogicalRegionDesc {
             ispace_id,
@@ -2251,11 +2248,11 @@ fn process_record(record: &Record, state: &mut State) {
             name,
         } => {
             let fspace_id = FSpaceID(*fspace_id as u64);
-            let tree_id = TreeID(*tree_id as u64);
+            state.find_field_space_mut(fspace_id);
             state
                 .logical_regions
-                .entry((*ispace_id, fspace_id, tree_id))
-                .or_insert_with(|| Region::new(*ispace_id, fspace_id, tree_id, name));
+                .entry((*ispace_id, fspace_id, *tree_id))
+                .or_insert_with(|| Region::new(*ispace_id, fspace_id, *tree_id, name));
         }
         Record::PhysicalInstRegionDesc {
             op_id,
@@ -2265,12 +2262,12 @@ fn process_record(record: &Record, state: &mut State) {
             tree_id,
         } => {
             let fspace_id = FSpaceID(*fspace_id as u64);
-            let tree_id = TreeID(*tree_id as u64);
+            state.find_field_space_mut(fspace_id);
             state
-                .create_instance(*inst_id, *op_id)
+                .create_inst(*inst_id, *op_id, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
-                .set_tree(tree_id);
+                .set_tree(*tree_id);
         }
         Record::PhysicalInstLayoutDesc {
             op_id,
@@ -2282,11 +2279,11 @@ fn process_record(record: &Record, state: &mut State) {
             align_desc,
         } => {
             let fspace_id = FSpaceID(*fspace_id as u64);
-            let field_id = FieldID(*field_id);
+            state.find_field_space_mut(fspace_id);
             state
-                .create_instance(*inst_id, *op_id)
-                .add_field(fspace_id, field_id)
-                .add_align_desc(fspace_id, field_id, *eqk, *align_desc, *has_align);
+                .create_inst(*inst_id, *op_id, insts)
+                .add_field(fspace_id, *field_id)
+                .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
         Record::PhysicalInstDimOrderDesc {
             op_id,
@@ -2300,7 +2297,7 @@ fn process_record(record: &Record, state: &mut State) {
                 Err(_) => unreachable!("bad dim kind"),
             };
             state
-                .create_instance(*inst_id, *op_id)
+                .create_inst(*inst_id, *op_id, insts)
                 .add_dim_order(dim, dim_kind);
         }
         Record::TaskKind {
@@ -2329,7 +2326,7 @@ fn process_record(record: &Record, state: &mut State) {
             let kind = OpKindID(*kind);
             state.create_op(*op_id).set_kind(kind);
         }
-        Record::MultiTask { op_id, task_id } => {
+        Record::MultiTask { op_id, .. } => {
             state.create_op(*op_id);
             // .set_op_impl(OpImpl::Multi(Multi::new(*task_id)));
         }
@@ -2340,11 +2337,10 @@ fn process_record(record: &Record, state: &mut State) {
         }
         Record::TaskWaitInfo {
             op_id,
-            task_id,
-            variant_id,
             wait_start: start,
             wait_ready: ready,
             wait_end: end,
+            ..
         } => {
             state
                 .find_task_mut(*op_id)
@@ -2387,10 +2383,9 @@ fn process_record(record: &Record, state: &mut State) {
             proc_id,
             create,
             ready,
-            start,
-            stop,
             gpu_start,
             gpu_stop,
+            ..
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *gpu_start, *gpu_stop);
             state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
@@ -2434,13 +2429,13 @@ fn process_record(record: &Record, state: &mut State) {
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
-            op_id,
             src_inst,
             dst_inst,
             fevent,
             num_fields,
             request_type,
             num_hops,
+            ..
         } => {
             let copy_info = CopyInfo {
                 src_inst: *src_inst,
@@ -2467,14 +2462,15 @@ fn process_record(record: &Record, state: &mut State) {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_fill(*op_id, *dst, time_range);
             state.update_last_time(*stop);
-            // TODO add entry to copy map here
         }
         Record::InstCreateInfo {
             op_id,
             inst_id,
             create,
         } => {
-            state.create_instance(*inst_id, *op_id).set_start(*create);
+            state
+                .create_inst(*inst_id, *op_id, insts)
+                .set_start(*create);
         }
         Record::InstUsageInfo {
             op_id,
@@ -2483,13 +2479,11 @@ fn process_record(record: &Record, state: &mut State) {
             size,
         } => {
             state
-                .mems
-                .get_mut(&mem_id)
-                .unwrap()
-                .instances
-                .insert((*inst_id, *op_id));
+                .insts
+                .entry((*inst_id, *op_id))
+                .or_insert_with(|| *mem_id);
             state
-                .create_instance(*inst_id, *op_id)
+                .create_inst(*inst_id, *op_id, insts)
                 .set_mem(*mem_id)
                 .set_size(*size);
         }
@@ -2500,7 +2494,7 @@ fn process_record(record: &Record, state: &mut State) {
             destroy,
         } => {
             state
-                .create_instance(*inst_id, *op_id)
+                .create_inst(*inst_id, *op_id, insts)
                 .set_start_stop(*create, *destroy);
             state.update_last_time(*destroy);
         }
@@ -2519,7 +2513,6 @@ fn process_record(record: &Record, state: &mut State) {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_deppart(*op_id, part_op, time_range);
             state.update_last_time(*stop);
-            // TODO add copy map entry here
         }
         Record::MapperCallInfo {
             kind,

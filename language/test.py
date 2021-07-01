@@ -163,11 +163,8 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
     return result_dir
 
 def compare_prof_results(verbose, py_exe_path, profile_dirs):
-    cmd = ['python3',
-           os.path.join(regent.root_dir(), 'tools', 'profile_diff.py'),
-           '--check',
-           '--file-pattern', 'tsv/*.tsv',
-           '--exclude-field', 'tsv/Mem_*.tsv:title',
+    cmd = ['diff', '-r', '-u',
+           '--exclude', 'legion_prof_ops.tsv',
            ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(

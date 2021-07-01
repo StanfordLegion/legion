@@ -17,8 +17,8 @@ use nom::{
 };
 
 use crate::state::{
-    EventID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID, RuntimeCallKindID,
-    TaskID, Timestamp, VariantID,
+    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID,
+    RuntimeCallKindID, TaskID, Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -90,16 +90,16 @@ pub enum Record {
     IndexSpacePointDesc { ispace_id: ISpaceID, dim: u32, rem: Point },
     IndexSpaceRectDesc { ispace_id: ISpaceID, dim: u32, rem: Array },
     IndexSpaceEmptyDesc { ispace_id: ISpaceID },
-    FieldDesc { unique_id: UniqueID, field_id: u32, size: u64, name: String },
-    FieldSpaceDesc { unique_id: UniqueID, name: String },
+    FieldDesc { fspace_id: FSpaceID, field_id: FieldID, size: u64, name: String },
+    FieldSpaceDesc { fspace_id: FSpaceID, name: String },
     PartDesc { unique_id: IPartID, name: String },
     IndexSpaceDesc { ispace_id: ISpaceID, name: String },
     IndexSubSpaceDesc { parent_id: IPartID, ispace_id: ISpaceID },
     IndexPartitionDesc { parent_id: ISpaceID, unique_id: IPartID, disjoint: bool, point0: u64 },
     IndexSpaceSizeDesc { ispace_id: ISpaceID, dense_size: u64, sparse_size: u64, is_sparse: bool },
-    LogicalRegionDesc { ispace_id: ISpaceID, fspace_id: u32, tree_id: u32, name: String },
-    PhysicalInstRegionDesc { op_id: OpID, inst_id: InstID, ispace_id: ISpaceID, fspace_id: u32, tree_id: u32 },
-    PhysicalInstLayoutDesc { op_id: OpID, inst_id: InstID, field_id: u32, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
+    LogicalRegionDesc { ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID, name: String },
+    PhysicalInstRegionDesc { op_id: OpID, inst_id: InstID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
+    PhysicalInstLayoutDesc { op_id: OpID, inst_id: InstID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
     PhysicalInstDimOrderDesc { op_id: OpID, inst_id: InstID, dim: u32, dim_kind: u32 },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
@@ -299,6 +299,15 @@ fn parse_ipart_id(input: &[u8]) -> IResult<&[u8], IPartID> {
 fn parse_ispace_id(input: &[u8]) -> IResult<&[u8], ISpaceID> {
     map(le_u64, |x| ISpaceID(x))(input)
 }
+fn parse_fspace_id(input: &[u8]) -> IResult<&[u8], FSpaceID> {
+    map(le_u64, |x| FSpaceID(x))(input)
+}
+fn parse_field_id(input: &[u8]) -> IResult<&[u8], FieldID> {
+    map(le_u32, |x| FieldID(x))(input)
+}
+fn parse_tree_id(input: &[u8]) -> IResult<&[u8], TreeID> {
+    map(le_u32, |x| TreeID(x))(input)
+}
 fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
     map(le_u32, |x| MapperCallKindID(x))(input)
 }
@@ -406,14 +415,14 @@ fn parse_index_space_empty_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], R
     Ok((input, Record::IndexSpaceEmptyDesc { ispace_id }))
 }
 fn parse_field_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, unique_id) = le_u64(input)?;
-    let (input, field_id) = le_u32(input)?;
+    let (input, fspace_id) = parse_fspace_id(input)?;
+    let (input, field_id) = parse_field_id(input)?;
     let (input, size) = le_u64(input)?;
     let (input, name) = parse_string(input)?;
     Ok((
         input,
         Record::FieldDesc {
-            unique_id,
+            fspace_id,
             field_id,
             size,
             name,
@@ -421,9 +430,9 @@ fn parse_field_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     ))
 }
 fn parse_field_space_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, unique_id) = le_u64(input)?;
+    let (input, fspace_id) = parse_fspace_id(input)?;
     let (input, name) = parse_string(input)?;
-    Ok((input, Record::FieldSpaceDesc { unique_id, name }))
+    Ok((input, Record::FieldSpaceDesc { fspace_id, name }))
 }
 fn parse_part_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, unique_id) = parse_ipart_id(input)?;
@@ -479,7 +488,7 @@ fn parse_index_space_size_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Re
 fn parse_logical_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ispace_id) = parse_ispace_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
-    let (input, tree_id) = le_u32(input)?;
+    let (input, tree_id) = parse_tree_id(input)?;
     let (input, name) = parse_string(input)?;
     Ok((
         input,
@@ -496,7 +505,7 @@ fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     let (input, inst_id) = parse_inst_id(input)?;
     let (input, ispace_id) = parse_ispace_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
-    let (input, tree_id) = le_u32(input)?;
+    let (input, tree_id) = parse_tree_id(input)?;
     Ok((
         input,
         Record::PhysicalInstRegionDesc {
@@ -511,7 +520,7 @@ fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
 fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
     let (input, inst_id) = parse_inst_id(input)?;
-    let (input, field_id) = le_u32(input)?;
+    let (input, field_id) = parse_field_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, has_align) = parse_bool(input)?;
     let (input, eqk) = le_u32(input)?;
