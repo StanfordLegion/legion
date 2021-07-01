@@ -557,8 +557,6 @@ namespace Legion {
       // map which is mainly needed in control replication
       virtual void argument_map_wrap(void) { }
     public:
-      void set_future_map_coordinates(
-          std::vector<std::pair<size_t,DomainPoint> > &coordinates);
       void pack_future_map(Serializer &rez) const;
       static FutureMapImpl* unpack_future_map(Runtime *runtime,
           Deserializer &derez, ReferenceMutator *mutator, TaskContext *ctx);
@@ -597,13 +595,6 @@ namespace Legion {
       RtEvent ready_event;
       RtUserEvent delete_event;
       std::map<DomainPoint,Future> futures;
-    protected:
-      // These are the coordinates for the parent task of the operation
-      // that made this future map, with the op_ctx_index above we can
-      // compute coordinates for each of the futures, Currently this is
-      // only valid in the case of running with `-lg:safe_ctrlrepl but
-      // it could be all the time if needed
-      std::vector<std::pair<size_t,DomainPoint> > coordinates; 
     };
 
     /**
@@ -3698,8 +3689,7 @@ namespace Legion {
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, size_t index, const Domain &domain,
-                          RtEvent complete, ReferenceMutator *mutator,
-                          std::vector<std::pair<size_t,DomainPoint> > &coords);
+                          RtEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   TypeTag type_tag);
     public:
