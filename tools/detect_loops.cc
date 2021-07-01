@@ -284,7 +284,7 @@ int read_events(FILE *f)
 	{
 	  unsigned long long ev2_id;
 	  unsigned wgen, pos;
-	  int ret = sscanf(s, "  [%d] L:%*p - %ndma request %*p: after %llx",
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred_start(transfer_op(%*p)) finish=%llx",
 			   &wgen, &pos, &ev2_id);
 	  if(ret == 2) {
 	    Event *e1 = Event::get_event(ev_id, wgen);

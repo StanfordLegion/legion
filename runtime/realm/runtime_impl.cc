@@ -2218,12 +2218,8 @@ namespace Realm {
       if(Network::max_node_id > 0) {
 	int tries = 0;
 	while(true) {
-	  // first make sure the incoming message queue is quiescent
-	  message_manager->drain_incoming_messages();
-
-	  // then check the network for quiescence
 	  tries++;
-	  bool done = Network::check_for_quiescence();
+	  bool done = Network::check_for_quiescence(message_manager);
 	  if(done) {
 	    if(Network::my_node_id == 0)
 	      log_runtime.info() << "quiescent after " << tries << " attempts";

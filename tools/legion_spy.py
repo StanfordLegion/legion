@@ -7883,6 +7883,7 @@ class Operation(object):
             MUST_EPOCH_OP_KIND : "tomato",
             REFINEMENT_OP_KIND : "royalblue",
             ADVISEMENT_OP_KIND : "magenta",
+            TUNABLE_OP_KIND : "lightcoral",
             }[self.kind]
 
     @property

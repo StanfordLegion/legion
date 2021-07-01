@@ -750,8 +750,16 @@ namespace Realm {
     CHECK_MPI( MPI_Gather(val_in, bytes, MPI_BYTE, vals_out, bytes, MPI_BYTE, root, MPI_COMM_WORLD) );
   }
 
+  size_t MPIModule::sample_messages_received_count(void)
+  {
+    // we don't have the right count to match the incoming message manager
+    //  (since we count completion replies too), so use a count of 0 that
+    //  merely waits until the incoming manager is temporarily idle
+    return 0;
+  }
+
   static unsigned long prev_total_rcvd = 0;
-  bool MPIModule::check_for_quiescence(void)
+  bool MPIModule::check_for_quiescence(size_t sampled_receive_count)
   {
     // ensure some progress happens on the poller before each quiescence check
     g_am_manager.ensure_polling_progress();

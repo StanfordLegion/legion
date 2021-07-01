@@ -3385,7 +3385,14 @@ legion_task_launcher_execute(legion_runtime_t runtime_,
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   Future f = runtime->execute_task(ctx, *launcher);
-  return CObjectWrapper::wrap(new Future(f));
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
 }
 
 unsigned
@@ -3657,6 +3664,15 @@ legion_task_launcher_set_local_function_task(legion_task_launcher_t launcher_,
   launcher->local_function_task = local_function_task;
 }
 
+void
+legion_task_launcher_set_elide_future_return(legion_task_launcher_t launcher_,
+                                             bool elide_future_return)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->elide_future_return = elide_future_return;
+}
+
 legion_index_launcher_t
 legion_index_launcher_create(
   legion_task_id_t tid,
@@ -3717,7 +3733,14 @@ legion_index_launcher_execute(legion_runtime_t runtime_,
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   FutureMap f = runtime->execute_index_space(ctx, *launcher);
-  return CObjectWrapper::wrap(new FutureMap(f));
+  if (launcher->elide_future_return)
+  {
+    legion_future_map_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new FutureMap(f));
 }
 
 legion_future_t
@@ -3731,7 +3754,14 @@ legion_index_launcher_execute_reduction(legion_runtime_t runtime_,
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   Future f = runtime->execute_index_space(ctx, *launcher, redop);
-  return CObjectWrapper::wrap(new Future(f));
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
 }
 
 legion_future_map_t
@@ -3750,7 +3780,6 @@ legion_index_launcher_execute_outputs(legion_runtime_t runtime_,
     reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
 
   FutureMap f = runtime->execute_index_space(ctx, *launcher, &reqs);
-  legion_future_map_t result = CObjectWrapper::wrap(new FutureMap(f));
 
   for (size_t idx = 0; idx < reqs_size; ++idx)
   {
@@ -3759,7 +3788,14 @@ legion_index_launcher_execute_outputs(legion_runtime_t runtime_,
     target->partition = reqs[idx].partition;
   }
 
-  return result;
+  if (launcher->elide_future_return)
+  {
+    legion_future_map_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new FutureMap(f));
 }
 
 legion_future_t
@@ -3775,7 +3811,14 @@ legion_index_launcher_execute_deterministic_reduction(
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic);
-  return CObjectWrapper::wrap(new Future(f));
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
 }
 
 legion_future_t
@@ -3797,7 +3840,6 @@ legion_index_launcher_execute_reduction_and_outputs(
     reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
 
   Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic, &reqs);
-  legion_future_t result = CObjectWrapper::wrap(new Future(f));
 
   for (size_t idx = 0; idx < reqs_size; ++idx)
   {
@@ -3806,7 +3848,14 @@ legion_index_launcher_execute_reduction_and_outputs(
     target->partition = reqs[idx].partition;
   }
 
-  return result;
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
 }
 
 unsigned
@@ -4110,6 +4159,15 @@ legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher_,
   IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->tag = tag;
+}
+
+void
+legion_index_launcher_set_elide_future_return(legion_index_launcher_t launcher_,
+                                              bool elide_future_return)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->elide_future_return = elide_future_return;
 }
 
 // -----------------------------------------------------------------------
@@ -5925,6 +5983,16 @@ legion_runtime_local_shard(legion_runtime_t runtime_, legion_context_t ctx_)
   return runtime->local_shard(ctx);
 }
 
+legion_shard_id_t
+legion_runtime_local_shard_without_context(void)
+{
+  Context ctx = Runtime::get_context();
+  if (ctx == NULL)
+    return 0; // no shard if we're not inside a task
+  Runtime *runtime = Runtime::get_runtime();
+  return runtime->local_shard(ctx);
+}
+
 size_t
 legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
 {
@@ -6572,6 +6640,27 @@ legion_context_get_unique_id(legion_context_t ctx_)
   return task->get_unique_id();
 }
 
+legion_task_mut_t
+legion_task_create_empty()
+{
+  TaskMut *task = new TaskMut();
+  return CObjectWrapper::wrap(task);
+}
+
+void
+legion_task_destroy(legion_task_mut_t handle_)
+{
+  TaskMut *handle = CObjectWrapper::unwrap(handle_);
+  delete handle;
+}
+
+legion_task_t
+legion_task_mut_as_task(legion_task_mut_t task_)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+  return CObjectWrapper::wrap(static_cast<Task *>(task));
+}
+
 legion_unique_id_t
 legion_task_get_unique_id(legion_task_t task_)
 {
@@ -6654,12 +6743,28 @@ legion_task_get_args(legion_task_t task_)
   return task->args;
 }
 
+void
+legion_task_set_args(legion_task_mut_t task_, void *args)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+
+  task->args = args;
+}
+
 size_t
 legion_task_get_arglen(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
   return task->arglen;
+}
+
+void
+legion_task_set_arglen(legion_task_mut_t task_, size_t arglen)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+
+  task->arglen = arglen;
 }
 
 legion_domain_t
@@ -6734,6 +6839,15 @@ legion_task_get_future(legion_task_t task_, unsigned idx)
   Future future = task->futures[idx];
 
   return CObjectWrapper::wrap(new Future(future));
+}
+
+void
+legion_task_add_future(legion_task_mut_t task_, legion_future_t future_)
+{
+  TaskMut *task = CObjectWrapper::unwrap(task_);
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  task->futures.push_back(*future);
 }
 
 legion_task_id_t

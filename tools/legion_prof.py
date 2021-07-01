@@ -109,9 +109,9 @@ dep_part_kinds = {
     6 : 'Difference',
     7 : 'Differences',
     8 : 'Equal Partition',
-    9 : 'Partition By Field',
+    9 : 'Partition by Field',
     10 : 'Partition by Image',
-    11 : 'Partition By Image Range',
+    11 : 'Partition by Image Range',
     12 : 'Partition by Preimage',
     13 : 'Partition by Preimage Range',
     14 : 'Create Association',
@@ -628,24 +628,24 @@ class Processor(object):
         time_points_all = list()
         for task in self.tasks:
             if (task.stop-task.start > 10 and task.ready != None):
-                time_points_all.append(TimePoint(task.ready, task, True))
-                time_points_all.append(TimePoint(task.stop, task, False))
+                time_points_all.append(TimePoint(task.ready, task, True, task.start))
+                time_points_all.append(TimePoint(task.stop, task, False, 0))
             else:
-                time_points_all.append(TimePoint(task.start, task, True))
-                time_points_all.append(TimePoint(task.stop, task, False))
+                time_points_all.append(TimePoint(task.start, task, True, 0))
+                time_points_all.append(TimePoint(task.stop, task, False, 0))
 
-            self.time_points.append(TimePoint(task.start, task, True))
-            self.time_points.append(TimePoint(task.stop, task, False))
+            self.time_points.append(TimePoint(task.start, task, True, 0))
+            self.time_points.append(TimePoint(task.stop, task, False, 0))
 
-            self.util_time_points.append(TimePoint(task.start, task, True))
-            self.util_time_points.append(TimePoint(task.stop, task, False))
+            self.util_time_points.append(TimePoint(task.start, task, True, 0))
+            self.util_time_points.append(TimePoint(task.stop, task, False, 0))
             if isinstance(task, HasWaiters):
                 # wait intervals don't count for the util graph
                 for wait_interval in task.wait_intervals:
                     self.util_time_points.append(TimePoint(wait_interval.start, 
-                                                           task, False))
+                                                           task, False, 0))
                     self.util_time_points.append(TimePoint(wait_interval.end, 
-                                                           task, True))
+                                                           task, True, 0))
 
         self.util_time_points.sort(key=lambda p: p.time_key)
         self.time_points.sort(key=lambda p: p.time_key)
@@ -774,12 +774,15 @@ class Processor(object):
 
 class TimePoint(object):
     __slots__ = ['time', 'thing', 'first', 'time_key']
-    def __init__(self, time, thing, first):
+    def __init__(self, time, thing, first, secondary_sort_key):
         assert time != None
         self.time = time
         self.thing = thing
         self.first = first
-        self.time_key = 2*time + (0 if first is True else 1)
+        # secondary_sort_key is a parameter used for breaking ties in sorting.
+        # In practice, we plan for this to be a nanosecond timestamp,
+        # like the time field above.
+        self.time_key = (time, 0 if first is True else 1, secondary_sort_key)
     def __cmp__(a, b):
         if a.time_key < b.time_key:
             return -1
@@ -814,7 +817,7 @@ class Memory(object):
         if self.affinity is not None:
             return self.affinity.get_short_text()
         else:
-            return " [n" + str(self.node_id) + "]" + memory_kinds_abbr[self.kind]
+            return "[n" + str(self.node_id) + "]" + memory_kinds_abbr[self.kind]
 
     def add_instance(self, inst):
         self.instances.add(inst)
@@ -840,8 +843,8 @@ class Memory(object):
     def sort_time_range(self):
         self.max_live_instances = 0
         for inst in self.instances:
-            self.time_points.append(TimePoint(inst.start, inst, True))
-            self.time_points.append(TimePoint(inst.stop, inst, False))
+            self.time_points.append(TimePoint(inst.start, inst, True, 0))
+            self.time_points.append(TimePoint(inst.stop, inst, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
@@ -850,7 +853,8 @@ class Memory(object):
             if point.first:
                 # Find a level to assign this to
                 if len(free_levels) > 0:
-                    point.thing.set_level(free_levels.pop())
+                    point.thing.set_level(min(free_levels))
+                    free_levels.remove(point.thing.level)
                 else:
                     point.thing.set_level(self.max_live_instances + 1)
                     self.max_live_instances += 1
@@ -940,11 +944,11 @@ class MemProcAffinity(object):
         if memory_node_proc[self.mem.kind] == "None":
             return "[all n]"
         elif memory_node_proc[self.mem.kind] == "Node_id":
-            return " [n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.mem.node_id) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "GPU_proc_id":
-            return " [n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.proc[0].node_id) + "][gpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         elif memory_node_proc[self.mem.kind] == "Proc_id":
-            return " [n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
+            return "[n" + str(self.proc[0].node_id) + "][cpu" + str(self.proc[0].proc_in_node) + "]" + memory_kinds_abbr[self.mem.kind]
         else:
             return ""
 
@@ -1020,8 +1024,8 @@ class Channel(object):
     def sort_time_range(self):
         self.max_live_copies = 0 
         for copy in self.copies:
-            self.time_points.append(TimePoint(copy.start, copy, True))
-            self.time_points.append(TimePoint(copy.stop, copy, False))
+            self.time_points.append(TimePoint(copy.start, copy, True, 0))
+            self.time_points.append(TimePoint(copy.stop, copy, False, 0))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
@@ -1099,16 +1103,37 @@ class Channel(object):
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
     def __cmp__(a, b):
-        if a.dst:
-            if b.dst:
-                return a.dst.__cmp__(b.dst)
+        if a.src:
+            if b.src:
+                x = a.src.__cmp__(b.src)
+                if x != 0:
+                    return x
+                if a.dst:
+                    if b.dst:
+                        return a.dst.__cmp__(b.dst)
+                    else:
+                        return 1
+                else:
+                    if b.dst:
+                        return -1
+                    else:
+                        return 0
             else:
                 return 1
         else:
-            if b.dst:
+            if b.src:
                 return -1
             else:
-                return 0
+                if a.dst:
+                    if b.dst:
+                        return a.dst.__cmp__(b.dst)
+                    else:
+                        return 1
+                else:
+                    if b.dst:
+                        return -1
+                    else:
+                        return 0
 
     def __lt__(self, other):
         return self.__cmp__(other) < 0
@@ -1912,7 +1937,6 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         for pos in range(0, len(self.ispace)):
             output_str = output_str + "Region: " + self.ispace[pos].get_short_text()
             output_str = output_str + " x " + str(self.fspace[pos])
-            max_len = 40
             key = self.fspace[pos]
             fieldlist = []
             count = 0
@@ -1927,13 +1951,10 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                     else:
                         align_str = ""
                     if count == 0:
-                        output_str = output_str + '[' + str(f) + align_str
+                        output_str = output_str + '$Fields: [' + str(f) + align_str
                     else:
                         output_str = output_str + ',' + str(f) + align_str
                     count = count + 1
-                    if len(output_str) > max_len and len(fieldlist) > 1:
-                        output_str = output_str + '$'
-                        max_len = len(output_str) + 40
                 if (count > 0):
                     output_str = output_str + ']'
             pend =len(self.ispace)-1
@@ -2830,6 +2851,8 @@ class State(object):
     def log_proftask_info(self, proc_id, op_id, start, stop):
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
+        if stop > self.last_time:
+            self.last_time = stop
         proftask = ProfTask(op_id, start, start, start, stop)
         proc = self.find_processor(proc_id)
         proc.add_task(proftask)
@@ -3394,7 +3417,7 @@ class State(object):
         # now we compute the structure of the stats (the parent-child
         # relationships
         nodes = self.get_nodes()
-        stats_structure = {node: [] for node in nodes}
+        stats_structure = {node: [] for node in sorted(nodes)}
 
         # for each node grouping, add all the subtypes of processors
         for node in nodes:
@@ -3414,7 +3437,7 @@ class State(object):
 
         with open(json_file_name, "w") as json_file:
             # json.dump(timepoints_dict.keys(), json_file)
-            json.dump(stats_structure, json_file)
+            json.dump(stats_structure, json_file, separators=(',', ':'))
 
         # here we write out the actual tsv stats files
         for tp_group in timepoints_dict:
@@ -3916,14 +3939,14 @@ class State(object):
         stats_levels = 4
 
         scale_data = {
-            'start': 0,
-            'end': last_time * 1.01,
+            'start': 0.0,
+            'end': math.ceil(last_time * 1000. * 1.01)/1000.,
             'stats_levels': stats_levels,
             'max_level': base_level + 1
         }
 
         with open(scale_json_file_name, "w") as scale_json_file:
-            json.dump(scale_data, scale_json_file)
+            json.dump(scale_data, scale_json_file, separators=(',', ':'))
 
 def main():
     class MyParser(argparse.ArgumentParser):

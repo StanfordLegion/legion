@@ -828,8 +828,9 @@ namespace Realm {
 		 BackgroundWorkManager *bgwork);
       ~GPUChannel();
 
-      // multiple concurrent cuda copies ok
-      static const bool is_ordered = false;
+      // multi-threading of cuda copies for a given device is disabled by
+      //  default (can be re-enabled with -cuda:mtdma 1)
+      static const bool is_ordered = true;
 
       virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,

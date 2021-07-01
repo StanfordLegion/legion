@@ -275,10 +275,17 @@ namespace Realm {
       while(*p2 && isalnum(*p2)) p2++;
       if((!*p2 || (*p2 == ',')) &&
          convert_integer_cmdline_argument(std::string(p1, p2-p1), lvl)) {
-        if(catname.empty())
+        if(catname.empty()) {
+          if(lvl < Logger::REALM_LOGGING_MIN_LEVEL)
+            fprintf(stderr, "WARNING: requested default logger level of %d is below compile-time minimum (%d) - not all logging output will be visible\n",
+                    lvl, Logger::REALM_LOGGING_MIN_LEVEL);
           default_level = lvl;
-        else
+        } else {
+          if(lvl < Logger::REALM_LOGGING_MIN_LEVEL)
+            fprintf(stderr, "WARNING: requested logger level for category '%s' of %d is below compile-time minimum (%d) - not all logging output will be visible\n",
+                    catname.c_str(), lvl, Logger::REALM_LOGGING_MIN_LEVEL);
           category_levels[catname] = lvl;
+        }
 
         p1 = p2;
         continue;

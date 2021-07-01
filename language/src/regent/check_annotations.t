@@ -240,6 +240,7 @@ local node_allow_annotations = {
     "inline",
     "inner",
     "leaf",
+    "local_launch",
     "optimize",
     "parallel",
     "replicable",

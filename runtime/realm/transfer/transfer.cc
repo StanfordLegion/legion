@@ -4180,7 +4180,7 @@ namespace Realm {
   {
     os << "deferred_start(";
     op->print(os);
-    os << ")";
+    os << ") finish=" << op->get_finish_event();
   }
 
   Event TransferOperation::DeferredStart::get_finish_event(void) const

@@ -82,7 +82,9 @@ end
 local node_is_leaf = {
   -- Expressions:
   [ast.typed.expr.Call] = function(node)
-    return {not std.is_task(node.fn.value), node}
+    return {not std.is_task(node.fn.value) or
+              (node.fn.value.is_local and node.fn.value:get_primary_variant():get_config_options().leaf),
+            node}
   end,
 
   [ast.typed.expr.RawContext]                 = always_false,
@@ -125,7 +127,6 @@ local node_is_leaf = {
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
   [ast.typed.expr.ImportPartition]            = always_false,
-  [ast.typed.expr.Projection]                 = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
@@ -158,6 +159,7 @@ local node_is_leaf = {
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
   [ast.typed.expr.AddressOf]       = always_true,
+  [ast.typed.expr.Projection]      = always_true,
 
   [ast.typed.expr.Internal]        = unreachable,
 
@@ -215,6 +217,13 @@ local node_is_inner = {
     return {not std.is_ref(node.expr_type), node}
   end,
 
+  [ast.typed.expr.Call] = function(node)
+    return {not std.is_task(node.fn.value) or
+              not node.fn.value.is_local or
+              node.fn.value:get_primary_variant():get_config_options().inner,
+            node}
+  end,
+
   [ast.typed.expr.RawPhysical] = always_false,
   [ast.typed.expr.Adjust]      = always_false,
   [ast.typed.expr.Arrive]      = always_false,
@@ -226,7 +235,6 @@ local node_is_inner = {
   [ast.typed.expr.Function]                   = always_true,
   [ast.typed.expr.FieldAccess]                = always_true,
   [ast.typed.expr.MethodCall]                 = always_true,
-  [ast.typed.expr.Call]                       = always_true,
   [ast.typed.expr.Cast]                       = always_true,
   [ast.typed.expr.Ctor]                       = always_true,
   [ast.typed.expr.CtorListField]              = always_true,
@@ -343,7 +351,11 @@ local node_is_idempotent = {
   -- do no external call of any kind and also
   -- do not perform any kind of file I/O
   [ast.typed.expr.Call] = function(node)
-    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or node.replicable, node}
+    return {(std.is_task(node.fn.value) and
+               (not node.fn.value.is_local or node.fn.value:get_primary_variant():get_config_options().idempotent)) or
+              std.is_math_fn(node.fn.value) or
+              node.replicable,
+            node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,
@@ -485,8 +497,13 @@ local node_is_replicable = {
   -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
     local is_user_replicable = type(node.fn.value) == "table" and rawget(node.fn.value, "replicable")
-    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or is_user_replicable or
-            node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
+    return {(std.is_task(node.fn.value) and
+              (not node.fn.value.is_local or node.fn.value:get_primary_variant():get_config_options().replicable)) or
+              std.is_math_fn(node.fn.value) or
+              is_user_replicable or
+              node.replicable or
+              std.replicable_whitelist[node.fn.value] or false,
+            node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,

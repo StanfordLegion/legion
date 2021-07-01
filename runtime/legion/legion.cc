@@ -82,7 +82,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Task::Task(void)
-      : Mappable(), args(NULL), arglen(0), local_args(NULL), local_arglen(0)
+      : Mappable(), task_id(0), args(NULL), arglen(0), is_index_space(false),
+        must_epoch_task(false), local_args(NULL), local_arglen(0),
+        steal_count(0), stealable(false), speculated(false),
+        local_function(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -93,7 +96,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Copy::Copy(void)
-      : Mappable()
+      : Mappable(), is_index_space(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -104,7 +107,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineMapping::InlineMapping(void)
-      : Mappable()
+      : Mappable(), layout_constraint_id(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -148,7 +151,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Fill::Fill(void)
-      : Mappable()
+      : Mappable(), is_index_space(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -159,7 +162,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Partition::Partition(void)
-      : Mappable()
+      : Mappable(), is_index_space(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1559,7 +1562,8 @@ namespace Legion {
         map_id(0), tag(0), point(DomainPoint(0)), 
         sharding_space(IndexSpace::NO_SPACE), static_dependences(NULL),
         enable_inlining(false), local_function_task(false),
-        independent_requirements(false), silence_warnings(false)
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1572,7 +1576,7 @@ namespace Legion {
         point(DomainPoint(0)), sharding_space(IndexSpace::NO_SPACE), 
         static_dependences(NULL), enable_inlining(false),
         local_function_task(false), independent_requirements(false), 
-        silence_warnings(false)
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1589,7 +1593,7 @@ namespace Legion {
         argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
         must_parallelism(false), map_id(0), tag(0), static_dependences(NULL), 
         enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1605,7 +1609,8 @@ namespace Legion {
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
         tag(t), static_dependences(NULL), enable_inlining(false), 
-        independent_requirements(false), silence_warnings(false)
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1622,7 +1627,8 @@ namespace Legion {
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
         tag(t), static_dependences(NULL), enable_inlining(false), 
-        independent_requirements(false), silence_warnings(false)
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1964,8 +1970,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TunableLauncher::TunableLauncher(TunableID tid, MapperID m, MappingTagID t)
-      : tunable(tid), mapper(m), tag(t)
+    TunableLauncher::TunableLauncher(TunableID tid, MapperID m, MappingTagID t,
+                                     size_t return_size)
+      : tunable(tid), mapper(m), tag(t), return_type_size(return_size)
     //--------------------------------------------------------------------------
     {
     }
@@ -6295,14 +6302,14 @@ namespace Legion {
     Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_lock(ctx);
+      return ctx->create_lock();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_lock(ctx, l);
+      ctx->destroy_lock(l);
     }
 
     //--------------------------------------------------------------------------
@@ -6310,14 +6317,14 @@ namespace Legion {
                                       const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
-      return runtime->acquire_grant(ctx, requests);
+      return ctx->acquire_grant(requests);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::release_grant(Context ctx, Grant grant)
     //--------------------------------------------------------------------------
     {
-      runtime->release_grant(ctx, grant);
+      ctx->release_grant(grant);
     }
 
     //--------------------------------------------------------------------------
@@ -6325,14 +6332,14 @@ namespace Legion {
                                                         unsigned arrivals)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_phase_barrier(ctx, arrivals);
+      return ctx->create_phase_barrier(arrivals);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_phase_barrier(ctx, pb);
+      ctx->destroy_phase_barrier(pb);
     }
 
     //--------------------------------------------------------------------------
@@ -6340,7 +6347,7 @@ namespace Legion {
                                                          PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-      return runtime->advance_phase_barrier(ctx, pb);
+      return ctx->advance_phase_barrier(pb);
     }
 
     //--------------------------------------------------------------------------
@@ -6351,8 +6358,8 @@ namespace Legion {
                                                         size_t init_size)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_dynamic_collective(ctx, arrivals, redop,
-                                                init_value, init_size);
+      return ctx->create_dynamic_collective(arrivals, redop, 
+                                            init_value, init_size);
     }
     
     //--------------------------------------------------------------------------
@@ -6360,7 +6367,7 @@ namespace Legion {
                                                       DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_dynamic_collective(ctx, dc);
+      ctx->destroy_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -6371,7 +6378,7 @@ namespace Legion {
                                                      unsigned count)
     //--------------------------------------------------------------------------
     {
-      runtime->arrive_dynamic_collective(ctx, dc, buffer, size, count);
+      ctx->arrive_dynamic_collective(dc, buffer, size, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6381,7 +6388,7 @@ namespace Legion {
                                                    unsigned count)
     //--------------------------------------------------------------------------
     {
-      runtime->defer_dynamic_collective_arrival(ctx, dc, f, count);
+      ctx->defer_dynamic_collective_arrival(dc, f, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6389,7 +6396,7 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_dynamic_collective_result(ctx, dc);
+      return ctx->get_dynamic_collective_result(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -6397,7 +6404,7 @@ namespace Legion {
                                                            DynamicCollective dc)
     //--------------------------------------------------------------------------
     {
-      return runtime->advance_dynamic_collective(ctx, dc);
+      return ctx->advance_dynamic_collective(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -7055,7 +7062,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, LEGION_NAME_SEMANTIC_TAG,
                                          dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -7065,18 +7073,19 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_name(IndexPartition handle,
-                                         const char *&result)
+    void Runtime::retrieve_name(IndexPartition handle, const char *&result)
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -7086,7 +7095,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -7098,7 +7108,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -7109,7 +7120,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -7120,7 +7132,8 @@ namespace Legion {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
           LEGION_NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
-      result = reinterpret_cast<const char*>(dummy_ptr);
+      static_assert(sizeof(dummy_ptr) == sizeof(result), "Fuck c++");
+      memcpy(&result, &dummy_ptr, sizeof(result));
     }
 
     //--------------------------------------------------------------------------
@@ -7502,11 +7515,12 @@ namespace Legion {
                                     const void *user_data /*= NULL*/,
                                     size_t user_len /*= 0*/,
                                     size_t return_type_size/*=MAX_RETURN_SIZE*/,
-                                    VariantID vid /*= AUTO_GENERATE_ID*/)
+                                    VariantID vid /*= AUTO_GENERATE_ID*/,
+                                    bool has_return_type_size /*= true*/)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_len, 
-                                       realm_desc, return_type_size, vid);
+             realm_desc, return_type_size, has_return_type_size, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -7518,12 +7532,14 @@ namespace Legion {
 	      const char *task_name /*= NULL*/,
               VariantID vid /*=AUTO_GENERATE_ID*/,
               size_t return_type_size /*=MAX_RETURN_SIZE*/,
+              bool has_return_type_size /*=true*/,
               bool check_task_id/*=true*/)
     //--------------------------------------------------------------------------
     {
       // Make a copy of the descriptor here
       return Internal::Runtime::preregister_variant(registrar, user_data, 
-         user_len, realm_desc, return_type_size, task_name, vid, check_task_id);
+             user_len, realm_desc, return_type_size, has_return_type_size,
+             task_name, vid, check_task_id);
     }
 
     //--------------------------------------------------------------------------

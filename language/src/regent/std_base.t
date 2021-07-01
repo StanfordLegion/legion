@@ -1473,7 +1473,11 @@ end
 
 -- TODO: This is actually safe once we make task ids global variables
 function base.task:set_task_id_unsafe(task_id)
-  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  if base.config["separate"] then
+    self.taskid:setinitializer(task_id)
+  else
+    self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  end
 end
 
 function base.task:get_task_id()
@@ -1621,6 +1625,10 @@ function base.task:set_is_inline(is_inline)
   self.is_inline = is_inline
 end
 
+function base.task:set_is_local(is_local)
+  self.is_local = is_local
+end
+
 function base.task:set_optimization_thunk(optimization_thunk)
   self.optimization_thunk = optimization_thunk
 end
@@ -1702,6 +1710,7 @@ do
       is_complete = false,
       optimization_thunk = false,
       is_inline = false,
+      is_local = false,
     }, base.task)
   end
 end

@@ -711,6 +711,7 @@ namespace Realm {
     Event e = search_from;
     while(true) {
       EventWaiter *waiters_head = 0;
+      Event next_barrier_gen = Event::NO_EVENT;
 
       ID id(e);
       if(id.is_event()) {
@@ -732,11 +733,29 @@ namespace Realm {
 	  }
 	}
       } else if(id.is_barrier()) {
-	assert(0);
-	break;
+        BarrierImpl *impl = get_runtime()->get_barrier_impl(e);
+
+        {
+          AutoLock<> al(impl->mutex);
+          std::map<gen_t, BarrierImpl::Generation *>::const_iterator it = impl->generations.begin();
+          // skip any generations before the one of interest
+          while((it != impl->generations.end()) && (it->first < id.barrier_generation()))
+            ++it;
+          // take the waiter list of the exact generation of interest (if exists)
+          if((it != impl->generations.end() && (it->first == id.barrier_generation()))) {
+            waiters_head = it->second->local_waiters.head.next;
+            ++it;
+          }
+          // if there's waiters on future barrier generations, they're implicitly
+          //  dependent on this generation
+          if(it != impl->generations.end())
+            next_barrier_gen = impl->make_event(it->first);
+        }
       } else {
 	assert(0);
       }
+
+      assert(!next_barrier_gen.exists());
 
       // record all of these event waiters as seen before traversing, so that we find the
       //  shortest possible path

@@ -323,6 +323,7 @@ namespace Legion {
       options_selected = false;
       map_origin = false;
       request_valid_instances = false;
+      elide_future_return = false;
       replicate = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
@@ -426,6 +427,7 @@ namespace Legion {
       }
       rez.serialize(request_valid_instances);
       rez.serialize(execution_fence_event);
+      rez.serialize(elide_future_return);
       rez.serialize(replicate);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
@@ -479,6 +481,7 @@ namespace Legion {
       }
       derez.deserialize(request_valid_instances);
       derez.deserialize(execution_fence_event);
+      derez.deserialize(elide_future_return);
       derez.deserialize(replicate);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -1400,6 +1403,7 @@ namespace Legion {
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
       this->map_origin = rhs->map_origin;
+      this->elide_future_return = rhs->elide_future_return;
       this->replicate = rhs->replicate;
       this->sharding_space = rhs->sharding_space;
       this->request_valid_instances = rhs->request_valid_instances;
@@ -2875,6 +2879,9 @@ namespace Legion {
                       "implementation of task %s (ID %lld).",
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
+      // Record the future output size
+      handle_future_size(variant_impl->return_type_size,
+          variant_impl->has_return_type_size, map_applied_conditions);
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -3406,26 +3413,33 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
+      std::vector<size_t> future_bounds_sizes;
       if (runtime->separate_runtime_instances)
       {
         std::vector<Processor> procs;
         tpl->get_mapper_output(this, selected_variant, task_priority,
-          perform_postmap, procs, future_memories, physical_instances);
+          perform_postmap, procs, future_memories, future_bounds_sizes,
+          physical_instances);
         target_processors.resize(1);
         target_processors[0] = this->target_proc;
       }
       else
         tpl->get_mapper_output(this, selected_variant, task_priority,
-          perform_postmap,target_processors,future_memories,physical_instances);
+          perform_postmap, target_processors, future_memories,
+          future_bounds_sizes, physical_instances);
       // Then request any future mappings in advance
       if (!futures.empty())
       {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           const Memory memory = future_memories[idx];
+          size_t bounds = SIZE_MAX;
+          if (idx < future_bounds_sizes.size())
+            bounds = future_bounds_sizes[idx];
           const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-              memory, this, unique_op_id, memory.address_space());
+            futures[idx].impl->request_application_instance(memory, this,
+                unique_op_id, memory.address_space(),
+                ApUserEvent::NO_AP_USER_EVENT, bounds);
           if (future_mapped.exists())
             map_applied_conditions.insert(future_mapped);
         }
@@ -3576,13 +3590,25 @@ namespace Legion {
         // here if we're going to record it
         if (!futures.empty())
           output.future_locations = future_memories;
+        std::vector<size_t> future_size_bounds(futures.size(), SIZE_MAX);
+        std::vector<TaskTreeCoordinates> future_coordinates(futures.size());
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl;
+          if (impl == NULL)
+            continue;
+          future_size_bounds[idx] = impl->get_upper_bound_size();
+          if (future_size_bounds[idx] < SIZE_MAX)
+            impl->get_future_coordinates(future_coordinates[idx]);
+        }
         const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
           remote_trace_recorder->record_mapper_output(tlid, output,
-              physical_instances, map_applied_conditions);
+              physical_instances, future_size_bounds, future_coordinates,
+              map_applied_conditions);
         else
-          tpl->record_mapper_output(tlid, output, 
-              physical_instances, map_applied_conditions);
+          tpl->record_mapper_output(tlid, output, physical_instances,
+              future_size_bounds, future_coordinates, map_applied_conditions);
       }
     }
 
@@ -3651,11 +3677,12 @@ namespace Legion {
                           get_task_name(), get_unique_id())
           else
             shard_manager->set_shard_mapping(output.control_replication_map);
+          VariantImpl *var_impl = NULL;
+          VariantID chosen_variant = output.task_mappings[0].chosen_variant;
           if (!runtime->unsafe_mapper)
           {
             // Check to make sure that they all picked the same variant
             // and that it is a replicable variant
-            VariantID chosen_variant = output.task_mappings[0].chosen_variant;
             for (unsigned idx = 1; idx < total_shards; idx++)
             {
               if (output.task_mappings[idx].chosen_variant != chosen_variant)
@@ -3669,8 +3696,8 @@ namespace Legion {
                               output.task_mappings[idx].chosen_variant,
                               get_task_name(), get_unique_id())
             }
-            VariantImpl *var_impl = runtime->find_variant_impl(task_id,
-                                      chosen_variant, true/*can_fail*/);
+            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+                                                  true/*can_fail*/);
             // If it's NULL we'll catch it later in the checks
             if ((var_impl != NULL) && !var_impl->is_replicable())
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3681,6 +3708,11 @@ namespace Legion {
                             mapper->get_mapper_name(), get_task_name(),
                             get_unique_id())
           }
+          else
+            var_impl = runtime->find_variant_impl(task_id, chosen_variant,
+                                                  true/*can_fail*/);
+          handle_future_size(var_impl->return_type_size,
+              var_impl->has_return_type_size, map_applied_conditions);
         }
         else
         {
@@ -3712,6 +3744,11 @@ namespace Legion {
                               get_unique_id())
             }
           }
+          VariantID chosen_variant = output.task_mappings[0].chosen_variant;
+          VariantImpl *var_impl = 
+            runtime->find_variant_impl(task_id,chosen_variant,true/*can_fail*/);
+          handle_future_size(var_impl->return_type_size,
+              var_impl->has_return_type_size, map_applied_conditions);
         }
         // We're going to store the needed instances locally so we can
         // do the mapping when we return on behalf of all the shards
@@ -3930,7 +3967,9 @@ namespace Legion {
           }
           else
           {
+            unsigned read_only_count = 0;
             std::vector<unsigned> performed_regions;
+            performed_regions.reserve(region_count);
             std::set<RtEvent> registration_postconditions;
             std::vector<UpdateAnalysis*> analyses(region_count, NULL);
             std::vector<ApEvent> effects(region_count, ApEvent::NO_AP_EVENT);
@@ -3967,6 +4006,42 @@ namespace Legion {
                                           unique_op_id,
 #endif
                                           record_valid);
+              if (IS_READ_ONLY(logical_regions[idx]))
+                read_only_count++;
+            }
+            // In order to avoid cycles when mapping multiple tasks in parallel
+            // with read-only requirements, we need to guarantee that all read-only
+            // copies are issued before we can perform any registrations for the
+            // task that will be using their results.
+            if (read_only_count > 1)
+            {
+              std::vector<RtEvent> read_only_preconditions;
+              read_only_preconditions.reserve(read_only_count);
+              std::vector<unsigned> read_only_regions;
+              read_only_regions.reserve(read_only_count);
+              for (std::vector<unsigned>::const_iterator it =
+                    performed_regions.begin(); it !=
+                    performed_regions.end(); it++)
+              {
+                if (!IS_READ_ONLY(logical_regions[*it]))
+                  continue;
+                read_only_regions.push_back(*it);
+                const RtEvent precondition = reg_pre[*it];
+                if (precondition.exists())
+                  read_only_preconditions.push_back(precondition);
+              }
+              if (!read_only_preconditions.empty())
+              {
+                const RtEvent read_only_precondition =
+                  Runtime::merge_events(read_only_preconditions);
+                if (read_only_precondition.exists())
+                {
+                  for (std::vector<unsigned>::const_iterator it =
+                        read_only_regions.begin(); it !=
+                        read_only_regions.end(); it++)
+                    reg_pre[*it] = read_only_precondition;
+                }
+              }
             }
 
             for (std::vector<unsigned>::const_iterator it = 
@@ -5265,16 +5340,19 @@ namespace Legion {
       if (!rhs->point_futures.empty())
         this->point_futures = rhs->point_futures;
       this->output_region_options = rhs->output_region_options;
-      this->predicate_false_future = rhs->predicate_false_future;
-      this->predicate_false_size = rhs->predicate_false_size;
-      if (this->predicate_false_size > 0)
+      if (!elide_future_return)
       {
+        this->predicate_false_future = rhs->predicate_false_future;
+        this->predicate_false_size = rhs->predicate_false_size;
+        if (this->predicate_false_size > 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(this->predicate_false_result == NULL);
+          assert(this->predicate_false_result == NULL);
 #endif
-        this->predicate_false_result = malloc(this->predicate_false_size);
-        memcpy(this->predicate_false_result, rhs->predicate_false_result,
-               this->predicate_false_size);
+          this->predicate_false_result = malloc(this->predicate_false_size);
+          memcpy(this->predicate_false_result, rhs->predicate_false_result,
+                 this->predicate_false_size);
+        }
       }
     }
 
@@ -5693,7 +5771,8 @@ namespace Legion {
       }
       remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
-      if (launcher.predicate != Predicate::TRUE_PRED)
+      if (launcher.predicate != Predicate::TRUE_PRED &&
+          !launcher.elide_future_return)
       {
         if (launcher.predicate_false_future.impl != NULL)
           predicate_false_future = launcher.predicate_false_future;
@@ -5725,9 +5804,17 @@ namespace Legion {
         local_function = true;
       }
       // Get a future from the parent context to use as the result
-      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), this));
+      if (launcher.elide_future_return)
+        elide_future_return = true;
+      else
+        result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), 
+              runtime->address_space, get_completion_event(), 
+              this, gen, context_index, index_point,
+#ifdef LEGION_SPY
+              unique_op_id,
+#endif
+              parent_ctx->get_depth()));
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -5892,6 +5979,9 @@ namespace Legion {
           it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(logical_regions.size());
@@ -5958,7 +6048,7 @@ namespace Legion {
     {
       // If we already launched, then return, otherwise continue
       // through and do the work to clean up the task 
-      if (launched)
+      if (launched || elide_future_return)
         return;
       // Set the future to the false result
       if (predicate_false_future.impl != NULL)
@@ -6078,6 +6168,30 @@ namespace Legion {
                           applied_condition, acquired_instances);
       complete_mapping(applied_condition);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::handle_future_size(size_t return_type_size,
+                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(orig_task);
+          rez.serialize(return_type_size);
+          rez.serialize(has_return_type_size);
+          rez.serialize(done_event);
+        }
+        runtime->send_individual_remote_future_size(orig_proc, rez);
+        applied_events.insert(done_event);
+      }
+      else if (has_return_type_size)
+        result.impl->set_future_result_size(return_type_size,
+                                            runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -6237,10 +6351,27 @@ namespace Legion {
         assert(instance == NULL);
         assert(metadata == NULL);
 #endif
-        result.impl->set_result(functor, own_functor, future_proc);
+        if (elide_future_return)
+        {
+          functor->callback_release_future();
+          if (own_functor)
+            delete functor;
+        }
+        else
+          result.impl->set_result(functor, own_functor, future_proc);
       }
       else
-        result.impl->set_result(instance, metadata, metasize);
+      {
+        if (elide_future_return)
+        {
+          if (instance != NULL)
+            delete instance;
+          if (metadata != NULL)
+            free(metadata);
+        }
+        else
+          result.impl->set_result(instance, metadata, metasize);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6297,26 +6428,29 @@ namespace Legion {
       FutureInstance *result = NULL;
       const void *metadata = NULL;
       size_t metasize = 0;
-      if (predicate_false_future.impl != NULL)
+      if (!elide_future_return)
       {
-        FutureInstance *canonical = 
-          predicate_false_future.impl->get_canonical_instance();
-        if (canonical != NULL)
+        if (predicate_false_future.impl != NULL)
         {
-          const Memory target = 
-            runtime->find_local_memory(current_proc, canonical->memory.kind());
-          MemoryManager *manager = runtime->find_memory_manager(target);
-          const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
-          result = manager->create_future_instance(this, unique_op_id,
-                        ready_event, canonical->size, false/*eager*/);
-          Runtime::trigger_event(NULL, ready_event, 
-                result->copy_from(canonical, this));
+          FutureInstance *canonical = 
+            predicate_false_future.impl->get_canonical_instance();
+          if (canonical != NULL)
+          {
+            const Memory target = 
+              runtime->find_local_memory(current_proc,canonical->memory.kind());
+            MemoryManager *manager = runtime->find_memory_manager(target);
+            const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
+            result = manager->create_future_instance(this, unique_op_id,
+                          ready_event, canonical->size, false/*eager*/);
+            Runtime::trigger_event(NULL, ready_event, 
+                  result->copy_from(canonical, this));
+          }
+          metadata = predicate_false_future.impl->get_metadata(&metasize);
         }
-        metadata = predicate_false_future.impl->get_metadata(&metasize);
+        else if (predicate_false_size > 0)
+          result = FutureInstance::create_local(predicate_false_result,
+              predicate_false_size, false/*own*/, runtime);
       }
-      else if (predicate_false_size > 0)
-        result = FutureInstance::create_local(predicate_false_result,
-            predicate_false_size, false/*own*/, runtime);
       execution_context->end_misspeculation(result, metadata, metasize); 
     }
 
@@ -6344,14 +6478,17 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      result.impl->pack_future(rez);
-      if (predicate_false_future.impl != NULL)
-        predicate_false_future.impl->pack_future(rez);
-      else
-        rez.serialize<DistributedID>(0);
-      rez.serialize(predicate_false_size);
-      if (predicate_false_size > 0)
-        rez.serialize(predicate_false_result, predicate_false_size);
+      if (!elide_future_return)
+      {
+        result.impl->pack_future(rez);
+        if (predicate_false_future.impl != NULL)
+          predicate_false_future.impl->pack_future(rez);
+        else
+          rez.serialize<DistributedID>(0);
+        rez.serialize(predicate_false_size);
+        if (predicate_false_size > 0)
+          rez.serialize(predicate_false_result, predicate_false_size);
+      }
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6398,6 +6535,7 @@ namespace Legion {
         deactivate();
         return false;
       }
+      if (!elide_future_return)
       {
         WrapperReferenceMutator mutator(ready_events);
         FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
@@ -6410,15 +6548,15 @@ namespace Legion {
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           predicate_false_future = Future(impl, false/*need reference*/);
         }
-      }
-      derez.deserialize(predicate_false_size);
-      if (predicate_false_size > 0)
-      {
+        derez.deserialize(predicate_false_size);
+        if (predicate_false_size > 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(predicate_false_result == NULL);
+          assert(predicate_false_result == NULL);
 #endif
-        predicate_false_result = malloc(predicate_false_size);
-        derez.deserialize(predicate_false_result, predicate_false_size);
+          predicate_false_result = malloc(predicate_false_size);
+          derez.deserialize(predicate_false_result, predicate_false_size);
+        }
       }
       // Figure out what our parent context is
       RtEvent ctx_ready;
@@ -6559,6 +6697,31 @@ namespace Legion {
         update_no_access_regions();
         launch_task();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualTask::process_unpack_remote_future_size(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndividualTask *task;
+      derez.deserialize(task);
+      size_t return_type_size;
+      derez.deserialize(return_type_size);
+      bool has_return_type_size;
+      derez.deserialize(has_return_type_size);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      std::set<RtEvent> applied_events;
+      task->handle_future_size(return_type_size, 
+          has_return_type_size, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
+
     }
 
     //--------------------------------------------------------------------------
@@ -6883,6 +7046,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::handle_future_size(size_t return_type_size,
+                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (has_return_type_size)
+        slice_owner->handle_future_size(return_type_size,
+                                        index_point, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
@@ -7100,7 +7273,7 @@ namespace Legion {
       execution_context->begin_misspeculation();
       const void *metadata = NULL;
       size_t metasize = 0;
-      FutureInstance *instance = 
+      FutureInstance *instance = elide_future_return ? NULL : 
         slice_owner->get_predicate_false_result(current_proc,metadata,metasize);
       execution_context->end_misspeculation(instance, metadata, metasize);
     }
@@ -7153,7 +7326,10 @@ namespace Legion {
         Future f = point_arguments.impl->get_future(point, true/*internal*/);
         if (f.impl != NULL)
         {
-          const RtEvent ready = f.impl->request_internal_buffer(this, eager);
+          // Request the local buffer
+          f.impl->request_internal_buffer(this, eager);
+          // Make sure that it is ready
+          const RtEvent ready = f.impl->subscribe();
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
           const void *buffer =
@@ -7430,6 +7606,14 @@ namespace Legion {
     {
       assert(false);
       return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_future_size(size_t return_type_size,
+                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // do nothing 
     }
     
     //--------------------------------------------------------------------------
@@ -8217,11 +8401,16 @@ namespace Legion {
               get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id(), get_trace()->get_trace_id())
       }
-      if (launcher.predicate != Predicate::TRUE_PRED)
-        initialize_predicate(launcher.predicate_false_future,
-                             launcher.predicate_false_result);
-      future_map = FutureMap(
-        create_future_map(ctx, launch_space->handle, launcher.sharding_space));
+      if (!launcher.elide_future_return)
+      {
+        if (launcher.predicate != Predicate::TRUE_PRED)
+          initialize_predicate(launcher.predicate_false_future,
+                               launcher.predicate_false_result);
+        future_map = FutureMap(
+         create_future_map(ctx, launch_space->handle, launcher.sharding_space));
+      }
+      else
+        elide_future_return = true;
       check_empty_field_requirements(); 
 
       if (runtime->legion_spy_enabled)
@@ -8250,6 +8439,11 @@ namespace Legion {
                              std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      if (launcher.elide_future_return)
+      {
+        initialize_task(ctx, launcher, launch_sp, track, outputs);
+        return Future();
+      }
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
@@ -8333,8 +8527,9 @@ namespace Legion {
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
       reduction_future = Future(new FutureImpl(parent_ctx, runtime,
-            true/*register*/, runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), this));
+          true/*register*/, runtime->get_available_distributed_id(), 
+          runtime->address_space, get_completion_event(),
+          (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
       if (runtime->legion_spy_enabled)
       {
@@ -8587,6 +8782,9 @@ namespace Legion {
       for (std::vector<FutureMap>::const_iterator it = 
             point_futures.begin(); it != point_futures.end(); it++)
         it->impl->register_dependence(this);
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                  wait_barriers, arrive_barriers, must_epoch);
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(logical_regions.size());
@@ -8649,7 +8847,7 @@ namespace Legion {
       else
       {
         // Enumerate the futures in the future map
-        if (redop == 0)
+        if ((redop == 0) && !elide_future_return)
           enumerate_futures(index_domain);
         Operation::trigger_ready();
       }
@@ -8660,6 +8858,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!elide_future_return);
       assert(future_handles == NULL);
 #endif
       future_handles = new FutureHandles;
@@ -9305,7 +9504,7 @@ namespace Legion {
           complete_effects.clear();
         }
       }
-      else
+      else if (!elide_future_return)
         Runtime::trigger_event(future_map_ready);
 #ifdef DEBUG_LEGION
       // Should be empty at this point
@@ -9440,7 +9639,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
       total_points = launch_space->get_volume();
-      if (redop == 0)
+      if ((redop == 0) && !elide_future_return)
         enumerate_futures(index_domain);
       SliceTask *slice = clone_as_slice_task(launch_space->handle,
                 current_proc, false/*recurse*/, false/*stealable*/);
@@ -10091,7 +10290,7 @@ namespace Legion {
         tpl->get_premap_output(this, reduction_futures);
         create_future_instances(reduction_futures); 
       }
-      else
+      else if (!elide_future_return)
       {
         Domain internal_domain;
         runtime->forest->find_launch_space_domain(internal_space,
@@ -10750,20 +10949,23 @@ namespace Legion {
       rez.serialize(origin_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(internal_space);
-      if (redop == 0)
+      if (!elide_future_return)
       {
+        if (redop == 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(future_map.impl != NULL);
+          assert(future_map.impl != NULL);
 #endif
-        future_map.impl->pack_future_map(rez);
+          future_map.impl->pack_future_map(rez);
+        }
+        if (predicate_false_future.impl != NULL)
+          predicate_false_future.impl->pack_future(rez);
+        else
+          rez.serialize<DistributedID>(0);
+        rez.serialize(predicate_false_size);
+        if (predicate_false_size > 0)
+          rez.serialize(predicate_false_result, predicate_false_size);
       }
-      if (predicate_false_future.impl != NULL)
-        predicate_false_future.impl->pack_future(rez);
-      else
-        rez.serialize<DistributedID>(0);
-      rez.serialize(predicate_false_size);
-      if (predicate_false_size > 0)
-        rez.serialize(predicate_false_result, predicate_false_size);
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->pack_task(rez, target);
@@ -10835,30 +11037,28 @@ namespace Legion {
       }
       else
         parent_ctx = index_owner->parent_ctx;
-      if (redop == 0)
+      if (!elide_future_return)
       {
         WrapperReferenceMutator mutator(ready_events);
-        future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
-                                            derez, &mutator, parent_ctx));
-      }
-      // Unpack the predicate false infos
-      {
-        WrapperReferenceMutator mutator(ready_events);
+        if (redop == 0)
+          future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
+                                              derez, &mutator, parent_ctx));
+        // Unpack the predicate false infos
         FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
         if (impl != NULL)
         {
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           predicate_false_future = Future(impl, false/*need reference*/);
         }
-      }
-      derez.deserialize(predicate_false_size);
-      if (predicate_false_size > 0)
-      {
+        derez.deserialize(predicate_false_size);
+        if (predicate_false_size > 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(predicate_false_result == NULL);
+          assert(predicate_false_result == NULL);
 #endif
-        predicate_false_result = malloc(predicate_false_size);
-        derez.deserialize(predicate_false_result, predicate_false_size);
+          predicate_false_result = malloc(predicate_false_size);
+          derez.deserialize(predicate_false_result, predicate_false_size);
+        }
       }
       for (unsigned idx = 0; idx < num_points; idx++)
       {
@@ -11048,7 +11248,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_HANDLE_FUTURE_CALL);
-      if (redop > 0)
+      if (elide_future_return)
+      {
+        if (functor != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(instance == NULL);
+          assert(metadata == NULL);
+#endif
+          functor->callback_release_future();
+          if (own_functor)
+            delete functor;
+        }
+        else
+        {
+          if (instance != NULL)
+            delete instance;
+          if (metadata != NULL)
+            free(metadata);
+        }
+      }
+      else if (redop > 0)
       {
 #ifdef DEBUG_LEGION
         assert(functor == NULL);
@@ -11076,12 +11296,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != future_handles->handles.end());
 #endif
-        std::vector<std::pair<size_t,DomainPoint> > coordinates;
-        parent_ctx->compute_task_tree_coordinates(coordinates);
-        coordinates.push_back(std::make_pair(context_index, point));
         LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-                    parent_ctx->get_context_uid(), &mutator, coordinates);
+            parent_ctx->get_context_uid(), &mutator, context_index, point);
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -11192,6 +11409,9 @@ namespace Legion {
                                         const void *&metadata, size_t &metasize)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!elide_future_return);
+#endif
       FutureInstance *result = NULL;
       if (predicate_false_future.impl != NULL)
       {
@@ -11366,6 +11586,29 @@ namespace Legion {
       }
       if (needs_trigger)
         trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::handle_future_size(size_t future_size,
+                const DomainPoint &point, std::set<RtEvent> &applied_conditions)
+    //--------------------------------------------------------------------------
+    {
+      if (redop > 0)
+        return;
+#ifdef DEBUG_LEGION
+      assert(future_handles != NULL);
+#endif
+      const std::map<DomainPoint,DistributedID> &handles = 
+        future_handles->handles;
+      std::map<DomainPoint,DistributedID>::const_iterator finder = 
+        handles.find(point);
+#ifdef DEBUG_LEGION
+      assert(finder != handles.end());
+#endif
+      WrapperReferenceMutator mutator(applied_conditions);
+      FutureImpl *impl = runtime->find_or_create_future(finder->second, 
+        parent_ctx->get_context_uid(), &mutator, context_index, point);
+      impl->set_future_result_size(future_size, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------

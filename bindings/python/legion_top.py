@@ -57,6 +57,40 @@ top_level = threading.local()
 cleanup_items = list()
 
 
+# Helper class for deduplicating output streams with control replication
+class LegionOutputStream(object):
+    def __init__(self, stream):
+        # This is the original stream
+        self.stream = stream
+
+    def close(self):
+        self.stream.close()
+
+    def fileno(self):
+        return self.stream.fileno()
+
+    def flush(self):
+        self.stream.flush()
+
+    def write(self, string):
+        if self.print_local_shard():
+            self.stream.write(string)
+
+    def writelines(self, sequence):
+        if self.print_local_shard():
+            self.stream.writelines(sequence)
+
+    def isatty(self):
+        return self.stream.isatty()
+
+    def print_local_shard(self):
+        return c.legion_runtime_local_shard_without_context() == 0
+
+# Replace the output stream with one that will deduplicate
+# printing for any control-replicated tasks
+sys.stdout = LegionOutputStream(sys.stdout)
+
+
 def input_args(filter_runtime_options=False):
     raw_args = c.legion_runtime_get_input_args()
 
@@ -303,33 +337,6 @@ def is_control_replicated():
         raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
 
 
-# Helper class for deduplicating output streams with control replication
-class LegionOutputStream(object):
-    def __init__(self, shard_id, stream):
-        self.shard_id = shard_id
-        # This is the original stream
-        self.stream = stream
-
-    def close(self):
-        self.stream.close()
-
-    def flush(self):
-        self.stream.flush()
-
-    def write(self, string):
-        # Only do the write if we are shard 0
-        if self.shard_id == 0:
-            self.stream.write(string)
-
-    def writelines(self, sequence):
-        # Only do the write if we are shard 0
-        if self.shard_id == 0:
-            self.stream.writelines(sequence)
-
-    def isatty(self):
-        return self.stream.isatty()
-
-
 def legion_python_main(raw_args, user_data, proc):
     raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
     raw_arg_size = len(raw_args)
@@ -345,11 +352,6 @@ def legion_python_main(raw_args, user_data, proc):
         task, raw_regions, num_regions, context, runtime)
 
     top_level.runtime, top_level.context, top_level.task = runtime, context, task
-
-    # If we're control replicated, deduplicate stdout
-    if is_control_replicated():
-        shard_id = c.legion_context_get_shard_id(runtime[0], context[0], True)
-        sys.stdout = LegionOutputStream(shard_id, sys.stdout)
 
     # Run user's script.
     args = input_args(True)

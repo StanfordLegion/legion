@@ -1643,6 +1643,10 @@ namespace Legion {
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
     public:
+      // Instruct the runtime that it does not need to produce
+      // a future or future map result for this index task
+      bool                               elide_future_return;
+    public:
       bool                               silence_warnings;
     };
 
@@ -1741,6 +1745,10 @@ namespace Legion {
       // means that either field sets are independent or region
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
+    public:
+      // Instruct the runtime that it does not need to produce
+      // a future or future map result for this index task
+      bool                               elide_future_return;
     public:
       bool                               silence_warnings;
     };
@@ -2253,13 +2261,15 @@ namespace Legion {
     public:
       TunableLauncher(TunableID tid,
                       MapperID mapper = 0,
-                      MappingTagID tag = 0);
+                      MappingTagID tag = 0,
+                      size_t return_type_size = SIZE_MAX);
     public:
       TunableID                           tunable;
       MapperID                            mapper;
       MappingTagID                        tag;
       TaskArgument                        arg;
       std::vector<Future>                 futures;
+      size_t                              return_type_size;
     };
 
     //==========================================================================
@@ -3509,8 +3519,7 @@ namespace Legion {
      * an operation to a mapping call.
      */
     class Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Mappable(void);
     public:
       // Return a globally unique ID for this operation
@@ -3576,8 +3585,7 @@ namespace Legion {
      * that mappers can make informed decisions.
      */
     class Task : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Task(void);
     public:
       // Check whether this task has a parent task
@@ -3625,8 +3633,7 @@ namespace Legion {
      * explicit copy region-to-region copy operation.
      */
     class Copy : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Copy(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3655,8 +3662,7 @@ namespace Legion {
      * inline mapping operation from its launcher
      */
     class InlineMapping : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       InlineMapping(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3677,8 +3683,7 @@ namespace Legion {
      * acquire operation from the original launcher.
      */
     class Acquire : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Acquire(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3700,8 +3705,7 @@ namespace Legion {
      * release operation from the original launcher.
      */
     class Release : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Release(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3727,8 +3731,7 @@ namespace Legion {
      * be READ_WRITE EXCLUSIVE.
      */
     class Close : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Close(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3746,8 +3749,7 @@ namespace Legion {
      * more information.
      */
     class Fill : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Fill(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3775,8 +3777,7 @@ namespace Legion {
      * the runtime such as 'create_partition_by_field'.
      */
     class Partition : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Partition(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3809,8 +3810,7 @@ namespace Legion {
      * epoch launcher for more information.
      */
     class MustEpoch : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       MustEpoch(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -8848,8 +8848,14 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean if this has a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
        * @param vid optional variant ID to use
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @return variant ID for the task
        */
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
@@ -8858,7 +8864,8 @@ namespace Legion {
 				      size_t user_len = 0,
                                       size_t return_type_size = 
                                                       LEGION_MAX_RETURN_SIZE,
-                                      VariantID vid = LEGION_AUTO_GENERATE_ID);
+                                      VariantID vid = LEGION_AUTO_GENERATE_ID,
+                                      bool has_return_type_size = true);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -8946,7 +8953,13 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean indicating a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @param check_task_id verify validity of the task ID
        * @return variant ID for the task
        */
@@ -8958,6 +8971,7 @@ namespace Legion {
 	      const char *task_name = NULL,
               VariantID vid = LEGION_AUTO_GENERATE_ID,
               size_t return_type_size = LEGION_MAX_RETURN_SIZE,
+              bool has_return_type_size = true,
               bool check_task_id = true);
 
       /**

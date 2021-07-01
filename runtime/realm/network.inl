@@ -41,16 +41,6 @@ namespace Realm {
 	single_network->barrier();
     }
 
-    inline bool check_for_quiescence(void)
-    {
-#ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(REALM_UNLIKELY(single_network == 0)) {
-	return false;
-      } else
-#endif
-	return single_network->check_for_quiescence();
-    }
-
     // collective communication across all nodes (TODO: subcommunicators?)
     template <typename T>
     inline T broadcast(NodeID root, T val)
