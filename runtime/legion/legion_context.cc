@@ -2581,6 +2581,8 @@ namespace Legion {
     Future TaskContext::predicate_task_false(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+      if (launcher.elide_future_return)
+        return Future();
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
@@ -2601,6 +2603,8 @@ namespace Legion {
                                               const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+      if (launcher.elide_future_return)
+        return FutureMap();
       Domain launch_domain = launcher.launch_domain;
       if (!launch_domain.exists())
         runtime->forest->find_launch_space_domain(launcher.launch_space,
@@ -2663,6 +2667,8 @@ namespace Legion {
                                               const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+      if (launcher.elide_future_return)
+        return Future();
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value

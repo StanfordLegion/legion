@@ -323,6 +323,7 @@ namespace Legion {
       options_selected = false;
       map_origin = false;
       request_valid_instances = false;
+      elide_future_return = false;
       replicate = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
@@ -426,6 +427,7 @@ namespace Legion {
       }
       rez.serialize(request_valid_instances);
       rez.serialize(execution_fence_event);
+      rez.serialize(elide_future_return);
       rez.serialize(replicate);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
@@ -479,6 +481,7 @@ namespace Legion {
       }
       derez.deserialize(request_valid_instances);
       derez.deserialize(execution_fence_event);
+      derez.deserialize(elide_future_return);
       derez.deserialize(replicate);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -1400,6 +1403,7 @@ namespace Legion {
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
       this->map_origin = rhs->map_origin;
+      this->elide_future_return = rhs->elide_future_return;
       this->replicate = rhs->replicate;
       this->sharding_space = rhs->sharding_space;
       this->request_valid_instances = rhs->request_valid_instances;
@@ -5336,16 +5340,19 @@ namespace Legion {
       if (!rhs->point_futures.empty())
         this->point_futures = rhs->point_futures;
       this->output_region_options = rhs->output_region_options;
-      this->predicate_false_future = rhs->predicate_false_future;
-      this->predicate_false_size = rhs->predicate_false_size;
-      if (this->predicate_false_size > 0)
+      if (!elide_future_return)
       {
+        this->predicate_false_future = rhs->predicate_false_future;
+        this->predicate_false_size = rhs->predicate_false_size;
+        if (this->predicate_false_size > 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(this->predicate_false_result == NULL);
+          assert(this->predicate_false_result == NULL);
 #endif
-        this->predicate_false_result = malloc(this->predicate_false_size);
-        memcpy(this->predicate_false_result, rhs->predicate_false_result,
-               this->predicate_false_size);
+          this->predicate_false_result = malloc(this->predicate_false_size);
+          memcpy(this->predicate_false_result, rhs->predicate_false_result,
+                 this->predicate_false_size);
+        }
       }
     }
 
@@ -5764,7 +5771,8 @@ namespace Legion {
       }
       remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
-      if (launcher.predicate != Predicate::TRUE_PRED)
+      if (launcher.predicate != Predicate::TRUE_PRED &&
+          !launcher.elide_future_return)
       {
         if (launcher.predicate_false_future.impl != NULL)
           predicate_false_future = launcher.predicate_false_future;
@@ -5796,14 +5804,17 @@ namespace Legion {
         local_function = true;
       }
       // Get a future from the parent context to use as the result
-      result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), 
-            this, gen, context_index, index_point,
+      if (launcher.elide_future_return)
+        elide_future_return = true;
+      else
+        result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), 
+              runtime->address_space, get_completion_event(), 
+              this, gen, context_index, index_point,
 #ifdef LEGION_SPY
-            unique_op_id,
+              unique_op_id,
 #endif
-            parent_ctx->get_depth()));
+              parent_ctx->get_depth()));
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -6037,7 +6048,7 @@ namespace Legion {
     {
       // If we already launched, then return, otherwise continue
       // through and do the work to clean up the task 
-      if (launched)
+      if (launched || elide_future_return)
         return;
       // Set the future to the false result
       if (predicate_false_future.impl != NULL)
@@ -6340,10 +6351,27 @@ namespace Legion {
         assert(instance == NULL);
         assert(metadata == NULL);
 #endif
-        result.impl->set_result(functor, own_functor, future_proc);
+        if (elide_future_return)
+        {
+          functor->callback_release_future();
+          if (own_functor)
+            delete functor;
+        }
+        else
+          result.impl->set_result(functor, own_functor, future_proc);
       }
       else
-        result.impl->set_result(instance, metadata, metasize);
+      {
+        if (elide_future_return)
+        {
+          if (instance != NULL)
+            delete instance;
+          if (metadata != NULL)
+            free(metadata);
+        }
+        else
+          result.impl->set_result(instance, metadata, metasize);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6400,26 +6428,29 @@ namespace Legion {
       FutureInstance *result = NULL;
       const void *metadata = NULL;
       size_t metasize = 0;
-      if (predicate_false_future.impl != NULL)
+      if (!elide_future_return)
       {
-        FutureInstance *canonical = 
-          predicate_false_future.impl->get_canonical_instance();
-        if (canonical != NULL)
+        if (predicate_false_future.impl != NULL)
         {
-          const Memory target = 
-            runtime->find_local_memory(current_proc, canonical->memory.kind());
-          MemoryManager *manager = runtime->find_memory_manager(target);
-          const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
-          result = manager->create_future_instance(this, unique_op_id,
-                        ready_event, canonical->size, false/*eager*/);
-          Runtime::trigger_event(NULL, ready_event, 
-                result->copy_from(canonical, this));
+          FutureInstance *canonical = 
+            predicate_false_future.impl->get_canonical_instance();
+          if (canonical != NULL)
+          {
+            const Memory target = 
+              runtime->find_local_memory(current_proc,canonical->memory.kind());
+            MemoryManager *manager = runtime->find_memory_manager(target);
+            const ApUserEvent ready_event = Runtime::create_ap_user_event(NULL);
+            result = manager->create_future_instance(this, unique_op_id,
+                          ready_event, canonical->size, false/*eager*/);
+            Runtime::trigger_event(NULL, ready_event, 
+                  result->copy_from(canonical, this));
+          }
+          metadata = predicate_false_future.impl->get_metadata(&metasize);
         }
-        metadata = predicate_false_future.impl->get_metadata(&metasize);
+        else if (predicate_false_size > 0)
+          result = FutureInstance::create_local(predicate_false_result,
+              predicate_false_size, false/*own*/, runtime);
       }
-      else if (predicate_false_size > 0)
-        result = FutureInstance::create_local(predicate_false_result,
-            predicate_false_size, false/*own*/, runtime);
       execution_context->end_misspeculation(result, metadata, metasize); 
     }
 
@@ -6447,14 +6478,17 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      result.impl->pack_future(rez);
-      if (predicate_false_future.impl != NULL)
-        predicate_false_future.impl->pack_future(rez);
-      else
-        rez.serialize<DistributedID>(0);
-      rez.serialize(predicate_false_size);
-      if (predicate_false_size > 0)
-        rez.serialize(predicate_false_result, predicate_false_size);
+      if (!elide_future_return)
+      {
+        result.impl->pack_future(rez);
+        if (predicate_false_future.impl != NULL)
+          predicate_false_future.impl->pack_future(rez);
+        else
+          rez.serialize<DistributedID>(0);
+        rez.serialize(predicate_false_size);
+        if (predicate_false_size > 0)
+          rez.serialize(predicate_false_result, predicate_false_size);
+      }
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -6501,6 +6535,7 @@ namespace Legion {
         deactivate();
         return false;
       }
+      if (!elide_future_return)
       {
         WrapperReferenceMutator mutator(ready_events);
         FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
@@ -6513,15 +6548,15 @@ namespace Legion {
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           predicate_false_future = Future(impl, false/*need reference*/);
         }
-      }
-      derez.deserialize(predicate_false_size);
-      if (predicate_false_size > 0)
-      {
+        derez.deserialize(predicate_false_size);
+        if (predicate_false_size > 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(predicate_false_result == NULL);
+          assert(predicate_false_result == NULL);
 #endif
-        predicate_false_result = malloc(predicate_false_size);
-        derez.deserialize(predicate_false_result, predicate_false_size);
+          predicate_false_result = malloc(predicate_false_size);
+          derez.deserialize(predicate_false_result, predicate_false_size);
+        }
       }
       // Figure out what our parent context is
       RtEvent ctx_ready;
@@ -7238,7 +7273,7 @@ namespace Legion {
       execution_context->begin_misspeculation();
       const void *metadata = NULL;
       size_t metasize = 0;
-      FutureInstance *instance = 
+      FutureInstance *instance = elide_future_return ? NULL : 
         slice_owner->get_predicate_false_result(current_proc,metadata,metasize);
       execution_context->end_misspeculation(instance, metadata, metasize);
     }
@@ -8366,11 +8401,16 @@ namespace Legion {
               get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id(), get_trace()->get_trace_id())
       }
-      if (launcher.predicate != Predicate::TRUE_PRED)
-        initialize_predicate(launcher.predicate_false_future,
-                             launcher.predicate_false_result);
-      future_map = FutureMap(
-        create_future_map(ctx, launch_space->handle, launcher.sharding_space));
+      if (!launcher.elide_future_return)
+      {
+        if (launcher.predicate != Predicate::TRUE_PRED)
+          initialize_predicate(launcher.predicate_false_future,
+                               launcher.predicate_false_result);
+        future_map = FutureMap(
+         create_future_map(ctx, launch_space->handle, launcher.sharding_space));
+      }
+      else
+        elide_future_return = true;
       check_empty_field_requirements(); 
 
       if (runtime->legion_spy_enabled)
@@ -8399,6 +8439,11 @@ namespace Legion {
                              std::vector<OutputRequirement> *outputs /*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      if (launcher.elide_future_return)
+      {
+        initialize_task(ctx, launcher, launch_sp, track, outputs);
+        return Future();
+      }
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
@@ -8802,7 +8847,7 @@ namespace Legion {
       else
       {
         // Enumerate the futures in the future map
-        if (redop == 0)
+        if ((redop == 0) && !elide_future_return)
           enumerate_futures(index_domain);
         Operation::trigger_ready();
       }
@@ -8813,6 +8858,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!elide_future_return);
       assert(future_handles == NULL);
 #endif
       future_handles = new FutureHandles;
@@ -9458,7 +9504,7 @@ namespace Legion {
           complete_effects.clear();
         }
       }
-      else
+      else if (!elide_future_return)
         Runtime::trigger_event(future_map_ready);
 #ifdef DEBUG_LEGION
       // Should be empty at this point
@@ -9593,7 +9639,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
       total_points = launch_space->get_volume();
-      if (redop == 0)
+      if ((redop == 0) && !elide_future_return)
         enumerate_futures(index_domain);
       SliceTask *slice = clone_as_slice_task(launch_space->handle,
                 current_proc, false/*recurse*/, false/*stealable*/);
@@ -10244,7 +10290,7 @@ namespace Legion {
         tpl->get_premap_output(this, reduction_futures);
         create_future_instances(reduction_futures); 
       }
-      else
+      else if (!elide_future_return)
       {
         Domain internal_domain;
         runtime->forest->find_launch_space_domain(internal_space,
@@ -10903,20 +10949,23 @@ namespace Legion {
       rez.serialize(origin_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(internal_space);
-      if (redop == 0)
+      if (!elide_future_return)
       {
+        if (redop == 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(future_map.impl != NULL);
+          assert(future_map.impl != NULL);
 #endif
-        future_map.impl->pack_future_map(rez);
+          future_map.impl->pack_future_map(rez);
+        }
+        if (predicate_false_future.impl != NULL)
+          predicate_false_future.impl->pack_future(rez);
+        else
+          rez.serialize<DistributedID>(0);
+        rez.serialize(predicate_false_size);
+        if (predicate_false_size > 0)
+          rez.serialize(predicate_false_result, predicate_false_size);
       }
-      if (predicate_false_future.impl != NULL)
-        predicate_false_future.impl->pack_future(rez);
-      else
-        rez.serialize<DistributedID>(0);
-      rez.serialize(predicate_false_size);
-      if (predicate_false_size > 0)
-        rez.serialize(predicate_false_result, predicate_false_size);
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->pack_task(rez, target);
@@ -10988,30 +11037,28 @@ namespace Legion {
       }
       else
         parent_ctx = index_owner->parent_ctx;
-      if (redop == 0)
+      if (!elide_future_return)
       {
         WrapperReferenceMutator mutator(ready_events);
-        future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
-                                            derez, &mutator, parent_ctx));
-      }
-      // Unpack the predicate false infos
-      {
-        WrapperReferenceMutator mutator(ready_events);
+        if (redop == 0)
+          future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
+                                              derez, &mutator, parent_ctx));
+        // Unpack the predicate false infos
         FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
         if (impl != NULL)
         {
           impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
           predicate_false_future = Future(impl, false/*need reference*/);
         }
-      }
-      derez.deserialize(predicate_false_size);
-      if (predicate_false_size > 0)
-      {
+        derez.deserialize(predicate_false_size);
+        if (predicate_false_size > 0)
+        {
 #ifdef DEBUG_LEGION
-        assert(predicate_false_result == NULL);
+          assert(predicate_false_result == NULL);
 #endif
-        predicate_false_result = malloc(predicate_false_size);
-        derez.deserialize(predicate_false_result, predicate_false_size);
+          predicate_false_result = malloc(predicate_false_size);
+          derez.deserialize(predicate_false_result, predicate_false_size);
+        }
       }
       for (unsigned idx = 0; idx < num_points; idx++)
       {
@@ -11201,7 +11248,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_HANDLE_FUTURE_CALL);
-      if (redop > 0)
+      if (elide_future_return)
+      {
+        if (functor != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(instance == NULL);
+          assert(metadata == NULL);
+#endif
+          functor->callback_release_future();
+          if (own_functor)
+            delete functor;
+        }
+        else
+        {
+          if (instance != NULL)
+            delete instance;
+          if (metadata != NULL)
+            free(metadata);
+        }
+      }
+      else if (redop > 0)
       {
 #ifdef DEBUG_LEGION
         assert(functor == NULL);
@@ -11342,6 +11409,9 @@ namespace Legion {
                                         const void *&metadata, size_t &metasize)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!elide_future_return);
+#endif
       FutureInstance *result = NULL;
       if (predicate_false_future.impl != NULL)
       {

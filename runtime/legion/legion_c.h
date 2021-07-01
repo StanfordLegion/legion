@@ -3043,6 +3043,13 @@ extern "C" {
                                                bool local_function_task);
 
   /**
+   * @see Legion::TaskLauncher::elide_future_return
+   */
+  void
+  legion_task_launcher_set_elide_future_return(legion_task_launcher_t launcher,
+                                               bool elide_future_return);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
@@ -3349,6 +3356,13 @@ extern "C" {
   void
   legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher,
                                         legion_mapping_tag_id_t tag);
+
+  /**
+   * @see Legion::IndexTaskLauncher::elide_future_return
+   */
+  void
+  legion_index_launcher_set_elide_future_return(legion_task_launcher_t launcher,
+                                                bool elide_future_return);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations

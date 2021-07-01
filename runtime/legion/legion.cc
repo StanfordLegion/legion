@@ -1562,7 +1562,8 @@ namespace Legion {
         map_id(0), tag(0), point(DomainPoint(0)), 
         sharding_space(IndexSpace::NO_SPACE), static_dependences(NULL),
         enable_inlining(false), local_function_task(false),
-        independent_requirements(false), silence_warnings(false)
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1575,7 +1576,7 @@ namespace Legion {
         point(DomainPoint(0)), sharding_space(IndexSpace::NO_SPACE), 
         static_dependences(NULL), enable_inlining(false),
         local_function_task(false), independent_requirements(false), 
-        silence_warnings(false)
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1592,7 +1593,7 @@ namespace Legion {
         argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
         must_parallelism(false), map_id(0), tag(0), static_dependences(NULL), 
         enable_inlining(false), independent_requirements(false), 
-        silence_warnings(false)
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1608,7 +1609,8 @@ namespace Legion {
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
         tag(t), static_dependences(NULL), enable_inlining(false), 
-        independent_requirements(false), silence_warnings(false)
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1625,7 +1627,8 @@ namespace Legion {
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
         tag(t), static_dependences(NULL), enable_inlining(false), 
-        independent_requirements(false), silence_warnings(false)
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
