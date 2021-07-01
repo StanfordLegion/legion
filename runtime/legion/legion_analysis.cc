@@ -3580,8 +3580,21 @@ namespace Legion {
         node_map[root_source] = prev;
         for (std::set<ProjectionSummary>::const_iterator it = 
               projections.begin(); it != projections.end(); it++)
+        {
+          if (!it->projection->is_functional)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION,
+              "We strongly encourage all projection functors to be functional, "
+              "however, projection function %d is not and therefore an "
+              "expensive analysis cannot be memoized. Please consider making "
+              "it functional to avoid performance degredation.",
+              info.projection->projection_id)
+            delete prev;
+            return false;
+          }
           it->projection->construct_projection_tree(op, index, node, it->domain,
                         it->sharding, it->sharding_domain, node_map);
+        }
       }
       // Then construct the new projection tree
       ProjectionTree *next = 
