@@ -2162,19 +2162,23 @@ namespace Legion {
                               std::vector<RegionNode*> &regions) const;
     protected:
       // Old checking code explicitly for tasks
-      void check_projection_region_result(const RegionRequirement &req,
+      void check_projection_region_result(LogicalRegion upper_bound,
                                           const Task *task, unsigned idx,
-                                          LogicalRegion result, Runtime *rt);
-      void check_projection_partition_result(const RegionRequirement &req,
+                                          LogicalRegion result, 
+                                          Runtime *runtime) const;
+      void check_projection_partition_result(LogicalPartition upper_bound,
                                              const Task *task, unsigned idx,
-                                             LogicalRegion result, Runtime *rt);
+                                             LogicalRegion result,
+                                             Runtime *runtime) const;
       // Annonymized checking code
-      void check_projection_region_result(const RegionRequirement &req,
+      void check_projection_region_result(LogicalRegion upper_bound,
                                           Operation *op, unsigned idx,
-                                          LogicalRegion result, Runtime *rt);
-      void check_projection_partition_result(const RegionRequirement &req,
+                                          LogicalRegion result,
+                                          Runtime *runtime) const;
+      void check_projection_partition_result(LogicalPartition upper_bound,
                                           Operation *op, unsigned idx,
-                                          LogicalRegion result, Runtime *rt);
+                                          LogicalRegion result,
+                                          Runtime *runtime) const;
       // Checking for inversion
       void check_inversion(const Task *task, unsigned idx,
                            const std::vector<DomainPoint> &ordered_points);

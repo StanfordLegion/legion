@@ -14885,7 +14885,8 @@ namespace Legion {
           LogicalRegion result = is_functional ?
             functor->project(req.partition, point, launch_domain) : 
             functor->project(task, idx, req.partition, point); 
-          check_projection_partition_result(req, task, idx, result, runtime);
+          check_projection_partition_result(req.partition, task, idx,
+                                            result, runtime);
           return result;
         }
         else
@@ -14893,7 +14894,7 @@ namespace Legion {
           LogicalRegion result = is_functional ?
             functor->project(req.region, point, launch_domain) : 
             functor->project(task, idx, req.region, point);
-          check_projection_region_result(req, task, idx, result, runtime);
+          check_projection_region_result(req.region, task, idx, result,runtime);
           return result;
         }
       }
@@ -14904,7 +14905,8 @@ namespace Legion {
           LogicalRegion result = is_functional ?
             functor->project(req.partition, point, launch_domain) : 
             functor->project(task, idx, req.partition, point);
-          check_projection_partition_result(req, task, idx, result, runtime);
+          check_projection_partition_result(req.partition, task, idx,
+                                            result, runtime);
           return result;
         }
         else
@@ -14912,7 +14914,7 @@ namespace Legion {
           LogicalRegion result = is_functional ?
             functor->project(req.region, point, launch_domain) :
             functor->project(task, idx, req.region, point);
-          check_projection_region_result(req, task, idx, result, runtime);
+          check_projection_region_result(req.region, task, idx, result,runtime);
           return result;
         }
       }
@@ -14942,8 +14944,8 @@ namespace Legion {
                  (*it)->get_domain_point(), launch_domain) :
              functor->project(*it, idx, req.partition, 
                               (*it)->get_domain_point());
-            check_projection_partition_result(req, static_cast<Task*>(*it),
-                                              idx, result, runtime);
+            check_projection_partition_result(req.partition,
+                static_cast<Task*>(*it), idx, result, runtime);
             (*it)->set_projection_result(idx, result);
             if (find_dependences)
             {
@@ -14968,7 +14970,7 @@ namespace Legion {
               functor->project(req.region, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(*it, idx, req.region,(*it)->get_domain_point());
-            check_projection_region_result(req, static_cast<Task*>(*it), 
+            check_projection_region_result(req.region, static_cast<Task*>(*it),
                                            idx, result, runtime);
             (*it)->set_projection_result(idx, result);
             if (find_dependences)
@@ -14998,8 +15000,8 @@ namespace Legion {
                  (*it)->get_domain_point(), launch_domain) :
              functor->project(*it, idx, req.partition, 
                               (*it)->get_domain_point());
-            check_projection_partition_result(req, static_cast<Task*>(*it),
-                                              idx, result, runtime);
+            check_projection_partition_result(req.partition,
+                static_cast<Task*>(*it), idx, result, runtime);
             (*it)->set_projection_result(idx, result);
             if (find_dependences)
             {
@@ -15024,7 +15026,7 @@ namespace Legion {
               functor->project(req.region, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(*it, idx, req.region,(*it)->get_domain_point());
-            check_projection_region_result(req, static_cast<Task*>(*it),
+            check_projection_region_result(req.region, static_cast<Task*>(*it),
                                            idx, result, runtime);
             (*it)->set_projection_result(idx, result);
             if (find_dependences)
@@ -15072,7 +15074,8 @@ namespace Legion {
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(mappable, idx, req.partition, 
                                 (*it)->get_domain_point());
-            check_projection_partition_result(req, op, idx, result, runtime);
+            check_projection_partition_result(req.partition, op, idx,
+                                              result, runtime);
             (*it)->set_projection_result(idx, result);
           }
         }
@@ -15086,7 +15089,7 @@ namespace Legion {
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(mappable, idx, req.region,
                                (*it)->get_domain_point());
-            check_projection_region_result(req, op, idx, result, runtime);
+            check_projection_region_result(req.region, op, idx, result,runtime);
             (*it)->set_projection_result(idx, result);
           }
         }
@@ -15103,7 +15106,8 @@ namespace Legion {
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(mappable, idx, req.partition, 
                                (*it)->get_domain_point());
-            check_projection_partition_result(req, op, idx, result, runtime);
+            check_projection_partition_result(req.partition, op, idx,
+                                              result, runtime);
             (*it)->set_projection_result(idx, result);
           }
         }
@@ -15117,7 +15121,7 @@ namespace Legion {
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(mappable, idx, req.region,
                                (*it)->get_domain_point());
-            check_projection_region_result(req, op, idx, result, runtime);
+            check_projection_region_result(req.region, op, idx, result,runtime);
             (*it)->set_projection_result(idx, result);
           }
         }
@@ -15207,23 +15211,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_region_result(
-        const RegionRequirement &req, const Task *task, unsigned idx,
-        LogicalRegion result, Runtime *runtime)
+        LogicalRegion upper_bound, const Task *task, unsigned idx,
+        LogicalRegion result, Runtime *runtime) const
     //--------------------------------------------------------------------------
     {
       // NO_REGION is always an acceptable answer
       if (result == LogicalRegion::NO_REGION)
         return;
-      if (result.get_tree_id() != req.region.get_tree_id())
+      if (result.get_tree_id() != upper_bound.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of task %s (UID %lld) which is different from the upper "
             "bound node of tree ID %d", projection_id, 
             result.get_tree_id(), idx, task->get_task_name(), 
-            task->get_unique_id(), req.region.get_tree_id())
+            task->get_unique_id(), upper_bound.get_tree_id())
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->is_subregion(result, req.region))
+      if (!runtime->forest->is_subregion(result, upper_bound))
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
@@ -15231,7 +15235,7 @@ namespace Legion {
             "task %s (UID %lld)", projection_id, idx,
             task->get_task_name(), task->get_unique_id())
       const unsigned projection_depth = 
-        runtime->forest->get_projection_depth(result, req.region);
+        runtime->forest->get_projection_depth(result, upper_bound);
       if (projection_depth != functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
@@ -15245,23 +15249,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_partition_result(
-        const RegionRequirement &req, const Task *task, unsigned idx,
-        LogicalRegion result, Runtime *runtime)
+        LogicalPartition upper_bound, const Task *task, unsigned idx,
+        LogicalRegion result, Runtime *runtime) const
     //--------------------------------------------------------------------------
     {
       // NO_REGION is always an acceptable answer
       if (result == LogicalRegion::NO_REGION)
         return;
-      if (result.get_tree_id() != req.partition.get_tree_id())
+      if (result.get_tree_id() != upper_bound.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of task %s (UID %lld) which is different from the upper "
             "bound node of tree ID %d", projection_id, 
             result.get_tree_id(), idx, task->get_task_name(), 
-            task->get_unique_id(), req.partition.get_tree_id())
+            task->get_unique_id(), upper_bound.get_tree_id())
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->is_subregion(result, req.partition))
+      if (!runtime->forest->is_subregion(result, upper_bound))
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
@@ -15269,7 +15273,7 @@ namespace Legion {
             "task %s (UID %lld)", projection_id, idx,
             task->get_task_name(), task->get_unique_id())
       const unsigned projection_depth = 
-        runtime->forest->get_projection_depth(result, req.partition);
+        runtime->forest->get_projection_depth(result, upper_bound);
       if (projection_depth != functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
@@ -15283,23 +15287,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_region_result(
-        const RegionRequirement &req, Operation *op, unsigned idx,
-        LogicalRegion result, Runtime *runtime)
+        LogicalRegion upper_bound, Operation *op, unsigned idx,
+        LogicalRegion result, Runtime *runtime) const
     //--------------------------------------------------------------------------
     {
       // NO_REGION is always an acceptable answer
       if (result == LogicalRegion::NO_REGION)
         return;
-      if (result.get_tree_id() != req.region.get_tree_id())
+      if (result.get_tree_id() != upper_bound.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of operation %s (UID %lld) which is different from the upper "
             "bound node of tree ID %d", projection_id, 
             result.get_tree_id(), idx, op->get_logging_name(), 
-            op->get_unique_op_id(), req.region.get_tree_id())
+            op->get_unique_op_id(), upper_bound.get_tree_id())
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->is_subregion(result, req.region))
+      if (!runtime->forest->is_subregion(result, upper_bound))
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
@@ -15307,7 +15311,7 @@ namespace Legion {
             "operation %s (UID %lld)", projection_id, idx,
             op->get_logging_name(), op->get_unique_op_id())
       const unsigned projection_depth = 
-        runtime->forest->get_projection_depth(result, req.region);
+        runtime->forest->get_projection_depth(result, upper_bound);
       if (projection_depth != functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
@@ -15321,23 +15325,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_partition_result(
-        const RegionRequirement &req, Operation *op, unsigned idx,
-        LogicalRegion result, Runtime *runtime)
+        LogicalPartition upper_bound, Operation *op, unsigned idx,
+        LogicalRegion result, Runtime *runtime) const
     //--------------------------------------------------------------------------
     {
       // NO_REGION is always an acceptable answer
       if (result == LogicalRegion::NO_REGION)
         return;
-      if (result.get_tree_id() != req.partition.get_tree_id())
+      if (result.get_tree_id() != upper_bound.get_tree_id())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of operation %s (UID %lld) which is different from the upper "
             "bound node of tree ID %d", projection_id, 
             result.get_tree_id(), idx, op->get_logging_name(), 
-            op->get_unique_op_id(), req.partition.get_tree_id())
+            op->get_unique_op_id(), upper_bound.get_tree_id())
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->is_subregion(result, req.partition))
+      if (!runtime->forest->is_subregion(result, upper_bound))
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
@@ -15345,7 +15349,7 @@ namespace Legion {
             "operation %s (UID %lld)", projection_id, idx,
             op->get_logging_name(), op->get_unique_op_id())
       const unsigned projection_depth = 
-        runtime->forest->get_projection_depth(result, req.partition);
+        runtime->forest->get_projection_depth(result, upper_bound);
       if (projection_depth != functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
@@ -15565,7 +15569,9 @@ namespace Legion {
                             IndexSpaceNode *sharding_space) const
     //--------------------------------------------------------------------------
     {
-      Mappable *mappable = is_functional ? NULL : op->get_mappable();
+#ifdef DEBUG_LEGION
+      assert(is_functional);
+#endif
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
       ProjectionTree *result = new ProjectionTree(row_source);
@@ -15587,18 +15593,12 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            if (is_functional)
-              result = functor->project(region->handle, itr.p, launch_domain);
-            else
-              result = functor->project(mappable, index, region->handle, itr.p);
+            result = functor->project(region->handle, itr.p, launch_domain);
           }
           else
-          {
-            if (is_functional)
-              result = functor->project(region->handle, itr.p, launch_domain);
-            else
-              result = functor->project(mappable, index, region->handle, itr.p);
-          }
+            result = functor->project(region->handle, itr.p, launch_domain);
+          check_projection_region_result(region->handle, op, index,
+                                         result, op->runtime);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -15619,18 +15619,12 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            if (is_functional)
-              result = functor->project(partition->handle, itr.p,launch_domain);
-            else
-              result = functor->project(mappable,index,partition->handle,itr.p);
+            result = functor->project(partition->handle, itr.p,launch_domain);
           }
           else
-          {
-            if (is_functional)
-              result = functor->project(partition->handle, itr.p,launch_domain);
-            else
-              result = functor->project(mappable,index,partition->handle,itr.p);
-          }
+            result = functor->project(partition->handle, itr.p,launch_domain);
+          check_projection_partition_result(partition->handle, op, index,
+                                            result, op->runtime);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -15652,7 +15646,9 @@ namespace Legion {
           std::map<IndexTreeNode*,ProjectionTree*> &node_map) const
     //--------------------------------------------------------------------------
     {
-      Mappable *mappable = is_functional ? NULL : op->get_mappable();
+#ifdef DEBUG_LEGION
+      assert(is_functional);
+#endif
       IndexTreeNode *row_source = root->get_row_source();
       RegionTreeForest *context = root->context;
       // Iterate over the points, compute the projections, and build the tree   
@@ -15671,18 +15667,12 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            if (is_functional)
-              result = functor->project(region->handle, itr.p, launch_domain);
-            else
-              result = functor->project(mappable, index, region->handle, itr.p);
+            result = functor->project(region->handle, itr.p, launch_domain);
           }
           else
-          {
-            if (is_functional)
-              result = functor->project(region->handle, itr.p, launch_domain);
-            else
-              result = functor->project(mappable, index, region->handle, itr.p);
-          }
+            result = functor->project(region->handle, itr.p, launch_domain);
+          check_projection_region_result(region->handle, op, index,
+                                         result, op->runtime);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
@@ -15703,18 +15693,12 @@ namespace Legion {
           if (!is_exclusive)
           {
             AutoLock p_lock(projection_reservation);
-            if (is_functional)
-              result = functor->project(partition->handle, itr.p,launch_domain);
-            else
-              result = functor->project(mappable,index,partition->handle,itr.p);
+            result = functor->project(partition->handle, itr.p,launch_domain);
           }
           else
-          {
-            if (is_functional)
-              result = functor->project(partition->handle, itr.p,launch_domain);
-            else
-              result = functor->project(mappable,index,partition->handle,itr.p);
-          }
+            result = functor->project(partition->handle, itr.p,launch_domain);
+          check_projection_partition_result(partition->handle, op, index,
+                                            result, op->runtime);
           if (!result.exists())
             continue;
           if (sharding_function != NULL)
