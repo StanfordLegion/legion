@@ -342,8 +342,17 @@ namespace Legion {
                                    ReductionOpID redop, bool deterministic) = 0; 
       virtual Future reduce_future_map(const FutureMap &future_map,
                                    ReductionOpID redop, bool deterministic) = 0;
+      virtual FutureMap construct_future_map(IndexSpace domain,
+                               const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0) = 0;
+      virtual FutureMap construct_future_map(IndexSpace domain,
+                               const std::map<DomainPoint,Future> &futures,
+                                             bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
@@ -1112,8 +1121,17 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
+      virtual FutureMap construct_future_map(IndexSpace domain,
+                               const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
                                const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
+      virtual FutureMap construct_future_map(IndexSpace domain,
+                                   const std::map<DomainPoint,Future> &futures,
+                                             bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
@@ -1862,8 +1880,17 @@ namespace Legion {
                                       ReductionOpID redop, bool deterministic);
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic);
+      virtual FutureMap construct_future_map(IndexSpace domain,
+                               const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
                                const std::map<DomainPoint,TaskArgument> &data,
+                                             bool collective = false,
+                                             ShardingID sid = 0);
+      virtual FutureMap construct_future_map(IndexSpace domain,
+                                   const std::map<DomainPoint,Future> &futures,
+                                             bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
