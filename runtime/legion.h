@@ -6349,7 +6349,7 @@ namespace Legion {
        * If the task is not control-replicated then the 'collective' flag
        * will not have any effect. 
        * @param ctx enclosing task context
-       * @param domain the domain that names all points in the future map
+       * @param domain the index space that names all points in the future map
        * @param data the set of futures from which to create the future map
        * @param collective whether shards from a control replicated context
        *                   should work collectively to construct the map
@@ -6357,6 +6357,10 @@ namespace Legion {
        *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
+      FutureMap construct_future_map(Context ctx, IndexSpace domain, 
+                           const std::map<DomainPoint,TaskArgument> &data,
+                           bool collective = false, ShardingID sid = 0);
+      LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,TaskArgument> &data,
                            bool collective = false, ShardingID sid = 0);
@@ -6371,7 +6375,7 @@ namespace Legion {
        * undefined behavior will occur. If the task is not control-replicated
        * then the 'collective' flag will not have any effect.
        * @param ctx enclosing task context
-       * @param domain the domain that names all points in the future map
+       * @param domain the index space that names all points in the future map
        * @param futures the set of futures from which to create the future map
        * @param collective whether shards from a control replicated context
        *                   should work collectively to construct the map
@@ -6379,9 +6383,14 @@ namespace Legion {
        *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
+      FutureMap construct_future_map(Context ctx, IndexSpace domain,
+                           const std::map<DomainPoint,Future> &futures,
+                           bool collective = false, ShardingID sid = 0);
+      LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
                            bool collective = false, ShardingID sid = 0);
+      
 
       /**
        * @deprecated

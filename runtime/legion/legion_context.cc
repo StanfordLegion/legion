@@ -6400,6 +6400,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(IndexSpace space,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      Domain domain;
+      runtime->forest->find_launch_space_domain(space, domain);
+      return construct_future_map(domain, data, collective, sid);
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                  bool collective, ShardingID sid)
@@ -6433,6 +6444,18 @@ namespace Legion {
         impl->set_future(it->first, future, &mutator);
       }
       return FutureMap(impl);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(IndexSpace space,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      Domain domain;
+      runtime->forest->find_launch_space_domain(space, domain);
+      return construct_future_map(domain, futures,RtUserEvent::NO_RT_USER_EVENT,
+                                  internal, collective, sid);
     }
 
     //--------------------------------------------------------------------------
@@ -22294,9 +22317,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap LeafContext::construct_future_map(IndexSpace domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal construct future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                  bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal construct future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::construct_future_map(IndexSpace domain,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
