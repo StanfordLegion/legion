@@ -3089,7 +3089,7 @@ namespace Legion {
       : DistributedCollectable(rhs), context(NULL), op(NULL), op_ctx_index(0),
         op_gen(0), op_depth(0),
 #ifdef LEGION_SPY
-        op_uid(0)
+        op_uid(0),
 #endif
         future_map_domain(NULL)
     //--------------------------------------------------------------------------

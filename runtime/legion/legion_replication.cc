@@ -1098,8 +1098,9 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
-      IndexSpaceNode *shard_node = (launch_space == shard_space) ? launch_node :
-        runtime->forest->get_node(shard_space);
+      IndexSpaceNode *shard_node = 
+        ((launch_space == shard_space) || !shard_space.exists()) ?
+        launch_node : runtime->forest->get_node(shard_space);
       future_map_ready = Runtime::create_rt_user_event();
       // Make a replicate future map 
       return new ReplFutureMapImpl(repl_ctx, this, future_map_ready,
@@ -4680,8 +4681,9 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
-      IndexSpaceNode *shard_node = (launch_space == shard_space) ? launch_node :
-        runtime->forest->get_node(shard_space);
+      IndexSpaceNode *shard_node = 
+        ((launch_space == shard_space) || !shard_space.exists()) ?
+        launch_node : runtime->forest->get_node(shard_space);
       return new ReplFutureMapImpl(repl_ctx, this, 
           Runtime::protect_event(get_completion_event()), launch_node,
           shard_node, runtime, runtime->get_available_distributed_id(), 

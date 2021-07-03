@@ -2233,6 +2233,7 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
+      using InnerContext::construct_future_map;
       virtual FutureMap construct_future_map(IndexSpace space,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                              bool collective = false,
