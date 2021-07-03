@@ -3052,7 +3052,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain != NULL);
 #endif
-      future_map_domain->add_expression_reference();
+      LocalReferenceMutator mutator;
+      future_map_domain->add_nested_valid_ref(did, &mutator);
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
@@ -3077,7 +3078,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain != NULL);
 #endif
-      future_map_domain->add_expression_reference();
+      LocalReferenceMutator mutator;
+      future_map_domain->add_nested_valid_ref(did, &mutator);
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
@@ -3103,7 +3105,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       futures.clear();
-      if (future_map_domain->remove_expression_reference())
+      if (future_map_domain->remove_nested_valid_ref(did))
         delete future_map_domain;
     }
 
@@ -3538,7 +3540,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_domain != NULL);
 #endif
-      shard_domain->add_expression_reference();
+      LocalReferenceMutator mutator;
+      shard_domain->add_nested_valid_ref(did, &mutator);
       repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
@@ -3563,7 +3566,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_domain != NULL);
 #endif
-      shard_domain->add_expression_reference();
+      LocalReferenceMutator mutator;
+      shard_domain->add_nested_valid_ref(did, &mutator);
       repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
@@ -3583,7 +3587,7 @@ namespace Legion {
     ReplFutureMapImpl::~ReplFutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
-      if (shard_domain->remove_expression_reference())
+      if (shard_domain->remove_nested_valid_ref(did))
         delete shard_domain;
       if (repl_ctx->remove_reference())
         delete repl_ctx;
