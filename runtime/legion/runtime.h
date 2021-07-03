@@ -523,6 +523,13 @@ namespace Legion {
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index, AddressSpaceID owner_space,
                     RtEvent ready_event, bool register_now = true); // remote
+      FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
+                    GenerationID gen, int depth, 
+#ifdef LEGION_SPY
+                    UniqueID uid,
+#endif
+                    RtEvent ready, IndexSpaceNode *domain,
+                    Runtime *rt, DistributedID did, AddressSpaceID owner_space);
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
@@ -589,6 +596,49 @@ namespace Legion {
       mutable LocalLock future_map_lock;
       RtEvent ready_event;
       std::map<DomainPoint,Future> futures;
+    };
+
+    /**
+     * \class TransformFutureMapImpl
+     * This class is a wrapper around a future map implementation that
+     * will transform the points being accessed on to a previous future map
+     */
+    class TransformFutureMapImpl : public FutureMapImpl {
+    public:
+      typedef DomainPoint (*PointTransformFnptr)(const DomainPoint& point,
+                                                 const Domain &domain,
+                                                 const Domain &range);
+      TransformFutureMapImpl(FutureMapImpl *previous, IndexSpaceNode *domain,
+                             PointTransformFnptr fnptr);
+      TransformFutureMapImpl(FutureMapImpl *previous, IndexSpaceNode *domain,
+                             PointTransformFunctor *functor, bool own_functor);
+      TransformFutureMapImpl(const TransformFutureMapImpl &rhs);
+      virtual ~TransformFutureMapImpl(void);
+    public:
+      TransformFutureMapImpl& operator=(const TransformFutureMapImpl &rhs);
+    public:
+      virtual bool is_replicate_future_map(void) const;
+      virtual Future get_future(const DomainPoint &point, 
+                                bool internal_only,
+                                RtEvent *wait_on = NULL);
+      virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
+      virtual void wait_all_results(bool silence_warnings = true,
+                                    const char *warning_string = NULL);
+      virtual void argument_map_wrap(void);
+    public:
+      // Will return NULL if it does not exist
+      virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
+      virtual void get_shard_local_futures(
+                                     std::map<DomainPoint,Future> &futures);
+    public:
+      FutureMapImpl *const previous;
+      const bool own_functor;
+      const bool is_functor;
+    protected:
+      union {
+        PointTransformFnptr fnptr;
+        PointTransformFunctor *functor; 
+      } transform;
     };
 
     /**

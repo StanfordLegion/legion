@@ -394,6 +394,13 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0) = 0;
+      virtual FutureMap transform_future_map(const FutureMap &fm,
+                                             IndexSpace new_domain, 
+                      TransformFutureMapImpl::PointTransformFnptr fnptr) = 0;
+      virtual FutureMap transform_future_map(const FutureMap &fm,
+                                             IndexSpace new_domain,
+                                             PointTransformFunctor *functor,
+                                             bool own_functor) = 0;
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -1258,6 +1265,13 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);
+      virtual FutureMap transform_future_map(const FutureMap &fm,
+                                             IndexSpace new_domain, 
+                      TransformFutureMapImpl::PointTransformFnptr fnptr);
+      virtual FutureMap transform_future_map(const FutureMap &fm,
+                                             IndexSpace new_domain,
+                                             PointTransformFunctor *functor,
+                                             bool own_functor);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -3022,6 +3036,13 @@ namespace Legion {
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);
+      virtual FutureMap transform_future_map(const FutureMap &fm,
+                                             IndexSpace new_domain, 
+                      TransformFutureMapImpl::PointTransformFnptr fnptr);
+      virtual FutureMap transform_future_map(const FutureMap &fm,
+                                             IndexSpace new_domain,
+                                             PointTransformFunctor *functor,
+                                             bool own_functor);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);

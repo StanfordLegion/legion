@@ -3087,6 +3087,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, size_t index,
+                                 GenerationID gen, int depth,
+#ifdef LEGION_SPY
+                                 UniqueID uid,
+#endif
+                                 RtEvent ready, IndexSpaceNode *domain, 
+                                 Runtime *rt, DistributedID did,
+                                 AddressSpaceID owner_space)
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), owner_space), 
+        context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
+#ifdef LEGION_SPY
+        op_uid(o->get_unique_op_id()),
+#endif
+        future_map_domain(domain), ready_event(ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain != NULL);
+#endif
+      LocalReferenceMutator mutator;
+      future_map_domain->add_nested_valid_ref(did, &mutator);
+#ifdef LEGION_GC
+      log_garbage.info("GC Future Map %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
       : DistributedCollectable(rhs), context(NULL), op(NULL), op_ctx_index(0),
         op_gen(0), op_depth(0),
@@ -3515,6 +3544,268 @@ namespace Legion {
         Runtime::trigger_event(done, Runtime::merge_events(done_events));
       else
         Runtime::trigger_event(done);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Transform Future Map Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
+                              IndexSpaceNode *domain, PointTransformFnptr fnptr)
+      : FutureMapImpl(prev->context, prev->op, prev->op_ctx_index, prev->op_gen,
+          prev->op_depth,
+#ifdef LEGION_SPY
+          prev->op_uid,
+#endif
+          prev->get_ready_event(), domain,
+          prev->runtime, prev->runtime->get_available_distributed_id(),
+          prev->runtime->address_space),
+        previous(prev), own_functor(false), is_functor(false)
+    //--------------------------------------------------------------------------
+    {
+      LocalReferenceMutator mutator;
+      prev->add_nested_gc_ref(did, &mutator);
+      transform.fnptr = fnptr;
+    }
+
+    //--------------------------------------------------------------------------
+    TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
+          IndexSpaceNode *domain, PointTransformFunctor *functor, bool own_func)
+      : FutureMapImpl(prev->context, prev->op, prev->op_ctx_index, prev->op_gen,
+          prev->op_depth,
+#ifdef LEGION_SPY
+          prev->op_uid,
+#endif
+          prev->get_ready_event(), domain,
+          prev->runtime, prev->runtime->get_available_distributed_id(),
+          prev->runtime->address_space),
+        previous(prev), own_functor(own_func), is_functor(true)
+    //--------------------------------------------------------------------------
+    {
+      LocalReferenceMutator mutator;
+      prev->add_nested_gc_ref(did, &mutator);
+      transform.functor = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    TransformFutureMapImpl::TransformFutureMapImpl(
+                                              const TransformFutureMapImpl &rhs)
+      : FutureMapImpl(rhs), previous(NULL), own_functor(false),is_functor(false)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TransformFutureMapImpl::~TransformFutureMapImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      if (previous->remove_nested_gc_ref(did))
+        delete previous;
+      if (own_functor)
+        delete transform.functor;
+    }
+
+    //--------------------------------------------------------------------------
+    TransformFutureMapImpl& TransformFutureMapImpl::operator=(
+                                              const TransformFutureMapImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TransformFutureMapImpl::is_replicate_future_map(void) const
+    //--------------------------------------------------------------------------
+    {
+      return previous->is_replicate_future_map();
+    }
+
+    //--------------------------------------------------------------------------
+    Future TransformFutureMapImpl::get_future(const DomainPoint &point, 
+                                           bool internal_only, RtEvent *wait_on)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain->contains_point(point));
+#endif
+      Domain domain, range;
+      future_map_domain->get_launch_space_domain(domain);
+      previous->future_map_domain->get_launch_space_domain(range);
+      if (is_functor)
+      {
+        const DomainPoint transformed = 
+          transform.functor->transform_point(point, domain, range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->get_future(transformed, internal_only, wait_on);
+      }
+      else
+      {
+        const DomainPoint transformed = (*transform.fnptr)(point,domain,range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->get_future(transformed, internal_only, wait_on);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TransformFutureMapImpl::get_all_futures(
+                                          std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Future> previous_futures;
+      previous->get_all_futures(previous_futures);
+      Domain domain, range;
+      future_map_domain->get_launch_space_domain(domain);
+      previous->future_map_domain->get_launch_space_domain(range);
+      if (is_functor)
+      {
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          const DomainPoint transformed = 
+            transform.functor->transform_point(itr.p, domain, range);
+#ifdef DEBUG_LEGION
+          assert(previous->future_map_domain->contains_point(transformed));
+#endif 
+          std::map<DomainPoint,Future>::const_iterator finder =
+            previous_futures.find(transformed);
+#ifdef DEBUG_LEGION
+          assert(finder != previous_futures.end());
+#endif
+          futures[itr.p] = finder->second;
+        }
+      }
+      else
+      {
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          const DomainPoint transformed = 
+            (*transform.fnptr)(itr.p, domain, range);
+#ifdef DEBUG_LEGION
+          assert(previous->future_map_domain->contains_point(transformed));
+#endif 
+          std::map<DomainPoint,Future>::const_iterator finder =
+            previous_futures.find(transformed);
+#ifdef DEBUG_LEGION
+          assert(finder != previous_futures.end());
+#endif
+          futures[itr.p] = finder->second;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TransformFutureMapImpl::wait_all_results(bool silence_warnings,
+                                                  const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      previous->wait_all_results(silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    void TransformFutureMapImpl::argument_map_wrap(void)
+    //--------------------------------------------------------------------------
+    {
+      previous->argument_map_wrap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureImpl* TransformFutureMapImpl::find_shard_local_future(
+                                                       const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain->contains_point(point));
+#endif
+      Domain domain, range;
+      future_map_domain->get_launch_space_domain(domain);
+      previous->future_map_domain->get_launch_space_domain(range);
+      if (is_functor)
+      {
+        const DomainPoint transformed = 
+          transform.functor->transform_point(point, domain, range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->find_shard_local_future(transformed);
+      }
+      else
+      {
+        const DomainPoint transformed = (*transform.fnptr)(point,domain,range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->find_shard_local_future(transformed);
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    void TransformFutureMapImpl::get_shard_local_futures(
+                                          std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      std::map<DomainPoint,Future> previous_futures;
+      previous->get_shard_local_futures(previous_futures);
+      Domain domain, range;
+      future_map_domain->get_launch_space_domain(domain);
+      previous->future_map_domain->get_launch_space_domain(range);
+      if (is_functor)
+      {
+        if (transform.functor->is_invertible())
+        {
+          for (std::map<DomainPoint,Future>::const_iterator it =
+                previous_futures.begin(); it != previous_futures.end(); it++)
+          {
+            const DomainPoint inverted =
+              transform.functor->invert_point(it->first, domain, range);
+#ifdef DEBUG_LEGION
+            assert(future_map_domain->contains_point(inverted));
+#endif
+            futures[inverted] = it->second;
+          }
+        }
+        else
+        {
+          // Not invertible so do it the hard way by enumerating all
+          // the points and seeing which ones we find
+          for (Domain::DomainPointIterator itr(domain); itr; itr++)
+          {
+            const DomainPoint transformed = 
+              transform.functor->transform_point(itr.p, domain, range);
+#ifdef DEBUG_LEGION
+            assert(previous->future_map_domain->contains_point(transformed));
+#endif 
+            std::map<DomainPoint,Future>::const_iterator finder =
+              previous_futures.find(transformed);
+            if (finder != previous_futures.end())
+              futures[itr.p] = finder->second;
+          }
+        }
+      }
+      else
+      {
+        // No easy way to invert a function pointer, so we iterate all
+        // the points and just take the ones that we find
+        for (Domain::DomainPointIterator itr(domain); itr; itr++)
+        {
+          const DomainPoint transformed = 
+            (*transform.fnptr)(itr.p, domain, range);
+#ifdef DEBUG_LEGION
+          assert(previous->future_map_domain->contains_point(transformed));
+#endif 
+          std::map<DomainPoint,Future>::const_iterator finder =
+            previous_futures.find(transformed);
+          if (finder != previous_futures.end())
+            futures[itr.p] = finder->second;
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////

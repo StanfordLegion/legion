@@ -5977,6 +5977,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap Runtime::transform_future_map(Context ctx, const FutureMap &fm,
+                               IndexSpace new_domain, PointTransformFnptr fnptr)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->transform_future_map(fm, new_domain, fnptr);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::transform_future_map(Context ctx, const FutureMap &fm,
+                IndexSpace new_domain, PointTransformFunctor *functor, bool own)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->transform_future_map(fm, new_domain, functor, own);
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::execute_task(Context ctx, 
                         TaskID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
