@@ -4153,10 +4153,19 @@ namespace Legion {
      */
     class PointTransformFunctor {
     public:
-      virtual ~PointTransformFunctor(void);
+      virtual ~PointTransformFunctor(void) { }
     public:
+      virtual bool is_invertible(void) const { return false; }
+      // Transform a point from the domain into a point in the range
       virtual DomainPoint transform_point(const DomainPoint &point,
+                                          const Domain &domain,
                                           const Domain &range) = 0;
+      // Invert a point from range and convert it into a point in the domain
+      // This is only called if is_invertible returns true
+      virtual DomainPoint invert_point(const DomainPoint &point,
+                                       const Domain &domain,
+                                       const Domain &range)
+        { return DomainPoint(); }
     };
 
     /**
@@ -6418,12 +6427,16 @@ namespace Legion {
        * that must fall within the range.
        * @param ctx enclosing task context
        * @param fm future map to apply a new coordinate space to
+       * @param new_domain an index space to describe the domain of points
+       *        for the transformed future map
        * @param fnptr a function pointer to call to transform points
        * @return a new future map with the coordinate space transformed
        */
       typedef DomainPoint (*PointTransformFnptr)(const DomainPoint &point,
+                                                 const Domain &domain,
                                                  const Domain &range);
       FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     IndexSpace new_domain,
                                      PointTransformFnptr fnptr);
       /**
        * Apply a transform to a FutureMap. All points that access the
@@ -6434,11 +6447,14 @@ namespace Legion {
        * transform the coordinate spaces of the points.
        * @param ctx enclosing task context
        * @param fm future map to apply a new coordinate space to
+       * @param new_domain an index space to describe the domain of points
+       *        for the transformed future map
        * @param functor pointer to a functor to transform points
        * @param take_ownership whether the runtime should delete the functor
        * @return a new future map with the coordinate space transformed
        */
       FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     IndexSpace new_domain,
                                      PointTransformFunctor *functor,
                                      bool take_ownership = false);
 

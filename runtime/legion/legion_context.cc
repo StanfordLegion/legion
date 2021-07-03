@@ -6492,6 +6492,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap InnerContext::transform_future_map(const FutureMap &fm,
+       IndexSpace new_domain, TransformFutureMapImpl::PointTransformFnptr fnptr)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (fm.impl == NULL)
+        return fm;
+      IndexSpaceNode *new_node = runtime->forest->get_node(new_domain);
+      return FutureMap(new TransformFutureMapImpl(fm.impl, new_node, fnptr));
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::transform_future_map(const FutureMap &fm,
+           IndexSpace new_domain, PointTransformFunctor *functor, bool own_func)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (fm.impl == NULL)
+        return fm;
+      IndexSpaceNode *new_node = runtime->forest->get_node(new_domain);
+      return FutureMap(
+          new TransformFutureMapImpl(fm.impl, new_node, functor, own_func));
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion InnerContext::map_region(const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -22339,6 +22364,28 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
         "Illegal construct future map call performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::transform_future_map(const FutureMap &fm,
+       IndexSpace new_domain, TransformFutureMapImpl::PointTransformFnptr fnptr)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal transform future map call performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::transform_future_map(const FutureMap &fm,
+           IndexSpace new_domain, PointTransformFunctor *functor, bool own_func)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal transform future map call performed in leaf task %s (ID %lld)",
+        get_task_name(), get_unique_id())
       return FutureMap();
     }
 
