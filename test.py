@@ -69,6 +69,7 @@ legion_cxx_tests = [
     ['examples/layout_constraints/transpose', []],
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/local_function_tasks/local_function_tasks', []],
+    ['examples/future_map_transforms/future_map_transforms', []],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
