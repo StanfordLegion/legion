@@ -95,9 +95,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(void)
       : Collectable(), runtime(implicit_runtime),
-        future_map(NULL), point_set(Domain::NO_DOMAIN), dimensionality(0), 
-        dependent_futures(0), update_point_set(false), own_point_set(false), 
-        equivalent(false)
+        future_map(NULL), point_set(NULL), dimensionality(0), 
+        dependent_futures(0), update_point_set(false), equivalent(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -105,18 +104,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ArgumentMapImpl::ArgumentMapImpl(const FutureMap &rhs)
       : Collectable(), runtime(implicit_runtime), future_map(rhs.impl), 
-        dependent_futures(0), update_point_set(false), own_point_set(false), 
-        equivalent(false)
+        dependent_futures(0), update_point_set(false), equivalent(false)
     //--------------------------------------------------------------------------
     {
       if (future_map.impl != NULL)
       {
-        point_set = future_map.impl->get_domain();
-        dimensionality = point_set.get_dim();
+        point_set = future_map.impl->future_map_domain;
+        point_set->add_expression_reference();
+        dimensionality = point_set->get_num_dims();
       }
       else
       {
-        point_set = Domain::NO_DOMAIN;
+        point_set = NULL;
         dimensionality = 0;
       }
     }
@@ -134,8 +133,8 @@ namespace Legion {
     ArgumentMapImpl::~ArgumentMapImpl(void)
     //--------------------------------------------------------------------------
     {
-      if (own_point_set)
-        free_point_set(); 
+      if ((point_set != NULL) && point_set->remove_expression_reference())
+        delete point_set;
     }
 
     //--------------------------------------------------------------------------
@@ -161,7 +160,8 @@ namespace Legion {
               "must always contain points of the same dimensionality.",
               dimensionality, point_dim)
       }
-      if (point_set.exists() && !update_point_set && point_set.contains(point))
+      if ((point_set != NULL) && !update_point_set &&
+           point_set->contains_point(point))
         return true;
       if (future_map.impl != NULL)
         unfreeze();
@@ -191,8 +191,8 @@ namespace Legion {
         assert(dimensionality > 0);
 #endif
       }
-      if (!replace and point_set.exists() && !update_point_set &&
-          point_set.contains(point))
+      if (!replace and (point_set != NULL) && !update_point_set &&
+          point_set->contains_point(point))
         return;
       if (future_map.impl != NULL)
         unfreeze();
@@ -257,8 +257,8 @@ namespace Legion {
         assert(dimensionality > 0);
 #endif
       }
-      if (!replace and point_set.exists() && !update_point_set &&
-          point_set.contains(point))
+      if (!replace and (point_set != NULL) && !update_point_set &&
+          point_set->contains_point(point))
         return;
       if (future_map.impl != NULL)
         unfreeze();
@@ -315,7 +315,8 @@ namespace Legion {
         assert(dimensionality > 0);
 #endif
       }
-      if (point_set.exists() && !update_point_set && !point_set.contains(point))
+      if ((point_set != NULL) && !update_point_set &&
+          !point_set->contains_point(point))
         return false;
       if (future_map.impl != NULL)
         unfreeze();
@@ -357,7 +358,8 @@ namespace Legion {
               "must always contain points of the same dimensionality.",
               dimensionality, point_dim)
       }
-      if (point_set.exists() && !update_point_set && !point_set.contains(point))
+      if ((point_set != NULL) && !update_point_set &&
+          !point_set->contains_point(point))
         return TaskArgument();
       if (future_map.impl != NULL)
         unfreeze();
@@ -383,11 +385,11 @@ namespace Legion {
       // Compute the point set if needed
       if (update_point_set)
       {
-        // Free the existing point set if we're going to make a new one
-        if (own_point_set)
-          free_point_set();
+        if ((point_set != NULL) && point_set->remove_expression_reference())
+          delete point_set;
         if (!arguments.empty())
         {
+          Domain point_domain;
           switch (dimensionality)
           {
 #define DIMFUNC(DIM) \
@@ -403,7 +405,7 @@ namespace Legion {
               } \
               const Realm::IndexSpace<DIM,coord_t> space(points); \
               const DomainT<DIM,coord_t> domaint(space); \
-              point_set = domaint; \
+              point_domain = domaint; \
               break; \
             }
             LEGION_FOREACH_N(DIMFUNC)
@@ -411,40 +413,32 @@ namespace Legion {
             default:
               assert(false);
           }
-          // We only need to count as owning this if it is not dense
-          own_point_set = !point_set.dense();
+          IndexSpace point_space = ctx->find_index_launch_space(point_domain);
+          point_set = runtime->forest->get_node(point_space);
+          point_set->add_expression_reference();
         }
         else
-        {
-          point_set = Domain::NO_DOMAIN;
-          own_point_set = false;
-        }
+          point_set = NULL;
         update_point_set = false;
-      }
-      RtUserEvent deletion_precondition;
-      // If we own the point set then we need to know when everyone is
-      // done using it so we can delete it
-      if (own_point_set)
-      {
-        deletion_precondition = Runtime::create_rt_user_event();
-        point_set_deletion_preconditions.insert(deletion_precondition);
       }
       // See if we have any dependent future points, if we do then we need
       // to launch an explicit creation operation to ensure we get the right
       // mapping dependences for this future map
-      if (dependent_futures == 0 && !runtime->safe_control_replication)
+      if (point_set == NULL)
+        future_map = FutureMap();
+      else if (dependent_futures == 0 && !runtime->safe_control_replication)
       {
         // Otherwise we have to make a future map and set all the futures
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-          0/*index*/, runtime->address_space, RtEvent::NO_RT_EVENT, 
-          true/*reg now*/, deletion_precondition));
+                                  0/*index*/, runtime->address_space,
+                                  RtEvent::NO_RT_EVENT, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
-        future_map = ctx->construct_future_map(point_set, arguments,
-                           deletion_precondition, true/*internal*/);
+        future_map = ctx->construct_future_map(point_set->handle, arguments,
+                                               true/*internal*/);
       equivalent = true; // mark that these are equivalent
       dependent_futures = 0; // reset this for the next unpack 
       return future_map;
@@ -462,9 +456,11 @@ namespace Legion {
         return;
       // Otherwise we need to make them equivalent
       future_map.impl->get_all_futures(arguments);
-      point_set = future_map.impl->get_domain();
+      if ((point_set != NULL) && point_set->remove_expression_reference())
+        delete point_set;
+      point_set = future_map.impl->future_map_domain;
+      point_set->add_expression_reference();
       update_point_set = false;
-      own_point_set = false;
       // Count how many dependent futures we have
 #ifdef DEBUG_LEGION
       assert(dependent_futures == 0);
@@ -474,36 +470,6 @@ namespace Legion {
         if (it->second.impl->producer_op != NULL)
           dependent_futures++;
       equivalent = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void ArgumentMapImpl::free_point_set(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(own_point_set);
-      assert(point_set.exists());
-#endif
-      RtEvent precondition;
-      if (!point_set_deletion_preconditions.empty())
-      {
-        precondition = Runtime::merge_events(point_set_deletion_preconditions);
-        point_set_deletion_preconditions.clear();
-      }
-      switch (dimensionality)
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-        { \
-          DomainT<DIM,coord_t> is = point_set; \
-          is.destroy(precondition); \
-          break; \
-        }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3071,9 +3037,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, RtEvent ready,
-                                 const Domain &domain, Runtime *rt,
-                                 DistributedID did, AddressSpaceID owner_space,
-                                 RtUserEvent deleted)
+                                 IndexSpaceNode *domain, Runtime *rt,
+                                 DistributedID did, AddressSpaceID owner_space)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
         context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
@@ -3081,12 +3046,13 @@ namespace Legion {
 #ifdef LEGION_SPY
         op_uid(o->get_unique_op_id()),
 #endif
-        future_map_domain(domain), ready_event(ready), delete_event(deleted)
+        future_map_domain(domain), ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(future_map_domain.exists());
+      assert(future_map_domain != NULL);
 #endif
+      future_map_domain->add_expression_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
@@ -3094,10 +3060,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt, const Domain &d,
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, size_t index,
                                  AddressSpaceID owner_space, RtEvent ready, 
-                                 bool register_now, RtUserEvent deleted)
+                                 bool register_now)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
           owner_space, register_now), 
@@ -3105,12 +3071,13 @@ namespace Legion {
 #ifdef LEGION_SPY
         op_uid(0),
 #endif
-        future_map_domain(d), ready_event(ready), delete_event(deleted)
+        future_map_domain(d), ready_event(ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(future_map_domain.exists());
+      assert(future_map_domain != NULL);
 #endif
+      future_map_domain->add_expression_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Future Map %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
@@ -3120,10 +3087,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
       : DistributedCollectable(rhs), context(NULL), op(NULL), op_ctx_index(0),
-        op_gen(0), op_depth(0)
+        op_gen(0), op_depth(0),
 #ifdef LEGION_SPY
-        , op_uid(0)
+        op_uid(0)
 #endif
+        future_map_domain(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3135,8 +3103,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       futures.clear();
-      if (delete_event.exists())
-        Runtime::trigger_event(delete_event);
+      if (future_map_domain->remove_expression_reference())
+        delete future_map_domain;
     }
 
     //--------------------------------------------------------------------------
@@ -3183,6 +3151,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain FutureMapImpl::get_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      Domain result;
+      future_map_domain->get_launch_space_domain(result);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future FutureMapImpl::get_future(const DomainPoint &point, 
                                      bool internal, RtEvent *wait_on)
     //--------------------------------------------------------------------------
@@ -3191,7 +3168,7 @@ namespace Legion {
       if (!internal)
 #endif
       {
-        if (!future_map_domain.contains(point))
+        if (!future_map_domain->contains_point(point))
           REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MAP_POINT,
               "Invalid request for a point not contained in the "
               "domain of a future map in task %s (UID %lld).",
@@ -3340,7 +3317,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(did);
-      rez.serialize(future_map_domain);
+      rez.serialize(future_map_domain->handle);
       rez.serialize(get_ready_event());
       rez.serialize(op_ctx_index);
     }
@@ -3354,7 +3331,7 @@ namespace Legion {
       derez.deserialize(future_map_did);
       if (future_map_did == 0)
         return NULL;
-      Domain future_map_domain;
+      IndexSpace future_map_domain;
       derez.deserialize(future_map_domain);
       RtEvent ready_event;
       derez.deserialize(ready_event);
@@ -3544,11 +3521,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
-                                         RtEvent ready, const Domain &domain,
-                                         const Domain &shard_dom, Runtime *rt, 
-                                         DistributedID did,AddressSpaceID owner,
-                                         RtUserEvent deletion_trigger)
-      : FutureMapImpl(ctx, op, ready, domain, rt, did, owner, deletion_trigger),
+                                         RtEvent ready, IndexSpaceNode *domain,
+                                         IndexSpaceNode *shard_dom, Runtime *rt, 
+                                         DistributedID did,AddressSpaceID owner)
+      : FutureMapImpl(ctx, op, ready, domain, rt, did, owner),
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -3559,6 +3535,10 @@ namespace Legion {
         has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(shard_domain != NULL);
+#endif
+      shard_domain->add_expression_reference();
       repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
@@ -3566,12 +3546,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
-                                  const Domain &domain, const Domain &shard_dom,
-                                  DistributedID did, size_t index, 
-                                  AddressSpaceID owner, RtEvent ready, bool reg,
-                                  RtUserEvent deletion_trigger)
-      : FutureMapImpl(ctx, rt, domain, did, index, owner, 
-                      ready, reg, deletion_trigger),
+                            IndexSpaceNode *domain, IndexSpaceNode *shard_dom,
+                            DistributedID did, size_t index, 
+                            AddressSpaceID owner, RtEvent ready, bool reg)
+      : FutureMapImpl(ctx, rt, domain, did, index, owner, ready, reg),
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -3582,6 +3560,10 @@ namespace Legion {
         has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(shard_domain != NULL);
+#endif
+      shard_domain->add_expression_reference();
       repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
@@ -3589,7 +3571,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
-      : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(Domain::NO_DOMAIN), 
+      : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(NULL), 
         future_map_barrier_index(0), collective_index(0), op_depth(0), op_uid(0)
     //--------------------------------------------------------------------------
     {
@@ -3601,6 +3583,8 @@ namespace Legion {
     ReplFutureMapImpl::~ReplFutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
+      if (shard_domain->remove_expression_reference())
+        delete shard_domain;
       if (repl_ctx->remove_reference())
         delete repl_ctx;
     }
@@ -3681,8 +3665,9 @@ namespace Legion {
       // the sharding function yet, if not we have to wait
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
-      const ShardID owner_shard = 
-        sharding_function->find_owner(point, shard_domain);
+      Domain domain;
+      shard_domain->get_launch_space_domain(domain);
+      const ShardID owner_shard = sharding_function->find_owner(point, domain);
       // If we're the owner shard we can just do the normal thing
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -3777,10 +3762,12 @@ namespace Legion {
                                                        const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+      Domain domain;
+      shard_domain->get_launch_space_domain(domain);
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
       // Check to see if we own this point or not
-      const ShardID shard = sharding_function->find_owner(point, shard_domain);
+      const ShardID shard = sharding_function->find_owner(point, domain);
       if (shard != repl_ctx->owner_shard->shard_id)
         return NULL;
       return FutureMapImpl::find_shard_local_future(point);
@@ -3793,13 +3780,14 @@ namespace Legion {
     {
       FutureMapImpl::get_shard_local_futures(others);
       const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      Domain domain;
+      shard_domain->get_launch_space_domain(domain);
       if (!sharding_function_ready.has_triggered())
         sharding_function_ready.wait();
       for (std::map<DomainPoint,Future>::iterator it = 
             others.begin(); it != others.end(); /*nothing*/)
       {
-        const ShardID shard = 
-          sharding_function->find_owner(it->first, shard_domain);
+        const ShardID shard = sharding_function->find_owner(it->first, domain);
         if (shard != local_shard)
         {
           std::map<DomainPoint,Future>::iterator to_delete = it++;
@@ -25869,7 +25857,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                          TaskContext *ctx, size_t index, const Domain &domain,
+                          TaskContext *ctx, size_t index, IndexSpace domain,
                           RtEvent complete, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -25889,32 +25877,14 @@ namespace Legion {
           return result;
         }
       }
-      // Check to see if we need to prefetch sparsity map data to this node
-      if (!domain.dense())
-      {
-        switch (domain.get_dim())
-        {
-#define DIMFUNC(DIM) \
-          case DIM: \
-            { \
-              const DomainT<DIM,coord_t> domaint = domain; \
-              const RtEvent wait_on(domaint.make_valid()); \
-              if (wait_on.exists() && !wait_on.has_triggered()) \
-                wait_on.wait(); \
-              break; \
-            }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-          default:
-            assert(false);
-        }
-      }
       const AddressSpaceID owner_space = determine_owner(did);
 #ifdef DEBUG_LEGION
       assert(owner_space != address_space);
+      assert(domain.exists());
 #endif
-      FutureMapImpl *result = new FutureMapImpl(ctx, this, domain, did, index,
-                                owner_space, complete, false/*register now */);
+      IndexSpaceNode *domain_node = forest->get_node(domain);
+      FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
+                      index, owner_space, complete, false/*register now */);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);

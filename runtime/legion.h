@@ -1507,7 +1507,7 @@ namespace Legion {
        * used to index into this future map.
        * @return domain of all points in the future map
        */
-      const Domain& get_future_map_domain(void) const;
+      Domain get_future_map_domain(void) const;
     }; 
 
 

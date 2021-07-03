@@ -391,7 +391,6 @@ namespace Legion {
                                              ShardingID sid = 0) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
-                    RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0) = 0;
@@ -1256,7 +1255,6 @@ namespace Legion {
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
-                    RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);
@@ -2235,13 +2233,12 @@ namespace Legion {
       virtual Future reduce_future_map(const FutureMap &future_map,
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
-      virtual FutureMap construct_future_map(const Domain &domain,
+      virtual FutureMap construct_future_map(IndexSpace space,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                              bool collective = false,
                                              ShardingID sid = 0);
-      virtual FutureMap construct_future_map(const Domain &domain,
+      virtual FutureMap construct_future_map(IndexSpace space,
                     const std::map<DomainPoint,Future> &futures,
-                    RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);
@@ -3021,7 +3018,6 @@ namespace Legion {
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
-                    RtUserEvent domain_deletion = RtUserEvent::NO_RT_USER_EVENT,
                                              bool internal = false,
                                              bool collective = false,
                                              ShardingID sid = 0);

@@ -2655,7 +2655,7 @@ namespace Legion {
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
-          const Domain &domain, IndexSpace shard_space, RtUserEvent deleted); 
+                      IndexSpace domain, IndexSpace shard_space); 
       // Another virtual method to override for control replication
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
@@ -2748,7 +2748,7 @@ namespace Legion {
       static void handle_map_task(const void *args);
     protected:
       void distribute_tasks(void);
-      RtUserEvent compute_launch_space(const MustEpochLauncher &launcher);
+      void compute_launch_space(const MustEpochLauncher &launcher);
     public:
       static void handle_distribute_task(const void *args);
       static void handle_launch_task(const void *args);

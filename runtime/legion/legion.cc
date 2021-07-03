@@ -2543,13 +2543,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const Domain& FutureMap::get_future_map_domain(void) const
+    Domain FutureMap::get_future_map_domain(void) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         return Domain::NO_DOMAIN;
       else
-        return impl->future_map_domain;
+        return impl->get_domain();
     }
 
     /////////////////////////////////////////////////////////////
@@ -5972,8 +5972,8 @@ namespace Legion {
                                     bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures,
-      Internal::RtUserEvent::NO_RT_USER_EVENT,false/*internal*/,collective,sid);
+      return ctx->construct_future_map(domain, futures, false/*internal*/,
+                                       collective, sid);
     }
 
     //--------------------------------------------------------------------------

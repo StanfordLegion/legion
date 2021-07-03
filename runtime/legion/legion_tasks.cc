@@ -9821,8 +9821,8 @@ namespace Legion {
       assert(!future_map_ready.exists() || future_map_ready.has_triggered());
 #endif
       future_map_ready = Runtime::create_rt_user_event();
-      return new FutureMapImpl(ctx, this, future_map_ready,index_domain,runtime,
-            runtime->get_available_distributed_id(), runtime->address_space);
+      return new FutureMapImpl(ctx, this, future_map_ready, this->launch_space,
+        runtime,runtime->get_available_distributed_id(),runtime->address_space);
     }
 
     //--------------------------------------------------------------------------

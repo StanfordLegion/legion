@@ -13912,14 +13912,17 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // Compute our launch domain if we need it
       launch_domain = launcher.launch_domain;
-      RtUserEvent future_deletion;
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+      {
+        if (!launch_domain.exists())
+          compute_launch_space(launcher);
+        launch_space = ctx->find_index_launch_space(launch_domain);
+      }
       if (!launch_domain.exists())
       {
-        if (!launcher.launch_space.exists())
-          future_deletion = compute_launch_space(launcher); 
-        else
-          runtime->forest->find_launch_space_domain(launcher.launch_space, 
-                                                    launch_domain);
+        runtime->forest->find_launch_space_domain(launcher.launch_space, 
+                                                  launch_domain);
 #ifdef DEBUG_LEGION
         assert(launch_domain.exists());
 #endif
@@ -13927,8 +13930,8 @@ namespace Legion {
       // Make a new future map for storing our results
       // We'll fill it in later
       sharding_space = launcher.sharding_space;
-      result_map = FutureMap(create_future_map(ctx, launch_domain, 
-                             sharding_space, future_deletion));
+      result_map = FutureMap(create_future_map(ctx, launch_space, 
+                                               sharding_space));
       instantiate_tasks(ctx, launcher); 
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
@@ -13940,13 +13943,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* MustEpochOp::create_future_map(TaskContext *ctx,
-              const Domain &domain, IndexSpace shard_space, RtUserEvent deleted)
+              IndexSpace domain, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, 
-            Runtime::protect_event(get_completion_event()), domain, 
-            runtime, runtime->get_available_distributed_id(), 
-            runtime->address_space, deleted);
+      IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
+      return new FutureMapImpl(ctx, this,
+            Runtime::protect_event(get_completion_event()), launch_node,
+            runtime, runtime->get_available_distributed_id(),
+            runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -14540,8 +14544,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtUserEvent MustEpochOp::compute_launch_space(
-                                              const MustEpochLauncher &launcher)
+    void MustEpochOp::compute_launch_space(const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       const size_t single_tasks = launcher.single_tasks.size();
@@ -14550,7 +14553,6 @@ namespace Legion {
       assert(!launch_domain.exists());
       assert((single_tasks > 0) || (multi_tasks > 0));
 #endif
-      RtUserEvent result;
       if (multi_tasks > 0)
       {
         RegionTreeForest *forest = runtime->forest;
@@ -14596,11 +14598,6 @@ namespace Legion {
                       subspaces, space, no_reqs)); \
                 const DomainT<DIM,coord_t> domaint(space); \
                 launch_domain = domaint; \
-                if (!space.dense()) \
-                { \
-                  result = Runtime::create_rt_user_event(); \
-                  space.destroy(result); \
-                } \
                 if (wait_on.exists()) \
                   wait_on.wait(); \
                 break; \
@@ -14639,11 +14636,6 @@ namespace Legion {
                 Realm::IndexSpace<DIM,coord_t> space(points); \
                 const DomainT<DIM,coord_t> domaint(space); \
                 launch_domain = domaint; \
-                if (!space.dense()) \
-                { \
-                  result = Runtime::create_rt_user_event(); \
-                  space.destroy(result); \
-                } \
                 break; \
               }
             LEGION_FOREACH_N(DIMFUNC) 
@@ -14658,7 +14650,6 @@ namespace Legion {
           launch_domain = Domain(point, point);
         }
       }
-      return result;
     }
 
     //--------------------------------------------------------------------------
