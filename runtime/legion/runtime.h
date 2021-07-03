@@ -120,19 +120,16 @@ namespace Legion {
     public:
       FutureMap freeze(TaskContext *ctx);
       void unfreeze(void);
-    protected:
-      void free_point_set(void);
     public:
       Runtime *const runtime;
     private:
       FutureMap future_map;
       std::map<DomainPoint,Future> arguments;
       std::set<RtEvent> point_set_deletion_preconditions;
-      Domain point_set;
+      IndexSpaceNode *point_set;
       unsigned dimensionality;
       unsigned dependent_futures; // number of futures with producer ops
       bool update_point_set;
-      bool own_point_set;
       bool equivalent; // argument and future_map the same
     };
 
@@ -521,20 +518,17 @@ namespace Legion {
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
       FutureMapImpl(TaskContext *ctx, Operation *op, 
-                    RtEvent ready, const Domain &domain,
-                    Runtime *rt, DistributedID did, AddressSpaceID owner_space,
-                    RtUserEvent deletion_trigger=RtUserEvent::NO_RT_USER_EVENT);
-      FutureMapImpl(TaskContext *ctx, Runtime *rt, const Domain &domain,
+                    RtEvent ready, IndexSpaceNode *domain,
+                    Runtime *rt, DistributedID did, AddressSpaceID owner_space);
+      FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index, AddressSpaceID owner_space,
-                    RtEvent ready_event, bool register_now = true, // remote
-                    RtUserEvent deletion_trigger=RtUserEvent::NO_RT_USER_EVENT);
+                    RtEvent ready_event, bool register_now = true); // remote
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
       inline RtEvent get_ready_event(void) const { return ready_event; }
-      inline const Domain& get_domain(void) const { return future_map_domain; }
       virtual bool is_replicate_future_map(void) const { return false; }
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -542,6 +536,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
+      Domain get_domain(void) const;
       virtual Future get_future(const DomainPoint &point, 
                                 bool internal_only,
                                 RtEvent *wait_on = NULL); 
@@ -589,11 +584,10 @@ namespace Legion {
 #ifdef LEGION_SPY
       const UniqueID op_uid;
 #endif
-      const Domain future_map_domain;
+      IndexSpaceNode *const future_map_domain;
     protected:
       mutable LocalLock future_map_lock;
       RtEvent ready_event;
-      RtUserEvent delete_event;
       std::map<DomainPoint,Future> futures;
     };
 
@@ -631,16 +625,12 @@ namespace Legion {
       };
     public:
       ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, RtEvent ready, 
-                        const Domain &domain, const Domain &shard_domain, 
-                        Runtime *rt, DistributedID did, AddressSpaceID owner,
-                        RtUserEvent deletion_trigger=
-                                              RtUserEvent::NO_RT_USER_EVENT);
+                        IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
+                        Runtime *rt, DistributedID did, AddressSpaceID owner);
       ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
-                        const Domain &domain, const Domain &shard_domain,
+                        IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, size_t index, AddressSpaceID owner,
-                        RtEvent ready_event, bool register_now = true,
-                        RtUserEvent deletion_trigger =
-                                              RtUserEvent::NO_RT_USER_EVENT);
+                        RtEvent ready_event, bool register_now = true);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
     public:
@@ -676,7 +666,7 @@ namespace Legion {
       static void handle_future_map_reclaim(const void *args);
     public:
       ReplicateContext *const repl_ctx;
-      const Domain shard_domain;
+      IndexSpaceNode *const shard_domain;
       const unsigned future_map_barrier_index;
       const RtBarrier future_map_barrier;
       const CollectiveID collective_index; // in case we have to do all-to-all
@@ -3688,7 +3678,7 @@ namespace Legion {
 #endif
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                          TaskContext *ctx, size_t index, const Domain &domain,
+                          TaskContext *ctx, size_t index, IndexSpace domain,
                           RtEvent complete, ReferenceMutator *mutator);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                                   TypeTag type_tag);

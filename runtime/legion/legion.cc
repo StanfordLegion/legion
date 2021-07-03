@@ -2543,13 +2543,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const Domain& FutureMap::get_future_map_domain(void) const
+    Domain FutureMap::get_future_map_domain(void) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         return Domain::NO_DOMAIN;
       else
-        return impl->future_map_domain;
+        return impl->get_domain();
     }
 
     /////////////////////////////////////////////////////////////
@@ -5940,7 +5940,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
+    FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                  bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
@@ -5950,12 +5950,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->construct_future_map(domain, data, collective, sid);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                     const std::map<DomainPoint,Future> &futures,
                                     bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures,
-      Internal::RtUserEvent::NO_RT_USER_EVENT,false/*internal*/,collective,sid);
+      return ctx->construct_future_map(domain, futures, false, collective, sid);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures,
+                                    bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->construct_future_map(domain, futures, false/*internal*/,
+                                       collective, sid);
     }
 
     //--------------------------------------------------------------------------

@@ -2606,11 +2606,14 @@ namespace Legion {
       if (launcher.elide_future_return)
         return FutureMap();
       Domain launch_domain = launcher.launch_domain;
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launch_domain); 
       if (!launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launcher.launch_space,
-                                                  launch_domain);
+        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+      IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
-          launch_domain, runtime->get_available_distributed_id(),
+          launch_node, runtime->get_available_distributed_id(),
           context_index, runtime->address_space, RtEvent::NO_RT_EVENT);
       if (launcher.predicate_false_future.impl != NULL)
       {
@@ -6400,12 +6403,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap InnerContext::construct_future_map(const Domain &domain,
+    FutureMap InnerContext::construct_future_map(IndexSpace space,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                  bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      Domain domain;
+      runtime->forest->find_launch_space_domain(space, domain);
       if (data.size() != domain.get_volume())
         REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
           "The number of buffers passed into a future map construction (%zd) "
@@ -6413,7 +6418,8 @@ namespace Legion {
           "in task %s (UID %lld)", data.size(), domain.get_volume(),
           get_task_name(), get_unique_id())
       const DistributedID did = runtime->get_available_distributed_id();
-      FutureMapImpl *impl = new FutureMapImpl(this, runtime, domain, did,
+      IndexSpaceNode *launch_node = runtime->forest->get_node(space);
+      FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
                       __sync_add_and_fetch(&outstanding_children_count, 1),
                       runtime->address_space, RtEvent::NO_RT_EVENT);
       LocalReferenceMutator mutator;
@@ -6437,32 +6443,52 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal,
-                                    bool collective, ShardingID sid)
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      return construct_future_map(find_index_launch_space(domain),
+                                  data, collective, sid);   
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(IndexSpace space,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       if (!internal)
       {
         AutoRuntimeCall call(this);
-        if (futures.size() != domain.get_volume())
-          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
-            "The number of futures passed into a future map construction (%zd) "
-            "does not match the volume of the domain (%zd) for the future map "
-            "in task %s (UID %lld)", futures.size(), domain.get_volume(),
-            get_task_name(), get_unique_id())
-        return construct_future_map(domain, futures, domain_deletion,
-                                    true/*internal*/, collective, sid);
+        return construct_future_map(space, futures, true/*internal*/,
+                                    collective, sid);
       }
       CreationOp *creation_op = runtime->get_available_creation_op();
       creation_op->initialize_map(this, futures);
       const DistributedID did = runtime->get_available_distributed_id();
+      IndexSpaceNode *launch_node = runtime->forest->get_node(space);
+      if (futures.size() != launch_node->get_volume())
+        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+            "The number of futures passed into a future map construction (%zd) "
+            "does not match the volume of the domain (%zd) for the future map "
+            "in task %s (UID %lld)", futures.size(), launch_node->get_volume(),
+            get_task_name(), get_unique_id())
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, 
-                            RtEvent::NO_RT_EVENT, domain, runtime, 
-                            did, runtime->address_space, domain_deletion);
+                            RtEvent::NO_RT_EVENT, launch_node, runtime, 
+                            did, runtime->address_space);
       add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      return construct_future_map(find_index_launch_space(domain), futures,
+                                  internal, collective, sid);
     }
 
     //--------------------------------------------------------------------------
@@ -13949,42 +13975,11 @@ namespace Legion {
         hasher.hash(color);
         verify_replicable(hasher, "create_partition_by_domain");
       }
-      Domain fm_domain;
-      RtUserEvent deletion_precondition;
-      // Have to include all the points in the domain computation
-      switch (color_space.get_dim())
-      {
-#define DIMFUNC(DIM) \
-        case DIM: \
-          { \
-            std::vector<Realm::Point<DIM,coord_t> > points(domains.size());\
-            unsigned index = 0; \
-            for (std::map<DomainPoint,Domain>::const_iterator it = \
-                  domains.begin(); it != domains.end(); it++) \
-            { \
-              const Point<DIM,coord_t> point = it->first; \
-              points[index++] = point; \
-            } \
-            Realm::IndexSpace<DIM,coord_t> space(points); \
-            const DomainT<DIM,coord_t> domaint(space); \
-            fm_domain = domaint; \
-            if (!space.dense()) \
-            { \
-              deletion_precondition = Runtime::create_rt_user_event(); \
-              space.destroy(deletion_precondition); \
-            } \
-            break; \
-          }
-          LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
       const DistributedID did = runtime->get_available_distributed_id();
-      FutureMap future_map(new FutureMapImpl(this, runtime, fm_domain, did,
+      IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
+      FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
             __sync_add_and_fetch(&outstanding_children_count, 1),
-            runtime->address_space, RtEvent::NO_RT_EVENT, true/*reg now*/,
-            deletion_precondition));
+            runtime->address_space, RtEvent::NO_RT_EVENT, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
       ShardID shard = 0;
@@ -16829,7 +16824,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ReplicateContext::construct_future_map(const Domain &domain,
+    FutureMap ReplicateContext::construct_future_map(IndexSpace space,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                  bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
@@ -16840,7 +16835,7 @@ namespace Legion {
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP);
-        hasher.hash(domain);
+        hasher.hash(space);
         if (!collective)
         {
           for (std::map<DomainPoint,TaskArgument>::const_iterator it =
@@ -16855,11 +16850,14 @@ namespace Legion {
           hasher.hash(sid);
         verify_replicable(hasher, "construct_future_map");
       }
-      if (data.size() != domain.get_volume())
+      IndexSpaceNode *domain_node = runtime->forest->get_node(space);
+      Domain domain;
+      domain_node->get_launch_space_domain(domain);
+      if (data.size() != domain_node->get_volume())
         REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
           "The number of buffers passed into a future map construction (%zd) "
           "does not match the volume of the domain (%zd) for the future map "
-          "in task %s (UID %lld)", data.size(), domain.get_volume(),
+          "in task %s (UID %lld)", data.size(), domain_node->get_volume(),
           get_task_name(), get_unique_id())
       FutureMapImpl *impl = NULL;
       if (collective)
@@ -16881,11 +16879,11 @@ namespace Legion {
         const AddressSpaceID owner_space =
           shard_manager->get_shard_space(dynamic_id_allocator_shard);
         ReplFutureMapImpl *repl_impl =
-          new ReplFutureMapImpl(this, runtime, domain, domain, did, 
+          new ReplFutureMapImpl(this, runtime, domain_node, domain_node, did,
             __sync_add_and_fetch(&outstanding_children_count, 1),
             owner_space, RtEvent::NO_RT_EVENT);
         ShardingFunction *function = shard_manager->find_sharding_function(sid);
-        // Check that all the points abide by the sharding function
+        // Check that all the points abide by the sharding function 
         for (std::map<DomainPoint,TaskArgument>::const_iterator it =
               data.begin(); it != data.end(); it++)
           if (function->find_owner(it->first, domain) != owner_shard->shard_id)
@@ -16901,7 +16899,7 @@ namespace Legion {
       else
       {
         const DistributedID did = runtime->get_available_distributed_id();
-        impl = new FutureMapImpl(this, runtime, domain, did,
+        impl = new FutureMapImpl(this, runtime, domain_node, did,
                       __sync_add_and_fetch(&outstanding_children_count, 1),
                       runtime->address_space, RtEvent::NO_RT_EVENT);
       }
@@ -16925,10 +16923,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap ReplicateContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal,
-                                    bool collective, ShardingID sid)
+    FutureMap ReplicateContext::construct_future_map(IndexSpace space,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -16939,7 +16936,7 @@ namespace Legion {
         {
           Murmur3Hasher hasher;
           hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP);
-          hasher.hash(domain);
+          hasher.hash(space);
           if (!collective)
           {
             for (std::map<DomainPoint,Future>::const_iterator it =
@@ -16953,15 +16950,17 @@ namespace Legion {
             hasher.hash(sid);
           verify_replicable(hasher, "construct_future_map");
         }
-        if (futures.size() != domain.get_volume())
-          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
-            "The number of futures passed into a future map construction (%zd) "
-            "does not match the volume of the domain (%zd) for the future map "
-            "in task %s (UID %lld)", futures.size(), domain.get_volume(),
-            get_task_name(), get_unique_id())
-        return construct_future_map(domain, futures, domain_deletion,
-                                    true/*internal*/, collective, sid);
+        
+        return construct_future_map(space, futures, true/*internal*/,
+                                    collective, sid);
       }
+      IndexSpaceNode *domain_node = runtime->forest->get_node(space);
+      if (futures.size() != domain_node->get_volume())
+        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+          "The number of futures passed into a future map construction (%zd) "
+          "does not match the volume of the domain (%zd) for the future map "
+          "in task %s (UID %lld)", futures.size(), domain_node->get_volume(),
+          get_task_name(), get_unique_id())
       CreationOp *creation_op = runtime->get_available_creation_op();
       creation_op->initialize_map(this, futures);
       FutureMapImpl *impl = NULL;
@@ -16984,10 +16983,12 @@ namespace Legion {
         const AddressSpaceID owner_space =
           shard_manager->get_shard_space(dynamic_id_allocator_shard);
         ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, creation_op,
-                            RtEvent::NO_RT_EVENT, domain, domain, runtime,
-                            did, owner_space, domain_deletion);
+                            RtEvent::NO_RT_EVENT, domain_node, domain_node,
+                            runtime, did, owner_space);
         ShardingFunction *function = shard_manager->find_sharding_function(sid);
         // Check that all the points abide by the sharding function
+        Domain domain;
+        domain_node->get_launch_space_domain(domain);
         for (std::map<DomainPoint,Future>::const_iterator it =
               futures.begin(); it != futures.end(); it++)
           if (function->find_owner(it->first, domain) != owner_shard->shard_id)
@@ -17004,7 +17005,7 @@ namespace Legion {
       {
         const DistributedID did = runtime->get_available_distributed_id();
         impl = new FutureMapImpl(this, creation_op, RtEvent::NO_RT_EVENT,
-            domain, runtime, did, runtime->address_space, domain_deletion);
+                      domain_node, runtime, did, runtime->address_space);
       }
       add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
@@ -22294,7 +22295,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap LeafContext::construct_future_map(const Domain &domain,
+    FutureMap LeafContext::construct_future_map(IndexSpace domain,
                                  const std::map<DomainPoint,TaskArgument> &data,
                                  bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
@@ -22307,9 +22308,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    RtUserEvent domain_deletion, bool internal,
-                                    bool collective, ShardingID sid)
+                                 const std::map<DomainPoint,TaskArgument> &data,
+                                 bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal construct future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::construct_future_map(IndexSpace domain,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
+        "Illegal construct future map call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::construct_future_map(const Domain &domain,
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool internal, bool collective, ShardingID sid)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,

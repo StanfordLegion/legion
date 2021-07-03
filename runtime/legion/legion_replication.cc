@@ -1097,16 +1097,15 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
-      Domain shard_domain;
-      if (shard_space.exists() && (launch_space != shard_space))
-        runtime->forest->find_launch_space_domain(shard_space, shard_domain);
-      else
-        shard_domain = index_domain;
+      IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
+      IndexSpaceNode *shard_node = 
+        ((launch_space == shard_space) || !shard_space.exists()) ?
+        launch_node : runtime->forest->get_node(shard_space);
       future_map_ready = Runtime::create_rt_user_event();
       // Make a replicate future map 
-      return new ReplFutureMapImpl(repl_ctx, this,future_map_ready,index_domain, 
-          shard_domain, runtime, runtime->get_available_distributed_id(), 
-          runtime->address_space);
+      return new ReplFutureMapImpl(repl_ctx, this, future_map_ready,
+          launch_node, shard_node, runtime, 
+          runtime->get_available_distributed_id(), runtime->address_space);
     } 
 
     //--------------------------------------------------------------------------
@@ -4672,7 +4671,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* ReplMustEpochOp::create_future_map(TaskContext *ctx,
-              const Domain &domain, IndexSpace shard_space, RtUserEvent deleted)
+                                IndexSpace launch_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4681,14 +4680,13 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
-      Domain shard_domain;
-      if (shard_space.exists())
-        runtime->forest->find_launch_space_domain(shard_space, shard_domain);
-      else
-        shard_domain = domain;
+      IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
+      IndexSpaceNode *shard_node = 
+        ((launch_space == shard_space) || !shard_space.exists()) ?
+        launch_node : runtime->forest->get_node(shard_space);
       return new ReplFutureMapImpl(repl_ctx, this, 
-          Runtime::protect_event(get_completion_event()), domain, shard_domain,
-          runtime, runtime->get_available_distributed_id(), 
+          Runtime::protect_event(get_completion_event()), launch_node,
+          shard_node, runtime, runtime->get_available_distributed_id(), 
           runtime->address_space);
     } 
 

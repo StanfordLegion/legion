@@ -1810,7 +1810,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
-          const Domain &domain, IndexSpace shard_space, RtUserEvent deleted);
+                      IndexSpace domain, IndexSpace shard_space);
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
