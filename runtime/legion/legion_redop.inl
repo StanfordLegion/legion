@@ -23,10 +23,18 @@
 
 namespace Legion {
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wclass-memaccess"
+#endif
   namespace TypePunning {
     // The tenth circle of hell is reserved for members of the C++ committee
-    // that decided to deviate from C's support for type punning unions
-    // Add on to the fact that it took them 9 fucking years to realize
+    // that decided to deviate from C's support for type punning unions.
+    // Add on to it the fact that it took them 9 fucking years to realize
     // that they needed std::atomic_ref and it's plain to see they are all
     // just a bunch of idiots that should never be allowed near a programming
     // language standard ever again. They've clearly never written lock-free
@@ -115,7 +123,13 @@ namespace Legion {
       static_assert(sizeof(T1) == sizeof(T2), "Sizes must match");
       uint8_t buffer[sizeof(T1)];
     };
-  };
+  }; // TypePunning
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
   template<> __CUDA_HD__ inline
   void SumReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
