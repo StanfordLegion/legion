@@ -23,14 +23,6 @@
 
 namespace Legion {
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wclass-memaccess"
-#endif
   namespace TypePunning {
     // The tenth circle of hell is reserved for members of the C++ committee
     // that decided to deviate from C's support for type punning unions.
@@ -89,47 +81,41 @@ namespace Legion {
     public:
       inline void load(const Pointer<T1> &pointer, size_t off = 0)
       {
-        memcpy(buffer, pointer.ptr() + off, sizeof(T1));
+        memcpy(buffer, (void*)(pointer.ptr() + off), sizeof(T1));
       }
       template<size_t ALIGNMENT>
       inline void load(const AlignedPointer<T1,ALIGNMENT> &pointer)
       {
-        memcpy(buffer, pointer.ptr(), sizeof(T1));
+        memcpy(buffer, (void*)pointer.ptr(), sizeof(T1));
       }
       inline T1 as_one(void) const
       {
         T1 result;
-        memcpy(&result, buffer, sizeof(result));
+        memcpy((void*)&result, buffer, sizeof(result));
         return result;
       }
       inline T2 as_two(void) const
       {
         T2 result;
-        memcpy(&result, buffer, sizeof(result));
+        memcpy((void*)&result, buffer, sizeof(result));
         return result;
       }
       inline Alias& operator=(T2 rhs)
       {
-        memcpy(buffer, &rhs, sizeof(rhs));
+        memcpy(buffer, (void*)&rhs, sizeof(rhs));
         return *this;
       }
     private:
       // Make this one private so it is can never be called
       inline Alias& operator=(T1 rhs)
       {
-        memcpy(buffer, &rhs, sizeof(rhs));
+        memcpy(buffer, (void*)&rhs, sizeof(rhs));
         return *this;
       }
       static_assert(sizeof(T1) == sizeof(T2), "Sizes must match");
       uint8_t buffer[sizeof(T1)];
     };
   }; // TypePunning
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
 
   template<> __CUDA_HD__ inline
   void SumReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
