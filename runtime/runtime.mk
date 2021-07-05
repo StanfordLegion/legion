@@ -254,6 +254,7 @@ endif
 ifeq ($(shell uname -s),FreeBSD)
 LEGION_LD_FLAGS	+= -lexecinfo -lpthread
 endif
+LEGION_LD_FLAGS += -latomic
 
 USE_HALF ?= 0
 ifeq ($(strip $(USE_HALF)),1)
