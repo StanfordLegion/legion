@@ -1510,7 +1510,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let stats_levels = 4;
         let scale_data = ScaleRecord {
             start: 0.0,
-            end: (state.last_time.0 as f64 * 1.01).ceil() / 1000.0,
+            end: (state.last_time.0 as f64 / 100. * 1.01).ceil() / 10.,
             stats_levels: stats_levels,
             max_level: base_level + 1,
         };
