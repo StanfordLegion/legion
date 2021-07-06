@@ -3940,7 +3940,7 @@ class State(object):
 
         scale_data = {
             'start': 0.0,
-            'end': math.ceil(last_time * 1000. * 1.01)/1000.,
+            'end': math.ceil(last_time * 10. * 1.01) / 10.,
             'stats_levels': stats_levels,
             'max_level': base_level + 1
         }
