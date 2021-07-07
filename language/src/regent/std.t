@@ -4771,12 +4771,15 @@ void %s(void);
   header_basename)
 end
 
-local function write_header(header_filename, registration_name, task_whitelist)
+local function write_header(header_filename, registration_name, task_whitelist, need_launcher)
   if not registration_name then
     registration_name = std.normalize_name(header_filename) .. "_register"
   end
 
-  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
+  local task_c_iface, task_cxx_iface, task_impl = "", "", {}
+  if need_launcher then
+    task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
+  end
 
   local header = io.open(header_filename, "w")
   assert(header)
@@ -4786,10 +4789,13 @@ local function write_header(header_filename, registration_name, task_whitelist)
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist, need_launcher)
   assert(header_filename and filename)
+  if need_launcher == nil then
+    need_launcher = true
+  end
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist)
+  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist, need_launcher)
   local _, names = std.setup(nil, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
