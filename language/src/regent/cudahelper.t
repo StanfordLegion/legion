@@ -389,11 +389,6 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     module[v.name] = v.kernel
   end
   local version = get_cuda_version()
-  local libdevice = find_device_library(tonumber(version))
-  local llvmbc = terralib.linkllvm(libdevice)
-  externcall_builtin = function(name, ftype)
-    return llvmbc:extern(name, ftype)
-  end
   local ptx = profile('cuda:ptx_gen', nil, function()
     return cudalib.toptx(module, nil, version)
   end)()
