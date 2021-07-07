@@ -3395,6 +3395,40 @@ legion_task_launcher_execute(legion_runtime_t runtime_,
     return CObjectWrapper::wrap(new Future(f));
 }
 
+legion_future_t
+legion_task_launcher_execute_outputs(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_task_launcher_t launcher_,
+                                     legion_output_requirement_t *reqs_,
+                                     size_t reqs_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  std::vector<OutputRequirement> reqs;
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+    reqs.push_back(*CObjectWrapper::unwrap(reqs_[idx]));
+
+  Future f = runtime->execute_task(ctx, *launcher, &reqs);
+
+  for (size_t idx = 0; idx < reqs_size; ++idx)
+  {
+    OutputRequirement *target = CObjectWrapper::unwrap(reqs_[idx]);
+    target->parent = reqs[idx].parent;
+    target->partition = reqs[idx].partition;
+  }
+
+  if (launcher->elide_future_return)
+  {
+    legion_future_t result_;
+    result_.impl = nullptr;
+    return result_;
+  }
+  else
+    return CObjectWrapper::wrap(new Future(f));
+}
+
 unsigned
 legion_task_launcher_add_region_requirement_logical_region(
   legion_task_launcher_t launcher_,

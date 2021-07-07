@@ -2852,6 +2852,18 @@ extern "C" {
                                legion_task_launcher_t launcher);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_task()
+   */
+  legion_future_t
+  legion_task_launcher_execute_outputs(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_task_launcher_t launcher,
+                                       legion_output_requirement_t *reqs,
+                                       size_t reqs_size);
+
+  /**
    * @see Legion::TaskLauncher::add_region_requirement()
    */
   unsigned
