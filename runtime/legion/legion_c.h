@@ -3268,7 +3268,7 @@ extern "C" {
    * @see Legion::IndexTaskLauncher::elide_future_return
    */
   void
-  legion_index_launcher_set_elide_future_return(legion_task_launcher_t launcher,
+  legion_index_launcher_set_elide_future_return(legion_index_launcher_t launcher,
                                                 bool elide_future_return);
 
   // -----------------------------------------------------------------------
