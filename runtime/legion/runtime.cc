@@ -10941,11 +10941,9 @@ namespace Legion {
         // should never happen because all eager allocations are done
         // locally and to memories for which loads and stores are safe
         void *base = instance.pointer_untyped(0,0);
-#ifdef DEBUG_LEGION
-        assert(base != NULL);
-#endif
-        const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
+        if (base != NULL)
         {
+          const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
           AutoLock lock(manager_lock);
           std::map<uintptr_t,size_t>::iterator finder = 
             eager_allocations.find(ptr);
