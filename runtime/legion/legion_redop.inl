@@ -6906,12 +6906,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile int8_t *target = (volatile int8_t*)&lhs;
-    int8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -6949,12 +6959,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile int8_t *target = (volatile int8_t*)&rhs1;
-    int8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -6992,12 +7012,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile short *target = (volatile short*)&lhs;
-    short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7035,12 +7065,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile short *target = (volatile short*)&rhs1;
-    short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7063,12 +7103,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile int *target = (int*)&lhs;
-    int oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7091,12 +7141,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile int *target = (int*)&rhs1;
-    int oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7119,12 +7179,22 @@ namespace Legion {
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
 #else
-    volatile long long *target = (volatile long long *)&lhs;
-    long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7147,12 +7217,22 @@ namespace Legion {
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
 #else
-    volatile long long *target = (volatile long long *)&rhs1;
-    long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7190,12 +7270,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile uint8_t *target = (volatile uint8_t*)&lhs;
-    uint8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7233,12 +7323,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
-    uint8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7276,12 +7376,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile unsigned short *target = (volatile unsigned short*)&lhs;
-    unsigned short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7319,12 +7429,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile unsigned short *target = (volatile unsigned short*)&rhs1;
-    unsigned short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7347,12 +7467,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned *target = (volatile unsigned *)&lhs;
-    unsigned oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7375,12 +7505,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned *target = (volatile unsigned *)&rhs1;
-    unsigned oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7403,12 +7543,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned long long *target = (volatile unsigned long long *)&lhs;
-    unsigned long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7431,12 +7581,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned long long *target = (volatile unsigned long long *)&rhs1;
-    unsigned long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval | rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval | rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7474,12 +7634,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile int8_t *target = (volatile int8_t*)&lhs;
-    int8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7517,12 +7687,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile int8_t *target = (volatile int8_t*)&rhs1;
-    int8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7560,12 +7740,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile short *target = (volatile short*)&lhs;
-    short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7603,12 +7793,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile short *target = (volatile short*)&rhs1;
-    short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7631,12 +7831,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile int *target = (int*)&lhs;
-    int oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7659,12 +7869,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile int *target = (int*)&rhs1;
-    int oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7687,12 +7907,22 @@ namespace Legion {
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
 #else
-    volatile long long *target = (volatile long long *)&lhs;
-    long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7715,12 +7945,22 @@ namespace Legion {
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
 #else
-    volatile long long *target = (volatile long long *)&rhs1;
-    long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7758,12 +7998,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile uint8_t *target = (volatile uint8_t*)&lhs;
-    uint8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7801,12 +8051,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
-    uint8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7844,12 +8104,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile unsigned short *target = (volatile unsigned short*)&lhs;
-    unsigned short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7887,12 +8157,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile unsigned short *target = (volatile unsigned short*)&rhs1;
-    unsigned short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7915,12 +8195,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned *target = (volatile unsigned *)&lhs;
-    unsigned oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7943,12 +8233,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned *target = (volatile unsigned *)&rhs1;
-    unsigned oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7971,12 +8271,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned long long *target = (volatile unsigned long long *)&lhs;
-    unsigned long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -7999,12 +8309,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned long long *target = (volatile unsigned long long *)&rhs1;
-    unsigned long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval & rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval & rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8030,13 +8350,23 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
-    // No atomic logical operations so use compare and swap
-    volatile int8_t *target = (volatile int8_t *)&lhs;
-    union { int8_t as_int; bool as_bool; } oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval.as_int = *target;
-      newval.as_bool = oldval.as_bool ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
+      newval = oldval != rhs;
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    TypePunning::Alias<int8_t,bool> oldval, newval;
+    TypePunning::Pointer<int8_t> pointer((void*)&lhs);
+    do {
+      oldval.load(pointer);
+      newval = oldval.as_two() != rhs;
+    } while (!__sync_bool_compare_and_swap((int8_t*)pointer,
+                    oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -8062,13 +8392,23 @@ namespace Legion {
       newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
     } while (oldval.as_bool[offset] != newval.as_bool[offset]);
 #else
-    // No atomic logical operations so use compare and swap
-    volatile int8_t *target = (volatile int8_t *)&rhs1;
-    union { int8_t as_int; bool as_bool; } oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval.as_int = *target;
-      newval.as_bool = oldval.as_bool ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));
+      newval = oldval != rhs2;
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    TypePunning::Alias<int8_t,bool> oldval, newval;
+    TypePunning::Pointer<int8_t> pointer((void*)&rhs1);
+    do {
+      oldval.load(pointer);
+      newval = oldval.as_two() != rhs2;
+    } while (!__sync_bool_compare_and_swap((int8_t*)pointer,
+          oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -8106,12 +8446,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile int8_t *target = (volatile int8_t*)&lhs;
-    int8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8149,12 +8499,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile int8_t *target = (volatile int8_t*)&rhs1;
-    int8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8192,12 +8552,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile short *target = (volatile short*)&lhs;
-    short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8235,12 +8605,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile short *target = (volatile short*)&rhs1;
-    short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8263,12 +8643,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile int *target = (int*)&lhs;
-    int oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8291,12 +8681,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile int *target = (int*)&rhs1;
-    int oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8319,12 +8719,22 @@ namespace Legion {
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
 #else
-    volatile long long *target = (volatile long long *)&lhs;
-    long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8347,12 +8757,22 @@ namespace Legion {
       newval.as_unsigned = atomicCAS(target, oldval.as_unsigned, newval.as_unsigned);
     } while (oldval.as_signed != newval.as_signed);
 #else
-    volatile long long *target = (volatile long long *)&rhs1;
-    long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8390,12 +8810,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile uint8_t *target = (volatile uint8_t*)&lhs;
-    uint8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8433,12 +8863,22 @@ namespace Legion {
     }
 #undef CASE
 #else
-    volatile uint8_t *target = (volatile uint8_t*)&rhs1;
-    uint8_t oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8476,12 +8916,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile unsigned short *target = (volatile unsigned short*)&lhs;
-    unsigned short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8519,12 +8969,22 @@ namespace Legion {
       } while (oldval.as_int != newval.as_int);
     }
 #else
-    volatile unsigned short *target = (volatile unsigned short*)&rhs1;
-    unsigned short oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8547,12 +9007,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned *target = (volatile unsigned *)&lhs;
-    unsigned oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8575,12 +9045,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned *target = (volatile unsigned *)&rhs1;
-    unsigned oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8603,12 +9083,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned long long *target = (volatile unsigned long long *)&lhs;
-    unsigned long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&lhs);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
@@ -8631,12 +9121,22 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    volatile unsigned long long *target = (volatile unsigned long long *)&rhs1;
-    unsigned long long oldval, newval;
+#if __cplusplus >= 202002L 
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
     do {
-      oldval = *target;
       newval = oldval ^ rhs2;
-    } while (!__sync_bool_compare_and_swap(target, oldval, newval));
+    } while (atomic.compare_exchange_weak(oldval, newval));
+#else
+    // No atomic logical operations so use compare and swap
+    RHS oldval, newval;
+    TypePunning::Pointer<RHS> pointer((void*)&rhs1);
+    do {
+      oldval = *pointer;
+      newval = oldval ^ rhs2;
+    } while (!__sync_bool_compare_and_swap((RHS*)pointer, oldval, newval));
+#endif
 #endif
   }
 
