@@ -20124,9 +20124,15 @@ namespace Legion {
     {
       // This is the heuristic that decides whether or not we should replicate
       // or shard the equivalence sets for a partition node
-      // For now we'll shard as long as there are at least as many children
-      // in the partition as there are shards, otherwise we'll replicate
-      return (node->get_num_children() < total_shards);
+      // We'll shard as long as there are at least as many children as there
+      // are shards in some partition along the tree to this partition
+      while (node != NULL)
+      {
+        if (node->get_num_children() >= total_shards)
+          return false;
+        node = node->parent->parent;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
