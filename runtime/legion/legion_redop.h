@@ -30,7 +30,7 @@
 #endif
 
 #ifndef __CUDA_HD__
-#ifdef __CUDACC__
+#if defined (__CUDACC__) or defined (__HIPCC__)
 #define __CUDA_HD__ __host__ __device__
 #else
 #define __CUDA_HD__
