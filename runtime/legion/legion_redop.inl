@@ -123,10 +123,65 @@ namespace Legion {
   }; // TypePunning
 
 #ifdef __CUDACC__
-  // We have these functions here because calling memcpy on the GPU
-  // is a terrible idea since it will spill the data out of registers
+  // We have these functions here because calling memcpy (per the
+  // insistence of the idiots on the C++ standards committee) on the
+  // GPU is a terrible idea since it will spill the data out of registers
   // and into local memory in order to do the memcpy. Hence we tell
-  // the compiler exactly what we mean using inline PTX.
+  // the compiler exactly what we mean using bit operations and inline PTX.
+  
+  __device__ __forceinline__
+  bool __uint2bool(unsigned int value, unsigned offset)
+  {
+    value = value >> (8*offset); 
+    return ((value & 0xFF) != 0);
+  }
+
+  __device__ __forceinline__
+  unsigned int __bool2uint(unsigned int previous, bool value, unsigned offset)
+  {
+    unsigned int next = value;
+    next = next << (8*offset);
+    unsigned int mask = 0xFF;
+    mask = mask << (8*offset);
+    previous = previous & (~mask);
+    return previous | next;
+  }
+
+  __device__ __forceinline__
+  uint8_t __uint2ubyte(unsigned int value, unsigned offset)
+  {
+    value = value >> (8*offset);
+    return uint8_t(value & 0xFF);
+  }
+
+  __device__ __forceinline__
+  unsigned int __ubyte2uint(unsigned int previous, uint8_t value, unsigned offset)
+  {
+    unsigned int next = value;
+    next = next << (8*offset);
+    unsigned int mask = 0xFF;
+    mask = mask << (8*offset);
+    previous = previous & (~mask);
+    return previous | next;
+  }
+
+  __device__ __forceinline__
+  int8_t __int2byte(int value, unsigned offset)
+  {
+    value = value >> (8*offset);
+    return int8_t(value & 0xFF);
+  }
+
+  __device__ __forceinline__
+  int __byte2int(int previous, int8_t value, unsigned offset)
+  {
+    int next = value;
+    next = next << (8*offset);
+    unsigned int mask = 0xFF;
+    mask = mask << (8*offset);
+    previous = previous & (~mask);
+    return previous | next;
+  }
 
   __device__ __forceinline__
   unsigned short int __short_as_ushort(short int value)
@@ -143,6 +198,80 @@ namespace Legion {
     asm("mov.b16 %0, %1;" : "=h"(result) : "h"(value));
     return result;
   }
+
+  __device__ __forceinline__
+  unsigned int __hiloushort2uint(unsigned short int hi, unsigned short int lo)
+  {
+    unsigned int result;
+    asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(lo), "h"(hi));
+    return result;
+  }
+
+  __device__ __forceinline__
+  unsigned short int __uint2loushort(unsigned int value)
+  {
+    unsigned short int lo, hi;
+    asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
+    return lo + 0*hi;
+  }
+
+  __device__ __forceinline__
+  unsigned short int __uint2hiushort(unsigned int value)
+  {
+    unsigned short int lo, hi;
+    asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
+    return hi + 0*lo;
+  }
+
+  __device__ __forceinline__
+  unsigned int __hiloshort2uint(short int hi, short int lo)
+  {
+    unsigned int result;
+    asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(lo), "h"(hi));
+    return result;
+  }
+
+  __device__ __forceinline__
+  short int __uint2loshort(unsigned int value)
+  {
+    short int lo, hi;
+    asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
+    return lo + 0*hi;
+  }
+
+  __device__ __forceinline__
+  short int __uint2hishort(unsigned int value)
+  {
+    short int lo, hi;
+    asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
+    return hi + 0*lo;
+  }
+
+#ifdef LEGION_REDOP_HALF
+  __device__ __forceinline__
+  unsigned int __hilohalf2uint(__half hi, __half lo)
+  {
+    unsigned int result;
+    asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(__half_as_short(lo)), "h"(__half_as_short(hi)));
+    return result;
+  }
+
+  __device__ __forceinline__
+  __half __uint2hihalf(unsigned int value)
+  {
+    short int lo, hi;
+    asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
+    return __short_as_half(hi) + __half(0)*__short_as_half(lo);
+  }
+  
+  __device__ __forceinline__
+  __half __uint2lohalf(unsigned int value)
+  {
+    short int lo, hi;
+    asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
+    return __short_as_half(lo) + __half(0)*__short_as_half(hi);
+  }
+#endif
 
   __device__ __forceinline__
   unsigned int __int_as_uint(int value)
@@ -224,16 +353,18 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
-    const unsigned offset = ((unsigned long long)ptr) % 4;
-    int *target = (int *)(ptr - offset);
-    union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *(volatile int*)target;
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&lhs);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    unsigned int newval = *ptr, oldval;
     do {
-      oldval.as_int = newval.as_int;
-      newval.as_bool[offset] = newval.as_bool[offset] || rhs;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
+      RHS previous = __uint2bool(newval, offset);
+      RHS next = previous || rhs;
+      oldval = newval;
+      newval = __bool2uint(newval, next, offset);
+      newval = atomicCAS(ptr, oldval, newval);
+    } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(lhs);
@@ -266,16 +397,18 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&rhs1;
-    const unsigned offset = ((unsigned long long)ptr) % 4;
-    int *target = (int *)(ptr - offset);
-    union { int as_int; bool as_bool[4]; } oldval, newval;
-    newval.as_int = *(volatile int*)target;
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&rhs1);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    unsigned int newval = *ptr, oldval;
     do {
-      oldval.as_int = newval.as_int;
-      newval.as_bool[offset] = newval.as_bool[offset] || rhs2;
-      newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int);
-    } while (oldval.as_bool[offset] != newval.as_bool[offset]);
+      RHS previous = __uint2bool(newval, offset);
+      RHS next = previous || rhs2;
+      oldval = newval;
+      newval = __bool2uint(newval, next, offset);
+      newval = atomicCAS(ptr, oldval, newval);
+    } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(rhs1);
@@ -307,29 +440,19 @@ namespace Legion {
   void SumReduction<int8_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#define CASE(F, IDX)                                                       \
-      case IDX : {                                                         \
-        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
-        union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *(volatile int*)target;                            \
-        do {                                                               \
-          oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs;                                         \
-          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
-        } while (oldval.as_int != newval.as_int);                          \
-        break;                                                             \
-      }                                                                    \
-
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
-    switch (((unsigned long long)ptr) % 4) {
-      CASE(x, 0)
-      CASE(y, 1)
-      CASE(z, 2)
-      CASE(w, 3)
-      default :{ assert(false); break; }
-    }
-#undef CASE
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&lhs);
+    const unsigned offset = unaligned % sizeof(int);
+    const uintptr_t aligned = unaligned - offset;
+    int *ptr = reinterpret_cast<int*>(aligned);
+    int newval = *ptr, oldval;
+    do {
+      RHS previous = __int2byte(newval, offset);
+      RHS next = previous || rhs;
+      oldval = newval;
+      newval = __byte2int(newval, next, offset);
+      newval = atomicCAS(ptr, oldval, newval);
+    } while (oldval != newval);
 #else
     __sync_fetch_and_add(&lhs, rhs);
 #endif
@@ -345,29 +468,19 @@ namespace Legion {
   void SumReduction<int8_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#define CASE(F, IDX)                                                       \
-      case IDX : {                                                         \
-        int *target = (int *)(ptr-sizeof(int8_t)*IDX);                     \
-        union { int as_int; char4 as_char; } oldval, newval;               \
-        newval.as_int = *(volatile int*)target;                            \
-        do {                                                               \
-          oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs2;                                        \
-          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
-        } while (oldval.as_int != newval.as_int);                          \
-        break;                                                             \
-      }                                                                    \
-
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&rhs1;
-    switch (((unsigned long long)ptr) % 4) {
-      CASE(x, 0)
-      CASE(y, 1)
-      CASE(z, 2)
-      CASE(w, 3)
-      default :{ assert(false); break; }
-    }
-#undef CASE
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&rhs1);
+    const unsigned offset = unaligned % sizeof(int);
+    const uintptr_t aligned = unaligned - offset;
+    int *ptr = reinterpret_cast<int*>(aligned);
+    int newval = *ptr, oldval;
+    do {
+      RHS previous = __int2byte(newval, offset);
+      RHS next = previous || rhs2;
+      oldval = newval;
+      newval = __byte2int(newval, next, offset);
+      newval = atomicCAS(ptr, oldval, newval);
+    } while (oldval != newval);
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
 #endif
@@ -383,6 +496,7 @@ namespace Legion {
   void SumReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 700
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -393,6 +507,36 @@ namespace Legion {
       newval = __ushort_as_short(atomicCAS(ptr,
             __short_as_ushort(oldval), __short_as_ushort(oldval)));
     } while (oldval != newval);
+#else
+    // 16-bit atomics are not supported prior to volta
+    // 32-bit GPU atomics need 4 byte alignment
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&lhs);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    RHS newval = lhs, oldval, other;
+    if (offset == 0) {
+      other = *((&lhs)+1);
+      do {
+        oldval = newval;
+        newval += rhs;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloshort2uint(other, oldval), __hiloshort2uint(other, newval));
+        newval = __uint2loshort(result);
+        other = __uint2hishort(result);
+      } while (oldval != newval);
+    } else {
+      other = *((&lhs)-1);
+      do {
+        oldval = newval;
+        newval += rhs;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloshort2uint(oldval, other), __hiloshort2uint(newval, other));
+        other = __uint2loshort(result);
+        newval = __uint2hishort(result);
+      } while (oldval != newval);
+    }
+#endif
 #else
     __sync_fetch_and_add(&lhs, rhs);
 #endif
@@ -408,6 +552,7 @@ namespace Legion {
   void SumReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 700
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -418,6 +563,36 @@ namespace Legion {
       newval = __ushort_as_short(atomicCAS(ptr,
             __short_as_ushort(oldval), __short_as_ushort(oldval)));
     } while (oldval != newval);
+#else
+    // 16-bit atomics are not supported prior to volta
+    // 32-bit GPU atomics need 4 byte alignment
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&rhs1);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    RHS newval = rhs1, oldval, other;
+    if (offset == 0) {
+      other = *((&rhs1)+1);
+      do {
+        oldval = newval;
+        newval += rhs2;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloshort2uint(other, oldval), __hiloshort2uint(other, newval));
+        newval = __uint2loshort(result);
+        other = __uint2hishort(result);
+      } while (oldval != newval);
+    } else {
+      other = *((&rhs1)-1);
+      do {
+        oldval = newval;
+        newval += rhs2;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloshort2uint(oldval, other), __hiloshort2uint(newval, other));
+        other = __uint2loshort(result);
+        newval = __uint2hishort(result);
+      } while (oldval != newval);
+    }
+#endif
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
 #endif
@@ -517,29 +692,19 @@ namespace Legion {
   void SumReduction<uint8_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#define CASE(F, IDX)                                                       \
-      case IDX : {                                                         \
-        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
-        union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *(volatile int*)target;                            \
-        do {                                                               \
-          oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs;                                         \
-          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
-        } while (oldval.as_int != newval.as_int);                          \
-        break;                                                             \
-      }                                                                    \
-
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&lhs;
-    switch (((unsigned long long)ptr) % 4) {
-      CASE(x, 0)
-      CASE(y, 1)
-      CASE(z, 2)
-      CASE(w, 3)
-      default :{ assert(false); break; }
-    }
-#undef CASE
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&lhs);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    unsigned int newval = *ptr, oldval;
+    do {
+      RHS previous = __uint2ubyte(newval, offset);
+      RHS next = previous || rhs;
+      oldval = newval;
+      newval = __ubyte2uint(newval, next, offset);
+      newval = atomicCAS(ptr, oldval, newval);
+    } while (oldval != newval);
 #else
     __sync_fetch_and_add(&lhs, rhs);
 #endif
@@ -555,29 +720,19 @@ namespace Legion {
   void SumReduction<uint8_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#define CASE(F, IDX)                                                       \
-      case IDX : {                                                         \
-        int *target = (int *)(ptr-sizeof(uint8_t)*IDX);                    \
-        union { int as_int; uchar4 as_char; } oldval, newval;              \
-        newval.as_int = *(volatile int*)target;                            \
-        do {                                                               \
-          oldval.as_int = newval.as_int;                                   \
-          newval.as_char.F += rhs2;                                        \
-          newval.as_int = atomicCAS(target, oldval.as_int, newval.as_int); \
-        } while (oldval.as_int != newval.as_int);                          \
-        break;                                                             \
-      }                                                                    \
-
     // GPU atomics need 4 byte alignment
-    char *ptr = (char*)&rhs1;
-    switch (((unsigned long long)ptr) % 4) {
-      CASE(x, 0)
-      CASE(y, 1)
-      CASE(z, 2)
-      CASE(w, 3)
-      default :{ assert(false); break; }
-    }
-#undef CASE
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&rhs1);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    unsigned int newval = *ptr, oldval;
+    do {
+      RHS previous = __uint2ubyte(newval, offset);
+      RHS next = previous || rhs2;
+      oldval = newval;
+      newval = __ubyte2uint(newval, next, offset);
+      newval = atomicCAS(ptr, oldval, newval);
+    } while (oldval != newval);
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
 #endif
@@ -593,12 +748,43 @@ namespace Legion {
   void SumReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 700
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
       newval += rhs;
       newval = atomicCAS(&lhs, oldval, newval);
     } while (oldval != newval);
+#else
+    // 16-bit atomics are not supported prior to volta
+    // 32-bit GPU atomics need 4 byte alignment
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&lhs);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    RHS newval = lhs, oldval, other;
+    if (offset == 0) {
+      other = *((&lhs)+1);
+      do {
+        oldval = newval;
+        newval += rhs;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloushort2uint(other, oldval), __hiloushort2uint(other, newval));
+        newval = __uint2loushort(result);
+        other = __uint2hiushort(result);
+      } while (oldval != newval);
+    } else {
+      other = *((&lhs)-1);
+      do {
+        oldval = newval;
+        newval += rhs;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloushort2uint(oldval, other), __hiloushort2uint(newval, other));
+        other = __uint2loushort(result);
+        newval = __uint2hiushort(result);
+      } while (oldval != newval);
+    }
+#endif
 #else
     __sync_fetch_and_add(&lhs, rhs);
 #endif
@@ -614,12 +800,43 @@ namespace Legion {
   void SumReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 700
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
       newval += rhs2;
       newval = atomicCAS(&rhs1, oldval, newval);
     } while (oldval != newval);
+#else
+    // 16-bit atomics are not supported prior to volta
+    // 32-bit GPU atomics need 4 byte alignment
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&rhs1);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    RHS newval = rhs1, oldval, other;
+    if (offset == 0) {
+      other = *((&rhs1)+1);
+      do {
+        oldval = newval;
+        newval += rhs2;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloushort2uint(other, oldval), __hiloushort2uint(other, newval));
+        newval = __uint2loushort(result);
+        other = __uint2hiushort(result);
+      } while (oldval != newval);
+    } else {
+      other = *((&rhs1)-1);
+      do {
+        oldval = newval;
+        newval += rhs2;
+        const unsigned int result = atomicCAS(ptr,
+            __hiloushort2uint(oldval, other), __hiloushort2uint(newval, other));
+        other = __uint2loushort(result);
+        newval = __uint2hiushort(result);
+      } while (oldval != newval);
+    }
+#endif
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
 #endif
@@ -700,6 +917,7 @@ namespace Legion {
   void SumReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 700
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -710,6 +928,36 @@ namespace Legion {
       newval = __ushort_as_half(atomicCAS(ptr,
             __half_as_ushort(oldval), __half_as_ushort(oldval)));
     } while (oldval != newval);
+#else
+    // 16-bit atomics are not supported prior to volta
+    // 32-bit GPU atomics need 4 byte alignment
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&lhs);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    RHS newval = lhs, oldval, other;
+    if (offset == 0) {
+      other = *((&lhs)+1);
+      do {
+        oldval = newval;
+        newval = newval + rhs;
+        const unsigned int result = atomicCAS(ptr,
+            __hilohalf2uint(other, oldval), __hilohalf2uint(other, newval));
+        newval = __uint2lohalf(result);
+        other = __uint2hihalf(result);
+      } while (oldval != newval);
+    } else {
+      other = *((&lhs)-1);
+      do {
+        oldval = newval;
+        newval = newval + rhs;
+        const unsigned int result = atomicCAS(ptr,
+            __hilohalf2uint(oldval, other), __hilohalf2uint(newval, other));
+        other = __uint2lohalf(result);
+        newval = __uint2hihalf(result);
+      } while (oldval != newval);
+    }
+#endif
 #else
 #if __cplusplus >= 202002L
     std::atomic_ref<RHS> atomic(lhs);
@@ -745,6 +993,7 @@ namespace Legion {
   void SumReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ >= 700
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -755,6 +1004,36 @@ namespace Legion {
       newval = __ushort_as_half(atomicCAS(ptr,
             __half_as_ushort(oldval), __half_as_ushort(oldval)));
     } while (oldval != newval);
+#else
+    // 16-bit atomics are not supported prior to volta
+    // 32-bit GPU atomics need 4 byte alignment
+    const uintptr_t unaligned = reinterpret_cast<uintptr_t>(&rhs1);
+    const unsigned offset = unaligned % sizeof(unsigned int);
+    const uintptr_t aligned = unaligned - offset;
+    unsigned int *ptr = reinterpret_cast<unsigned int*>(aligned);
+    RHS newval = rhs1, oldval, other;
+    if (offset == 0) {
+      other = *((&rhs1)+1);
+      do {
+        oldval = newval;
+        newval = newval + rhs2;
+        const unsigned int result = atomicCAS(ptr,
+            __hilohalf2uint(other, oldval), __hilohalf2uint(other, newval));
+        newval = __uint2lohalf(result);
+        other = __uint2hihalf(result);
+      } while (oldval != newval);
+    } else {
+      other = *((&rhs1)-1);
+      do {
+        oldval = newval;
+        newval = newval + rhs2;
+        const unsigned int result = atomicCAS(ptr,
+            __hilohalf2uint(oldval, other), __hilohalf2uint(newval, other));
+        other = __uint2lohalf(result);
+        newval = __uint2hihalf(result);
+      } while (oldval != newval);
+    }
+#endif
 #else
 #if __cplusplus >= 202002L
     std::atomic_ref<RHS> atomic(rhs1);
