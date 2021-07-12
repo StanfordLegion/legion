@@ -21,7 +21,7 @@
 #ifndef RUNTIME_ACCESSOR_H
 #define RUNTIME_ACCESSOR_H
 
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define CUDAPREFIX __host__ __device__
 #else
 #define CUDAPREFIX
@@ -41,103 +41,103 @@
 struct ptr_t
 {
 public:
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   ptr_t(void) : value(0) { }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   ptr_t(const ptr_t &p) : value(p.value) { }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   ptr_t(long long int v) : value(v) { }
 public:
   long long int value;
 public:
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t& operator=(const ptr_t &ptr) { value = ptr.value; return *this; }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline bool operator==(const ptr_t &ptr) const { return (ptr.value == this->value); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline bool operator!=(const ptr_t &ptr) const { return (ptr.value != this->value); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline bool operator< (const ptr_t &ptr) const { return (ptr.value <  this->value); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline operator bool(void) const { return (value != -1LL); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline bool operator!(void) const { return (value == -1LL); }
 
   // Addition operation on pointers
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator+(const ptr_t &ptr) const { return ptr_t(value + ptr.value); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator+(unsigned offset) const { return ptr_t(value + offset); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator+(int offset) const { return ptr_t(value + offset); }
 
   // Subtraction operation on pointers
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator-(const ptr_t &ptr) const { return ptr_t(value - ptr.value); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator-(unsigned offset) const { return ptr_t(value - offset); }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator-(int offset) const { return ptr_t(value - offset); }
 
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t& operator++(void) { value++; return *this; }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator++(int) { value++; return *this; }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t& operator--(void) { value--; return *this; }
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline ptr_t operator--(int) { value--; return *this; }
 
   // Thank you Eric for type cast operators!
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline operator long long int(void) const { return value; }
 
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   inline bool is_null(void) const { return (value == -1LL); }
 
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __host__ __device__
 #endif
   static inline ptr_t nil(void) { ptr_t p; p.value = -1LL; return p; }

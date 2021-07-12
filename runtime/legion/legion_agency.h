@@ -32,7 +32,7 @@
 #define _OPENMP 201307
 #endif
 #include <agency/omp/execution.hpp>
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #include <agency/cuda/execution/executor/parallel_executor.hpp>
 #endif
 
@@ -43,7 +43,7 @@ namespace Legion {
                                   agency::sequenced_executor,
                                   agency::vector_executor,
                                   agency::omp::parallel_for_executor
-#if defined (__CUDACC__) or defined (__HIPCC__)
+#if defined (__CUDACC__) || defined (__HIPCC__)
                                   , agency::cuda_parallel_executor
 #endif
                                   >;
