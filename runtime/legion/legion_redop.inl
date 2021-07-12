@@ -918,16 +918,7 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned short int *ptr = (unsigned short int*)&lhs;
-    do {
-      oldval = newval;
-      newval = newval + rhs;
-      newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
-    } while (oldval != newval);
+    atomicAdd(&lhs,rhs);
 #else
     // 16-bit atomics are not supported prior to volta
     // 32-bit GPU atomics need 4 byte alignment
@@ -994,16 +985,7 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned short int *ptr = (unsigned short int*)&rhs1;
-    do {
-      oldval = newval;
-      newval = newval + rhs2;
-      newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
-    } while (oldval != newval);
+    atomicAdd(&rhs1, rhs2);
 #else
     // 16-bit atomics are not supported prior to volta
     // 32-bit GPU atomics need 4 byte alignment
