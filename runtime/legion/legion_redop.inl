@@ -1369,6 +1369,8 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 600
+    // Type punning like this is illegal in C++ but the
+    // CUDA manual has an example just like it so fuck it
     double *lptr = (double*)&lhs;
     atomicAdd(lptr, rhs.real());
     atomicAdd(lptr+1, rhs.imag());
@@ -1424,6 +1426,8 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 600
+    // Type punning like this is illegal in C++ but the
+    // CUDA manual has an example just like it so fuck it
     double *lptr = (double*)&rhs1;
     atomicAdd(lptr, rhs2.real());
     atomicAdd(lptr+1, rhs2.imag());
@@ -1438,7 +1442,7 @@ namespace Legion {
       newval = __ulonglong_as_double(atomicCAS(ptr,
             __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);   
-    newval = lhs.imag();
+    newval = rhs1.imag();
     do {
       oldval = newval;
       newval += rhs2.imag();
