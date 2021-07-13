@@ -304,6 +304,23 @@ namespace Legion {
     asm("mov.b64 %0, %1;" : "=l"(result) : "l"(value));
     return result;
   }
+
+  __device__ __forceinline__
+  double __ulonglong_as_double(unsigned long long value)
+  {
+    double result;
+    asm("mov.b64 %0, %1;" : "=d"(result) : "l"(value));
+    return result;
+  }
+
+  __device__ __forceinline__
+  unsigned long long __double_as_ulonglong(double value)
+  {
+    unsigned long long result;
+    asm("mov.b64 %0, %1;" : "=l"(result) : "d"(value));
+    return result;
+  }
+
 #ifdef LEGION_REDOP_COMPLEX
 #ifdef LEGION_REDOP_HALF
   __device__ __forceinline__
