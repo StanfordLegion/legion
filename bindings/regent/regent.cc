@@ -270,3 +270,10 @@ DECLARE_ARRAY_REDUCTION(register_array_reduction_min_uint32 , MinReduction<uint3
 DECLARE_ARRAY_REDUCTION(register_array_reduction_min_uint64 , MinReduction<uint64_t>)
 
 #undef DECLARE_ARRAY_REDUCTION
+
+int64_t regent_generate_dynamic_kernel_id()
+{
+  static int64_t next_kernel_id = 12345;
+  int64_t kernel_id = next_kernel_id++;
+  return kernel_id;
+}
