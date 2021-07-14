@@ -1046,25 +1046,29 @@ function base.variant:is_inline()
 end
 
 do
-  local global_kernel_id = 1
+  -- We use this counter to guarantee that each CUDA kernel within a module has a unique name
+  -- Note that task-local counters prefixed by task names are insufficient because meta-programmed
+  -- tasks have the same name.
+  local global_kernel_counter = 1
   function base.variant:add_cuda_kernel(kernel)
     if not self.cudakernels then
-      self.cudakernels = {}
+      self.cudakernels = terralib.newlist()
     end
-    local kernel_id = global_kernel_id
-    local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(kernel_id)
-    self.cudakernels[kernel_id] = {
+    local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(global_kernel_counter)
+    local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
+    self.cudakernels:insert({
       name = kernel_name,
       kernel = kernel,
-    }
-    global_kernel_id = global_kernel_id + 1
+      kernel_id = kernel_id,
+    })
     kernel:setname(kernel_name)
+    global_kernel_counter = global_kernel_counter + 1
     return kernel_id
   end
 end
 
 function base.variant:get_cuda_kernels()
-  return self.cudakernels or {}
+  return self.cudakernels or terralib.newlist()
 end
 
 function base.variant:set_config_options(t)

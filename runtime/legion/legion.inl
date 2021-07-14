@@ -20682,7 +20682,7 @@ namespace Legion {
     }
 
 #ifdef LEGION_GPU_REDUCTIONS
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define LEGION_THREADS_PER_BLOCK 256
 #define LEGION_MIN_BLOCKS_PER_SM 4
     namespace Internal {
@@ -21083,7 +21083,7 @@ namespace Legion {
     }
 #undef LEGION_THREADS_PER_BLOCK
 #undef LEGION_MIN_BLOCKS_PER_SM
-#endif // __CUDACC__
+#endif // __CUDACC__ || __HIPCC__
 #endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------

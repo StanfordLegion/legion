@@ -29,7 +29,7 @@
 
 #include "legion/legion_config.h"
 
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define CUDAPREFIX __host__ __device__
 #else
 #define CUDAPREFIX

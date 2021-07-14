@@ -250,7 +250,7 @@ namespace Realm {
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
       //  The CUDA compiler also seems to be a little dense here as well
-#if (REALM_CXX_STANDARD >= 11) && !defined(__CUDACC__)
+#if (REALM_CXX_STANDARD >= 11) && (!defined(__CUDACC__) && !defined(__HIPCC__))
     protected:
       friend QT;
 #else
