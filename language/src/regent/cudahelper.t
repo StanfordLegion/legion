@@ -259,10 +259,6 @@ local terra register_cubin(cubin : rawstring) : &&opaque
   return handle
 end
 
-local terra register_function(handle : &&opaque, id : int, name : &int8)
-  HijackAPI.hijackCudaRegisterFunction(handle, [&int8](id), name)
-end
-
 local function find_device_library(target)
   local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
   local libdevice = nil
@@ -385,9 +381,7 @@ end
 
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
-  for k, v in pairs(kernels) do
-    module[v.name] = v.kernel
-  end
+  kernels:map(function(kernel) module[kernel.name] = kernel.kernel end)
   local version = get_cuda_version()
   local ptx = profile('cuda:ptx_gen', nil, function()
     return cudalib.toptx(module, nil, version)
@@ -417,11 +411,14 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     end
   end
 
-  for k, v in pairs(kernels) do
-    register = quote
-      [register]
-      register_function([handle], [k], [v.name])
-    end
+  register = quote
+    [register]
+    [kernels:map(function(kernel)
+      return quote
+        [kernel.kernel_id] = [&int8]([c.regent_generate_dynamic_kernel_id]())
+        [HijackAPI.hijackCudaRegisterFunction]([handle], [kernel.kernel_id], [kernel.name])
+      end
+    end)]
   end
 
   return register
@@ -594,8 +591,7 @@ function cudahelper.compute_reduction_buffer_size(cx, node, reductions)
   return size
 end
 
-local internal_kernel_id = 2 ^ 30
-local internal_kernels = {}
+local internal_kernels = terralib.newlist()
 local INTERNAL_KERNEL_PREFIX = "__internal"
 
 function cudahelper.get_internal_kernels()
@@ -605,31 +601,30 @@ end
 cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
   local value = base.reduction_op_init[op][type]
   local op_name = base.reduction_ops[op].name
-  local kernel_id = internal_kernel_id
-  internal_kernel_id = internal_kernel_id - 1
   local kernel_name =
     INTERNAL_KERNEL_PREFIX .. "__init__" .. tostring(type) ..
     "__" .. tostring(op_name) .. "__"
+  local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
   local terra init(buffer : &type)
     var tid = tid_x() + bid_x() * n_tid_x()
     buffer[tid] = [value]
   end
   init:setname(kernel_name)
-  internal_kernels[kernel_id] = {
+  internal_kernels:insert({
     name = kernel_name,
     kernel = init,
-  }
+    kernel_id = kernel_id,
+  })
   return kernel_id
 end)
 
 cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
   local value = base.reduction_op_init[op][type]
   local op_name = base.reduction_ops[op].name
-  local kernel_id = internal_kernel_id
-  internal_kernel_id = internal_kernel_id - 1
   local kernel_name =
     INTERNAL_KERNEL_PREFIX .. "__red__" .. tostring(type) ..
     "__" .. tostring(op_name) .. "__"
+  local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
 
   local tid = terralib.newsymbol(c.size_t, "tid")
   local input = terralib.newsymbol(&type, "input")
@@ -652,10 +647,11 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
   end
 
   red:setname(kernel_name)
-  internal_kernels[kernel_id] = {
+  internal_kernels:insert({
     name = kernel_name,
     kernel = red,
-  }
+    kernel_id = kernel_id,
+  })
   return kernel_id
 end)
 

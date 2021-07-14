@@ -165,6 +165,8 @@ DECLARE_C_REDUCTION(safe_reduce_min)
 
 #undef DECLARE_C_REDUCTION
 
+int64_t regent_generate_dynamic_kernel_id();
+
 #ifdef __cplusplus
 }
 #endif
