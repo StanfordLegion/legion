@@ -1448,6 +1448,13 @@ namespace Realm {
 
   void XmitSrcDestPair::enqueue_completion_reply(gex_AM_Arg_t comp_info)
   {
+#ifdef DEBUG_REALM
+    // should never ask for a completion with neither local or remote
+    //  bits set
+    assert((comp_info & (PendingCompletion::LOCAL_PENDING_BIT |
+                         PendingCompletion::REMOTE_PENDING_BIT)) != 0);
+#endif
+
     // attempt an immediate send if they are enabled and we don't appear
     //  to have any completion replies queued up
     if(internal->module->cfg_use_immediate &&
@@ -4368,9 +4375,12 @@ namespace Realm {
       //  completion information
       return comp_info;
     } else {
-      // reply is allowed for local completion, but remote isn't done
-      return (comp_info &
-	      ~PendingCompletion::REMOTE_PENDING_BIT);
+      if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
+        // reply is allowed for local completion, but remote isn't done
+        return (comp_info &
+                ~PendingCompletion::REMOTE_PENDING_BIT);
+      } else
+        return 0;
     }
   }
 
@@ -4421,9 +4431,12 @@ namespace Realm {
       //  completion information
       return comp_info;
     } else {
-      // reply is allowed for local completion, but remote isn't done
-      return (comp_info &
-	      ~PendingCompletion::REMOTE_PENDING_BIT);
+      if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
+        // reply is allowed for local completion, but remote isn't done
+        return (comp_info &
+                ~PendingCompletion::REMOTE_PENDING_BIT);
+      } else
+        return 0;
     }
   }
 
@@ -4540,6 +4553,9 @@ namespace Realm {
       int index = args[i] >> 2;
       bool do_local = ((args[i] & PendingCompletion::LOCAL_PENDING_BIT) != 0);
       bool do_remote = ((args[i] & PendingCompletion::REMOTE_PENDING_BIT) != 0);
+#ifdef DEBUG_REALM
+      assert(do_local || do_remote);
+#endif
 
       PendingCompletion *comp = compmgr.lookup_completion(index);
       compmgr.invoke_completions(comp, do_local, do_remote);
