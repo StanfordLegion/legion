@@ -1498,7 +1498,11 @@ function base.task:get_mapper_id()
 end
 
 function base.task:set_mapper_id(mapper_id)
-  self.mapper_id = terralib.constant(c.legion_mapper_id_t, mapper_id)
+  if base.config["separate"] then
+    self.mapper_id:setinitializer(mapper_id)
+  else
+    self.mapper_id = terralib.constant(c.legion_mapper_id_t, mapper_id)
+  end
 end
 
 function base.task:has_mapping_tag_id()
@@ -1511,7 +1515,11 @@ function base.task:get_mapping_tag_id()
 end
 
 function base.task:set_mapping_tag_id(tag)
-  self.mapping_tag_id = terralib.constant(c.legion_mapping_tag_id_t, tag)
+  if base.config["separate"] then
+    self.mapping_tag_id:setinitializer(tag)
+  else
+    self.mapping_tag_id = terralib.constant(c.legion_mapping_tag_id_t, tag)
+  end
 end
 
 function base.task:set_name(name)
@@ -1667,12 +1675,28 @@ do
     local unique_id = make_unique_task_identifier(name)
     local task_id
     if base.config["separate"] then
-      task_id = terralib.global(c.legion_task_id_t, c.AUTO_GENERATE_ID,
-                                "__regent_task_" .. unique_id .. "_task_id")
+      task_id = terralib.global(
+        c.legion_task_id_t, c.AUTO_GENERATE_ID,
+        "__regent_task_" .. unique_id .. "_task_id")
     else
       task_id = terralib.constant(c.legion_task_id_t, next_task_id)
       next_task_id = next_task_id + 1
     end
+
+    local mapper_id = false
+    if base.config["separate"] then
+      mapper_id = terralib.global(
+        c.legion_mapper_id_t, 0,
+        "__regent_task_" .. unique_id .. "_mapper_id")
+    end
+
+    local mapping_tag_id = false
+    if base.config["separate"] then
+      mapping_tag_id = terralib.global(
+        c.legion_mapping_tag_id_t, 0,
+        "__regent_task_" .. unique_id .. "_mapping_tag_id")
+    end
+
     return setmetatable({
       name = name,
       span = span,
@@ -1682,8 +1706,8 @@ do
       calling_convention = false,
 
       -- User-configurable task metadata:
-      mapper_id = false,
-      mapping_tag_id = false,
+      mapper_id = mapper_id,
+      mapping_tag_id = mapping_tag_id,
 
       -- Metadata for the Regent calling convention:
       param_symbols = false,
