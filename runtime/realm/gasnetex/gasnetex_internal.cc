@@ -762,6 +762,11 @@ namespace Realm {
     , num_groups(0)
     , num_pending(0)
   {
+    // set the soft limit at 50% of max capacity
+    pending_soft_limit = size_t(1) << (LOG2_MAXGROUPS +
+                                       PendingCompletionGroup::LOG2_GROUPSIZE -
+                                       1);
+
     for(size_t i = 0; i < (1 << LOG2_MAXGROUPS); i++)
       groups[i].store(0);
   }
@@ -883,6 +888,11 @@ namespace Realm {
   size_t PendingCompletionManager::num_completions_pending()
   {
     return num_pending.load();
+  }
+
+  bool PendingCompletionManager::over_pending_completion_soft_limit() const
+  {
+    return (num_pending.load() >= pending_soft_limit);
   }
 
 
@@ -2997,6 +3007,10 @@ namespace Realm {
 						   size_t header_size,
 						   uintptr_t dest_payload_addr)
   {
+    // TODO: ideally make this a per-target counter?
+    if(with_congestion && compmgr.over_pending_completion_soft_limit())
+      return 0;
+
     if(dest_payload_addr == 0) {
       // medium message
       return GASNetEXHandlers::max_request_medium(eps[0],
@@ -3033,6 +3047,10 @@ namespace Realm {
 						   size_t header_size,
 						   uintptr_t dest_payload_addr)
   {
+    // TODO: ideally make this a per-target counter?
+    if(with_congestion && compmgr.over_pending_completion_soft_limit())
+      return 0;
+
     if(dest_payload_addr == 0) {
       // medium message
       return GASNetEXHandlers::max_request_medium(eps[0],
@@ -3078,6 +3096,10 @@ namespace Realm {
   size_t GASNetEXInternal::recommended_max_payload(bool with_congestion,
 						   size_t header_size)
   {
+    // TODO: ideally make this a per-target counter?
+    if(with_congestion && compmgr.over_pending_completion_soft_limit())
+      return 0;
+
     return gex_AM_LUBRequestMedium();
   }
 

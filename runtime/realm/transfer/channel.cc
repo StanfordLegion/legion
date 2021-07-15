@@ -3818,6 +3818,14 @@ namespace Realm {
 		  // source also favors 1d >> 2d >> gather
 		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
 		     (src_1d_maxbytes >= src_ga_maxbytes)) {
+                    // TODO: if congestion is telling us not to send anything
+                    //  at all, it'd be better to sleep until the network
+                    //  says it's reasonable to try again - this approach
+                    //  will effectively spinwait (but at least guarantees to
+                    //  intersperse it with calls to the network progress
+                    //  work item)
+                    if(src_1d_maxbytes == 0) break;
+
 		    // 1D source
 		    bytes = src_1d_maxbytes;
 		    //log_xd.info() << "remote write 1d: guid=" << guid
