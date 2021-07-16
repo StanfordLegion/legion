@@ -59,3 +59,9 @@ REGENT_ARRAY_REDUCE_LIST(DECLARE_ARRAY_REDUCTION)
 
 #endif
 
+int64_t regent_generate_dynamic_kernel_id()
+{
+  static int64_t next_kernel_id = 12345;
+  int64_t kernel_id = next_kernel_id++;
+  return kernel_id;
+}

@@ -582,7 +582,7 @@ namespace Realm {
 #endif
 #ifdef REALM_ACCESSOR_DEBUG
   RegionInstance dbg_inst;
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #error "REALM_ACCESSOR_DEBUG macro for AffineAccessor not supported for GPU code"
 #endif
 #endif

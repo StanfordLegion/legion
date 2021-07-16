@@ -4198,21 +4198,13 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
     cudahelper.link_driver_library()
-    local all_kernels = {}
+    local all_kernels = terralib.newlist()
     variants:map(function(variant)
       if variant:is_cuda() then
-        local kernels = variant:get_cuda_kernels()
-        if kernels ~= nil then
-          for k, v in pairs(kernels) do
-            all_kernels[k] = v
-          end
-        end
+        all_kernels:insertall(variant:get_cuda_kernels())
       end
     end)
-    for k, v in pairs(cudahelper.get_internal_kernels()) do
-      assert(all_kernels[k] == nil)
-      all_kernels[k] = v
-    end
+    all_kernels:insertall(cudahelper.get_internal_kernels())
     cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
