@@ -22,7 +22,7 @@ endif
 DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 MAX_FIELDS	?= 256		# Maximum number of fields in a field space
-OUTPUT_LEVEL    ?= LEVEL_PRINT 	# Compile time logging level
+OUTPUT_LEVEL    ?= LEVEL_DEBUG 	# Compile time logging level
 USE_FORTRAN	?= 0		# Include Fortran support		
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_OPENMP	?= 0		# Include OpenMP processor support

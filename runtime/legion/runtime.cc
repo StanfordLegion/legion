@@ -3099,7 +3099,7 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), owner_space), 
         context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
 #ifdef LEGION_SPY
-        op_uid(o->get_unique_op_id()),
+        op_uid(uid),
 #endif
         future_map_domain(domain), ready_event(ready)
     //--------------------------------------------------------------------------
