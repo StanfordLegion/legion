@@ -4198,21 +4198,13 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
     cudahelper.link_driver_library()
-    local all_kernels = {}
+    local all_kernels = terralib.newlist()
     variants:map(function(variant)
       if variant:is_cuda() then
-        local kernels = variant:get_cuda_kernels()
-        if kernels ~= nil then
-          for k, v in pairs(kernels) do
-            all_kernels[k] = v
-          end
-        end
+        all_kernels:insertall(variant:get_cuda_kernels())
       end
     end)
-    for k, v in pairs(cudahelper.get_internal_kernels()) do
-      assert(all_kernels[k] == nil)
-      all_kernels[k] = v
-    end
+    all_kernels:insertall(cudahelper.get_internal_kernels())
     cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
@@ -4771,12 +4763,15 @@ void %s(void);
   header_basename)
 end
 
-local function write_header(header_filename, registration_name, task_whitelist)
+local function write_header(header_filename, registration_name, task_whitelist, need_launcher)
   if not registration_name then
     registration_name = std.normalize_name(header_filename) .. "_register"
   end
 
-  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
+  local task_c_iface, task_cxx_iface, task_impl = "", "", {}
+  if need_launcher then
+    task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
+  end
 
   local header = io.open(header_filename, "w")
   assert(header)
@@ -4786,10 +4781,13 @@ local function write_header(header_filename, registration_name, task_whitelist)
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist, need_launcher)
   assert(header_filename and filename)
+  if need_launcher == nil then
+    need_launcher = true
+  end
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist)
+  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist, need_launcher)
   local _, names = std.setup(nil, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"

@@ -26,7 +26,7 @@
 #endif // LEGION_USE_PYTHON_CFFI
 
 // Define a prefix for annotating functions for CUDA compilation
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define __CUDA_HD__ __host__ __device__
 #else
 #define __CUDA_HD__

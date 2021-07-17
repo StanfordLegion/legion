@@ -72,7 +72,7 @@
 #endif
 
 // REALM_CUDA_HD - adds __host__ __device__ iff compiling with NVCC
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define REALM_CUDA_HD __host__ __device__
 #else
 #define REALM_CUDA_HD
@@ -86,7 +86,7 @@
 #endif
 
 // REALM_ASSERT(cond, message) - abort program if 'cond' is not true
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define REALM_ASSERT(cond, message)  assert(cond)
 #else
 #define REALM_ASSERT(cond, message)  assert((cond) && (message))
