@@ -3848,7 +3848,7 @@ namespace Legion {
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
-        op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
+        op_depth(repl_ctx->get_depth()), op_uid(repl_ctx->get_unique_id()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
         sharding_function(NULL), collective_performed(false), 
         has_non_trivial_call(false)
