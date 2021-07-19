@@ -1684,7 +1684,7 @@ namespace Legion {
   {
 #ifdef __CUDA_ARCH__
     // Apparently there is no signed 64bit int atomic yet
-    RHS newval = rhs1, oldval;
+    RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
     unsigned long long int *ptr = (unsigned long long int*)&lhs;
@@ -2183,15 +2183,15 @@ namespace Legion {
   void DiffReduction<double>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    RHS newval = rhs1, oldval;
+    RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
-    long long *ptr = (long long*)&rhs1;
+    unsigned long long *ptr = (unsigned long long*)&lhs;
     do {
       oldval = newval;
-      newval -= rhs2;
-      newval = __longlong_as_double(atomicCAS(ptr,
-            __double_as_longlong(oldval), __double_as_longlong(newval)));
+      newval -= rhs;
+      newval = __ulonglong_as_double(atomicCAS(ptr,
+            __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L
@@ -2227,12 +2227,12 @@ namespace Legion {
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
-    long long *ptr = (long long*)&rhs1;
+    unsigned long long *ptr = (unsigned long long*)&rhs1;
     do {
       oldval = newval;
       newval -= rhs2;
-      newval = __longlong_as_double(atomicCAS(ptr,
-            __double_as_longlong(oldval), __double_as_longlong(newval)));
+      newval = __ulonglong_as_double(atomicCAS(ptr,
+            __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L
