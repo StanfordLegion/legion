@@ -1985,6 +1985,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
+      virtual DomainPoint get_collective_instance_point(void) const;
     protected:
       RtBarrier inline_barrier;
       ShardedMappingExchange *exchange; 
@@ -2014,6 +2015,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual DomainPoint get_collective_instance_point(void) const;
     protected:
       RtBarrier resource_barrier;
       ApBarrier broadcast_barrier;
@@ -2075,6 +2077,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual DomainPoint get_collective_instance_point(void) const;
     public:
       // Help for unordered detachments
       void record_unordered_kind(
@@ -2328,7 +2331,7 @@ namespace Legion {
     public:
       CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
       CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
-      CollectiveMapping(Deserializer &derez);
+      CollectiveMapping(Deserializer &derez, size_t size = 0);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
         { return unique_sorted_spaces[idx]; }

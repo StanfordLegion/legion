@@ -7424,6 +7424,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint PointTask::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
+    }
+
+    //--------------------------------------------------------------------------
     bool PointTask::finalize_collective_instance(MappingCallKind call_kind,
                                                  unsigned index, bool success)
     //--------------------------------------------------------------------------

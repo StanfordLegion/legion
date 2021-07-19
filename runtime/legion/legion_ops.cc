@@ -1138,6 +1138,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Operation::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for derived types
+      assert(false);
+      return DomainPoint();
+    }
+
+    //--------------------------------------------------------------------------
     bool Operation::finalize_collective_instance(MappingCallKind call,
                                               unsigned total_calls, bool succes)
     //--------------------------------------------------------------------------
@@ -7931,6 +7940,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint PointCopyOp::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
+    }
+
+    //--------------------------------------------------------------------------
     bool PointCopyOp::finalize_collective_instance(MappingCallKind call_kind,
                                                    unsigned index, bool success)
     //--------------------------------------------------------------------------
@@ -9112,7 +9128,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, 
               deletion_requirements[idx], version_infos[idx],
-              PhysicalTraceInfo(trace_info, idx), map_applied_conditions);
+              PhysicalTraceInfo(trace_info, idx), NULL/*no collective map*/,
+              map_applied_conditions);
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
         if (allocator->ready_event.exists())
@@ -11596,6 +11613,7 @@ namespace Legion {
                                               this, 0/*idx*/, completion_event,
                                               restricted_instances,
                                               trace_info, 
+                                              NULL/*no collective mapping*/,
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -12487,6 +12505,7 @@ namespace Legion {
                                               completion_event,
                                               restricted_instances, 
                                               source_instances, trace_info,
+                                              NULL/*no collective mapping*/,
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -16917,7 +16936,7 @@ namespace Legion {
                 find_or_create_collective_instance(
                           call_kind, index, constraints, regions, kind,
                           footprint, unsat_kind, unsat_index, collective_point);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool DependentPartitionOp::finalize_collective_instance(
@@ -17269,6 +17288,13 @@ namespace Legion {
       return owner->find_or_create_collective_instance(mapper_call, index,
           constraints, regions, kind, footprint, unsat_kind, unsat_index,
           collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint PointDepPartOp::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
     }
 
     //--------------------------------------------------------------------------
@@ -17741,7 +17767,8 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info, 
                                        init_precondition, true_guard,
-                                       trace_info, map_applied_conditions);
+                                       trace_info, NULL/*no collective map*/,
+                                       map_applied_conditions);
         if (runtime->legion_spy_enabled)
         {
 #ifdef LEGION_SPY
@@ -17825,7 +17852,8 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info,
                                        init_precondition, true_guard,
-                                       trace_info, map_applied_conditions);
+                                       trace_info, NULL/*no collective map*/,
+                                       map_applied_conditions);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event,
                                       completion_event);
@@ -18672,6 +18700,13 @@ namespace Legion {
       return owner->find_or_create_collective_instance(mapper_call, index,
           constraints, regions, kind, footprint, unsat_kind, unsat_index,
           collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint PointFillOp::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
     }
 
     //--------------------------------------------------------------------------
@@ -20442,8 +20477,9 @@ namespace Legion {
       InstanceView *ext_view = external_views[0];
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
-                                         version_info, ext_view,
-                                         trace_info, map_applied_conditions);
+                                         version_info, ext_view, trace_info,
+                                         NULL/*no collective map*/,
+                                         map_applied_conditions);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
           Runtime::merge_events(&trace_info, detach_event, effects_done);

@@ -3736,7 +3736,8 @@ namespace Legion {
       {
         OverwriteAnalysis *analysis = new OverwriteAnalysis(forest->runtime,
             op, index, usage, eit->first, eit->second, 
-            PhysicalTraceInfo(trace_info, index), ApEvent::NO_AP_EVENT);
+            PhysicalTraceInfo(trace_info, index), NULL/*no collective mapping*/,
+            ApEvent::NO_AP_EVENT);
         analysis->add_reference();
         std::set<RtEvent> deferral_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =

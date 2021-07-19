@@ -629,6 +629,7 @@ namespace Legion {
       CollectiveManager& operator=(const CollectiveManager &rh);
     public:
       void finalize_collective_instance(ApUserEvent instance_event);
+      CollectiveMapping* get_collective_mapping(void) const;
     public:
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;

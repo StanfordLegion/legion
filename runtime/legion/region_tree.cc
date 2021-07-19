@@ -2026,7 +2026,7 @@ namespace Legion {
       assert(!targets.is_virtual_mapping());
 #endif
       RegionNode *region_node = get_node(req.region);
-      FieldMask user_mask = 
+      const FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2041,28 +2041,104 @@ namespace Legion {
       std::vector<InstanceView*> source_views;
       if (!sources.empty())
         context->convert_source_views(sources, source_views);
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
 #ifdef DEBUG_LEGION
       assert(analysis == NULL);
       // Should be recording or must be read-only
       assert(record_valid || IS_READ_ONLY(req));
 #endif
-      analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
-                                    targets, target_views, source_views, 
-                                    trace_info, precondition, term_event, 
-                                    check_initialized,record_valid,skip_output);
-      analysis->add_reference();
-      // Iterate over all the equivalence classes and perform the analysis
-      // Only need to check for uninitialized data for things not discarding
-      // and things that are not simultaneous (simultaneous can appear 
-      // uninitialized since it might be reading, but then use internal
-      // synchronization to wait for something running concurrently to write)
       std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
+      const FieldMaskSet<EquivalenceSet> &eq_sets =
+        version_info.get_equivalence_sets();
+      // If one manager is collective then they all should be
+      if (targets[0].get_manager()->is_collective_manager())
+      {
+        CollectiveManager *collective =
+          targets[0].get_manager()->as_collective_manager();
+        CollectiveMapping *collective_mapping = 
+          collective->get_collective_mapping();
+        analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
+                                      targets, target_views, source_views, 
+                                      trace_info, collective_mapping, 
+                                      precondition,term_event,check_initialized,
+                                      record_valid, skip_output);
+        analysis->add_reference();
+        // For collective instances, we need to make sure that we are on the
+        // right node for the first pass of the traversal
+        FieldMask local_mask;
+        const DomainPoint local_point = op->get_collective_instance_point();
+        const AddressSpace local_space = runtime->address_space;
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          const InstanceRef &ref = targets[idx];
+          InstanceManager *manager = ref.get_manager();
+#ifdef DEBUG_LEGION
+          assert(manager->is_collective_manager());
+#endif
+          collective = manager->as_collective_manager();
+#ifdef DEBUG_LEGION
+          // Each of the instances must have the same collective mapping
+          // even if they have different mapppings for points to memories
+          CollectiveMapping *to_compare = collective->get_collective_mapping();
+          assert((collective_mapping == to_compare) ||
+                  (*collective_mapping == *to_compare));
+#endif
+          PhysicalInstance instance = collective->get_instance(local_point);
+          const AddressSpaceID inst_space = instance.address_space();
+          const FieldMask &inst_mask = ref.get_valid_fields();
+          if (inst_space != local_space)
+          {
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  eq_sets.begin(); it != eq_sets.end(); it++)
+            {
+              const FieldMask overlap = it->second & inst_mask;
+              if (!!overlap)
+                analysis->record_remote(it->first, overlap, inst_space);
+            }
+          }
+          else
+            local_mask |= inst_mask;
+        }
+        if (!!local_mask)
+        {
+          if (local_mask != user_mask)
+          {
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  eq_sets.begin(); it != eq_sets.end(); it++)
+            {
+              const FieldMask overlap = it->second & local_mask;
+              if (!overlap)
+                continue;
+              analysis->traverse(it->first, overlap, deferral_events,
+                                 map_applied_events);
+            }
+          }
+          else
+          {
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                  eq_sets.begin(); it != eq_sets.end(); it++)
+              analysis->traverse(it->first, it->second, deferral_events,
+                                 map_applied_events);   
+          }
+        }
+      }
+      else
+      {
+        // Iterate over all the equivalence classes and perform the analysis
+        // Only need to check for uninitialized data for things not discarding
+        // and things that are not simultaneous (simultaneous can appear 
+        // uninitialized since it might be reading, but then use internal
+        // synchronization to wait for something running concurrently to write)
+        analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
+                                      targets, target_views, source_views, 
+                                      trace_info, NULL/*collective mapping*/,
+                                      precondition,term_event,check_initialized,
+                                      record_valid, skip_output);
+        analysis->add_reference();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+          analysis->traverse(it->first, it->second, deferral_events,
+                             map_applied_events);
+      }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -2240,6 +2316,7 @@ namespace Legion {
                                          ApEvent term_event,
                                          InstanceSet &restricted_instances,
                                          const PhysicalTraceInfo &trace_info,
+                                         CollectiveMapping *collective_mapping,
                                          std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                          , const char *log_name
@@ -2257,7 +2334,7 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      AcquireAnalysis analysis(runtime, op, index, local_expr);
+      AcquireAnalysis analysis(runtime, op,index,local_expr,collective_mapping);
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
@@ -2311,6 +2388,7 @@ namespace Legion {
                                    InstanceSet &restricted_instances,
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
+                                   CollectiveMapping *collective_mapping,
                                    std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                    , const char *log_name
@@ -2334,8 +2412,8 @@ namespace Legion {
         version_info.get_equivalence_sets();
       std::set<RtEvent> deferral_events;
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      ReleaseAnalysis analysis(runtime, op, index, precondition, 
-                               local_expr, source_views, trace_info);
+      ReleaseAnalysis analysis(runtime, op, index, precondition, local_expr,
+                               source_views, trace_info, collective_mapping);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
@@ -3034,6 +3112,7 @@ namespace Legion {
                                           ApEvent precondition,
                                           PredEvent true_guard, 
                                           const PhysicalTraceInfo &trace_info,
+                                          CollectiveMapping *collective_mapping,
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
@@ -3046,7 +3125,7 @@ namespace Legion {
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), region_node->row_source, fill_view, 
-          eq_sets.get_valid_mask(), trace_info, precondition, 
+          eq_sets.get_valid_mask(), trace_info, collective_mapping,precondition,
           RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -3078,6 +3157,7 @@ namespace Legion {
                                           ShardedView *view, 
                                           VersionInfo &version_info,
                                           const PhysicalTraceInfo &trace_info,
+                                          CollectiveMapping *collective_mapping,
                                           const ApEvent precondition,
                                           std::set<RtEvent> &map_applied_events,
                                           const bool add_restriction)
@@ -3095,8 +3175,8 @@ namespace Legion {
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           req, region_node->row_source, view, overwrite_mask, trace_info, 
-          precondition, RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT, 
-          true/*track effects*/, add_restriction);
+          collective_mapping, precondition, RtEvent::NO_RT_EVENT,
+          PredEvent::NO_PRED_EVENT, true/*track effects*/, add_restriction);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3171,11 +3251,36 @@ namespace Legion {
         if (guard_event.exists())
           map_applied_events.insert(guard_event);
       }
-      OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), region_node->row_source, registration_view, 
-          ext_mask, trace_info, ApEvent::NO_AP_EVENT, guard_event, 
-          PredEvent::NO_PRED_EVENT, false/*track effects*/, restricted);
-      analysis->add_reference();
+      OverwriteAnalysis *analysis = NULL; 
+      if (local_view->get_manager()->is_collective_manager())
+      {
+        CollectiveManager *collective =
+          local_view->get_manager()->as_collective_manager();
+#ifdef DEBUG_LEGION
+        // Should always be local
+        const DomainPoint local_point =
+          attach_op->get_collective_instance_point();
+        PhysicalInstance instance = collective->get_instance(local_point);
+        assert(instance.address_space() == runtime->address_space);
+#endif
+        CollectiveMapping *collective_mapping =
+          collective->get_collective_mapping();
+        analysis = new OverwriteAnalysis(runtime, attach_op, index,
+            RegionUsage(req), region_node->row_source, registration_view, 
+            ext_mask, trace_info, collective_mapping, ApEvent::NO_AP_EVENT,
+            guard_event, PredEvent::NO_PRED_EVENT, false/*track effects*/,
+            restricted);
+        analysis->add_reference();
+      }
+      else
+      {
+        analysis = new OverwriteAnalysis(runtime, attach_op, index,
+            RegionUsage(req), region_node->row_source, registration_view, 
+            ext_mask, trace_info, NULL/*no collective mapping*/,
+            ApEvent::NO_AP_EVENT, guard_event, PredEvent::NO_PRED_EVENT,
+            false/*track effects*/, restricted);
+        analysis->add_reference();
+      }
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
@@ -3199,6 +3304,7 @@ namespace Legion {
                                           VersionInfo &version_info,
                                           InstanceView *local_view,
                                           const PhysicalTraceInfo &trace_info,
+                                          CollectiveMapping *collective_mapping,
                                           std::set<RtEvent> &map_applied_events,
                                           LogicalView *registration_view)
     //--------------------------------------------------------------------------
@@ -3221,10 +3327,36 @@ namespace Legion {
                                                      map_applied_events, 
                                                      trace_info,
                                                      runtime->address_space);
-      FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
-                                  region_node->row_source, local_view, 
-                                  registration_view, true/*remove restriction*/);
-      analysis->add_reference();
+      FilterAnalysis *analysis = NULL; 
+      if (local_view->get_manager()->is_collective_manager())
+      {
+        CollectiveManager *collective =
+          local_view->get_manager()->as_collective_manager();
+#ifdef DEBUG_LEGION
+        // Should always be local
+        const DomainPoint local_point =
+          detach_op->get_collective_instance_point();
+        PhysicalInstance instance = collective->get_instance(local_point);
+        assert(instance.address_space() == runtime->address_space);
+#endif
+        CollectiveMapping *collective_mapping =
+          collective->get_collective_mapping();
+        analysis = new FilterAnalysis(runtime, detach_op, index,
+                                      collective_mapping, 
+                                      region_node->row_source, local_view,
+                                      registration_view,
+                                      true/*remove restriction*/);
+        analysis->add_reference();
+      }
+      else
+      {
+        analysis = new FilterAnalysis(runtime, detach_op, index,
+                                      NULL/*no collective_mapping*/, 
+                                      region_node->row_source, local_view,
+                                      registration_view,
+                                      true/*remove restriction*/);
+        analysis->add_reference();
+      }
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
@@ -3246,42 +3378,27 @@ namespace Legion {
                                              const RegionRequirement &req,
                                              VersionInfo &version_info,
                                             const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events,
-                                          const bool collective)  
+                                          CollectiveMapping *collective_mapping,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
+      
+      const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
-      const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       IndexSpaceExpression *local_expr = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           usage, local_expr, NULL/*view*/, eq_sets.get_valid_mask(), 
-          trace_info, ApEvent::NO_AP_EVENT);
+          trace_info, collective_mapping, ApEvent::NO_AP_EVENT);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
-      if (collective)
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
-        {
-          // Skip any that are not ones that we own, they will be handled
-          // by a a remote node
-          if (!it->first->is_owner())
-            continue;
-          analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events);
-        }
-      }
-      else
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
-          analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events);
-      }
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        analysis->traverse(it->first, it->second, deferral_events,
+                           map_applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())

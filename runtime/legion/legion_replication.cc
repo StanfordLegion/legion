@@ -3346,8 +3346,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(mapping_barrier.exists());
 #endif
-        if ((is_total_sharding && is_first_local_shard) || 
-            (repl_ctx->owner_shard->shard_id == 0))
+        if (is_first_local_shard)
         {
           // For this case we actually need to go through and prune out any
           // valid instances for these fields in the equivalence sets in order
@@ -3356,8 +3355,9 @@ namespace Legion {
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
             runtime->forest->invalidate_fields(this, idx, 
                 deletion_requirements[idx], version_infos[idx],
-                PhysicalTraceInfo(trace_info, idx), map_applied_conditions, 
-                is_total_sharding/*collective*/);
+                PhysicalTraceInfo(trace_info, idx),
+                &repl_ctx->shard_manager->get_collective_mapping(),
+                map_applied_conditions); 
         }
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
@@ -5981,6 +5981,7 @@ namespace Legion {
         enqueue_ready_operation();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplMapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -6301,6 +6302,23 @@ namespace Legion {
       else
         complete_execution();
     }
+#endif
+
+    //--------------------------------------------------------------------------
+    DomainPoint ReplMapOp::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      DomainPoint result;
+      result.dim = 1;
+      result[0] = repl_ctx->owner_shard->shard_id;
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     void ReplMapOp::activate(void)
@@ -6475,6 +6493,7 @@ namespace Legion {
         enqueue_ready_operation();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplAttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -6693,6 +6712,23 @@ namespace Legion {
         }
       }
     }
+#endif
+
+    //--------------------------------------------------------------------------
+    DomainPoint ReplAttachOp::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      DomainPoint result;
+      result.dim = 1;
+      result[0] = repl_ctx->owner_shard->shard_id;
+      return result;
+    }
 
     /////////////////////////////////////////////////////////////
     // Repl Detach Op 
@@ -6760,6 +6796,7 @@ namespace Legion {
       resource_barrier = repl_ctx->get_next_detach_resource_barrier();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplDetachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -6839,6 +6876,23 @@ namespace Legion {
         complete_execution(Runtime::protect_event(detach_event));
       else
         complete_execution();
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    DomainPoint ReplDetachOp::get_collective_instance_point(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      DomainPoint result;
+      result.dim = 1;
+      result[0] = repl_ctx->owner_shard->shard_id;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8346,11 +8400,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(Deserializer &derez)
+    CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t num_spaces)
     //--------------------------------------------------------------------------
     {
-      size_t num_spaces;
-      derez.deserialize(num_spaces);
+      if (num_spaces == 0)
+        derez.deserialize(num_spaces);
+#ifdef DEBUG_LEGION
+      assert(num_spaces > 0);
+#endif
       unique_sorted_spaces.resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize(unique_sorted_spaces[idx]);

@@ -1800,6 +1800,7 @@ namespace Legion {
                      std::vector<InstanceView*> &target_views,
                      std::vector<InstanceView*> &source_views,
                      const PhysicalTraceInfo &trace_info,
+                     CollectiveMapping *collective_mapping,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool check_initialized, const bool record_valid,
                      const bool skip_output);
@@ -1810,6 +1811,7 @@ namespace Legion {
                      std::vector<InstanceView*> &target_views,
                      std::vector<InstanceView*> &source_views,
                      const PhysicalTraceInfo &trace_info,
+                     CollectiveMapping *collective_mapping,
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
                      const bool check_initialized, const bool record_valid,
@@ -1879,10 +1881,11 @@ namespace Legion {
                             public LegionHeapify<AcquireAnalysis> {
     public: 
       AcquireAnalysis(Runtime *rt, Operation *op, unsigned index,
-                      IndexSpaceExpression *expr);
+                      IndexSpaceExpression *expr,
+                      CollectiveMapping *collective_mapping);
       AcquireAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
-                      AcquireAnalysis *target); 
+                      AcquireAnalysis *target);
       AcquireAnalysis(const AcquireAnalysis &rhs);
       virtual ~AcquireAnalysis(void);
     public:
@@ -1918,7 +1921,8 @@ namespace Legion {
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
                       ApEvent precondition, IndexSpaceExpression *expr,
                       std::vector<InstanceView*> &source_views,
-                      const PhysicalTraceInfo &trace_info);
+                      const PhysicalTraceInfo &trace_info,
+                      CollectiveMapping *collective_mapping);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
@@ -2075,6 +2079,7 @@ namespace Legion {
                         const RegionUsage &usage, IndexSpaceExpression *expr, 
                         LogicalView *view, const FieldMask &mask,
                         const PhysicalTraceInfo &trace_info,
+                        CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -2085,6 +2090,7 @@ namespace Legion {
                         const RegionUsage &usage, IndexSpaceExpression *expr,
                         const FieldMaskSet<LogicalView> &views,
                         const PhysicalTraceInfo &trace_info,
+                        CollectiveMapping *collective_mapping,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
                         const PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
@@ -2152,6 +2158,7 @@ namespace Legion {
                            public LegionHeapify<FilterAnalysis> {
     public:
       FilterAnalysis(Runtime *rt, Operation *op, unsigned index,
+                     CollectiveMapping *collective_mapping,
                      IndexSpaceExpression *expr, InstanceView *inst_view,
                      LogicalView *registration_view,
                      const bool remove_restriction = false);

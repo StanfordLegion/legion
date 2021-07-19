@@ -931,6 +931,7 @@ namespace Legion {
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index,
                                   DomainPoint &collective_point);
+      virtual DomainPoint get_collective_instance_point(void) const;
       virtual bool finalize_collective_instance(MappingCallKind mapper_call,
                                                 unsigned index, bool success);
       virtual void report_total_collective_instance_calls(MappingCallKind call,

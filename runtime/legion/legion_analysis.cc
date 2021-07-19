@@ -6110,7 +6110,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, unsigned idx, 
-                          IndexSpaceExpression *e, bool h, CollectiveMapping *m)
+                    IndexSpaceExpression *e, bool h, CollectiveMapping *m)
       : previous(rt->address_space), original_source(rt->address_space),
         runtime(rt), analysis_expr(e), collective_mapping(m), op(o), index(idx),
         owns_op(false), on_heap(h), recorded_instances(NULL), restricted(false), 
@@ -6124,14 +6124,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, AddressSpaceID source, 
                                AddressSpaceID prev, Operation *o, unsigned idx,
-                               IndexSpaceExpression *e, bool h, 
-                               CollectiveMapping *mapping)
+                               IndexSpaceExpression *e, bool h,
+                               CollectiveMapping *mapping) 
       : previous(prev), original_source(source), runtime(rt), analysis_expr(e),
         collective_mapping(mapping), op(o), index(idx), owns_op(true), 
         on_heap(h), recorded_instances(NULL), restricted(false), 
         parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
+      if (collective_mapping != NULL)
+        collective_mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -7358,9 +7360,10 @@ namespace Legion {
                      std::vector<InstanceView*> &target_vws,
                      std::vector<InstanceView*> &source_vws,
                      const PhysicalTraceInfo &t_info,
+                     CollectiveMapping *mapping,
                      const ApEvent pre, const ApEvent term,
                      const bool check, const bool record, const bool skip)
-      : PhysicalAnalysis(rt, o, idx, rn->row_source, true/*on heap*/), 
+      : PhysicalAnalysis(rt, o, idx, rn->row_source, true/*on heap*/, mapping),
         usage(req), node(rn), target_instances(target_insts), 
         target_views(target_vws), source_views(source_vws), trace_info(t_info),
         precondition(pre), term_event(term),
@@ -7377,11 +7380,12 @@ namespace Legion {
                      InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      std::vector<InstanceView*> &source_vws,
-                     const PhysicalTraceInfo &info,
+                     const PhysicalTraceInfo &info, CollectiveMapping *mapping,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool check, 
                      const bool record, const bool skip)
-      : PhysicalAnalysis(rt, src, prev, o, idx, rn->row_source,true/*on heap*/),
+      : PhysicalAnalysis(rt, src, prev, o, idx, rn->row_source,
+                         true/*on heap*/, mapping),
         usage(use), node(rn), target_instances(target_insts), 
         target_views(target_vws), source_views(source_vws), trace_info(info), 
         precondition(pre), term_event(term),
@@ -7521,6 +7525,13 @@ namespace Legion {
           for (unsigned idx = 0; idx < source_views.size(); idx++)
             rez.serialize(source_views[idx]->did);
           trace_info.pack_trace_info<false>(rez, applied_events, target);
+          // We only need to pack the collective mapping once when going
+          // from the origin space to the next space
+          if ((collective_mapping != NULL) &&
+              (original_source == runtime->address_space))
+            collective_mapping->pack(rez);
+          else
+            rez.serialize<size_t>(0);
           rez.serialize(precondition);
           rez.serialize(term_event);
           rez.serialize(updated);
@@ -7722,6 +7733,10 @@ namespace Legion {
       }
       PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+      size_t collective_mapping_size;
+      derez.deserialize(collective_mapping_size);
+      CollectiveMapping *collective_mapping = ((collective_mapping_size) > 0) ?
+        new CollectiveMapping(derez, collective_mapping_size) : NULL;
       ApEvent precondition;
       derez.deserialize(precondition);
       ApEvent term_event;
@@ -7745,8 +7760,8 @@ namespace Legion {
       // This takes ownership of the remote operation
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
           previous, op, index, usage, node, targets, target_views, source_views,
-          trace_info, remote_user_registered, precondition, term_event, 
-          check_initialized, record_valid, skip_output);
+          trace_info, collective_mapping, remote_user_registered, precondition,
+          term_event, check_initialized, record_valid, skip_output);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready
@@ -7800,9 +7815,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, 
-                                     unsigned idx, IndexSpaceExpression *expr)
-      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/), 
+    AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, unsigned idx,
+                   IndexSpaceExpression *expr, CollectiveMapping *mapping)
+      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, mapping), 
         target_analysis(this)
     //--------------------------------------------------------------------------
     {
@@ -7812,7 +7827,7 @@ namespace Legion {
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, AddressSpaceID src, 
                       AddressSpaceID prev, Operation *o, unsigned idx, 
                       IndexSpaceExpression *expr, AcquireAnalysis *t)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         target_analysis(t)
     //--------------------------------------------------------------------------
     {
@@ -8039,8 +8054,9 @@ namespace Legion {
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, Operation *o, unsigned idx, 
                                      ApEvent pre, IndexSpaceExpression *expr,
                                      std::vector<InstanceView*> &source_vws, 
-                                     const PhysicalTraceInfo &t_info)
-      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/), 
+                                     const PhysicalTraceInfo &t_info,
+                                     CollectiveMapping *mapping)
+      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, mapping), 
         precondition(pre), target_analysis(this), source_views(source_vws),
         trace_info(t_info), release_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -8052,7 +8068,7 @@ namespace Legion {
           AddressSpaceID prev, Operation *o, unsigned idx, 
           IndexSpaceExpression *expr, ApEvent pre, ReleaseAnalysis *t, 
           std::vector<InstanceView*> &source_vws, const PhysicalTraceInfo &info)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         precondition(pre), target_analysis(t), source_views(source_vws),
         trace_info(info), release_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -8889,11 +8905,11 @@ namespace Legion {
                         unsigned idx, const RegionUsage &use,
                         IndexSpaceExpression *expr, LogicalView *view, 
                         const FieldMask &mask, const PhysicalTraceInfo &t_info,
-                        const ApEvent pre, const RtEvent guard, 
-                        const PredEvent pred, const bool track, 
-                        const bool restriction)
-      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/), usage(use), 
-        trace_info(t_info), precondition(pre), guard_event(guard), 
+                        CollectiveMapping *mapping, const ApEvent pre,
+                        const RtEvent guard, const PredEvent pred,
+                        const bool track, const bool restriction)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, mapping),
+        usage(use), trace_info(t_info), precondition(pre), guard_event(guard),
         pred_guard(pred), track_effects(track), add_restriction(restriction),
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -8913,12 +8929,13 @@ namespace Legion {
                         IndexSpaceExpression *e,
                         const FieldMaskSet<LogicalView> &vws,
                         const PhysicalTraceInfo &t_info,
+                        CollectiveMapping *mapping,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
                         const bool restriction)
-      : PhysicalAnalysis(rt, o, idx, e, true/*on heap*/), usage(use), 
-        trace_info(t_info), precondition(pre), guard_event(guard), 
-        pred_guard(pred), track_effects(track), add_restriction(restriction), 
+      : PhysicalAnalysis(rt, o, idx, e, true/*on heap*/, mapping), usage(use),
+        trace_info(t_info), precondition(pre), guard_event(guard),
+        pred_guard(pred), track_effects(track), add_restriction(restriction),
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -8943,10 +8960,10 @@ namespace Legion {
                         const PredEvent pred, const bool track, 
                         const bool restriction)
       : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
-        usage(use), views(vws,true/*copy*/), 
+        usage(use), views(vws,true/*copy*/),
         reduction_views(reductions,true/*copy*/), trace_info(info),
-        precondition(pre), guard_event(guard), pred_guard(pred), 
-        track_effects(track), add_restriction(restriction), 
+        precondition(pre), guard_event(guard), pred_guard(pred),
+        track_effects(track), add_restriction(restriction),
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -9265,10 +9282,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FilterAnalysis::FilterAnalysis(Runtime *rt, Operation *o, unsigned idx,
+                              CollectiveMapping *mapping,
                               IndexSpaceExpression *expr, InstanceView *view,
                               LogicalView *reg_view, const bool remove_restrict)
-      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/), inst_view(view), 
-        registration_view(reg_view), remove_restriction(remove_restrict)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, mapping),
+        inst_view(view), registration_view(reg_view),
+        remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
     }
@@ -9279,7 +9298,7 @@ namespace Legion {
                               IndexSpaceExpression *expr, InstanceView *view, 
                               LogicalView *reg_view, const bool remove_restrict)
       : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
-        inst_view(view), registration_view(reg_view), 
+        inst_view(view), registration_view(reg_view),
         remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
