@@ -43,9 +43,9 @@ end
 
 local function get_partition_dim(expr)
   if expr:is(ast.typed.expr.Projection) then
-    return std.as_read(expr.region.value.expr_type).colors_symbol.symbol_type.dim
+    return std.as_read(expr.region.value.expr_type):colors().dim
   else
-    return std.as_read(expr.value.expr_type).colors_symbol.symbol_type.dim
+    return std.as_read(expr.value.expr_type):colors().dim
   end
 end
 
@@ -267,11 +267,10 @@ local function analyze_noninterference_previous(
     end
   end
 
-  if #args_interfering == 0 then
+  if next(args_interfering) == nil then
     return true
-  else
-    return false, args_interfering
   end
+  return false, args_interfering
 end
 
 local function add_exprs(lhs, rhs, sign)
@@ -1332,24 +1331,19 @@ local function collect_and_sort_args(args, call_args, task, param_region_types)
   return array
 end
 
-local c = terralib.includecstring([[
-#include <stdio.h>
-#include <stdlib.h>
-]])
-
 terra throw_dynamic_check_error(loc : rawstring, arg1 : uint8, arg2 : uint8)
-  var stderr = c.fdopen(2, "w")
+  var stderr = std.c.fdopen(2, "w")
   if arg1 == arg2 then
-    c.fprintf(stderr, [[Errors reported during runtime.
+    std.c.fprintf(stderr, [[Errors reported during runtime.
 %s: loop optimization failed: argument %d interferes with itself
 ]], loc, arg1)
   else
-    c.fprintf(stderr, [[Errors reported during runtime.
+    std.c.fprintf(stderr, [[Errors reported during runtime.
 %s: loop optimization failed: argument %d interferes with argument %d
 ]], loc, arg1, arg2)
   end
-  c.fflush(stderr)
-  c.abort()
+  std.c.fflush(stderr)
+  std.c.abort()
 end
 
 local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
