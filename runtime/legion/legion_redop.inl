@@ -122,7 +122,7 @@ namespace Legion {
     };
   }; // TypePunning
 
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
   // We have these functions here because calling memcpy (per the
   // insistence of the idiots on the C++ standards committee) on the
   // GPU is a terrible idea since it will spill the data out of registers
@@ -186,65 +186,115 @@ namespace Legion {
   __device__ __forceinline__
   unsigned short int __short_as_ushort(short int value)
   {
+#ifdef __HIPCC__
+    union { short int as_signed; unsigned short int as_unsigned; } val;
+    val.as_signed = value; 
+    return val.as_unsigned;
+#else
     unsigned short int result;
     asm("mov.b16 %0, %1;" : "=h"(result) : "h"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   short int __ushort_as_short(unsigned short int value)
   {
+#ifdef __HIPCC__
+    union { short int as_signed; unsigned short int as_unsigned; } val;
+    val.as_unsigned = value; 
+    return val.as_signed;
+#else
     short int result;
     asm("mov.b16 %0, %1;" : "=h"(result) : "h"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   unsigned int __hiloushort2uint(unsigned short int hi, unsigned short int lo)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; ushort2 as_short; } val;
+    val.as_short.x = hi;
+    val.as_short.y = lo;
+    return val.as_int;
+#else
     unsigned int result;
     asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(lo), "h"(hi));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   unsigned short int __uint2loushort(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; ushort2 as_short; } val;
+    val.as_int = value;
+    return val.as_short.y;
+#else
     unsigned short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
     return lo + 0*hi;
+#endif
   }
 
   __device__ __forceinline__
   unsigned short int __uint2hiushort(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; ushort2 as_short; } val;
+    val.as_int = value;
+    return val.as_short.x;
+#else
     unsigned short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
     return hi + 0*lo;
+#endif
   }
 
   __device__ __forceinline__
   unsigned int __hiloshort2uint(short int hi, short int lo)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; short2 as_short; } val;
+    val.as_short.x = hi;
+    val.as_short.y = lo;
+    return val.as_int;
+#else
     unsigned int result;
     asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(lo), "h"(hi));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   short int __uint2loshort(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; short2 as_short; } val;
+    val.as_int = value;
+    return val.as_short.y;
+#else
     short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
     return lo + 0*hi;
+#endif
   }
 
   __device__ __forceinline__
   short int __uint2hishort(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; short2 as_short; } val;
+    val.as_int = value;
+    return val.as_short.x;
+#else
     short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
     return hi + 0*lo;
+#endif
   }
 
 #ifdef LEGION_REDOP_HALF
@@ -276,49 +326,85 @@ namespace Legion {
   __device__ __forceinline__
   unsigned int __int_as_uint(int value)
   {
+#ifdef __HIPCC__
+    union { int as_signed; unsigned int as_unsigned; } val;
+    val.as_signed = value; 
+    return val.as_unsigned;
+#else
     unsigned int result;
     asm("mov.b32 %0, %1;" : "=r"(result) : "r"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   int __uint_as_int(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { int as_signed; unsigned int as_unsigned; } val;
+    val.as_unsigned = value; 
+    return val.as_signed;
+#else
     int result;
     asm("mov.b32 %0, %1;" : "=r"(result) : "r"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   unsigned long long __longlong_as_ulonglong(long long value)
   {
+#ifdef __HIPCC__
+    union { long long as_signed; unsigned long long as_unsigned; } val;
+    val.as_signed = value; 
+    return val.as_unsigned;
+#else
     unsigned long long result;
     asm("mov.b64 %0, %1;" : "=l"(result) : "l"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   long long __ulonglong_as_longlong(unsigned long long value)
   {
+#ifdef __HIPCC__
+    union { long long as_signed; unsigned long long as_unsigned; } val;
+    val.as_unsigned = value; 
+    return val.as_signed;
+#else
     long long result;
     asm("mov.b64 %0, %1;" : "=l"(result) : "l"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   double __ulonglong_as_double(unsigned long long value)
   {
+#ifdef __HIPCC__
+    union { unsigned long long as_int; double as_float; } val; 
+    val.as_int = value;
+    return val.as_float;
+#else
     double result;
     asm("mov.b64 %0, %1;" : "=d"(result) : "l"(value));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   unsigned long long __double_as_ulonglong(double value)
   {
+#ifdef __HIPCC__
+    union { unsigned long long as_int; double as_float; } val; 
+    val.as_float = value;
+    return val.as_int;
+#else
     unsigned long long result;
     asm("mov.b64 %0, %1;" : "=l"(result) : "d"(value));
     return result;
+#endif
   }
 
 #ifdef LEGION_REDOP_COMPLEX
