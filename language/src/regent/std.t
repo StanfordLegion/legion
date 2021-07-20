@@ -4710,6 +4710,12 @@ local function generate_task_interfaces(task_whitelist)
     for _, definition in ipairs(definitions) do
       task_impl[definition[1]] = definition[2]
     end
+    -- In separate compilation, need to make sure all globals get exported.
+    if base.config["separate"] then
+      task_impl[task:get_task_id().name] = task:get_task_id()
+      task_impl[task:get_mapper_id().name] = task:get_mapper_id()
+      task_impl[task:get_mapping_tag_id().name] = task:get_mapping_tag_id()
+    end
   end
 
   return task_c_iface:concat("\n\n"), task_cxx_iface:concat("\n\n"), task_impl
