@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_noninterference_cross.rg:30: loop optimization failed: argument 2 interferes with argument 1
---        ^
+-- optimize_index_launch_noninterference_cross.rg:29: loop optimization failed: argument 2 interferes with argument 1
 
 import "regent"
 
