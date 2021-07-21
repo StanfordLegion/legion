@@ -4690,7 +4690,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   profile.print_summary()
 end
 
-local function generate_task_interfaces(task_whitelist)
+local function generate_task_interfaces(task_whitelist, need_launcher)
   local tasks = {}
   for _, variant in ipairs(variants) do
     if task_whitelist and data.find_key(task_whitelist, variant.task) then
@@ -4704,11 +4704,13 @@ local function generate_task_interfaces(task_whitelist)
   local task_cxx_iface = terralib.newlist()
   local task_impl = {}
   for task, _ in pairs(tasks) do
-    task_c_iface:insert(header_helper.generate_task_c_interface(task))
-    task_cxx_iface:insert(header_helper.generate_task_cxx_interface(task))
-    local definitions = header_helper.generate_task_implementation(task)
-    for _, definition in ipairs(definitions) do
-      task_impl[definition[1]] = definition[2]
+    if need_launcher then
+      task_c_iface:insert(header_helper.generate_task_c_interface(task))
+      task_cxx_iface:insert(header_helper.generate_task_cxx_interface(task))
+      local definitions = header_helper.generate_task_implementation(task)
+      for _, definition in ipairs(definitions) do
+        task_impl[definition[1]] = definition[2]
+      end
     end
     -- In separate compilation, need to make sure all globals get exported.
     if base.config["separate"] then
@@ -4774,10 +4776,8 @@ local function write_header(header_filename, registration_name, task_whitelist, 
     registration_name = std.normalize_name(header_filename) .. "_register"
   end
 
-  local task_c_iface, task_cxx_iface, task_impl = "", "", {}
-  if need_launcher then
-    task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(task_whitelist)
-  end
+  local task_c_iface, task_cxx_iface, task_impl = generate_task_interfaces(
+    task_whitelist, need_launcher)
 
   local header = io.open(header_filename, "w")
   assert(header)
