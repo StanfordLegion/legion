@@ -244,7 +244,7 @@ local function analyze_noninterference_previous(
   if region_type:is_projected() then
     region_type = region_type:get_projection_source()
   end
-  local args_interfering = {}
+  local args_interfering = terralib.newlist()
   for i, other_arg in pairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
     if other_region_type:is_projected() then
@@ -263,7 +263,7 @@ local function analyze_noninterference_previous(
         -- Index non-interference is handled at the type checker level
         -- and is captured in the constraints.
     then
-      table.insert(args_interfering, i)
+      args_interfering:insert(i)
     end
   end
 
