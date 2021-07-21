@@ -17,6 +17,7 @@
 
 // NOP but helpful for IDEs
 #include "realm/network.h"
+#include "realm/compiler_support.h"
 
 namespace Realm {
 
@@ -26,7 +27,7 @@ namespace Realm {
     inline NetworkModule *get_network(NodeID node)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
-      if(REALM_UNLILELY(single_network == 0)) {
+      if(REALM_UNLIKELY(single_network == 0)) {
       } else
 #endif
 	return single_network;
