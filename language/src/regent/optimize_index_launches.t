@@ -34,6 +34,21 @@ local function get_source_location(node)
   return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
 end
 
+local function get_partition_symbol(expr)
+  if expr:is(ast.typed.expr.Projection) then
+    return expr.region.value.value
+  end
+  return expr.value.value
+end
+
+local function get_partition_dim(expr)
+  if expr:is(ast.typed.expr.Projection) then
+    return std.as_read(expr.region.value.expr_type):colors().dim
+  else
+    return std.as_read(expr.value.expr_type):colors().dim
+  end
+end
+
 function context:__index (field)
   local value = context [field]
   if value ~= nil then
@@ -229,6 +244,7 @@ local function analyze_noninterference_previous(
   if region_type:is_projected() then
     region_type = region_type:get_projection_source()
   end
+  local args_interfering = terralib.newlist()
   for i, other_arg in pairs(regions_previously_used) do
     local other_region_type = std.as_read(other_arg.expr_type)
     if other_region_type:is_projected() then
@@ -247,10 +263,14 @@ local function analyze_noninterference_previous(
         -- Index non-interference is handled at the type checker level
         -- and is captured in the constraints.
     then
-      return false, i
+      args_interfering:insert(i)
     end
   end
-  return true
+
+  if next(args_interfering) == nil then
+    return true
+  end
+  return false, args_interfering
 end
 
 local function add_exprs(lhs, rhs, sign)
@@ -1150,12 +1170,20 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       -- Tests for non-interference.
       if std.is_region(arg_type) and (not is_demand or not skip_interference_check) then
         do
-          local passed, failure_i = analyze_noninterference_previous(
+          local passed, failures_i = analyze_noninterference_previous(
             loop_cx, task, arg, regions_previously_used, mapping)
           if not passed then
-            report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
-                " interferes with argument " .. tostring(failure_i))
-            return
+            if emit_dynamic_check then
+              for _, failure in pairs(failures_i) do
+                if get_partition_symbol(arg) == get_partition_symbol(args[failure]) then
+                  table.insert(args_need_dynamic_check, { i, failure })
+                end
+              end
+            else
+              report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
+                   " interferes with argument " .. tostring(failures_i[1]))
+              return
+            end
           end
         end
 
@@ -1213,8 +1241,8 @@ local function init_bitmask(bitmask, volume)
   local stats = terralib.newlist()
 
   local idx = std.newsymbol(int64, "i")
-  local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&bool))
-  stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(false, bool)))
+  local bitmask_i = util.mk_expr_index_access(util.mk_expr_id_rawref(bitmask), util.mk_expr_id(idx), std.rawref(&uint8))
+  stats:insert(util.mk_stat_assignment(bitmask_i, util.mk_expr_constant(0, uint8)))
 
   local values = terralib.newlist()
   values:insert(util.mk_expr_constant(0, int64))
@@ -1223,114 +1251,204 @@ local function init_bitmask(bitmask, volume)
   return util.mk_stat_for_num(idx, values, util.mk_block(stats))
 end
 
--- Computes: pf.z + pf.y * (bounds.hi.z - bounds.lo.z + 1) + pf.x * (bounds.hi.z - bounds.lo.z + 1) * (bounds.hi.y - bounds.lo.y + 1)
 local function collapse_projection_functor(pf, dim, bounds)
-  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
+  local index_types = { std.int1d, std.int2d, std.int3d, std.int4d,
+    std.int5d, std.int6d, std.int7d, std.int8d, std.int9d }
+  local dim_names = { "x", "y", "z", "w", "v", "u", "t", "s", "r" }
 
-  if dim == 0 or dim == 1 then
+  local function mk_extent(dim)
+    return util.mk_expr_binary("+",
+      util.mk_expr_binary("-",
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), dim_names[dim], int64),
+        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), dim_names[dim], int64)),
+      util.mk_expr_constant(1, int64))
+  end
+
+  local function recurse(dim, prev_extent, prev_ast)
+    if dim == 0 then return prev_ast end
+
+    local extent = util.mk_expr_binary("*", mk_extent(dim + 1), prev_extent)
+    local ast = util.mk_expr_binary("+",
+                 util.mk_expr_binary("*",
+                   util.mk_expr_field_access(pf, dim_names[dim], int64),
+                   extent),
+                 prev_ast)
+    return recurse(dim - 1, extent, ast)
+  end
+
+  if dim <= 1 then
     return pf
   else
-    local x = util.mk_expr_field_access(pf, "x", int64)
-    local y = util.mk_expr_field_access(pf, "y", int64)
+    return recurse(
+      dim - 1,
+      util.mk_expr_constant(1, int64),
+      util.mk_expr_field_access(pf, dim_names[dim], int64))
+  end
+end
 
-    local y_extent = util.mk_expr_binary("+",
-      util.mk_expr_binary("-",
-        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "y", int64),
-        util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "y", int64)),
-      util.mk_expr_constant(1, int64))
-
-    if dim == 2 then
-      return util.mk_expr_binary("+", util.mk_expr_binary("*", x, y_extent), y)
-
-    elseif dim == 3 then
-      local z = util.mk_expr_field_access(pf, "z", int64)
-      local z_extent = util.mk_expr_binary("+",
-        util.mk_expr_binary("-",
-          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "hi", index_types[dim]), "z", int64),
-          util.mk_expr_field_access(util.mk_expr_field_access(bounds, "lo", index_types[dim]), "z", int64)),
-        util.mk_expr_constant(1, int64))
-
-      return util.mk_expr_binary("+",
-        util.mk_expr_binary("*", x, util.mk_expr_binary("*", y_extent, z_extent)),
-        util.mk_expr_binary("+", util.mk_expr_binary("*", y, z_extent), z))
-
+local function collect_and_sort_args(args, call_args, task, param_region_types)
+  -- Collect all args of the same partition together
+  local collected = {}
+  for _, arg in pairs(args) do
+    if type(arg) == "number" then
+      local psym = get_partition_symbol(call_args[arg])
+      collected[psym] = collected[psym] or {}
+      collected[psym][arg] = true
     else
-      assert(false)
+      -- Cross-check args are pairs
+      local psym = get_partition_symbol(call_args[arg[1]])
+      collected[psym] = collected[psym] or {}
+      collected[psym][arg[1]] = true
+      collected[psym][arg[2]] = true
     end
   end
+
+  local array = {}
+  for psym, args in pairs(collected) do
+    array[psym] = terralib.newlist()
+    for arg, v in pairs(args) do
+      if v then array[psym]:insert(arg) end
+    end
+  end
+
+  for _, args in pairs(array) do
+    table.sort(args, function(p, q)
+      local p_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[p], task)
+      local q_privileges, _, _, _, _ = std.find_task_privileges(param_region_types[q], task)
+
+      local p_has_WR = p_privileges[1] == "reads_writes" or string.find(p_privileges[1], "reduces")
+      local q_has_WR = q_privileges[1] == "reads_writes" or string.find(q_privileges[1], "reduces")
+
+      if p_has_WR and not q_has_WR then
+        return true
+      elseif q_has_WR and not p_has_WR then
+        return false
+      end
+      return p < q
+    end)
+  end
+
+  return array
+end
+
+terra throw_dynamic_check_error(loc : rawstring, arg1 : uint8, arg2 : uint8)
+  var stderr = std.c.fdopen(2, "w")
+  if arg1 == arg2 then
+    std.c.fprintf(stderr, [[Errors reported during runtime.
+%s: loop optimization failed: argument %d interferes with itself
+]], loc, arg1)
+  else
+    std.c.fprintf(stderr, [[Errors reported during runtime.
+%s: loop optimization failed: argument %d interferes with argument %d
+]], loc, arg1, arg2)
+  end
+  std.c.fflush(stderr)
+  std.c.abort()
 end
 
 local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_launch_ast, unopt_loop_ast)
   local check = terralib.newlist()
 
-  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d }
-  local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d }
+  local index_types = { [0] = std.int1d, std.int1d, std.int2d, std.int3d, std.int4d,
+    std.int5d, std.int6d, std.int7d, std.int8d, std.int9d }
+  local rect_types = { [0] = std.rect1d, std.rect1d, std.rect2d, std.rect3d, std.rect4d,
+    std.rect5d, std.rect6d, std.rect7d, std.rect8d, std.rect9d }
+
+  local call_args = index_launch_ast.call.args
+  assert(#call_args < 256)
+
+  local param_region_types = index_launch_ast.call.fn.value:get_type().parameters
+  local task = index_launch_ast.call.fn.value
 
   local verdict = std.newsymbol(bool, "verdict")
   check:insert(util.mk_stat_var(verdict, bool, util.mk_expr_constant(false, bool)))
 
-  for _, idx in pairs(args_need_dynamic_check) do
-    local arg = index_launch_ast.call.args[idx]
+  local collected_args = collect_and_sort_args(
+    args_need_dynamic_check, call_args, task, param_region_types)
+
+  for _, args in pairs(collected_args) do
     local stats = terralib.newlist()
 
-    -- Skip non-partition args
-    if arg:is(ast.typed.expr.IndexAccess) and
-       std.is_region(arg.expr_type) and
-       std.is_partition(std.as_read(arg.value.expr_type)) then
+    local dim = get_partition_dim(call_args[args[1]])
 
-      local dim = arg.expr_type:ispace().dim
+    -- Generate the AST for var volume = p.colors.bounds:volume()
+    local p_colors = util.mk_expr_field_access(
+      util.mk_expr_id(get_partition_symbol(call_args[args[1]])), "colors", std.ispace(index_types[dim]))
+    local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
+    local volume = std.newsymbol(int64, "volume")
+    stats:insert(
+     util.mk_stat_var(volume, int64, util.mk_expr_method_call(
+       p_bounds, int64, "volume", terralib.newlist())))
 
-      -- Generate the AST for var volume = p.colors.bounds:volume()
-      local p_colors = util.mk_expr_field_access(util.mk_expr_id(arg.value.value), "colors", std.ispace(index_types[dim]))
-      local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
-      local volume = std.newsymbol(int64, "volume")
-      stats:insert(util.mk_stat_var(volume, int64, util.mk_expr_method_call(p_bounds, int64, "volume", terralib.newlist())))
+    -- Malloc a bitmask of size volume and initialize it
+    local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
+    local bitmask = std.newsymbol(&uint8, "bitmask")
+    local malloc_call = util.mk_expr_call(
+      std.c.malloc,
+      util.mk_expr_cast(int64, util.mk_expr_id(volume)))
+    stats:insert(
+      util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
+    stats:insert(
+      util.mk_stat_var(bitmask, &uint8, util.mk_expr_cast(&uint8, util.mk_expr_id(bitmask_raw))))
+    stats:insert(init_bitmask(bitmask, volume))
 
-      -- Malloc a bitmask of size volume and initialize it
-      local bitmask_raw = std.newsymbol(&opaque, "bitmask_raw")
-      local bitmask = std.newsymbol(&bool, "bitmask")
-      local malloc_call = util.mk_expr_call(std.c.malloc, util.mk_expr_cast(int64, util.mk_expr_id(volume)))
-      stats:insert(util.mk_stat_var(bitmask_raw, &opaque, malloc_call))
-      stats:insert(util.mk_stat_var(bitmask, &bool, util.mk_expr_cast(&bool, util.mk_expr_id(bitmask_raw))))
-      stats:insert(init_bitmask(bitmask, volume))
+    local value = std.newsymbol(int64, "value")
+    stats:insert(util.mk_stat_var(value, int64))
 
-      local value = std.newsymbol(int64, "value")
-      stats:insert(util.mk_stat_var(value, int64))
+    local conflict = std.newsymbol(uint8, "conflict")
+    stats:insert(util.mk_stat_var(conflict, uint8, util.mk_expr_constant(0, uint8)))
 
-      local conflict = std.newsymbol(bool, "conflict")
-      stats:insert(util.mk_stat_var(conflict, bool, util.mk_expr_constant(false, bool)))
-
+    for _, arg in ipairs(args) do
       local duplicates_check = terralib.newlist()
+      index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
 
-      -- Figure out what type of loop we've got and get its index expr
       local index_expr
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        index_expr = arg.index.arg
+        index_expr = call_args[arg].index.arg
       else
-        index_expr = arg.index
+        if call_args[arg]:is(ast.typed.expr.Projection) then
+          index_expr = call_args[arg].region.index
+        else
+          index_expr = call_args[arg].index
+        end
       end
 
       -- Assign: value = collapse(index_expr)
-      index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
-      duplicates_check:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(value), collapse_projection_functor(index_expr, dim, p_bounds)))
+      duplicates_check:insert(
+        util.mk_stat_assignment(
+          util.mk_expr_id_rawref(value),
+          collapse_projection_functor(index_expr, dim, p_bounds)))
 
       local then_block = terralib.newlist()
 
-      local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask), util.mk_expr_id(value), std.rawref(&bool))
+      local bitmask_value = util.mk_expr_index_access(util.mk_expr_id(bitmask),
+        util.mk_expr_id(value), std.rawref(&uint8))
       then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
 
-      then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(true, bool)) )
+      local privileges, _, _, _, _ = std.find_task_privileges(param_region_types[arg], task)
+      assert(#privileges == 1)
+      if privileges[1] ~= "reads" then
+        then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(arg, uint8)))
+      end
 
       -- Issue an error here if we have to
       if is_demand then
-        local abort = util.mk_stat_expr(util.mk_expr_call(std.assert_error, terralib.newlist {
-          util.mk_expr_constant(false, bool), util.mk_expr_constant(get_source_location(unopt_loop_ast) ..
-            ": loop optimization failed: argument " .. idx .. " interferes with itself", rawstring)
+        local abort = util.mk_stat_expr(util.mk_expr_call(throw_dynamic_check_error, terralib.newlist {
+          util.mk_expr_constant(get_source_location(unopt_loop_ast), rawstring),
+          util.mk_expr_constant(arg, uint8),
+          util.mk_expr_id(conflict)
           }))
-        then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { abort }))
+        then_block:insert(
+          util.mk_stat_if(
+            util.mk_expr_binary("~=", util.mk_expr_id(conflict), util.mk_expr_constant(0, uint8)),
+            terralib.newlist { abort }))
       else
-        local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict), util.mk_expr_constant(true, bool))
-        then_block:insert(util.mk_stat_if(util.mk_expr_id(conflict), terralib.newlist { set_verdict, util.mk_stat_break() }))
+        local set_verdict = util.mk_stat_assignment(util.mk_expr_id_rawref(verdict),
+          util.mk_expr_constant(true, bool))
+        then_block:insert(
+          util.mk_stat_if(
+            util.mk_expr_binary("~=", util.mk_expr_id(conflict), util.mk_expr_constant(0, uint8)),
+            terralib.newlist { set_verdict, util.mk_stat_break() }))
       end
 
       -- Bounds check
@@ -1339,24 +1457,31 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
         util.mk_expr_binary("<", util.mk_expr_id(value), util.mk_expr_id(volume)))
       duplicates_check:insert(util.mk_stat_if(cond, then_block))
 
-      local bounds
-      -- Generate the AST based on loop type
+      -- Skip this check if a previous one failed
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        bounds = index_launch_ast.values
-        stats:insert(util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+        local bounds = index_launch_ast.values
+        stats:insert(
+          util.mk_stat_if_else(
+            util.mk_expr_id(verdict),
+            terralib.newlist(),
+            util.mk_stat_for_num(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check))))
       else
-        bounds = index_launch_ast.value
-        stats:insert(util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check)))
+        local bounds = index_launch_ast.value
+        stats:insert(
+          util.mk_stat_if_else(
+            util.mk_expr_id(verdict),
+            terralib.newlist(),
+            util.mk_stat_for_list(index_launch_ast.symbol, bounds, util.mk_block(duplicates_check))))
       end
+    end
 
-      stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
+    stats:insert(util.mk_stat_expr(util.mk_expr_call(std.c.free, util.mk_expr_id(bitmask))))
 
-      if is_demand then
-        check:insert(util.mk_stat_block(util.mk_block(stats)))
-      else
-        -- Skip this check if a previous one failed
-        check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
-      end
+    if is_demand then
+      check:insert(util.mk_stat_block(util.mk_block(stats)))
+    else
+      -- Skip this check if a previous one failed
+      check:insert(util.mk_stat_if_else(util.mk_expr_id(verdict), terralib.newlist(), stats))
     end
   end
 
