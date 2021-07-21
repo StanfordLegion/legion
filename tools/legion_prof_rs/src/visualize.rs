@@ -12,7 +12,7 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpace, Inst,
+    Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpaceID, Inst,
     Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry, ProcID,
     ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
@@ -553,11 +553,18 @@ impl Chan {
 }
 
 #[derive(Debug)]
-pub struct ISpacePretty<'a>(pub &'a ISpace, pub &'a State);
+pub struct ISpacePretty<'a>(pub ISpaceID, pub &'a State);
 
 impl fmt::Display for ISpacePretty<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ISpacePretty(ispace, state) = self;
+        let ISpacePretty(ispace_id, state) = self;
+
+        let ispace = state.index_spaces.get(&ispace_id);
+        if ispace.is_none() {
+            write!(f, "ispace:{}", ispace_id.0)?;
+            return Ok(());
+        }
+        let ispace = ispace.unwrap();
 
         match &ispace.bounds {
             Bounds::Empty => {
@@ -571,19 +578,17 @@ impl fmt::Display for ISpacePretty<'_> {
             write!(f, "{}", name)?;
         } else {
             let parent = ispace.parent.and_then(|p_id| {
-                state
-                    .index_partitions
-                    .get(&p_id)
-                    .unwrap()
-                    .parent
-                    .map(|gp_id| state.index_spaces.get(&gp_id).unwrap())
+                state.index_partitions.get(&p_id).and_then(|p| {
+                    p.parent
+                        .map(|gp_id| state.index_spaces.get(&gp_id).unwrap())
+                })
             });
             if let Some(name) = parent.and_then(|p| p.name.as_ref()) {
                 write!(f, "{}", name)?;
             } else if let Some(parent_id) = parent.map(|p| p.ispace_id) {
                 write!(f, "ispace:{}", parent_id.0)?;
             } else {
-                write!(f, "ispace:{}", ispace.ispace_id.0)?;
+                write!(f, "ispace:{}", ispace_id.0)?;
             }
         }
         if let Some(size) = &ispace.size {
@@ -744,14 +749,13 @@ impl fmt::Display for InstPretty<'_> {
 
         let mut ispace_ids = inst.ispace_ids.iter().enumerate().peekable();
         while let Some((i, ispace_id)) = ispace_ids.next() {
-            let ispace = state.index_spaces.get(&ispace_id).unwrap();
             let fspace_id = inst.fspace_ids[i];
             let fspace = state.field_spaces.get(&fspace_id).unwrap();
 
             write!(
                 f,
                 "Region: {} x {}",
-                ISpacePretty(&ispace, state),
+                ISpacePretty(*ispace_id, state),
                 FSpacePretty(fspace, inst),
             )?;
             if ispace_ids.peek().is_some() {
