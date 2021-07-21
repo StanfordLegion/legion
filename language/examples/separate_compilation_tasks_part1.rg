@@ -40,4 +40,5 @@ my_regent_task:set_mapping_tag_id(SAME_ADDRESS_SPACE)
 local root_dir = arg[0]:match(".*/") or "./"
 local separate_compilation_tasks_part1_h = root_dir .. "separate_compilation_tasks_part1.h"
 local separate_compilation_tasks_part1_so = root_dir .. "libseparate_compilation_tasks_part1.so"
-regentlib.save_tasks(separate_compilation_tasks_part1_h, separate_compilation_tasks_part1_so)
+-- Test with launcher interface disabled, since technically it shouldn't be required.
+regentlib.save_tasks(separate_compilation_tasks_part1_h, separate_compilation_tasks_part1_so, nil, nil, nil, nil, false)
