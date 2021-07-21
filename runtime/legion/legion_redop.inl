@@ -5707,7 +5707,7 @@ namespace Legion {
   void MaxReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    atomicMax((unsigned long long*)&lhs, rhs); 
+    atomicMax(&lhs, rhs); 
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(lhs);
@@ -5739,7 +5739,7 @@ namespace Legion {
   void MaxReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    atomicMax((unsigned long long*)&rhs1, rhs2); 
+    atomicMax(&rhs1, rhs2); 
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(rhs1);
