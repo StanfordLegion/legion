@@ -5707,7 +5707,7 @@ namespace Legion {
   void MaxReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    atomicMax(&lhs, rhs); 
+    atomicMax((unsigned long long*)&lhs, (unsigned long long)rhs);
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(lhs);
@@ -5739,7 +5739,7 @@ namespace Legion {
   void MaxReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    atomicMax(&rhs1, rhs2); 
+    atomicMax((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(rhs1);
@@ -6994,14 +6994,7 @@ namespace Legion {
   void MinReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-    // apparently there is no 64-bit atomic min
-    unsigned long long *target = (unsigned long long *)&lhs;
-    unsigned long long oldval, newval = lhs;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs);
-      newval = atomicCAS(target, oldval, newval);
-    } while (oldval != newval);
+    atomicMin((unsigned long long*)&lhs, (unsigned long long)rhs);
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(lhs);
@@ -7033,14 +7026,7 @@ namespace Legion {
   void MinReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-    // apparently there is no 64-bit atomic min
-    unsigned long long *target = (unsigned long long *)&rhs1;
-    unsigned long long oldval, newval = rhs1;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs2);
-      newval = atomicCAS(target, oldval, newval);
-    } while (oldval != newval);
+    atomicMin((unsigned long long*)&rhs1, (unsigned long long)rhs2);
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(rhs1);
