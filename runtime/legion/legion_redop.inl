@@ -5707,7 +5707,18 @@ namespace Legion {
   void MaxReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
+#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
+    // Old versions of CUDA are dumb as shit when it comes to new C++
+    unsigned long long *target = (unsigned long long *)&lhs;
+    unsigned long long oldval, newval = lhs;
+    do {
+      oldval = newval;
+      newval = __MAX__(newval, rhs);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
     atomicMax((unsigned long long*)&lhs, (unsigned long long)rhs);
+#endif
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(lhs);
@@ -5739,7 +5750,18 @@ namespace Legion {
   void MaxReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
+#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
+    // Old versions of CUDA are dumb as shit when it comes to new C++
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    unsigned long long oldval, newval = rhs;
+    do {
+      oldval = newval;
+      newval = __MAX__(newval, rhs2);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
     atomicMax((unsigned long long*)&rhs1, (unsigned long long)rhs2);
+#endif
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(rhs1);
@@ -6994,7 +7016,18 @@ namespace Legion {
   void MinReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
+#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
+    // Old versions of CUDA are dumb as shit when it comes to new C++
+    unsigned long long *target = (unsigned long long *)&lhs;
+    unsigned long long oldval, newval = lhs;
+    do {
+      oldval = newval;
+      newval = __MIN__(newval, rhs);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
     atomicMin((unsigned long long*)&lhs, (unsigned long long)rhs);
+#endif
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(lhs);
@@ -7026,7 +7059,18 @@ namespace Legion {
   void MinReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
+#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
+    // Old versions of CUDA are dumb as shit when it comes to new C++
+    unsigned long long *target = (unsigned long long *)&rhs1;
+    unsigned long long oldval, newval = rhs;
+    do {
+      oldval = newval;
+      newval = __MIN__(newval, rhs2);
+      newval = atomicCAS(target, oldval, newval);
+    } while (oldval != newval);
+#else
     atomicMin((unsigned long long*)&rhs1, (unsigned long long)rhs2);
+#endif
 #else
 #if __cplusplus >= 202002L 
     std::atomic_ref<RHS> atomic(rhs1);
