@@ -6502,22 +6502,40 @@ namespace Legion {
       src_privilege_paths.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        initialize_privilege_path(src_privilege_paths[idx],
-                                  src_requirements[idx]);
+        RegionRequirement &req = src_requirements[idx];
+        // Promote any singular region requirements to projection
+        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+        {
+          req.handle_type = LEGION_REGION_PROJECTION;
+          req.projection = 0;
+        }
+        initialize_privilege_path(src_privilege_paths[idx], req);
       }
       dst_privilege_paths.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        initialize_privilege_path(dst_privilege_paths[idx],
-                                  dst_requirements[idx]);
+        RegionRequirement &req = dst_requirements[idx];
+        // Promote any singular region requirements to projection
+        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+        {
+          req.handle_type = LEGION_REGION_PROJECTION;
+          req.projection = 0;
+        }
+        initialize_privilege_path(dst_privilege_paths[idx], req);
       }
       if (!src_indirect_requirements.empty())
       {
         gather_privilege_paths.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          initialize_privilege_path(gather_privilege_paths[idx],
-                                    src_indirect_requirements[idx]);
+          RegionRequirement &req = src_indirect_requirements[idx];
+          // Promote any singular region requirements to projection
+          if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+          {
+            req.handle_type = LEGION_REGION_PROJECTION;
+            req.projection = 0;
+          }
+          initialize_privilege_path(gather_privilege_paths[idx], req);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -6525,8 +6543,14 @@ namespace Legion {
         scatter_privilege_paths.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          initialize_privilege_path(scatter_privilege_paths[idx],
-                                    dst_indirect_requirements[idx]);
+          RegionRequirement &req = dst_indirect_requirements[idx];
+          // Promote any singular region requirements to projection
+          if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+          {
+            req.handle_type = LEGION_REGION_PROJECTION;
+            req.projection = 0;
+          }
+          initialize_privilege_path(scatter_privilege_paths[idx], req);
         }
       } 
       if (runtime->legion_spy_enabled)
@@ -14015,6 +14039,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       compute_parent_index();
+      // If we're an index space op, promote a singular region requirement
+      // up to a projection region requirement for accuracy
+      if (is_index_space && 
+          (requirement.handle_type == LEGION_SINGULAR_PROJECTION))
+      {
+        requirement.handle_type = LEGION_REGION_PROJECTION;
+        requirement.projection = 0;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16260,6 +16292,12 @@ namespace Legion {
     { 
       // First compute the parent index
       compute_parent_index();
+      // Promote a singular region requirement up to a projection
+      if (requirement.handle_type == LEGION_SINGULAR_PROJECTION)
+      {
+        requirement.handle_type = LEGION_REGION_PROJECTION;
+        requirement.projection = 0;
+      }
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
         log_index_fill_requirement();
@@ -17643,6 +17681,12 @@ namespace Legion {
     {
       // First compute the parent index
       compute_parent_index();
+      // Promote a singular region requirement up to a projection
+      if (requirement.handle_type == LEGION_SINGULAR_PROJECTION)
+      {
+        requirement.handle_type = LEGION_REGION_PROJECTION;
+        requirement.projection = 0;
+      }
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->check_privileges)
         check_point_requirements();
@@ -18698,6 +18742,12 @@ namespace Legion {
     {
       // First compute the parent index
       compute_parent_index();
+      // Promote a singular region requirement up to a projection
+      if (requirement.handle_type == LEGION_SINGULAR_PROJECTION)
+      {
+        requirement.handle_type = LEGION_REGION_PROJECTION;
+        requirement.projection = 0;
+      }
       initialize_privilege_path(privilege_path, requirement);
     }
 

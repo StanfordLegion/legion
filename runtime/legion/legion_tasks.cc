@@ -7202,16 +7202,27 @@ namespace Legion {
       // Annotate any regions which are going to need to be early mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (!IS_WRITE(regions[idx]))
-          continue;
-        if (regions[idx].handle_type == LEGION_SINGULAR_PROJECTION)
-          regions[idx].flags |= LEGION_MUST_PREMAP_FLAG;
-        else if (regions[idx].handle_type == LEGION_REGION_PROJECTION)
+        RegionRequirement &req = regions[idx];
+        // any region requirements which were marked singular need to
+        // be promoted up to being a region projection with depth 0
+        if (req.handle_type == LEGION_SINGULAR_PROJECTION)
         {
-          ProjectionFunction *function = runtime->find_projection_function(
-                                                    regions[idx].projection);
-          if (function->depth == 0)
-            regions[idx].flags |= LEGION_MUST_PREMAP_FLAG;
+          req.handle_type = LEGION_REGION_PROJECTION;
+          req.projection = 0;
+        }
+        if (!IS_WRITE(req))
+          continue;
+        if (req.handle_type == LEGION_REGION_PROJECTION)
+        {
+          if (req.projection > 0)
+          {
+            ProjectionFunction *function =
+              runtime->find_projection_function(req.projection);
+            if (function->depth == 0)
+              req.flags |= LEGION_MUST_PREMAP_FLAG;
+          }
+          else
+            req.flags |= LEGION_MUST_PREMAP_FLAG;
         }
       }
       // Initialize the privilege paths
