@@ -1027,13 +1027,15 @@ namespace Realm {
 	    result.success = false;
 	    measurements.add_measurement(result);
 	  }
-	}
 	  
-	// send any remaining incomplete profiling responses
-	measurements.send_responses(requests);
+          // send any remaining incomplete profiling responses
+          measurements.send_responses(requests);
 
-	// clear the measurments after we send the response
-	measurements.clear();
+          // clear the measurements after we send the response
+          // TODO: move this to a single place on the instance destruction
+          //  code path instead
+          measurements.clear();
+	}
 
 	if(ready_event.exists())
 	  GenEventImpl::trigger(ready_event, true /*poisoned*/, work_until);

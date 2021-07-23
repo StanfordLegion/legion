@@ -260,8 +260,12 @@ namespace Realm {
 
     size_t num_completions_pending();
 
+    bool over_pending_completion_soft_limit() const;
+
   protected:
-    static const size_t LOG2_MAXGROUPS = 12; // 4K groups -> 1M completions
+    // NOTE: we stuff completion IDs, message IDs and 2 more bits into a
+    //  32-bit word, so we're limited to 2^(30-12) = 256K completions
+    static const size_t LOG2_MAXGROUPS = 10;
 
     // protects pops from the free list (to avoid A-B-A problem), but NOT pushes
     Realm::Mutex mutex;
@@ -269,6 +273,7 @@ namespace Realm {
     Realm::atomic<size_t> num_groups; // number of groups currently allocated
     Realm::atomic<PendingCompletionGroup *> groups[1 << LOG2_MAXGROUPS];
     atomic<size_t> num_pending;
+    size_t pending_soft_limit;  // try to stall traffic above this threshold
   };
 
   template <typename T, unsigned CHUNK_SIZE>
