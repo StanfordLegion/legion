@@ -5753,7 +5753,7 @@ namespace Legion {
 #if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
     // Old versions of CUDA are dumb as shit when it comes to new C++
     unsigned long long *target = (unsigned long long *)&rhs1;
-    unsigned long long oldval, newval = rhs;
+    unsigned long long oldval, newval = rhs1;
     do {
       oldval = newval;
       newval = __MAX__(newval, rhs2);
@@ -7062,7 +7062,7 @@ namespace Legion {
 #if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
     // Old versions of CUDA are dumb as shit when it comes to new C++
     unsigned long long *target = (unsigned long long *)&rhs1;
-    unsigned long long oldval, newval = rhs;
+    unsigned long long oldval, newval = rhs1;
     do {
       oldval = newval;
       newval = __MIN__(newval, rhs2);
