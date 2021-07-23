@@ -1084,14 +1084,18 @@ namespace Legion {
               if (future_size_set || (known_upper_bound_size < SIZE_MAX))
               {
                 // Try to make the instance now
-                MemoryManager *manager = runtime->find_memory_manager(target); 
-                if (!inst_ready.exists())
-                  inst_ready = Runtime::create_ap_user_event(NULL);
-                FutureInstance *instance = manager->create_future_instance(task,
-                    task_uid, inst_ready, future_size_set ? future_size :
-                      known_upper_bound_size, false/*eager*/);
-                pending_instances[target] =
-                  PendingInstance(instance, inst_ready);
+                const size_t pending_size =
+                  future_size_set ? future_size : known_upper_bound_size;
+                if (pending_size > 0)
+                {
+                  MemoryManager *manager = runtime->find_memory_manager(target);
+                  if (!inst_ready.exists())
+                    inst_ready = Runtime::create_ap_user_event(NULL);
+                  FutureInstance *instance = manager->create_future_instance(
+                      task, task_uid, inst_ready, pending_size, false/*eager*/);
+                  pending_instances[target] =
+                    PendingInstance(instance, inst_ready);
+                }
               }
               else
               {
@@ -1188,13 +1192,17 @@ namespace Legion {
         {
           if (future_size_set)
           {
-            MemoryManager *manager = 
-              runtime->find_memory_manager(runtime->runtime_system_memory); 
-            const ApUserEvent inst_ready = Runtime::create_ap_user_event(NULL);
-            FutureInstance *instance = manager->create_future_instance(op,
-              op->get_unique_op_id(), inst_ready, future_size, eager);
-            pending_instances[local_sysmem] = 
-              PendingInstance(instance, inst_ready);
+            if (future_size > 0)
+            {
+              MemoryManager *manager = 
+                runtime->find_memory_manager(runtime->runtime_system_memory); 
+              const ApUserEvent inst_ready =
+                Runtime::create_ap_user_event(NULL);
+              FutureInstance *instance = manager->create_future_instance(op,
+                op->get_unique_op_id(), inst_ready, future_size, eager);
+              pending_instances[local_sysmem] = 
+                PendingInstance(instance, inst_ready);
+            }
           }
           else
           {
