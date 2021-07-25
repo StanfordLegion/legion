@@ -11158,7 +11158,6 @@ namespace Legion {
       deletion_ready_barrier = manager->get_deletion_ready_barrier();
       deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
       deletion_execution_barrier = manager->get_deletion_execution_barrier();
-      inline_mapping_barrier = manager->get_inline_mapping_barrier();
       attach_resource_barrier = manager->get_attach_resource_barrier();
       detach_resource_barrier = manager->get_detach_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
@@ -17071,7 +17070,12 @@ namespace Legion {
                     launcher.requirement.region.tree_id, 
                     get_task_name(), get_unique_id());
 #endif
-      map_op->initialize_replication(this, inline_mapping_barrier);
+      const Domain shard_space(DomainPoint(0), 
+          DomainPoint(shard_manager->total_shards-1));
+      map_op->initialize_replication(this,
+          find_index_launch_space(shard_space),
+          shard_manager->find_sharding_function(0/*cyclic*/),
+          shard_manager->is_first_local_shard(owner_shard));
       if (current_trace != NULL)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
                       "Attempted an inline mapping of region "
@@ -17148,7 +17152,12 @@ namespace Legion {
       }
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
-      map_op->initialize_replication(this, inline_mapping_barrier);
+      const Domain shard_space(DomainPoint(0), 
+          DomainPoint(shard_manager->total_shards-1));
+      map_op->initialize_replication(this,
+          find_index_launch_space(shard_space),
+          shard_manager->find_sharding_function(0/*cyclic*/),
+          shard_manager->is_first_local_shard(owner_shard));
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);

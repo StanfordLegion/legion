@@ -912,6 +912,27 @@ namespace Legion {
     }; 
 
     /**
+     * \class CheckCollectiveMapping
+     * A class for exchanging the names of collective instances for confirming
+     * that all shards are using the same collective instances
+     */
+    class CheckCollectiveMapping : public BroadcastCollective {
+    public:
+      CheckCollectiveMapping(ReplicateContext *ctx, CollectiveID id);
+      CheckCollectiveMapping(const CheckCollectiveMapping &rhs);
+      virtual ~CheckCollectiveMapping(void);
+    public:
+      CheckCollectiveMapping& operator=(const CheckCollectiveMapping &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      bool verify(const FieldMaskSet<CollectiveManager> &instances);
+    protected:
+      LegionMap<DistributedID,FieldMask>::aligned chosen_instances;
+    };
+
+    /**
      * \class ShardedMappingExchange
      * A class for exchanging the names of instances and mapping dependence
      * events for sharded mapping operations.
@@ -1970,7 +1991,7 @@ namespace Legion {
      * mappings can act like a kind of communication between shards
      * where they are all reading/writing to the same logical region.
      */
-    class ReplMapOp : public MapOp {
+    class ReplMapOp : public CollectiveInstanceCreator<MapOp> {
     public:
       ReplMapOp(Runtime *rt);
       ReplMapOp(const ReplMapOp &rhs);
@@ -1978,19 +1999,24 @@ namespace Legion {
     public:
       ReplMapOp& operator=(const ReplMapOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx, RtBarrier &inline_bar);
-      RtEvent complete_inline_mapping(RtEvent mapping_applied);
+      void initialize_replication(ReplicateContext *ctx,
+                                  IndexSpace shard_space,
+                                  ShardingFunction *shard_fn,
+                                  bool first_local_shard);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void); 
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+      virtual DomainPoint get_shard_point(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
+      virtual IndexSpaceNode* get_collective_space(void) const;
     protected:
-      RtBarrier inline_barrier;
-      ShardedMappingExchange *exchange; 
-      ValueBroadcast<DistributedID> *view_did_broadcast;
-      ShardedView *sharded_view;
+      CollectiveID collective_check;
+      IndexSpace shard_space;
+      ShardingFunction *shard_fn;
+      bool is_first_local_shard;
     };
 
     /**
@@ -2421,8 +2447,6 @@ namespace Legion {
         { return deletion_mapping_barrier; }
       inline RtBarrier get_deletion_execution_barrier(void) const
         { return deletion_mapping_barrier; }
-      inline RtBarrier get_inline_mapping_barrier(void) const
-        { return inline_mapping_barrier; }
       inline RtBarrier get_attach_resource_barrier(void) const
         { return attach_resource_barrier; }
       inline RtBarrier get_detach_resource_barrier(void) const
@@ -2489,6 +2513,9 @@ namespace Legion {
                                 std::vector<unsigned> &indexes);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
+      void exchange_shard_local_op_event(size_t context_index,
+                                         ApEvent complete_event);
+      ApEvent find_shard_local_op_event(size_t context_index);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(FutureInstance *instance, void *metadata,
@@ -2608,7 +2635,6 @@ namespace Legion {
       RtBarrier deletion_ready_barrier;
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
-      RtBarrier inline_mapping_barrier;
       RtBarrier attach_resource_barrier;
       RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;
@@ -2642,6 +2668,16 @@ namespace Legion {
       std::set<std::pair<std::string,std::string> > 
                                unique_registration_callbacks;
 #endif
+    protected:
+      struct ShardLocalEvent {
+      public:
+        ShardLocalEvent(void) : remaining(0) { }
+      public:
+        ApEvent result;
+        RtUserEvent pending;
+        unsigned remaining;
+      };
+      std::map<size_t,ShardLocalEvent> shard_local_events;
     protected:
       AttachDeduplication *attach_deduplication;
     };

@@ -3452,40 +3452,23 @@ namespace Legion {
             init_precondition = sync_precondition;
         }
       }
+      bool record_valid = true;
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
-      ApEvent effects_done;
-      if (remap_region)
+      if (!remap_region)
       {
-        region.impl->get_references(mapped_instances);
-        effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
-                                                requirement, version_info,
-                                                this, 0/*idx*/, 
-                                                init_precondition,
-                                                termination_event,
-                                                mapped_instances, 
-                                                source_instances,
-                                                trace_info,
-                                                map_applied_conditions
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-      }
-      else
-      { 
         // Now we've got the valid instances so invoke the mapper
-        const bool record_valid = 
-          invoke_mapper(mapped_instances, source_instances);
+        record_valid = invoke_mapper(mapped_instances, source_instances);
         // First mapping so set the references now
         region.impl->set_references(mapped_instances);
-        // Then we can register our mapped instances
-        effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
+      }
+      else
+        region.impl->get_references(mapped_instances);
+      // Then we can register our mapped instances
+      ApEvent effects_done =
+        runtime->forest->physical_perform_updates_and_registration(
                                                 requirement, version_info,
                                                 this, 0/*idx*/,
                                                 init_precondition,
@@ -3499,7 +3482,6 @@ namespace Legion {
                                                 unique_op_id,
 #endif
                                                 record_valid);
-      }
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
       {

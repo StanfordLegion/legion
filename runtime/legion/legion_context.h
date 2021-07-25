@@ -2520,7 +2520,6 @@ namespace Legion {
       RtBarrier deletion_ready_barrier;
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
-      RtBarrier inline_mapping_barrier;
       RtBarrier attach_resource_barrier;
       RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;

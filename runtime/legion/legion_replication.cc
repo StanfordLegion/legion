@@ -5883,14 +5883,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplMapOp::ReplMapOp(Runtime *rt)
-      : MapOp(rt)
+      : CollectiveInstanceCreator<MapOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplMapOp::ReplMapOp(const ReplMapOp &rhs)
-      : MapOp(rhs)
+      : CollectiveInstanceCreator<MapOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5913,325 +5913,219 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::initialize_replication(ReplicateContext *ctx,RtBarrier &bar)
+    void ReplMapOp::initialize_replication(ReplicateContext *ctx, 
+              IndexSpace shard_sp, ShardingFunction *fn, bool first_local_shard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(exchange == NULL);
-      assert(view_did_broadcast == NULL);
-      assert(sharded_view == NULL);
+      assert(!shard_space.exists());
+      assert(shard_fn == NULL);
 #endif
-      inline_barrier = bar;
-      ctx->advance_replicate_barrier(bar, ctx->total_shards);
-      // We only check the results of the mapping if the runtime requests it
-      // We can skip the check though if this is a read-only requirement
-      if (!IS_READ_ONLY(requirement))
-        exchange = new ShardedMappingExchange(COLLECTIVE_LOC_74, ctx,
-                           ctx->owner_shard->shard_id, !runtime->unsafe_mapper);
-      if (IS_WRITE(requirement))
-      {
-        // We need a second generation of the barrier for writes
-        ctx->advance_replicate_barrier(bar, ctx->total_shards);
-        // We need a third generation of the barrirer if we're not discarding
-        // the previous version of the barrier so we can make sure all the
-        // updates have been performed before we register our users
-        if (!IS_DISCARD(requirement))
-          ctx->advance_replicate_barrier(bar, ctx->total_shards);
-        view_did_broadcast = 
-          new ValueBroadcast<DistributedID>(ctx, 0/*owner*/, COLLECTIVE_LOC_75);
-        // if we're shard 0 then get the distributed id and send it out
-        if (ctx->owner_shard->shard_id == 0)
-        {
-          DistributedID view_did = runtime->get_available_distributed_id();
-          // make it and register it with the runtime
-          sharded_view = new ShardedView(runtime->forest,
-            view_did, runtime->address_space, true/*register now*/);
-          // then broadcast the result out so the other nodes can grab it
-          view_did_broadcast->broadcast(sharded_view->did);
-        }
-      }
+      shard_space = shard_sp;
+      shard_fn = fn;
+      is_first_local_shard = first_local_shard;
+      if (!remap_region && !runtime->unsafe_mapper)
+        collective_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);
+      if (!grants.empty())
+        REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
+            "Illegal use of grants with an inline mapping in control "
+            "replicated parent task %s (UID %lld). Use of non-canonical "
+            "Legion features such as grants are not permitted with "
+            "control replication.", parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
+      if (!wait_barriers.empty())
+        REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
+            "Illegal use of wait phase barriers with an inline mapping in "
+            "control replicated parent task %s (UID %lld). Use of "
+            "non-canonical Legion features such as wait phase barriers are "
+            "not permitted with control replication.",
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      if (!arrive_barriers.empty())
+        REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
+            "Illegal use of arrive phase barriers with an inline mapping in "
+            "control replicated parent task %s (UID %lld). Use of "
+            "non-canonical Legion features such as arrive phase barriers are "
+            "not permitted with control replication.",
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::trigger_ready(void)
+    void ReplMapOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
+      MapOp::trigger_prepipeline_stage(); 
 #ifdef DEBUG_LEGION
-      assert(inline_barrier.exists());
+      assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      // Compute the version numbers for this mapping operation
-      std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement, 
-                                                   version_info,
-                                                   preconditions);
-      if ((view_did_broadcast != NULL) && (sharded_view == NULL))
-      {
-        // Get the distributed ID for the sharded view and request it
-        const DistributedID sharded_view_did = view_did_broadcast->get_value();
-        RtEvent ready;
-        sharded_view = static_cast<ShardedView*>(
-            runtime->find_or_request_logical_view(sharded_view_did, ready));
-        if (ready.exists())
-          preconditions.insert(ready);
-      }
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
+      // Now promote the region requirement up to projection requirement
+      requirement.handle_type = LEGION_REGION_PROJECTION;
+      requirement.projection = 0; // identity
     }
 
-#if 0
+    //--------------------------------------------------------------------------
+    void ReplMapOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->check_privileges)
+        check_privilege();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
+      IndexSpaceNode *shard_space_node = runtime->forest->get_node(shard_space);
+      ProjectionInfo projection_info(runtime, requirement,
+                                     shard_space_node, shard_fn);
+      RefinementTracker tracker(this, map_applied_conditions);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
     //--------------------------------------------------------------------------
     void ReplMapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
-      // If we have any wait preconditions from phase barriers or 
-      // grants then we use them to compute a precondition for doing
-      // any copies or anything else for this operation
-      ApEvent init_precondition = execution_fence_event;
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        ApEvent sync_precondition = 
-          merge_sync_preconditions(trace_info, grants, wait_barriers);
-        if (sync_precondition.exists())
-        {
-          if (init_precondition.exists())
-            init_precondition = Runtime::merge_events(&trace_info, 
-                                  init_precondition, sync_precondition); 
-          else
-            init_precondition = sync_precondition;
-        }
-      }
-      InstanceSet mapped_instances;
-      std::vector<PhysicalManager*> source_instances;
-      // If we are remapping then we know the answer
-      // so we don't need to do any premapping
-      bool record_valid = true;
-      if (!remap_region)
-      {
-        record_valid = invoke_mapper(mapped_instances, source_instances);
-        region.impl->set_references(mapped_instances);
-      }
-      else
-        region.impl->get_references(mapped_instances);
-      // First kick off the exchange to get that in flight
-      std::vector<InstanceView*> mapped_views;
-      std::vector<InstanceView*> source_views;
-      {
-        InnerContext *context = find_physical_context(0/*index*/);
-        context->convert_target_views(mapped_instances, mapped_views);
-        if (exchange != NULL)
-          exchange->initiate_exchange(mapped_instances, mapped_views);
-      }
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      const bool is_owner_shard = (repl_ctx->owner_shard->shard_id == 0); 
-      ApEvent effects_done;
-      // What we do next depends on the privileges
-      if (IS_REDUCE(requirement))
+      ShardManager *shard_manager = repl_ctx->shard_manager;
+      bool record_valid = true;
+      InstanceSet mapped_instances;
+      std::vector<PhysicalManager*> source_instances;
+      // If we are remapping then we know the answer
+      // so we don't need to do any premapping
+      if (!remap_region)
       {
-        // Shard 0 updates the equivalence sets with its reduction buffer
-        // Everyone else just needs to do their registration
-        if (!is_owner_shard)
+        // Now we've got the valid instances so invoke the mapper
+        record_valid = invoke_mapper(mapped_instances, source_instances);
+        if (!runtime->unsafe_mapper)
         {
-          InnerContext *context = find_physical_context(0/*index*/);
-          context->convert_target_views(mapped_instances, mapped_views); 
-          RegionNode *node = runtime->forest->get_node(requirement.region);
-          UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this,
-                                      0/*index*/, requirement, node,
-                                      mapped_instances, mapped_views,
-                                      source_views,trace_info,init_precondition,
-                                      termination_event,
-                                      false/*check initialized*/, record_valid,
-                                      false/*skip output*/);
-          analysis->add_reference();
-          // Note that this call will clean up the analysis allocation
-          effects_done = runtime->forest->physical_perform_registration(
-                analysis, mapped_instances, trace_info, map_applied_conditions);
+          // Check that all the produced mappings are collective instances
+          FieldMaskSet<CollectiveManager> collective_instances;
+          for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+          {
+            InstanceManager *manager = mapped_instances[idx].get_manager();
+            if (!manager->is_collective_manager())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected a non-collective instance "
+                  "for mapping an inline mapping in control-replicated "
+                  "parent task %s (UID %lld). All inline mappings in "
+                  "control-replicated parent tasks must select created or "
+                  "select a collective instance for mapping.",
+                  mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id())
+            CollectiveManager *collective = manager->as_collective_manager();
+            if (!collective->point_space->contains_point(get_shard_point()))
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected a collective instance "
+                  "for mapping an inline mapping in control-replicated "
+                  "parent task %s (UID %lld) that does not contain an entry "
+                  "for shard %lld. All inline mappings must select collective "
+                  "instances that have entries for all points in the parent "
+                  "task's sharding space.", mapper->get_mapper_name(),
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                  get_shard_point()[0])
+            if (collective->point_space->get_volume() !=
+                shard_manager->total_shards)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected a collective instance "
+                  "for mapping an inline mapping in control-replicated "
+                  "parent task %s (UID %lld) that contains more points than "
+                  "shards. All inline mappings must select collective "
+                  "instances that have exactly one point in the parent task's "
+                  "sharding space and no more.", mapper->get_mapper_name(),
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+            collective_instances.insert(collective,
+                mapped_instances[idx].get_valid_fields());
+          }
+          // Then check that all the mappers agreed on the mapping
+          CheckCollectiveMapping exchange(repl_ctx, collective_check);
+          if (!exchange.verify(collective_instances))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected different collective "
+                  "instances on different on shard 0 and shard %d when "
+                  "mapping an inline mapping in control-replicated "
+                  "parent task %s (UID %lld). Each inline mapping in a "
+                  "control-replicated parent task must map to the same "
+                  "collective instances across all shards.",
+                  mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id()) 
         }
-        else
-          effects_done = 
-            runtime->forest->physical_perform_updates_and_registration(
-                requirement, version_info, this, 0/*index*/, init_precondition,
-                termination_event, mapped_instances, source_instances,
-                trace_info, map_applied_conditions
-#ifdef DEBUG_LEGION
-                , get_logging_name(), unique_op_id
-#endif
-                );
-        // Complete the exchange
-        exchange->complete_exchange(this, sharded_view, 
-                                    mapped_instances, map_applied_conditions);
-      }
-      else if (IS_WRITE(requirement) && IS_DISCARD(requirement))
-      {
-#ifdef DEBUG_LEGION
-        assert(sharded_view != NULL);
-        assert(exchange != NULL);
-        assert(record_valid);
-#endif
-        // All the users just need to do their registration
-        RegionNode *node = runtime->forest->get_node(requirement.region);
-        UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
-                                      0/*index*/, requirement, node, 
-                                      mapped_instances, mapped_views,
-                                      source_views,trace_info,init_precondition,
-                                      termination_event,
-                                      false/*check initialized*/, record_valid,
-                                      false/*skip output*/);
-        analysis->add_reference();
-        // Note that this call will clean up the analysis allocation
-        effects_done = 
-          runtime->forest->physical_perform_registration(analysis, 
-              mapped_instances, trace_info, map_applied_conditions);
-        // We need to fill in the sharded view before we do the next
-        // call in case there are output effects due to restriction
-        exchange->complete_exchange(this, sharded_view, 
-                                    mapped_instances, map_applied_conditions);
-        // We need everyone to be done mapping before we can do the overwrite
-        if (!map_applied_conditions.empty())
-        {
-          Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,       
-              Runtime::merge_events(map_applied_conditions));
-          // No longer need this since one shard will wait on all of them
-          map_applied_conditions.clear();
-        }
-        else
-          Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
-        if (is_owner_shard)
-        {
-          // Wait for all the other shards to be done mapping first
-          inline_barrier.wait(); 
-          effects_done = 
-              runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
-                  sharded_view, version_info, trace_info, init_precondition, 
-                  map_applied_conditions, false/*restrict*/);
-        }
-        Runtime::advance_barrier(inline_barrier);
+        // First mapping so set the references now
+        region.impl->set_references(mapped_instances);
       }
       else
       {
-        // Everyone pretends like they are readers and does their 
-        // separate updates as though they were going to just read 
-        const bool is_write = IS_WRITE(requirement);
-        if (is_write)
-          requirement.privilege = LEGION_READ_ONLY; // pretend read-only for now
-        UpdateAnalysis *analysis = NULL; 
-        const RtEvent registration_precondition = 
-          runtime->forest->physical_perform_updates(requirement, version_info,
-              this, 0/*index*/, init_precondition, termination_event, 
-              mapped_instances, source_instances, trace_info, 
-              map_applied_conditions, analysis,
+        region.impl->get_references(mapped_instances);
 #ifdef DEBUG_LEGION
-              get_logging_name(), unique_op_id,
-#endif
-              // Can't track initialized here because it might not be
-              // correct with our altered privileges
-              record_valid/*record valid*/, false/*check initialized*/,
-              // We can skip output for the same reason we don't 
-              // need to track any effects
-              true/*defer copies*/, true/*skip output*/); 
-        // If we're a write, then switch back privileges
-        if (is_write)
-        {
-          // In the read-write case we need to make sure everyone is done
-          // performing their updates before anyone does a registration
-          if (registration_precondition.exists())
-            map_applied_conditions.insert(registration_precondition);
-          if (!map_applied_conditions.empty())
-          {
-            Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,       
-                Runtime::merge_events(map_applied_conditions));
-            // Don't need these anymore since we're going to wait for them
-            map_applied_conditions.clear();
-          }
-          else
-            Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
-          // Set the privilege back to read-write
-          requirement.privilege = LEGION_READ_WRITE;
-          // Reset the usage of the analysis too
-          analysis->usage = RegionUsage(requirement);
-          // Wait for everyone to finish their updates
-          inline_barrier.wait();
-          // Advance the barrier to the next generation
-          Runtime::advance_barrier(inline_barrier);
-        }
-        else
-        {
-          // In the read-only case we just need to wait for our registration
-          // to be done before we can proceed
-          if (registration_precondition.exists() && 
-              !registration_precondition.has_triggered())
-            registration_precondition.wait();
-        }
-        // Then do the registration, no need to track output effects since we
-        // know that this instance can't be restricted in a control 
-        // replicated context
-        runtime->forest->physical_perform_registration(analysis, 
-            mapped_instances, trace_info, map_applied_conditions);
-        // If we have a write then we make a sharded view and 
-        // then shard 0 will do the overwrite
-        if (is_write)
-        {
-#ifdef DEBUG_LEGION
-          assert(sharded_view != NULL);
-          assert(exchange != NULL);
-#endif
-          // We need to fill in the sharded view before we do the next
-          // call in case there are output effects due to restriction
-          // Note this has to be done across all the shards in case 
-          // the restricted copies go remote
-          exchange->complete_exchange(this, sharded_view, 
-                                      mapped_instances, map_applied_conditions);
-          // We need everyone to be done mapping before we can do the overwrite
-          if (!map_applied_conditions.empty())
-          {
-            Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,       
-                Runtime::merge_events(map_applied_conditions));
-            // No longer need this since one shard will wait on all of them
-            map_applied_conditions.clear();
-          }
-          else
-            Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
-          if (is_owner_shard)
-          {
-            // Wait for all the other shards to be done mapping first
-            inline_barrier.wait();
-            // Now we can do the replacement
-            effects_done = 
-              runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
-                sharded_view, version_info, trace_info, init_precondition, 
-                map_applied_conditions, false/*restrict*/);
-          }
-          Runtime::advance_barrier(inline_barrier);
-        }
-      }
-#ifdef DEBUG_LEGION
-      if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
-      {
-        assert(!mapped_instances.empty());
-        dump_physical_state(&requirement, 0);
-      } 
-#endif
-      ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
-      if (mapped_instances.size() > 1)
-      {
-        std::set<ApEvent> mapped_events;
+        // These should all be collective instances
         for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-          mapped_events.insert(mapped_instances[idx].get_ready_event());
-        map_complete_event = Runtime::merge_events(&trace_info, mapped_events);
+        {
+          InstanceManager *manager = mapped_instances[idx].get_manager();
+          assert(manager->is_collective_manager());
+          CollectiveManager *collective = manager->as_collective_manager();
+          assert(collective->point_space->contains_point(get_shard_point()));
+          assert(collective->point_space->get_volume() ==
+                  shard_manager->total_shards);
+        }
+#endif
       }
-      else if (!mapped_instances.empty())
-        map_complete_event = mapped_instances[0].get_ready_event();
+      ApEvent map_complete_event, effects_done;
+      if (is_first_local_shard)
+      {
+        ApEvent init_precondition = execution_fence_event;
+        // Then we can register our mapped instances
+        effects_done = 
+          runtime->forest->physical_perform_updates_and_registration(
+                                                requirement, version_info,
+                                                this, 0/*idx*/,
+                                                init_precondition,
+                                                termination_event, 
+                                                mapped_instances,
+                                                source_instances,
+                                                trace_info,
+                                                map_applied_conditions,
+#ifdef DEBUG_LEGION
+                                                get_logging_name(),
+                                                unique_op_id,
+#endif
+                                                record_valid);
+#ifdef DEBUG_LEGION
+        if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
+        {
+          assert(!mapped_instances.empty());
+          dump_physical_state(&requirement, 0);
+        } 
+#endif
+        if (mapped_instances.size() > 1)
+        {
+          std::set<ApEvent> mapped_events;
+          for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+            mapped_events.insert(mapped_instances[idx].get_ready_event());
+          map_complete_event = Runtime::merge_events(&trace_info,mapped_events);
+        }
+        else if (!mapped_instances.empty())
+          map_complete_event = mapped_instances[0].get_ready_event();
+        // Bounce the map complete event off the shard manager so that
+        // any other local shards can also get it
+        shard_manager->exchange_shard_local_op_event(context_index,
+                                                     map_complete_event);
+      }
+      else
+        map_complete_event =
+          shard_manager->find_shard_local_op_event(context_index);
       if (runtime->legion_spy_enabled)
       {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
+        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
@@ -6239,41 +6133,10 @@ namespace Legion {
                                         termination_event);
 #endif
       }
-      // See if we have any reservations to take as part of this map
-      if (!atomic_locks.empty() || !arrive_barriers.empty())
-      {
-        if (!effects_done.exists())
-          effects_done = 
-            Runtime::merge_events(&trace_info, effects_done, termination_event);
-        else
-          effects_done = termination_event;
-        // They've already been sorted in order 
-        for (std::map<Reservation,bool>::const_iterator it = 
-              atomic_locks.begin(); it != atomic_locks.end(); it++)
-        {
-          map_complete_event = 
-                Runtime::acquire_ap_reservation(it->first, it->second,
-                                                map_complete_event);
-          // We can also issue the release condition on our termination
-          Runtime::release_reservation(it->first, effects_done);
-        }
-        for (std::vector<PhaseBarrier>::iterator it = 
-              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                 it->phase_barrier);
-          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        effects_done);    
-        }
-      }
+      if (!effects_done.exists())
+        effects_done = termination_event; 
       // We can trigger the ready event now that we know its precondition
       Runtime::trigger_event(NULL, ready_event, map_complete_event);
-      // Remove profiling our guard and trigger the profiling event if necessary
-      int diff = -1; // need this dumbness for PGI
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
-          profiling_reported.exists())
-        Runtime::trigger_event(profiling_reported);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       RtEvent mapping_applied;
@@ -6282,7 +6145,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(complete_inline_mapping(mapping_applied));
+      complete_mapping(mapping_applied);
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -6302,7 +6165,13 @@ namespace Legion {
       else
         complete_execution();
     }
-#endif
+
+    //--------------------------------------------------------------------------
+    DomainPoint ReplMapOp::get_shard_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_collective_instance_point();
+    }
 
     //--------------------------------------------------------------------------
     DomainPoint ReplMapOp::get_collective_instance_point(void) const
@@ -6321,13 +6190,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceNode* ReplMapOp::get_collective_space(void) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->forest->get_node(shard_space);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMapOp::activate(void)
     //--------------------------------------------------------------------------
     {
       MapOp::activate();
-      exchange = NULL;
-      view_did_broadcast = NULL;
-      sharded_view = NULL;
+      collective_check = 0;
+      shard_space = IndexSpace::NO_SPACE;
+      shard_fn = NULL;
+      is_first_local_shard = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6335,19 +6212,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_map_op();
-      if (exchange != NULL)
-        delete exchange;
-      if (view_did_broadcast != NULL)
-        delete view_did_broadcast;
       runtime->free_repl_map_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent ReplMapOp::complete_inline_mapping(RtEvent mapping_applied)
-    //--------------------------------------------------------------------------
-    {
-      Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,mapping_applied);
-      return inline_barrier;
     }
 
     /////////////////////////////////////////////////////////////
@@ -8598,10 +8463,6 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
         deletion_execution_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // Inline mapping barrier for synchronizing inline mappings
-        // across all the shards
-        inline_mapping_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // External resource barrier for synchronizing attach/detach ops
         attach_resource_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -8697,7 +8558,6 @@ namespace Legion {
           deletion_ready_barrier.destroy_barrier();
           deletion_mapping_barrier.destroy_barrier();
           deletion_execution_barrier.destroy_barrier();
-          inline_mapping_barrier.destroy_barrier();
           attach_resource_barrier.destroy_barrier();
           detach_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
@@ -8931,7 +8791,6 @@ namespace Legion {
           assert(deletion_ready_barrier.exists());
           assert(deletion_mapping_barrier.exists());
           assert(deletion_execution_barrier.exists());
-          assert(inline_mapping_barrier.exists());
           assert(attach_resource_barrier.exists());
           assert(detach_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
@@ -8951,7 +8810,6 @@ namespace Legion {
           rez.serialize(deletion_ready_barrier);
           rez.serialize(deletion_mapping_barrier);
           rez.serialize(deletion_execution_barrier);
-          rez.serialize(inline_mapping_barrier);
           rez.serialize(attach_resource_barrier);
           rez.serialize(detach_resource_barrier);
           rez.serialize(mapping_fence_barrier);
@@ -9041,7 +8899,6 @@ namespace Legion {
         derez.deserialize(deletion_ready_barrier);
         derez.deserialize(deletion_mapping_barrier);
         derez.deserialize(deletion_execution_barrier);
-        derez.deserialize(inline_mapping_barrier);
         derez.deserialize(attach_resource_barrier);
         derez.deserialize(detach_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
@@ -9313,6 +9170,66 @@ namespace Legion {
         for (unsigned shard = 0; shard < total_shards; shard++)
               unique_shard_spaces.insert((*address_spaces)[shard]);
       return (unique_shard_spaces.size() == runtime->total_address_spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::exchange_shard_local_op_event(size_t context_index,
+                                                     ApEvent complete_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!local_shards.empty());
+#endif
+      if (local_shards.size() == 1)
+        return;
+      RtUserEvent to_trigger;
+      {
+        AutoLock m_lock(manager_lock);
+        ShardLocalEvent &event = shard_local_events[context_index];
+        event.result = complete_event;
+        event.remaining = local_shards.size() - 1;
+        to_trigger = event.pending;
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ShardManager::find_shard_local_op_event(size_t context_index)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent wait_on;
+      {
+        AutoLock m_lock(manager_lock);
+        ShardLocalEvent &event = shard_local_events[context_index];
+        if (event.remaining == 0)
+        {
+          // here before the sender
+          if (!event.pending.exists())
+            event.pending = Runtime::create_rt_user_event();
+          wait_on = event.pending;
+        }
+        else
+        {
+          ApEvent result = event.result;
+          if ((--event.remaining) == 0)
+            shard_local_events.erase(context_index);
+          return result;
+        }
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock m_lock(manager_lock);
+      std::map<size_t,ShardLocalEvent>::iterator finder = 
+        shard_local_events.find(context_index);
+#ifdef DEBUG_LEGION
+      assert(finder != shard_local_events.end());
+      assert(finder->second.remaining > 0);
+#endif
+      ApEvent result = finder->second.result;
+      if ((--finder->second.remaining) == 0)
+        shard_local_events.erase(finder);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -13745,6 +13662,102 @@ namespace Legion {
       // No need to hold the lock after the collective is complete
       all_mapped.swap(tasks_mapped);
       all_complete.swap(tasks_complete);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Check Collective Mapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CheckCollectiveMapping::CheckCollectiveMapping(ReplicateContext *ctx,
+                                                   CollectiveID id)
+      : BroadcastCollective(ctx, id, 0/*origin shard*/)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CheckCollectiveMapping::CheckCollectiveMapping(
+                                              const CheckCollectiveMapping &rhs)
+      : BroadcastCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CheckCollectiveMapping::~CheckCollectiveMapping(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CheckCollectiveMapping& CheckCollectiveMapping::operator=(
+                                              const CheckCollectiveMapping &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CheckCollectiveMapping::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(chosen_instances.size());
+      for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it =
+            chosen_instances.begin(); it != chosen_instances.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CheckCollectiveMapping::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_instances;
+      derez.deserialize(num_instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        derez.deserialize(chosen_instances[did]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CheckCollectiveMapping::verify(
+                               const FieldMaskSet<CollectiveManager> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shard == 0)
+      {
+        for (FieldMaskSet<CollectiveManager>::const_iterator it =
+              instances.begin(); it != instances.end(); it++)
+          chosen_instances[it->first->did] = it->second;
+        perform_collective_async();
+      }
+      else
+      {
+        perform_collective_wait();
+        if (instances.size() != chosen_instances.size())
+          return false;
+        for (FieldMaskSet<CollectiveManager>::const_iterator it =
+              instances.begin(); it != instances.end(); it++)
+        {
+          LegionMap<DistributedID,FieldMask>::aligned::const_iterator
+            finder = chosen_instances.find(it->first->did);
+          if (finder == chosen_instances.end())
+            return false;
+          if (finder->second != it->second)
+            return false;
+        }
+      }
+      return true;
     }
 
     /////////////////////////////////////////////////////////////
