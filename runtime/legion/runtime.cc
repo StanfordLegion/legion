@@ -4262,7 +4262,7 @@ namespace Legion {
         leaf_region(leaf), virtual_mapped(virt), 
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
         req(r),mapped_event(mapped),ready_event(ready),termination_event(term),
-        sharded_view(NULL), mapped(m), valid(false), made_accessor(false)
+        mapped(m), valid(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4287,9 +4287,6 @@ namespace Legion {
 #endif
       if (!references.empty() && !replaying)
         references.remove_resource_references(PHYSICAL_REGION_REF);
-      if ((sharded_view != NULL) && 
-          sharded_view->remove_base_resource_ref(PHYSICAL_REGION_REF))
-        delete sharded_view;
     }
 
     //--------------------------------------------------------------------------
@@ -4300,18 +4297,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::set_sharded_view(ShardedView *view)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharded_view == NULL);
-      assert(view != NULL);
-#endif
-      sharded_view = view;
-      sharded_view->add_base_resource_ref(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------

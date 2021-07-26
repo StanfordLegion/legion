@@ -769,9 +769,6 @@ namespace Legion {
     public:
       inline bool created_accessor(void) const { return made_accessor; }
     public:
-      void set_sharded_view(ShardedView *view);
-      inline ShardedView* get_sharded_view(void) const { return sharded_view; }
-    public:
       void wait_until_valid(bool silence_warnings, const char *warning_string, 
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
@@ -854,8 +851,6 @@ namespace Legion {
       // written by the "mapping stage" code of whatever operation made this
       // can be accessed in "application" side code after 'mapped' triggers
       InstanceSet references;
-      // Only used for control replication
-      ShardedView *sharded_view;
       // "appliciation side" state
       // whether it is currently mapped
       bool mapped; 

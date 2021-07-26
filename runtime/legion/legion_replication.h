@@ -2033,26 +2033,30 @@ namespace Legion {
       ReplAttachOp& operator=(const ReplAttachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  RtBarrier &resource_bar,
-                                  ApBarrier &broadcast_bar,
-                                  ApBarrier &reduce_bar);
+                                  IndexSpace shard_space,
+                                  ShardingFunction *shard_fn,
+                                  bool first_local_shard);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual void trigger_ready(void);
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual DomainPoint get_collective_instance_point(void) const;
+    public:
+      virtual PhysicalManager* create_manager(RegionNode *node,
+                                   const std::vector<FieldID> &field_set,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<unsigned> &mask_index_map,
+                                   const std::vector<CustomSerdezID> &serez,
+                                              const FieldMask &external_mask);
+    protected:
+      IndexSpace shard_space;
+      ShardingFunction *shard_fn;
+      bool is_first_local_shard;
     protected:
       RtBarrier resource_barrier;
-      ApBarrier broadcast_barrier;
-      ApBarrier reduce_barrier;
-      RtUserEvent repl_mapping_applied;
-      InstanceRef external_instance;
-      ShardedMappingExchange *exchange; 
       ValueBroadcast<DistributedID> *did_broadcast;
-      ShardedView *sharded_view;
-      RtEvent all_mapped_event;
-      bool exchange_complete;
     };
 
     /**
@@ -2095,8 +2099,14 @@ namespace Legion {
     public:
       ReplDetachOp& operator=(const ReplDetachOp &rhs);
     public:
+      void initialize_replication(ReplicateContext *ctx,
+                                  IndexSpace shard_space,
+                                  ShardingFunction *shard_fn,
+                                  bool first_local_shard);
+    public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void select_sources(const unsigned index,
@@ -2108,8 +2118,10 @@ namespace Legion {
       // Help for unordered detachments
       void record_unordered_kind(
         std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
-    public:
-      RtBarrier resource_barrier;
+    protected:
+      IndexSpace shard_space;
+      ShardingFunction *shard_fn;
+      bool is_first_local_shard;
     };
 
     /**
@@ -2449,8 +2461,6 @@ namespace Legion {
         { return deletion_mapping_barrier; }
       inline RtBarrier get_attach_resource_barrier(void) const
         { return attach_resource_barrier; }
-      inline RtBarrier get_detach_resource_barrier(void) const
-        { return detach_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
       inline RtBarrier get_resource_return_barrier(void) const
@@ -2461,10 +2471,6 @@ namespace Legion {
         { return summary_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
         { return execution_fence_barrier; }
-      inline ApBarrier get_attach_broadcast_barrier(void) const
-        { return attach_broadcast_barrier; }
-      inline ApBarrier get_attach_reduce_barrier(void) const
-        { return attach_reduce_barrier; }
       inline RtBarrier get_dependent_partition_barrier(void) const
         { return dependent_partition_barrier; }
       inline RtBarrier get_semantic_attach_barrier(void) const
@@ -2636,7 +2642,6 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier attach_resource_barrier;
-      RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;

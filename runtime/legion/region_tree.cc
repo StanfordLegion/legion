@@ -3218,11 +3218,11 @@ namespace Legion {
     ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
                                           unsigned index,
                                           const RegionRequirement &req,
-                                          InstanceView *local_view,
-                                          LogicalView *registration_view,
+                                          InstanceView *instance_view,
                                           const ApEvent termination_event,
                                           VersionInfo &version_info,
                                           const PhysicalTraceInfo &trace_info,
+                                          CollectiveMapping *collective_mapping,
                                           std::set<RtEvent> &map_applied_events,
                                           const bool restricted)
     //--------------------------------------------------------------------------
@@ -3240,7 +3240,7 @@ namespace Legion {
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
       const RtEvent collect_event = trace_info.get_collect_event();
-      const ApEvent ready = local_view->register_user(usage, ext_mask,
+      const ApEvent ready = instance_view->register_user(usage, ext_mask,
                   region_node->row_source, op_id, index, termination_event,
                   collect_event, registration_applied, trace_info, 
                   runtime->address_space);
@@ -3251,36 +3251,12 @@ namespace Legion {
         if (guard_event.exists())
           map_applied_events.insert(guard_event);
       }
-      OverwriteAnalysis *analysis = NULL; 
-      if (local_view->get_manager()->is_collective_manager())
-      {
-        CollectiveManager *collective =
-          local_view->get_manager()->as_collective_manager();
-#ifdef DEBUG_LEGION
-        // Should always be local
-        const DomainPoint local_point =
-          attach_op->get_collective_instance_point();
-        PhysicalInstance instance = collective->get_instance(local_point);
-        assert(instance.address_space() == runtime->address_space);
-#endif
-        CollectiveMapping *collective_mapping =
-          collective->get_collective_mapping();
-        analysis = new OverwriteAnalysis(runtime, attach_op, index,
-            RegionUsage(req), region_node->row_source, registration_view, 
-            ext_mask, trace_info, collective_mapping, ApEvent::NO_AP_EVENT,
-            guard_event, PredEvent::NO_PRED_EVENT, false/*track effects*/,
+      OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
+            index, RegionUsage(req), region_node->row_source, instance_view,
+            ext_mask, trace_info, collective_mapping, ApEvent::NO_AP_EVENT, 
+            guard_event, PredEvent::NO_PRED_EVENT, false/*track effects*/, 
             restricted);
-        analysis->add_reference();
-      }
-      else
-      {
-        analysis = new OverwriteAnalysis(runtime, attach_op, index,
-            RegionUsage(req), region_node->row_source, registration_view, 
-            ext_mask, trace_info, NULL/*no collective mapping*/,
-            ApEvent::NO_AP_EVENT, guard_event, PredEvent::NO_PRED_EVENT,
-            false/*track effects*/, restricted);
-        analysis->add_reference();
-      }
+      analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
@@ -14142,6 +14118,9 @@ namespace Legion {
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(node->column_source == this);
+#endif
       std::vector<size_t> field_sizes(field_set.size());
       std::vector<unsigned> mask_index_map(field_set.size());
       std::vector<CustomSerdezID> serdez(field_set.size());
@@ -14149,55 +14128,9 @@ namespace Legion {
       compute_field_layout(field_set, field_sizes, 
                            mask_index_map, serdez, external_mask);
       // Now make the instance, this should always succeed
-      ApEvent ready_event;
-      size_t instance_footprint;
-      LayoutConstraintSet constraints;
-      PhysicalInstance inst = 
-        attach_op->create_instance(node->row_source, field_set, field_sizes, 
-                                   constraints, ready_event,instance_footprint);
-      // Check to see if this instance is local or whether we need
-      // to send this request to a remote node to make
-      if (inst.address_space() != context->runtime->address_space)
-      {
-        Serializer rez;
-        volatile DistributedID remote_did = 0;
-        const RtUserEvent wait_for = Runtime::create_rt_user_event();
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(inst);
-          rez.serialize(ready_event);
-          rez.serialize(instance_footprint);
-          constraints.serialize(rez);
-          rez.serialize(external_mask);
-          rez.serialize<size_t>(field_set.size());
-          for (unsigned idx = 0; idx < field_set.size(); idx++)
-          {
-            rez.serialize(field_set[idx]);
-            rez.serialize(field_sizes[idx]);
-            rez.serialize(mask_index_map[idx]);
-            rez.serialize(serdez[idx]);
-          }
-          rez.serialize(node->handle);
-          rez.serialize(&remote_did);
-          rez.serialize(wait_for);
-        }
-        runtime->send_external_create_request(inst.address_space(), rez);
-        // Wait for the response to come back
-        wait_for.wait();
-        // Now we can request the physical manager
-        RtEvent wait_on;
-        PhysicalManager *result = 
-         context->runtime->find_or_request_instance_manager(remote_did,wait_on);
-        if (wait_on.exists())
-          wait_on.wait();
-        return InstanceRef(result, external_mask);
-      }
-      else // Local so we can just do this call here
-        return InstanceRef(create_external_manager(inst, ready_event, 
-                            instance_footprint, constraints, field_set, 
-                            field_sizes,  external_mask, mask_index_map, 
-                            node, serdez), external_mask);
+      PhysicalManager *manager = attach_op->create_manager(node, field_set,
+          field_sizes, mask_index_map, serdez, external_mask);
+      return InstanceRef(manager, external_mask); 
     }
 
     //--------------------------------------------------------------------------

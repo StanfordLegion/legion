@@ -11147,7 +11147,8 @@ namespace Legion {
         field_allocator_shard(0), logical_region_allocator_shard(0), 
         dynamic_id_allocator_shard(0), equivalence_set_allocator_shard(0), 
         next_available_collective_index(0), next_logical_collective_index(1),
-        next_physical_template_index(0), next_replicate_bar_index(0), 
+        next_physical_template_index(0), 
+        sharding_launch_space(IndexSpace::NO_SPACE),next_replicate_bar_index(0),
         next_logical_bar_index(0), unordered_ops_counter(0), 
         unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
@@ -11159,14 +11160,11 @@ namespace Legion {
       deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
       deletion_execution_barrier = manager->get_deletion_execution_barrier();
       attach_resource_barrier = manager->get_attach_resource_barrier();
-      detach_resource_barrier = manager->get_detach_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
       summary_fence_barrier = manager->get_summary_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
-      attach_broadcast_barrier = manager->get_attach_broadcast_barrier();
-      attach_reduce_barrier = manager->get_attach_reduce_barrier();
       dependent_partition_barrier = manager->get_dependent_partition_barrier();
       semantic_attach_barrier = manager->get_semantic_attach_barrier();
       inorder_barrier = manager->get_inorder_barrier();
@@ -17070,10 +17068,8 @@ namespace Legion {
                     launcher.requirement.region.tree_id, 
                     get_task_name(), get_unique_id());
 #endif
-      const Domain shard_space(DomainPoint(0), 
-          DomainPoint(shard_manager->total_shards-1));
       map_op->initialize_replication(this,
-          find_index_launch_space(shard_space),
+          find_sharding_launch_space(true/*can create*/),
           shard_manager->find_sharding_function(0/*cyclic*/),
           shard_manager->is_first_local_shard(owner_shard));
       if (current_trace != NULL)
@@ -17152,10 +17148,8 @@ namespace Legion {
       }
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
-      const Domain shard_space(DomainPoint(0), 
-          DomainPoint(shard_manager->total_shards-1));
       map_op->initialize_replication(this,
-          find_index_launch_space(shard_space),
+          find_sharding_launch_space(true/*can create*/),
           shard_manager->find_sharding_function(0/*cyclic*/),
           shard_manager->is_first_local_shard(owner_shard));
       register_inline_mapped_region(region);
@@ -17545,8 +17539,10 @@ namespace Legion {
             get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher);
-      attach_op->initialize_replication(this, attach_resource_barrier,
-                        attach_broadcast_barrier, attach_reduce_barrier);
+      attach_op->initialize_replication(this, 
+          find_sharding_launch_space(true/*can create*/),
+          shard_manager->find_sharding_function(0/*cyclic*/),
+          shard_manager->is_first_local_shard(owner_shard));
 
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_regions(attach_op, 
@@ -17728,6 +17724,10 @@ namespace Legion {
       }
       ReplDetachOp *op = runtime->get_available_repl_detach_op();
       Future result = op->initialize_detach(this, region, flush, unordered);
+      op->initialize_replication(this,
+          find_sharding_launch_space(!unordered),
+          shard_manager->find_sharding_function(0/*cyclic*/),
+          shard_manager->is_first_local_shard(owner_shard));
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
@@ -20329,15 +20329,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_detach_resource_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtBarrier result = detach_resource_barrier;
-      advance_logical_barrier(detach_resource_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 
                                                         size_t arrivals)
     //--------------------------------------------------------------------------
@@ -20429,6 +20420,26 @@ namespace Legion {
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_logical_bar_index == total_shards)
         next_logical_bar_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::find_sharding_launch_space(bool can_create)
+    //--------------------------------------------------------------------------
+    {
+      // In general this method is only called during intialization by the
+      // application task when launching off sub operations, but with detach
+      // operations it can be called in unordered context, but in that case
+      // we should already be able to find an existing launch space from
+      // the corresponding attach operation
+      if (sharding_launch_space.exists())
+        return sharding_launch_space;
+#ifdef DEBUG_LEGION
+      assert(can_create);
+#endif
+      const Domain shard_domain(DomainPoint(0), 
+          DomainPoint(shard_manager->total_shards-1));
+      sharding_launch_space = find_index_launch_space(shard_domain);
+      return sharding_launch_space;
     }
 
     //--------------------------------------------------------------------------

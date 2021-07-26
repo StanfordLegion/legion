@@ -639,13 +639,11 @@ namespace Legion {
                                 const std::vector<FieldID> &field_set);
       ApEvent attach_external(AttachOp *attach_op, unsigned index,
                               const RegionRequirement &req,
-                              // Two views are usually the same but different
-                              // in cases of control replication
-                              InstanceView *local_view,
-                              LogicalView *registration_view,
+                              InstanceView *instance_view,
                               const ApEvent termination_event,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,
+                              CollectiveMapping *collective_mapping,
                               std::set<RtEvent> &map_applied_events,
                               const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,

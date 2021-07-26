@@ -3712,12 +3712,12 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     public:
-      PhysicalInstance create_instance(IndexSpaceNode *node,
-                                       const std::vector<FieldID> &field_set,
-                                       const std::vector<size_t> &field_sizes,
-                                             LayoutConstraintSet &cons,
-                                             ApEvent &ready_event,
-                                             size_t &instance_footprint);
+      virtual PhysicalManager* create_manager(RegionNode *node,
+                                   const std::vector<FieldID> &field_set,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<unsigned> &mask_index_map,
+                                   const std::vector<CustomSerdezID> &serez,
+                                              const FieldMask &external_mask);
     protected:
       void activate_attach_op(void);
       void deactivate_attach_op(void);

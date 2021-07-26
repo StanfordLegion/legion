@@ -19146,12 +19146,12 @@ namespace Legion {
       InstanceView *ext_view = external_views[0];
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
-                                                        ext_view, ext_view,
-                                                        mapping ?
+                                                        ext_view, mapping ?
                                                           termination_event :
                                                           completion_event,
                                                         version_info,
                                                         trace_info,
+                                                        NULL/*not collective*/,
                                                         map_applied_conditions,
                                                         restricted);
 #ifdef DEBUG_LEGION
@@ -19205,16 +19205,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
-                                         const std::vector<FieldID> &field_set,
-                                         const std::vector<size_t> &sizes, 
-                                               LayoutConstraintSet &constraints,
-                                               ApEvent &ready_event,
-                                               size_t &instance_footprint)
+    PhysicalManager* AttachOp::create_manager(RegionNode *node,
+                                    const std::vector<FieldID> &field_set,
+                                    const std::vector<size_t> &sizes,
+                                    const std::vector<unsigned> &mask_index_map,
+                                    const std::vector<CustomSerdezID> &serdez,
+                                              const FieldMask &external_mask)
     //--------------------------------------------------------------------------
     {
+      ApEvent ready_event;
+      LayoutConstraintSet constraints;
       PhysicalInstance result = PhysicalInstance::NO_INST;
-      instance_footprint = footprint;
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -19226,8 +19227,8 @@ namespace Legion {
             {
 	      field_ids[idx] = *it;
             }
-            result = node->create_file_instance(file_name, field_ids, sizes, 
-                                                file_mode, ready_event);
+            result = node->row_source->create_file_instance(file_name,
+                            field_ids, sizes, file_mode, ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);           
             constraints.field_constraint = 
@@ -19253,7 +19254,7 @@ namespace Legion {
               field_files[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->create_hdf5_instance(file_name,
+            result = node->row_source->create_hdf5_instance(file_name,
                                       field_ids, sizes, field_files,
                                       layout_constraint_set.ordering_constraint,
                                       (file_mode == LEGION_FILE_READ_ONLY),
@@ -19271,15 +19272,15 @@ namespace Legion {
           }
         case LEGION_EXTERNAL_INSTANCE:
           {
-            Realm::InstanceLayoutGeneric *ilg = node->create_layout(
+            Realm::InstanceLayoutGeneric *ilg = node->row_source->create_layout(
                 layout_constraint_set, field_set, sizes, false/*compact*/);
             const PointerConstraint &pointer = 
                                       layout_constraint_set.pointer_constraint;
 #ifdef DEBUG_LEGION
             assert(pointer.is_valid);
 #endif
-            result = node->create_external_instance(pointer.memory, pointer.ptr,
-                                                    ilg, ready_event);
+            result = node->row_source->create_external_instance(pointer.memory,
+                                          pointer.ptr, ilg, ready_event);
             constraints = layout_constraint_set;
             constraints.specialized_constraint = 
               SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
@@ -19307,7 +19308,48 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      return result;
+      // Check to see if this instance is local or whether we need
+      // to send this request to a remote node to make it
+      if (result.address_space() != runtime->address_space)
+      {
+        Serializer rez;
+        volatile DistributedID remote_did = 0;
+        const RtUserEvent wait_for = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(node->column_source->handle);
+          rez.serialize(result);
+          rez.serialize(ready_event);
+          rez.serialize(footprint);
+          constraints.serialize(rez);
+          rez.serialize(external_mask);
+          rez.serialize<size_t>(field_set.size());
+          for (unsigned idx = 0; idx < field_set.size(); idx++)
+          {
+            rez.serialize(field_set[idx]);
+            rez.serialize(sizes[idx]);
+            rez.serialize(mask_index_map[idx]);
+            rez.serialize(serdez[idx]);
+          }
+          rez.serialize(node->row_source->handle);
+          rez.serialize(&remote_did);
+          rez.serialize(wait_for);
+        }
+        runtime->send_external_create_request(result.address_space(), rez);
+        // Wait for the response to come back
+        wait_for.wait();
+        // Now we can request the physical manager
+        RtEvent wait_on;
+        PhysicalManager *result = 
+         runtime->find_or_request_instance_manager(remote_did, wait_on);
+        if (wait_on.exists())
+          wait_on.wait();
+        return result;
+      }
+      else // Local so we can just do this call here
+        return node->column_source->create_external_manager(result, ready_event,
+            footprint, constraints, field_set, sizes, external_mask,
+            mask_index_map, node, serdez);
     }
 
     //--------------------------------------------------------------------------

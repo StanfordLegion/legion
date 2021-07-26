@@ -2415,7 +2415,6 @@ namespace Legion {
       RtBarrier get_next_deletion_ready_barrier(void);
       RtBarrier get_next_deletion_mapping_barrier(void);
       RtBarrier get_next_deletion_execution_barrier(void);
-      RtBarrier get_next_detach_resource_barrier(void);
       inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
         {
           Runtime::advance_barrier(bar);
@@ -2449,6 +2448,8 @@ namespace Legion {
       // This one can only be called inside the logical dependence analysis
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
+    protected:
+      IndexSpace find_sharding_launch_space(bool can_create);
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);
@@ -2521,14 +2522,11 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier attach_resource_barrier;
-      RtBarrier detach_resource_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
       RtBarrier summary_fence_barrier;
       ApBarrier execution_fence_barrier;
-      ApBarrier attach_broadcast_barrier;
-      ApBarrier attach_reduce_barrier;
       RtBarrier dependent_partition_barrier;
       RtBarrier semantic_attach_barrier;
       ApBarrier inorder_barrier;
@@ -2612,6 +2610,7 @@ namespace Legion {
         std::vector<size_t> shard_sizes;
       };
       std::vector<AttachLaunchSpace*> index_attach_launch_spaces;
+      IndexSpace sharding_launch_space;
     protected:
       unsigned next_replicate_bar_index;
       unsigned next_logical_bar_index;
