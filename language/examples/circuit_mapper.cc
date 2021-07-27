@@ -89,13 +89,13 @@ LogicalRegion CircuitMapper::default_policy_select_instance_region(
 Processor CircuitMapper::default_policy_select_initial_processor(
                                             MapperContext ctx, const Task &task)
 {
-  if (same_address_space || task.is_index_space || task.index_point.is_null()) {
+  if (same_address_space || task.is_index_space || task.index_point.is_null() || !task.sharding_space.exists()) {
     return DefaultMapper::default_policy_select_initial_processor(ctx, task);
   }
 
-  assert(task.index_point.dim == 1 && task.sharding_space.exists());
+  assert(task.index_point.dim == 1);
   coord_t index = task.index_point[0];
-  size_t bounds = runtime->get_index_space_domain(task.sharding_space).get_volume();
+  size_t bounds = runtime->get_index_space_domain(ctx, task.sharding_space).get_volume();
 
   VariantInfo info =
     default_find_preferred_variant(task, ctx, false/*needs tight*/);
