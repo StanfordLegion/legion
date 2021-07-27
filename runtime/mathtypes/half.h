@@ -516,12 +516,6 @@ struct __half
     __x = __convert_float_to_halfint(a);
   }
 
-  inline __half& operator=(const __half &rhs)
-  {
-    __x = rhs.__x;
-    return *this;
-  }
-
   inline __half& operator=(const float &rhs)
   {
     __x = __convert_float_to_halfint(rhs);
