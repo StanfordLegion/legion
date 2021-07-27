@@ -67,7 +67,7 @@ namespace Legion {
       }
       static inline size_t align(void *p)
       {
-        long long ptr;
+        uintptr_t ptr;
         static_assert(sizeof(ptr) == sizeof(p), "Fuck C++");
         memcpy(&ptr, &p, sizeof(ptr));
         return ptr % ALIGNMENT;
