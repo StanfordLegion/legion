@@ -93,23 +93,24 @@ Processor CircuitMapper::default_policy_select_initial_processor(
     return DefaultMapper::default_policy_select_initial_processor(ctx, task);
   }
 
-  assert(task.index_point.dim == 1);
+  assert(task.index_point.dim == 1 && task.sharding_space.exists());
   coord_t index = task.index_point[0];
+  size_t bounds = runtime->get_index_space_domain(task.sharding_space).get_volume();
 
   VariantInfo info =
     default_find_preferred_variant(task, ctx, false/*needs tight*/);
   switch (info.proc_kind)
   {
     case Processor::LOC_PROC:
-      return remote_cpus[index % remote_cpus.size()];
+      return remote_cpus[index * remote_cpus.size() / bounds];
     case Processor::TOC_PROC:
-      return remote_gpus[index % remote_gpus.size()];
+      return remote_gpus[index * remote_gpus.size() / bounds];
     case Processor::IO_PROC:
-      return remote_ios[index % remote_ios.size()];
+      return remote_ios[index * remote_ios.size() / bounds];
     case Processor::OMP_PROC:
-      return remote_omps[index % remote_omps.size()];
+      return remote_omps[index * remote_omps.size() / bounds];
     case Processor::PY_PROC:
-      return remote_pys[index % remote_pys.size()];
+      return remote_pys[index * remote_pys.size() / bounds];
     default: // make warnings go away
       break;
   }
