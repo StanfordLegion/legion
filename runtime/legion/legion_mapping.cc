@@ -603,11 +603,12 @@ namespace Legion {
                                       const TaskVariantRegistrar &registrar,
 				      const CodeDescriptor &codedesc,
 				      const void *user_data, size_t user_len,
+                                      size_t return_type_size, 
                                       bool has_return_type)
     //--------------------------------------------------------------------------
     {
       return ctx->manager->register_task_variant(ctx, registrar, codedesc,
-                                            user_data,user_len,has_return_type);
+                    user_data, user_len, return_type_size, has_return_type);
     }
 
     //--------------------------------------------------------------------------

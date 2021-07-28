@@ -40,6 +40,7 @@ add_subdirectory(inline_tasks)
 add_subdirectory(local_function_tasks)
 add_subdirectory(layout_constraints)
 add_subdirectory(implicit_top_task)
+add_subdirectory(future_map_transforms)
 
 if(Legion_MPI_INTEROP)
   add_subdirectory(mpi_interop)

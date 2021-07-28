@@ -1507,7 +1507,7 @@ namespace Legion {
        * used to index into this future map.
        * @return domain of all points in the future map
        */
-      const Domain& get_future_map_domain(void) const;
+      Domain get_future_map_domain(void) const;
     }; 
 
 
@@ -1643,6 +1643,10 @@ namespace Legion {
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
     public:
+      // Instruct the runtime that it does not need to produce
+      // a future or future map result for this index task
+      bool                               elide_future_return;
+    public:
       bool                               silence_warnings;
     };
 
@@ -1741,6 +1745,10 @@ namespace Legion {
       // means that either field sets are independent or region
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
+    public:
+      // Instruct the runtime that it does not need to produce
+      // a future or future map result for this index task
+      bool                               elide_future_return;
     public:
       bool                               silence_warnings;
     };
@@ -2253,13 +2261,15 @@ namespace Legion {
     public:
       TunableLauncher(TunableID tid,
                       MapperID mapper = 0,
-                      MappingTagID tag = 0);
+                      MappingTagID tag = 0,
+                      size_t return_type_size = SIZE_MAX);
     public:
       TunableID                           tunable;
       MapperID                            mapper;
       MappingTagID                        tag;
       TaskArgument                        arg;
       std::vector<Future>                 futures;
+      size_t                              return_type_size;
     };
 
     //==========================================================================
@@ -3509,8 +3519,7 @@ namespace Legion {
      * an operation to a mapping call.
      */
     class Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Mappable(void);
     public:
       // Return a globally unique ID for this operation
@@ -3576,8 +3585,7 @@ namespace Legion {
      * that mappers can make informed decisions.
      */
     class Task : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Task(void);
     public:
       // Check whether this task has a parent task
@@ -3625,8 +3633,7 @@ namespace Legion {
      * explicit copy region-to-region copy operation.
      */
     class Copy : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Copy(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3655,8 +3662,7 @@ namespace Legion {
      * inline mapping operation from its launcher
      */
     class InlineMapping : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       InlineMapping(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3677,8 +3683,7 @@ namespace Legion {
      * acquire operation from the original launcher.
      */
     class Acquire : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Acquire(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3700,8 +3705,7 @@ namespace Legion {
      * release operation from the original launcher.
      */
     class Release : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Release(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3727,8 +3731,7 @@ namespace Legion {
      * be READ_WRITE EXCLUSIVE.
      */
     class Close : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Close(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3746,8 +3749,7 @@ namespace Legion {
      * more information.
      */
     class Fill : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Fill(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3775,8 +3777,7 @@ namespace Legion {
      * the runtime such as 'create_partition_by_field'.
      */
     class Partition : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       Partition(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -3809,8 +3810,7 @@ namespace Legion {
      * epoch launcher for more information.
      */
     class MustEpoch : public Mappable {
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
+    public:
       MustEpoch(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -4141,6 +4141,31 @@ namespace Legion {
       // callback_get_future_instance is not overridden
       virtual size_t callback_get_future_size(void);
       virtual void callback_pack_future(void *buffer, size_t size); 
+    };
+
+    /**
+     * \class PointTransformFunctor
+     * A point transform functor provides a virtual function
+     * infterface for transforming points in one coordinate space
+     * into a different coordinate space. Calls to this functor 
+     * must be pure in that the same arguments passed to the 
+     * functor must always yield the same results.
+     */
+    class PointTransformFunctor {
+    public:
+      virtual ~PointTransformFunctor(void) { }
+    public:
+      virtual bool is_invertible(void) const { return false; }
+      // Transform a point from the domain into a point in the range
+      virtual DomainPoint transform_point(const DomainPoint &point,
+                                          const Domain &domain,
+                                          const Domain &range) = 0;
+      // Invert a point from range and convert it into a point in the domain
+      // This is only called if is_invertible returns true
+      virtual DomainPoint invert_point(const DomainPoint &point,
+                                       const Domain &domain,
+                                       const Domain &range)
+        { return DomainPoint(); }
     };
 
     /**
@@ -6349,7 +6374,7 @@ namespace Legion {
        * If the task is not control-replicated then the 'collective' flag
        * will not have any effect. 
        * @param ctx enclosing task context
-       * @param domain the domain that names all points in the future map
+       * @param domain the index space that names all points in the future map
        * @param data the set of futures from which to create the future map
        * @param collective whether shards from a control replicated context
        *                   should work collectively to construct the map
@@ -6357,6 +6382,10 @@ namespace Legion {
        *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
+      FutureMap construct_future_map(Context ctx, IndexSpace domain, 
+                           const std::map<DomainPoint,TaskArgument> &data,
+                           bool collective = false, ShardingID sid = 0);
+      LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,TaskArgument> &data,
                            bool collective = false, ShardingID sid = 0);
@@ -6371,7 +6400,7 @@ namespace Legion {
        * undefined behavior will occur. If the task is not control-replicated
        * then the 'collective' flag will not have any effect.
        * @param ctx enclosing task context
-       * @param domain the domain that names all points in the future map
+       * @param domain the index space that names all points in the future map
        * @param futures the set of futures from which to create the future map
        * @param collective whether shards from a control replicated context
        *                   should work collectively to construct the map
@@ -6379,9 +6408,55 @@ namespace Legion {
        *                   pattern if collective=true
        * @return a new future map containing all the futures
        */
+      FutureMap construct_future_map(Context ctx, IndexSpace domain,
+                           const std::map<DomainPoint,Future> &futures,
+                           bool collective = false, ShardingID sid = 0);
+      LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
                            bool collective = false, ShardingID sid = 0);
+      
+
+      /**
+       * Apply a transform to a FutureMap. All points that access the
+       * FutureMap will be transformed by the 'transform' function before
+       * accessing the backing future map. Note that multiple transforms
+       * can be composed this way to create new FutureMaps. This version
+       * takes a function pointer which must take a domain point and the
+       * range of the original future map and returns a new domain point
+       * that must fall within the range.
+       * @param ctx enclosing task context
+       * @param fm future map to apply a new coordinate space to
+       * @param new_domain an index space to describe the domain of points
+       *        for the transformed future map
+       * @param fnptr a function pointer to call to transform points
+       * @return a new future map with the coordinate space transformed
+       */
+      typedef DomainPoint (*PointTransformFnptr)(const DomainPoint &point,
+                                                 const Domain &domain,
+                                                 const Domain &range);
+      FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     IndexSpace new_domain,
+                                     PointTransformFnptr fnptr);
+      /**
+       * Apply a transform to a FutureMap. All points that access the
+       * FutureMap will be transformed by the 'transform' function before
+       * accessing the backing future map. Note that multiple transforms
+       * can be composed this way to create new FutureMaps. This version
+       * takes a pointer PointTransform functor object to invoke to 
+       * transform the coordinate spaces of the points.
+       * @param ctx enclosing task context
+       * @param fm future map to apply a new coordinate space to
+       * @param new_domain an index space to describe the domain of points
+       *        for the transformed future map
+       * @param functor pointer to a functor to transform points
+       * @param take_ownership whether the runtime should delete the functor
+       * @return a new future map with the coordinate space transformed
+       */
+      FutureMap transform_future_map(Context ctx, const FutureMap &fm,
+                                     IndexSpace new_domain,
+                                     PointTransformFunctor *functor,
+                                     bool take_ownership = false);
 
       /**
        * @deprecated
@@ -8121,7 +8196,7 @@ namespace Legion {
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
 
 #ifdef LEGION_GPU_REDUCTIONS
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
       template<typename REDOP>
       static void preregister_gpu_reduction_op(ReductionOpID redop_id);
 #endif
@@ -8798,8 +8873,14 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean if this has a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
        * @param vid optional variant ID to use
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @return variant ID for the task
        */
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
@@ -8808,7 +8889,8 @@ namespace Legion {
 				      size_t user_len = 0,
                                       size_t return_type_size = 
                                                       LEGION_MAX_RETURN_SIZE,
-                                      VariantID vid = LEGION_AUTO_GENERATE_ID);
+                                      VariantID vid = LEGION_AUTO_GENERATE_ID,
+                                      bool has_return_type_size = true);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -8896,7 +8978,13 @@ namespace Legion {
        * @param user_data pointer to optional user data to associate with the
        * task variant
        * @param user_len size of optional user_data in bytes
-       * @param has_return_type boolean indicating a non-void return type
+       * @param return_type_size size in bytes of the maximum return type
+       *                         produced by this task variant
+       * @param has_return_type_size boolean indicating whether the max
+       *                         return_type_size is valid or not, in cases
+       *                         with unbounded output futures this should
+       *                         be set to false but will come with a 
+       *                         significant performance penalty
        * @param check_task_id verify validity of the task ID
        * @return variant ID for the task
        */
@@ -8908,6 +8996,7 @@ namespace Legion {
 	      const char *task_name = NULL,
               VariantID vid = LEGION_AUTO_GENERATE_ID,
               size_t return_type_size = LEGION_MAX_RETURN_SIZE,
+              bool has_return_type_size = true,
               bool check_task_id = true);
 
       /**

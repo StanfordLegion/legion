@@ -934,6 +934,8 @@ namespace Realm {
       virtual bool do_work(TimeLimit work_until);
 
     protected:
+      friend CHANNEL;
+
       LocalChannel *channel;
       bool ordered_mode, in_ordered_worker;
       Mutex mutex;
@@ -945,7 +947,8 @@ namespace Realm {
     public:
       SingleXDQChannel(BackgroundWorkManager *bgwork,
 		       XferDesKind _kind,
-		       const std::string& _name);
+		       const std::string& _name,
+                       int _numa_domain = -1);
 
       virtual void shutdown();
 

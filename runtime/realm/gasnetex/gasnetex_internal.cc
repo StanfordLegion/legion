@@ -294,46 +294,46 @@ namespace Realm {
     PktType prev = pktbuf_pkt_types[pktidx].exchange(pkttype);
     assert(prev == PKTTYPE_INVALID);
 
-    // if we're not the oldest non-ready packet, no counter bumping for us
-    if(pktbuf_ready_packets.load() != pktidx)
-      return false;
-
-    // see if any newer-but-consecutive packets are ready to go
-    int new_ready = pktidx + 1;
-    while((new_ready < MAX_PACKETS) &&
-	  (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID))
-      new_ready++;
-
+    // try to append the known-ready range (i.e. [pktidx,new_ready) ) to the
+    //  ready packets counter
     int old_ready = pktidx;
-    bool ok = pktbuf_ready_packets.compare_exchange(old_ready, new_ready);
-    if(!ok) {
-      // if our compare-and-swap failed, it may have gotten caught up in
-      //  somebody else's fixup step below, but at least make sure it's
-      //  advanced to include us
-      assert(old_ready > pktidx);
-      // and since we didn't do an update, we're not responsible for the
-      //  fixup step ourselves
-      return true;
-    }
-
-    // each time we bump the count, it's possible the committer of the
-    //  now-oldest-unready packet lost the race to see our update, so do it for
-    //  them
-    while((new_ready < MAX_PACKETS) &&
-	  (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID)) {
-      old_ready = new_ready;
-      new_ready++;
-      // grab any consecutive ones too
+    while(true) {
+      // see if any newer-but-consecutive packets are ready to go
+      //  (note that the first round of this has no ordering w.r.t. other
+      //  committers, so is a best-effort check - if we succeed at a CAS below,
+      //  we'll recheck with the ordering benefits that the CAS provides)
+      int new_ready = pktidx + 1;
       while((new_ready < MAX_PACKETS) &&
-	    (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID))
-	new_ready++;
+            (pktbuf_pkt_types[new_ready].load() != PKTTYPE_INVALID))
+        new_ready++;
 
-      bool ok = pktbuf_ready_packets.compare_exchange(old_ready, new_ready);
-      if(!ok) {
-	// it's ok for this to fail - it means somebody else was already
-	//  doing it, and it's now their responsibility to keep the chain alive
-	break;
+      if(!pktbuf_ready_packets.compare_exchange(old_ready, new_ready)) {
+        // CAS failed - three cases to consider
+        if(old_ready < pktidx) {
+          // there are still some packets before us that aren't ready -
+          //  whoever bumps the counter for them will take care of us
+          return false;
+        } else if(old_ready >= new_ready) {
+          // somebody else has covered the entire range we wanted to add, so
+          //  everything has been taken care of
+          return false;
+        } else {
+          // somebody updated for part of the range, but not the whole
+          //  thing - we need to try again to do the rest (using the
+          //  updated value of old_ready)
+          continue;
+        }
       }
+
+      // each time we bump the count, it's possible the committer of the
+      //  now-oldest-unready packet lost the race to see our update, so check
+      //  the next packet - if it's invalid, our work is done
+      if((new_ready >= MAX_PACKETS) ||
+         (pktbuf_pkt_types[new_ready].load() == PKTTYPE_INVALID))
+        break;
+
+      // possible race - at least one new packet looks ready, so try again
+      old_ready = new_ready;
     }
 
     return true;
@@ -762,6 +762,11 @@ namespace Realm {
     , num_groups(0)
     , num_pending(0)
   {
+    // set the soft limit at 50% of max capacity
+    pending_soft_limit = size_t(1) << (LOG2_MAXGROUPS +
+                                       PendingCompletionGroup::LOG2_GROUPSIZE -
+                                       1);
+
     for(size_t i = 0; i < (1 << LOG2_MAXGROUPS); i++)
       groups[i].store(0);
   }
@@ -883,6 +888,11 @@ namespace Realm {
   size_t PendingCompletionManager::num_completions_pending()
   {
     return num_pending.load();
+  }
+
+  bool PendingCompletionManager::over_pending_completion_soft_limit() const
+  {
+    return (num_pending.load() >= pending_soft_limit);
   }
 
 
@@ -1438,6 +1448,13 @@ namespace Realm {
 
   void XmitSrcDestPair::enqueue_completion_reply(gex_AM_Arg_t comp_info)
   {
+#ifdef DEBUG_REALM
+    // should never ask for a completion with neither local or remote
+    //  bits set
+    assert((comp_info & (PendingCompletion::LOCAL_PENDING_BIT |
+                         PendingCompletion::REMOTE_PENDING_BIT)) != 0);
+#endif
+
     // attempt an immediate send if they are enabled and we don't appear
     //  to have any completion replies queued up
     if(internal->module->cfg_use_immediate &&
@@ -2298,6 +2315,8 @@ namespace Realm {
     , internal(_internal)
     , shutdown_flag(false)
     , shutdown_cond(mutex)
+    , pollwait_flag(false)
+    , pollwait_cond(mutex)
   {}
 
   void GASNetEXPoller::begin_polling()
@@ -2419,10 +2438,21 @@ namespace Realm {
 	break;
     }
 
+    // sample pollwait flag before we perform gasnet_AMPoll
+    bool pollwait_snapshot = pollwait_flag.load();
+
     // no gex version of this?
     gasnet_AMPoll();
 
     ThreadLocal::gex_work_until = nullptr;
+
+    // if there was a pollwaiter before we started the poll, we can wake it
+    //  now
+    if(pollwait_snapshot) {
+      AutoLock<> al(mutex);
+      pollwait_flag.store(false);
+      pollwait_cond.broadcast();
+    }
 
     // if a shutdown has been requested, wake the waiter - if not, requeue
     if(shutdown_flag.load()) {
@@ -2432,6 +2462,13 @@ namespace Realm {
       return false;
     } else
       return true;
+  }
+
+  void GASNetEXPoller::wait_for_full_poll_cycle()
+  {
+    AutoLock<> al(mutex);
+    pollwait_flag.store(true);
+    pollwait_cond.wait();
   }
 
 
@@ -2857,7 +2894,12 @@ namespace Realm {
     }
   }
 
-  bool GASNetEXInternal::check_for_quiescence()
+  size_t GASNetEXInternal::sample_messages_received_count()
+  {
+    return total_packets_received.load();
+  }
+
+  bool GASNetEXInternal::check_for_quiescence(size_t sampled_receive_count)
   {
     // in order to be quiescent, the following things should be true:
     // 1) no unsent packets in any xpair
@@ -2906,7 +2948,11 @@ namespace Realm {
 	  }
 	}
     }
-    local_counts[2] = total_packets_received.load();
+    // use the receive count that was sampled before the incoming message
+    //  manager was drained - if the actual 'total_packets_received' has
+    //  increased since, we're obviously not quiescent, but we need every
+    //  other rank to know that too
+    local_counts[2] = sampled_receive_count;
 
     log_gex_quiesce.debug() << "local counts: " << local_counts[0]
 			    << " " << local_counts[1] << " " << local_counts[2];
@@ -2923,14 +2969,16 @@ namespace Realm {
     //  and complain if it takes too long
     long long t_start = Clock::current_time_in_nanoseconds();
     long long t_complain = t_start;
-    while(gex_Event_Test(done) != GASNET_OK) {
+    do {
       long long t_now = Clock::current_time_in_nanoseconds();
       if(t_now >= (t_complain + 1000000000 /*1 sec*/)) {
 	log_gex_quiesce.info() << "allreduce not done after " << (t_now - t_start) << " ns";
 	t_complain = t_now;
       }
-      gasnet_AMPoll();
-    }
+      // we can't perform the poll ourselves, but make sure at least one full
+      //  poll succeeds before we continue
+      poller.wait_for_full_poll_cycle();
+    } while(gex_Event_Test(done) != GASNET_OK);
 
     if(prim_rank == 0)
       log_gex_quiesce.info() << "total counts: " << total_counts[0]
@@ -2966,6 +3014,10 @@ namespace Realm {
 						   size_t header_size,
 						   uintptr_t dest_payload_addr)
   {
+    // TODO: ideally make this a per-target counter?
+    if(with_congestion && compmgr.over_pending_completion_soft_limit())
+      return 0;
+
     if(dest_payload_addr == 0) {
       // medium message
       return GASNetEXHandlers::max_request_medium(eps[0],
@@ -3002,6 +3054,10 @@ namespace Realm {
 						   size_t header_size,
 						   uintptr_t dest_payload_addr)
   {
+    // TODO: ideally make this a per-target counter?
+    if(with_congestion && compmgr.over_pending_completion_soft_limit())
+      return 0;
+
     if(dest_payload_addr == 0) {
       // medium message
       return GASNetEXHandlers::max_request_medium(eps[0],
@@ -3047,6 +3103,10 @@ namespace Realm {
   size_t GASNetEXInternal::recommended_max_payload(bool with_congestion,
 						   size_t header_size)
   {
+    // TODO: ideally make this a per-target counter?
+    if(with_congestion && compmgr.over_pending_completion_soft_limit())
+      return 0;
+
     return gex_AM_LUBRequestMedium();
   }
 
@@ -4315,9 +4375,12 @@ namespace Realm {
       //  completion information
       return comp_info;
     } else {
-      // reply is allowed for local completion, but remote isn't done
-      return (comp_info &
-	      ~PendingCompletion::REMOTE_PENDING_BIT);
+      if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
+        // reply is allowed for local completion, but remote isn't done
+        return (comp_info &
+                ~PendingCompletion::REMOTE_PENDING_BIT);
+      } else
+        return 0;
     }
   }
 
@@ -4368,9 +4431,12 @@ namespace Realm {
       //  completion information
       return comp_info;
     } else {
-      // reply is allowed for local completion, but remote isn't done
-      return (comp_info &
-	      ~PendingCompletion::REMOTE_PENDING_BIT);
+      if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
+        // reply is allowed for local completion, but remote isn't done
+        return (comp_info &
+                ~PendingCompletion::REMOTE_PENDING_BIT);
+      } else
+        return 0;
     }
   }
 
@@ -4487,6 +4553,9 @@ namespace Realm {
       int index = args[i] >> 2;
       bool do_local = ((args[i] & PendingCompletion::LOCAL_PENDING_BIT) != 0);
       bool do_remote = ((args[i] & PendingCompletion::REMOTE_PENDING_BIT) != 0);
+#ifdef DEBUG_REALM
+      assert(do_local || do_remote);
+#endif
 
       PendingCompletion *comp = compmgr.lookup_completion(index);
       compmgr.invoke_completions(comp, do_local, do_remote);

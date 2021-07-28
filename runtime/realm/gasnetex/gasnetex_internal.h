@@ -260,8 +260,12 @@ namespace Realm {
 
     size_t num_completions_pending();
 
+    bool over_pending_completion_soft_limit() const;
+
   protected:
-    static const size_t LOG2_MAXGROUPS = 12; // 4K groups -> 1M completions
+    // NOTE: we stuff completion IDs, message IDs and 2 more bits into a
+    //  32-bit word, so we're limited to 2^(30-12) = 256K completions
+    static const size_t LOG2_MAXGROUPS = 10;
 
     // protects pops from the free list (to avoid A-B-A problem), but NOT pushes
     Realm::Mutex mutex;
@@ -269,6 +273,7 @@ namespace Realm {
     Realm::atomic<size_t> num_groups; // number of groups currently allocated
     Realm::atomic<PendingCompletionGroup *> groups[1 << LOG2_MAXGROUPS];
     atomic<size_t> num_pending;
+    size_t pending_soft_limit;  // try to stall traffic above this threshold
   };
 
   template <typename T, unsigned CHUNK_SIZE>
@@ -530,11 +535,17 @@ namespace Realm {
 
     virtual bool do_work(TimeLimit work_until);
 
+    // causes calling thread to wait for a full call to gasnet_AMPoll() to
+    //  be performed by the poller
+    void wait_for_full_poll_cycle();
+
   protected:
     GASNetEXInternal *internal;
     Mutex mutex;
     atomic<bool> shutdown_flag;  // set/cleared inside mutex, but tested outside
     CondVar shutdown_cond;
+    atomic<bool> pollwait_flag;  // set/cleared inside mutex, but tested outside
+    CondVar pollwait_cond;
     XmitSrcDestPair::XmitPairList critical_xpairs;
     GASNetEXEvent::EventList pending_events;
   };
@@ -613,7 +624,8 @@ namespace Realm {
     void broadcast(gex_Rank_t root, const void *val_in, void *val_out, size_t bytes);
     void gather(gex_Rank_t root, const void *val_in, void *vals_out, size_t bytes);
 
-    bool check_for_quiescence();
+    size_t sample_messages_received_count();
+    bool check_for_quiescence(size_t sampled_receive_count);
 
     PendingCompletion *get_available_comp();
     PendingCompletion *early_local_completion(PendingCompletion *comp);

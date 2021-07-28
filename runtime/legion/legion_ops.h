@@ -664,8 +664,7 @@ namespace Legion {
       InnerContext* find_physical_context(unsigned index);
     public:
       // Support for operations that compute futures
-      void compute_future_coordinates(
-                     std::vector<std::pair<size_t,DomainPoint> > &coordinates);
+      void compute_task_tree_coordinates(TaskTreeCoordinates &coordinates);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
@@ -2460,8 +2459,8 @@ namespace Legion {
       OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
     protected:
       Future future;
     };
@@ -2656,7 +2655,7 @@ namespace Legion {
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
-          const Domain &domain, IndexSpace shard_space, RtUserEvent deleted); 
+                      IndexSpace domain, IndexSpace shard_space); 
       // Another virtual method to override for control replication
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
@@ -2749,7 +2748,7 @@ namespace Legion {
       static void handle_map_task(const void *args);
     protected:
       void distribute_tasks(void);
-      RtUserEvent compute_launch_space(const MustEpochLauncher &launcher);
+      void compute_launch_space(const MustEpochLauncher &launcher);
     public:
       static void handle_distribute_task(const void *args);
       static void handle_launch_task(const void *args);
@@ -3143,7 +3142,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      virtual void request_future_buffers(std::set<RtEvent> &ready_events);
+      virtual void request_future_buffers(std::set<RtEvent> &mapped_events,
+                                          std::set<RtEvent> &ready_events);
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
@@ -4024,6 +4024,9 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
+      // virtual method for control replication
+      virtual void process_result(MapperManager *mapper,
+                                  void *buffer, size_t size) const { }
     protected:
       TunableID tunable_id;
       MapperID mapper_id;
@@ -4031,7 +4034,9 @@ namespace Legion {
       void *arg;
       size_t argsize;
       size_t tunable_index;
+      size_t return_type_size;
       Future result;
+      FutureInstance *instance;
       std::vector<Future> futures;
     };
 

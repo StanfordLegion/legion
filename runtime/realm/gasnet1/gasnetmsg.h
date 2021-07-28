@@ -490,8 +490,9 @@ enum { MSGID_NEW_ACTIVEMSG = 251 };
 class QuiescenceChecker {
 public:
   QuiescenceChecker();
-  
-  bool perform_check(void);
+
+  size_t sample_messages_received_count(void);
+  bool perform_check(size_t sampled_receive_count);
 
 public:
   size_t last_message_count;

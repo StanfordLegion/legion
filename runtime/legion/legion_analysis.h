@@ -153,8 +153,10 @@ namespace Legion {
                                        ApEvent e2, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs, ApEvent e1, ApEvent e2,
                                        ApEvent e3, Memoizable *memo) = 0;
-      virtual void record_merge_events(ApEvent &lhs, 
+      virtual void record_merge_events(ApEvent &lhs,
                             const std::set<ApEvent>& rhs, Memoizable *memo) = 0;
+      virtual void record_merge_events(ApEvent &lhs,
+                         const std::vector<ApEvent>& rhs, Memoizable *memo) = 0;
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -169,7 +171,10 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<void*> &indirections,
+                           const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier, 
+#endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
@@ -212,6 +217,8 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
+                         const std::vector<size_t> &future_size_bounds,
+                         const std::vector<TaskTreeCoordinates> &coordinates,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs) = 0;
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs) = 0;
@@ -236,6 +243,7 @@ namespace Legion {
         REMOTE_TRACE_MERGE_EVENTS,
         REMOTE_TRACE_ISSUE_COPY,
         REMOTE_TRACE_COPY_VIEWS,
+        REMOTE_TRACE_ISSUE_INDIRECT,
         REMOTE_TRACE_ISSUE_FILL,
         REMOTE_TRACE_FILL_VIEWS,
         REMOTE_TRACE_RECORD_OP_VIEW,
@@ -279,6 +287,8 @@ namespace Legion {
                                        ApEvent e3, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::set<ApEvent>& rhs, Memoizable *memo);
+      virtual void record_merge_events(ApEvent &lhs, 
+                            const std::vector<ApEvent>& rhs, Memoizable *memo);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -293,7 +303,10 @@ namespace Legion {
                            IndexSpaceExpression *expr,
                            const std::vector<CopySrcDstField>& src_fields,
                            const std::vector<CopySrcDstField>& dst_fields,
-                           const std::vector<void*> &indirections,
+                           const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                           unsigned unique_indirections_identifier,
+#endif
                            ApEvent precondition, PredEvent pred_guard);
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
@@ -336,6 +349,8 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          const std::vector<size_t> &future_size_bounds,
+                          const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied_events);
       virtual void record_set_effects(Memoizable *memo, ApEvent &rhs);
       virtual void record_complete_replay(Memoizable *memo, ApEvent rhs);
@@ -415,6 +430,12 @@ namespace Legion {
           base_sanity_check();
           rec->record_merge_events(result, events, memo);
         }
+      inline void record_merge_events(ApEvent &result, 
+                                      const std::vector<ApEvent> &events) const
+        {
+          base_sanity_check();
+          rec->record_merge_events(result, events, memo);
+        }
       inline void record_op_sync_event(ApEvent &result) const
         {
           base_sanity_check();
@@ -423,10 +444,13 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          const std::vector<size_t> &future_size_bounds,
+                          const std::vector<TaskTreeCoordinates> &coordinates,
                           std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(tlid, output, physical_instances, applied);
+          rec->record_mapper_output(tlid, output, physical_instances,
+                            future_size_bounds, coordinates, applied);
         }
       inline void record_set_effects(Memoizable *memo, ApEvent &rhs) const
         {
@@ -555,12 +579,19 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard) const
         {
           sanity_check();
-          rec->record_issue_indirect(memo, result, expr, src_fields, dst_fields,
-                                     indirections, precondition, pred_guard);
+          rec->record_issue_indirect(memo, result, expr, src_fields,
+                                     dst_fields, indirections,
+#ifdef LEGION_SPY
+                                     unique_indirections_identifier,
+#endif
+                                     precondition, pred_guard);
         }
       inline void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,

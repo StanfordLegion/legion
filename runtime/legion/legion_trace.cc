@@ -2107,15 +2107,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate* PhysicalTrace::start_new_template(void)
+    PhysicalTemplate* PhysicalTrace::start_new_template(
+                                              TaskTreeCoordinates &&coordinates)
     //--------------------------------------------------------------------------
     {
       // If we have a replicated context then we are making sharded templates
       if (repl_ctx != NULL)
-        current_template = 
-          new ShardedPhysicalTemplate(this, execution_fence_event, repl_ctx);
+        current_template = new ShardedPhysicalTemplate(this, 
+            execution_fence_event, std::move(coordinates), repl_ctx);
       else
-        current_template = new PhysicalTemplate(this, execution_fence_event);
+        current_template = new PhysicalTemplate(this, execution_fence_event,
+                                                std::move(coordinates));
       return current_template;
     }
 
@@ -3839,9 +3841,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
-      : trace(t), recording(true), replayable(false, "uninitialized"),
-        fence_completion_id(0),
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
+                                       TaskTreeCoordinates &&coords)
+      : trace(t), coordinates(std::move(coords)), recording(true),
+        replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), last_fence(NULL),
         recording_done(Runtime::create_rt_user_event()),
@@ -3858,8 +3861,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : trace(NULL), recording(true), replayable(false, "uninitialized"),
-        fence_completion_id(0),
+      : trace(NULL), coordinates(rhs.coordinates), recording(true),
+        replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -4301,6 +4304,15 @@ namespace Legion {
               num_merges += generator_kind != MERGE_EVENT;
               break;
             }
+          case ISSUE_INDIRECT:
+            {
+              unsigned precondition_idx =
+                (*it)->as_issue_indirect()->precondition_idx;
+              InstructionKind generator_kind =
+                instructions[precondition_idx]->get_kind();
+              num_merges += generator_kind != MERGE_EVENT;
+              break;
+            }
           case ISSUE_FILL:
             {
               unsigned precondition_idx =
@@ -4377,6 +4389,18 @@ namespace Legion {
 #endif
               find_all_last_users(finder->second, users, ready_events);
               precondition_idx = &copy->precondition_idx;
+              break;
+            }
+          case ISSUE_INDIRECT:
+            {
+              IssueIndirect *indirect = inst->as_issue_indirect();
+              std::map<unsigned, ViewExprs>::iterator finder =
+                copy_views.find(indirect->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != copy_views.end());
+#endif
+              find_all_last_users(finder->second, users, ready_events);
+              precondition_idx = &indirect->precondition_idx;
               break;
             }
           case ISSUE_FILL:
@@ -4503,6 +4527,12 @@ namespace Legion {
             {
               IssueCopy *copy = inst->as_issue_copy();
               used[gen[copy->precondition_idx]] = true;
+              break;
+            }
+          case ISSUE_INDIRECT:
+            {
+              IssueIndirect *indirect = inst->as_issue_indirect();
+              used[gen[indirect->precondition_idx]] = true;
               break;
             }
           case ISSUE_FILL:
@@ -4769,6 +4799,11 @@ namespace Legion {
                 event_to_check = &inst->as_issue_copy()->precondition_idx;
                 break;
               }
+            case ISSUE_INDIRECT:
+              {
+                event_to_check = &inst->as_issue_indirect()->precondition_idx;
+                break;
+              }
             case ISSUE_FILL:
               {
                 event_to_check = &inst->as_issue_fill()->precondition_idx;
@@ -4934,6 +4969,13 @@ namespace Legion {
               IssueCopy *copy = inst->as_issue_copy();
               incoming[copy->lhs].push_back(copy->precondition_idx);
               outgoing[copy->precondition_idx].push_back(copy->lhs);
+              break;
+            }
+          case ISSUE_INDIRECT :
+            {
+              IssueIndirect *indirect = inst->as_issue_indirect();
+              incoming[indirect->lhs].push_back(indirect->precondition_idx);
+              outgoing[indirect->precondition_idx].push_back(indirect->lhs);
               break;
             }
           case ISSUE_FILL :
@@ -5313,6 +5355,14 @@ namespace Legion {
               lhs = copy->lhs;
               break;
             }
+          case ISSUE_INDIRECT :
+            {
+              IssueIndirect *indirect = inst->as_issue_indirect();
+              int subst = substs[indirect->precondition_idx];
+              if (subst >= 0) indirect->precondition_idx = (unsigned)subst;
+              lhs = indirect->lhs;
+              break;
+            }
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
@@ -5464,6 +5514,15 @@ namespace Legion {
               assert(gen[copy->precondition_idx] != -1U);
 #endif
               used[gen[copy->precondition_idx]] = true;
+              break;
+            }
+          case ISSUE_INDIRECT:
+            {
+              IssueIndirect *indirect = inst->as_issue_indirect();
+#ifdef DEBUG_LEGION
+              assert(gen[indirect->precondition_idx] != -1U);
+#endif
+              used[gen[indirect->precondition_idx]] = true;
               break;
             }
           case ISSUE_FILL:
@@ -5702,6 +5761,8 @@ namespace Legion {
     void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
+                              const std::vector<size_t> &future_size_bounds,
+                              const std::vector<TaskTreeCoordinates> &coords,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -5718,6 +5779,42 @@ namespace Legion {
       mapping.task_priority = output.task_priority;
       mapping.postmap_task = output.postmap_task;
       mapping.future_locations = output.future_locations;
+      mapping.future_size_bounds = future_size_bounds;
+      // Check to see if the future coordinates are inside of our trace
+      // They have to be inside of our trace in order for it to be safe
+      // for use to be able to re-use their upper bound sizes (because
+      // we know those tasks are reusing the same variants)
+      for (unsigned idx = 0; idx < future_size_bounds.size(); idx++)
+      {
+        // If there's no upper bound then no need to check if the
+        // future is inside 
+        if (future_size_bounds[idx] == SIZE_MAX)
+          continue;
+        const TaskTreeCoordinates &future_coords = coords[idx];
+#ifdef DEBUG_LEGION
+        assert(future_coords.size() <= coordinates.size()); 
+#endif
+        if (future_coords.empty() ||
+            (future_coords.size() < coordinates.size()))
+        {
+          mapping.future_size_bounds[idx] = SIZE_MAX;
+          continue;
+        }
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        // If the size of the coordinates are the same we better
+        // be inside the same parent task or something is really wrong
+        for (unsigned idx2 = 0; idx2 < (future_coords.size()-1); idx2++)
+          assert(future_coords[idx2] == coordinates[idx2]);
+#endif
+#endif
+        // check to see if it came after the start of the trace
+        if (coordinates[idx].first <= future_coords[idx].first)
+          continue;
+        // Otherwise not inside the trace and therefore we cannot
+        // record the bounds for the future
+        mapping.future_size_bounds[idx] = SIZE_MAX;
+      }
       mapping.physical_instances = physical_instances;
       WrapperReferenceMutator mutator(applied_events);
       for (std::deque<InstanceSet>::iterator it =
@@ -5742,6 +5839,7 @@ namespace Legion {
                                              bool &postmap_task,
                               std::vector<Processor> &target_procs,
                               std::vector<Memory> &future_locations,
+                              std::vector<size_t> &future_size_bounds,
                               std::deque<InstanceSet> &physical_instances) const
     //--------------------------------------------------------------------------
     {
@@ -5759,6 +5857,7 @@ namespace Legion {
       postmap_task = finder->second.postmap_task;
       target_procs = finder->second.target_procs;
       future_locations = finder->second.future_locations;
+      future_size_bounds = finder->second.future_size_bounds;
       physical_instances = finder->second.physical_instances;
     }
 
@@ -5840,8 +5939,7 @@ namespace Legion {
                                                Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> rhs;
-      rhs.insert(rhs_);
+      std::vector<ApEvent> rhs(1, rhs_);
       record_merge_events(lhs, rhs, memo);
     }
 
@@ -5850,9 +5948,9 @@ namespace Legion {
                                                ApEvent e2, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> rhs;
-      rhs.insert(e1);
-      rhs.insert(e2);
+      std::vector<ApEvent> rhs(2);
+      rhs[0] = e1;
+      rhs[1] = e2;
       record_merge_events(lhs, rhs, memo);
     }
 
@@ -5862,10 +5960,10 @@ namespace Legion {
                                                Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> rhs;
-      rhs.insert(e1);
-      rhs.insert(e2);
-      rhs.insert(e3);
+      std::vector<ApEvent> rhs(3);
+      rhs[0] = e1;
+      rhs[1] = e2;
+      rhs[2] = e3;
       record_merge_events(lhs, rhs, memo);
     }
 
@@ -5900,6 +5998,57 @@ namespace Legion {
         ApUserEvent rename = Runtime::create_ap_user_event(NULL);
         Runtime::trigger_event(NULL, rename, lhs);
         lhs = rename;
+      }
+#endif
+
+      insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
+            memo->get_trace_local_id()));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(ApEvent &lhs,
+                                               const std::vector<ApEvent>& rhs,
+                                               Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+
+      std::set<unsigned> rhs_;
+      for (std::vector<ApEvent>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder != event_map.end())
+          rhs_.insert(finder->second);
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
+      else
+      {
+        // Check for reuse
+        for (unsigned idx = 0; idx < rhs.size(); idx++)
+        {
+          if (lhs != rhs[idx])
+            continue;
+          Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+          rename.trigger(lhs);
+          lhs = ApEvent(rename);
+          break;
+        }
       }
 #endif
 
@@ -5953,12 +6102,37 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
-      // TODO: support for tracing of gather/scatter/indirect operations
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      } 
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      // Do this first in case it gets preempted
+      const unsigned rhs_ = find_event(precondition, tpl_lock);
+      unsigned lhs_ = convert_event(lhs);
+      insert_instruction(new IssueIndirect(
+            *this, lhs_, expr, find_trace_local_id(memo),
+            src_fields, dst_fields, indirections,
+#ifdef LEGION_SPY
+            unique_indirections_identifier,
+#endif
+            rhs_));
     }
 
     //--------------------------------------------------------------------------
@@ -6644,8 +6818,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::ShardedPhysicalTemplate(PhysicalTrace *trace,
-                                     ApEvent fence_event, ReplicateContext *ctx)
-      : PhysicalTemplate(trace, fence_event), repl_ctx(ctx),
+       ApEvent fence_event, TaskTreeCoordinates &&coords, ReplicateContext *ctx)
+      : PhysicalTemplate(trace, fence_event, std::move(coords)), repl_ctx(ctx),
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
@@ -6777,6 +6951,113 @@ namespace Legion {
             memo->get_trace_local_id()));
     }
 
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_merge_events(ApEvent &lhs,
+                              const std::vector<ApEvent> &rhs, Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      std::set<unsigned> rhs_;
+      std::set<RtEvent> wait_for;
+      std::vector<ApEvent> pending_events;
+      std::map<ApEvent,RtUserEvent> request_events;
+      for (std::vector<ApEvent>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder == event_map.end())
+        {
+          // We're going to need to check this event later
+          pending_events.push_back(*it);
+          // See if anyone else has requested this event yet 
+          std::map<ApEvent,RtEvent>::const_iterator request_finder = 
+            pending_event_requests.find(*it);
+          if (request_finder == pending_event_requests.end())
+          {
+            const RtUserEvent request_event = Runtime::create_rt_user_event();
+            pending_event_requests[*it] = request_event;
+            wait_for.insert(request_event);
+            request_events[*it] = request_event;
+          }
+          else
+            wait_for.insert(request_finder->second);
+        }
+        else if (finder->second != NO_INDEX)
+          rhs_.insert(finder->second);
+      }
+      // If we have anything to wait for we need to do that
+      if (!wait_for.empty())
+      {
+        tpl_lock.release();
+        // Send any request messages first
+        if (!request_events.empty())
+        {
+          for (std::map<ApEvent,RtUserEvent>::const_iterator it = 
+                request_events.begin(); it != request_events.end(); it++)
+            request_remote_shard_event(it->first, it->second);
+        }
+        // Do the wait
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+        tpl_lock.reacquire();
+        // All our pending events should be here now
+        for (std::vector<ApEvent>::const_iterator it = 
+              pending_events.begin(); it != pending_events.end(); it++)
+        {
+          std::map<ApEvent,unsigned>::iterator finder = event_map.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != event_map.end());
+#endif
+          if (finder->second != NO_INDEX)
+            rhs_.insert(finder->second);
+        }
+      }
+      if (rhs_.size() == 0)
+        rhs_.insert(fence_completion_id);
+      
+      // If the lhs event wasn't made on this node then we need to rename it
+      // because we need all events to go back to a node where we know that
+      // we have a shard that can answer queries about it
+      const AddressSpaceID event_space = find_event_space(lhs);
+      if (event_space != repl_ctx->runtime->address_space)
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename, lhs);
+        lhs = rename;
+      }
+#ifndef LEGION_DISABLE_EVENT_PRUNING
+      else if (!lhs.exists())
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename);
+        lhs = rename;
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < rhs.size(); idx++)
+        {
+          if (lhs != rhs[idx])
+            continue;
+          ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+          Runtime::trigger_event(NULL, rename, lhs);
+          lhs = rename;
+          break;
+        }
+      }
+#endif
+      insert_instruction(new MergeEvent(*this, convert_event(lhs), rhs_,
+            memo->get_trace_local_id()));
+    }
+
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     unsigned ShardedPhysicalTemplate::convert_event(const ApEvent &event, 
@@ -6875,7 +7156,10 @@ namespace Legion {
                              ApEvent &lhs, IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
-                             const std::vector<void*> &indirections,
+                             const std::vector<CopyIndirection*> &indirections,
+#ifdef LEGION_SPY
+                             unsigned unique_indirections_identifier,
+#endif
                              ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
@@ -6892,7 +7176,11 @@ namespace Legion {
       }
       // Then do the base call
       PhysicalTemplate::record_issue_indirect(memo, lhs, expr, src_fields,
-                      dst_fields, indirections, precondition, pred_guard);
+                                              dst_fields, indirections,
+#ifdef LEGION_SPY
+                                              unique_indirections_identifier,
+#endif
+                                              precondition, pred_guard);
     }
     
     //--------------------------------------------------------------------------
@@ -7824,9 +8112,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!replay_precondition.exists());
 #endif
-      // Peak at recurrent from the front, can do this safely without
-      // the lock since we're not actually modifying anything
-      const bool recurrent = pending_replays.front().second;
+      ApEvent completion; bool recurrent;
+      {
+        AutoLock t_lock(template_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(!pending_replays.empty());
+#endif
+        const std::pair<ApEvent,bool> &pending = pending_replays.front();
+        completion = pending.first;
+        recurrent = pending.second;
+      }
       // Now update all of our barrier information
       if (recurrent)
       {
@@ -7949,7 +8244,6 @@ namespace Legion {
       }
       else
       {
-        const ApEvent completion = pending_replays.front().first;
         for (std::vector<std::pair<ApBarrier,unsigned> >::const_iterator it =
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
           events[it->second] = completion;
@@ -8339,11 +8633,18 @@ namespace Legion {
           local_frontiers.find(it->second); 
         if (finder == local_frontiers.end())
           continue;
+        std::map<unsigned,std::set<ShardID> >::iterator subscription_finder =
+          local_subscriptions.find(it->second);
 #ifdef DEBUG_LEGION
         assert(local_frontiers.find(it->first) == local_frontiers.end());
+        assert(subscription_finder != local_subscriptions.end());
+        assert(local_subscriptions.find(it->first) ==
+                local_subscriptions.end());
 #endif
         local_frontiers[it->first] = finder->second;
-        local_frontiers.erase(finder); 
+        local_frontiers.erase(finder);
+        local_subscriptions[it->first].swap(subscription_finder->second);
+        local_subscriptions.erase(subscription_finder);
       }
     }
 
@@ -8663,14 +8964,15 @@ namespace Legion {
                              std::map<TraceLocalID,Memoizable*> &operations)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> to_merge;
-      for (std::set<unsigned>::iterator it = rhs.begin(); it != rhs.end();
-           ++it)
+      std::vector<ApEvent> to_merge;
+      to_merge.reserve(rhs.size());
+      for (std::set<unsigned>::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
       {
 #ifdef DEBUG_LEGION
         assert(*it < events.size());
 #endif
-        to_merge.insert(events[*it]);
+        to_merge.push_back(events[*it]);
       }
       ApEvent result = Runtime::merge_events(NULL, to_merge);
       events[lhs] = result;
@@ -8820,6 +9122,108 @@ namespace Legion {
       ss << "}, events[" << precondition_idx << "]";
 
       if (redop != 0) ss << ", " << redop;
+      ss << ")";
+
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // IssueIndirect
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IssueIndirect::IssueIndirect(PhysicalTemplate& tpl,
+                                 unsigned l, IndexSpaceExpression *e,
+                                 const TraceLocalID& key,
+                                 const std::vector<CopySrcDstField>& s,
+                                 const std::vector<CopySrcDstField>& d,
+                                 const std::vector<CopyIndirection*> &indirects,
+#ifdef LEGION_SPY
+                                 unsigned unique_indirections_id,
+#endif
+                                 unsigned pi)
+      : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+#ifdef LEGION_SPY
+        unique_indirections_identifier(unique_indirections_id), 
+#endif
+        precondition_idx(pi)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < tpl.events.size());
+      assert(tpl.operations.front().find(owner) != 
+              tpl.operations.front().end());
+      assert(src_fields.size() > 0);
+      assert(dst_fields.size() > 0);
+      assert(precondition_idx < tpl.events.size());
+      assert(expr != NULL);
+#endif
+      expr->add_expression_reference();
+      indirections.resize(indirects.size());
+      for (unsigned idx = 0; idx < indirects.size(); idx++)
+        indirections[idx] = indirects[idx]->clone();
+    }
+
+    //--------------------------------------------------------------------------
+    IssueIndirect::~IssueIndirect(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_expression_reference())
+        delete expr;
+      for (unsigned idx = 0; idx < indirections.size(); idx++)
+        delete indirections[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void IssueIndirect::execute(std::vector<ApEvent> &events,
+                                std::map<unsigned,ApUserEvent> &user_events,
+                                std::map<TraceLocalID,Memoizable*> &operations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      Memoizable *memo = operations[owner];
+      ApEvent precondition = events[precondition_idx];
+      const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
+      events[lhs] = expr->issue_indirect(trace_info, dst_fields,
+                                         src_fields, indirections,
+#ifdef LEGION_SPY
+                                         unique_indirections_identifier,
+#endif
+                                         precondition,PredEvent::NO_PRED_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string IssueIndirect::to_string(
+                                 std::map<TraceLocalID,Memoizable*> &operations)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = indirect(operations[" << owner << "], "
+         << "Index expr: " << expr->expr_id << ", {";
+      for (unsigned idx = 0; idx < src_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << src_fields[idx].inst.id
+           << "," << std::dec << src_fields[idx].subfield_offset
+           << "," << src_fields[idx].size
+           << "," << src_fields[idx].field_id
+           << "," << src_fields[idx].serdez_id << ")";
+        if (idx != src_fields.size() - 1) ss << ",";
+      }
+      ss << "}, {";
+      for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << dst_fields[idx].inst.id
+           << "," << std::dec << dst_fields[idx].subfield_offset
+           << "," << dst_fields[idx].size
+           << "," << dst_fields[idx].field_id
+           << "," << dst_fields[idx].serdez_id << ")";
+        if (idx != dst_fields.size() - 1) ss << ",";
+      }
+      ss << "}, events[" << precondition_idx << "]";
+      ss << ", TODO: indirections";
       ss << ")";
 
       return ss.str();

@@ -55,7 +55,7 @@ namespace Legion {
           }
         case Processor::TOC_PROC:
           {
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
             return Internal::VariantExecutor(agency::cuda::parallel_executor());
 #else
             // This is an error because we need to be compiled

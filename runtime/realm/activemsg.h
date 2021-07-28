@@ -357,8 +357,9 @@ namespace Realm {
 
     void start_handler_threads(size_t stack_size);
 
-    // stalls caller until all incoming messages have been handled
-    void drain_incoming_messages(void);
+    // stalls caller until all incoming messages have been handled (and at
+    //  least 'min_messages_handled' in total)
+    void drain_incoming_messages(size_t min_messages_handled);
 
     void shutdown(void);
 
@@ -403,7 +404,8 @@ namespace Realm {
     };
 
     int get_messages(Message *& head, Message **& tail, bool wait);
-    bool return_messages(int sender, Message *head, Message **tail);
+    bool return_messages(int sender, size_t num_handled,
+                         Message *head, Message **tail);
 
     int nodes, dedicated_threads, sleeper_count;
     atomic<bool> bgwork_requested;
@@ -415,6 +417,8 @@ namespace Realm {
     int todo_oldest, todo_newest;
     int handlers_active;
     bool drain_pending;
+    size_t drain_min_count;
+    size_t total_messages_handled;
     Realm::Mutex mutex;
     Realm::CondVar condvar, drain_condvar;
     Realm::CoreReservation *core_rsrv;

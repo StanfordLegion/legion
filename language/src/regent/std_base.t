@@ -1046,25 +1046,29 @@ function base.variant:is_inline()
 end
 
 do
-  local global_kernel_id = 1
+  -- We use this counter to guarantee that each CUDA kernel within a module has a unique name
+  -- Note that task-local counters prefixed by task names are insufficient because meta-programmed
+  -- tasks have the same name.
+  local global_kernel_counter = 1
   function base.variant:add_cuda_kernel(kernel)
     if not self.cudakernels then
-      self.cudakernels = {}
+      self.cudakernels = terralib.newlist()
     end
-    local kernel_id = global_kernel_id
-    local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(kernel_id)
-    self.cudakernels[kernel_id] = {
+    local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(global_kernel_counter)
+    local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
+    self.cudakernels:insert({
       name = kernel_name,
       kernel = kernel,
-    }
-    global_kernel_id = global_kernel_id + 1
+      kernel_id = kernel_id,
+    })
     kernel:setname(kernel_name)
+    global_kernel_counter = global_kernel_counter + 1
     return kernel_id
   end
 end
 
 function base.variant:get_cuda_kernels()
-  return self.cudakernels or {}
+  return self.cudakernels or terralib.newlist()
 end
 
 function base.variant:set_config_options(t)
@@ -1473,7 +1477,11 @@ end
 
 -- TODO: This is actually safe once we make task ids global variables
 function base.task:set_task_id_unsafe(task_id)
-  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  if base.config["separate"] then
+    self.taskid:setinitializer(task_id)
+  else
+    self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  end
 end
 
 function base.task:get_task_id()
@@ -1490,7 +1498,11 @@ function base.task:get_mapper_id()
 end
 
 function base.task:set_mapper_id(mapper_id)
-  self.mapper_id = terralib.constant(c.legion_mapper_id_t, mapper_id)
+  if base.config["separate"] then
+    self.mapper_id:setinitializer(mapper_id)
+  else
+    self.mapper_id = terralib.constant(c.legion_mapper_id_t, mapper_id)
+  end
 end
 
 function base.task:has_mapping_tag_id()
@@ -1503,7 +1515,11 @@ function base.task:get_mapping_tag_id()
 end
 
 function base.task:set_mapping_tag_id(tag)
-  self.mapping_tag_id = terralib.constant(c.legion_mapping_tag_id_t, tag)
+  if base.config["separate"] then
+    self.mapping_tag_id:setinitializer(tag)
+  else
+    self.mapping_tag_id = terralib.constant(c.legion_mapping_tag_id_t, tag)
+  end
 end
 
 function base.task:set_name(name)
@@ -1621,6 +1637,10 @@ function base.task:set_is_inline(is_inline)
   self.is_inline = is_inline
 end
 
+function base.task:set_is_local(is_local)
+  self.is_local = is_local
+end
+
 function base.task:set_optimization_thunk(optimization_thunk)
   self.optimization_thunk = optimization_thunk
 end
@@ -1655,12 +1675,28 @@ do
     local unique_id = make_unique_task_identifier(name)
     local task_id
     if base.config["separate"] then
-      task_id = terralib.global(c.legion_task_id_t, c.AUTO_GENERATE_ID,
-                                "__regent_task_" .. unique_id .. "_task_id")
+      task_id = terralib.global(
+        c.legion_task_id_t, c.AUTO_GENERATE_ID,
+        "__regent_task_" .. unique_id .. "_task_id")
     else
       task_id = terralib.constant(c.legion_task_id_t, next_task_id)
       next_task_id = next_task_id + 1
     end
+
+    local mapper_id = false
+    if base.config["separate"] then
+      mapper_id = terralib.global(
+        c.legion_mapper_id_t, 0,
+        "__regent_task_" .. unique_id .. "_mapper_id")
+    end
+
+    local mapping_tag_id = false
+    if base.config["separate"] then
+      mapping_tag_id = terralib.global(
+        c.legion_mapping_tag_id_t, 0,
+        "__regent_task_" .. unique_id .. "_mapping_tag_id")
+    end
+
     return setmetatable({
       name = name,
       span = span,
@@ -1670,8 +1706,8 @@ do
       calling_convention = false,
 
       -- User-configurable task metadata:
-      mapper_id = false,
-      mapping_tag_id = false,
+      mapper_id = mapper_id,
+      mapping_tag_id = mapping_tag_id,
 
       -- Metadata for the Regent calling convention:
       param_symbols = false,
@@ -1702,6 +1738,7 @@ do
       is_complete = false,
       optimization_thunk = false,
       is_inline = false,
+      is_local = false,
     }, base.task)
   end
 end

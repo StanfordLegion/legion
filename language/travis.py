@@ -81,6 +81,10 @@ def test(root_dir, install_only, debug, max_dim, short, no_pretty,
         # if not spy and not prof and not gcov and not hdf5 and not openmp and not cuda:
         #     extra_flags.append('--debug')
 
+        if prof and 'TMP_BIN_DIR' in env:
+            extra_flags.append('--legion-prof-rs=%s' % (
+                os.path.join(env['TMP_BIN_DIR'], 'legion_prof')))
+
         subprocess.check_call(
             [sys.executable, './test.py', '-q'] + test_threads + max_dim_flag + short_flag + no_pretty_flag + extra_flags + inner_flag,
             env = env,

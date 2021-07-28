@@ -1,10 +1,31 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (???? ??, ????)
+Version 21.06.0 (June 24, 2021)
+  * Build
+    - Version information is now compiled into Realm and Legion.  This takes
+        the form of a string (e.g. "legion-21.06.0") rather than anything
+        that can be compared (i.e. no semantic versioning here).  Compile-time
+        defines `REALM_VERSION` and `LEGION_VERSION` are available as well as
+        run-time calls `Realm::Runtime::get_library_version` and
+        `Legion::Runtime::get_library_version`.
   * Regent
     - Support for dynamic checks on projection functors, enabling a
         much larger class of loops to be supported as index launches
+    - Support for local tasks (i.e., without going through the
+      runtime) via `__demand(__local)`
+  * Realm
+    - Windows (MSVC) builds are now tested in CI and and therefore more likely
+        to work
+    - Realm runtime can now be shutdown and reinitialized in the same process.
+        (Exception: GASNet-based network layers do not support this.)
+    - Registration of host memory with CUDA driver is skipped for host
+        memories larger than 1GB by default due to CUDA driver overhead.
+        This threshold can be increased (or decreased) with `-cuda:hostreg`
+  * Tools
+    - New Rust implementation of Legion Prof is 5-15x faster than the
+        original (even with PyPy). For more details, see:
+        https://legion.stanford.edu/profiling/#rust-legion-prof
 
 Version 21.03.0 (March 30, 2021)
   * Build

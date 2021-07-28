@@ -88,6 +88,7 @@ extern "C" {
   LEGION_FOREACH_N(NEW_ACCESSOR_ARRAY_TYPE)
 #undef NEW_ACCESSOR_ARRAY_TYPE
   NEW_OPAQUE_TYPE(legion_task_t);
+  NEW_OPAQUE_TYPE(legion_task_mut_t);
   NEW_OPAQUE_TYPE(legion_copy_t);
   NEW_OPAQUE_TYPE(legion_fill_t);
   NEW_OPAQUE_TYPE(legion_inline_t);
@@ -2851,6 +2852,18 @@ extern "C" {
                                legion_task_launcher_t launcher);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_task()
+   */
+  legion_future_t
+  legion_task_launcher_execute_outputs(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_task_launcher_t launcher,
+                                       legion_output_requirement_t *reqs,
+                                       size_t reqs_size);
+
+  /**
    * @see Legion::TaskLauncher::add_region_requirement()
    */
   unsigned
@@ -3040,6 +3053,13 @@ extern "C" {
   void
   legion_task_launcher_set_local_function_task(legion_task_launcher_t launcher,
                                                bool local_function_task);
+
+  /**
+   * @see Legion::TaskLauncher::elide_future_return
+   */
+  void
+  legion_task_launcher_set_elide_future_return(legion_task_launcher_t launcher,
+                                               bool elide_future_return);
 
   /**
    * @return Caller takes ownership of return value.
@@ -3348,6 +3368,13 @@ extern "C" {
   void
   legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher,
                                         legion_mapping_tag_id_t tag);
+
+  /**
+   * @see Legion::IndexTaskLauncher::elide_future_return
+   */
+  void
+  legion_index_launcher_set_elide_future_return(legion_index_launcher_t launcher,
+                                                bool elide_future_return);
 
   // -----------------------------------------------------------------------
   // Inline Mapping Operations
@@ -4673,6 +4700,9 @@ extern "C" {
   legion_shard_id_t
   legion_runtime_local_shard(legion_runtime_t runtime, legion_context_t ctx);
 
+  legion_shard_id_t
+  legion_runtime_local_shard_without_context(void);
+
   /**
    * @see Legion::Runtime::total_shards()
    */
@@ -4913,6 +4943,35 @@ extern "C" {
   legion_context_get_unique_id(legion_context_t ctx); 
 
   /**
+   * Important: This creates an *empty* task. In the vast majority of
+   * cases you want a pre-filled task passed by the runtime. This
+   * returns a separate type, legion_task_mut_t, to help avoid
+   * potential pitfalls.
+   *
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Task::Task()
+   */
+  legion_task_mut_t
+  legion_task_create_empty();
+
+  /**
+   * @param handle Caller must have ownership of parameter 'handle'
+   *
+   * @see Legion::Task::~Task()
+   */
+  void
+  legion_task_destroy(legion_task_mut_t handle);
+
+  /**
+   * This function turns a legion_task_mut_t into a legion_task_t for
+   * use with the rest of the API calls. Note that the derived pointer
+   * depends on the original and should not outlive it.
+   */
+  legion_task_t
+  legion_task_mut_as_task(legion_task_mut_t task);
+
+  /**
    * @see Legion::Mappable::get_unique_id()
    */
   legion_unique_id_t
@@ -4984,10 +5043,22 @@ extern "C" {
   legion_task_get_args(legion_task_t task);
 
   /**
+   * @see Legion::Task::args
+   */
+  void
+  legion_task_set_args(legion_task_mut_t task, void *args);
+
+  /**
    * @see Legion::Task::arglen
    */
   size_t
   legion_task_get_arglen(legion_task_t task);
+
+  /**
+   * @see Legion::Task::arglen
+   */
+  void
+  legion_task_set_arglen(legion_task_mut_t task, size_t arglen);
 
   /**
    * @see Legion::Task::index_domain
@@ -5044,6 +5115,12 @@ extern "C" {
    */
   legion_future_t
   legion_task_get_future(legion_task_t task, unsigned idx);
+
+  /**
+   * @see Legion::Task::futures
+   */
+  void
+  legion_task_add_future(legion_task_mut_t task, legion_future_t future);
 
   /**
    * @see Legion::Task::task_id

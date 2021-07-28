@@ -73,7 +73,7 @@ def download(dest_path, url, sha256, insecure=False):
         check_sha256(dest_path, sha256)
         return
 
-    subprocess.check_call(['curl'] + insecure_flag + ['-o', dest_path, url])
+    subprocess.check_call(['curl', '-L'] + insecure_flag + ['-o', dest_path, url])
     check_sha256(dest_path, sha256)
 
 def extract(dest_dir, archive_path, format):
@@ -262,6 +262,14 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         clang_source_dir = os.path.join(llvm_dir, 'cfe-9.0.0.src')
         download(llvm_tarball, '%s/9.0.0/llvm-9.0.0.src.tar.xz' % mirror, 'd6a0565cf21f22e9b4353b2eb92622e8365000a9e90a16b09b56f8157eabfe84', insecure=insecure)
         download(clang_tarball, '%s/9.0.0/cfe-9.0.0.src.tar.xz' % mirror, '7ba81eef7c22ca5da688fdf9d88c20934d2d6b40bfe150ffd338900890aa4610', insecure=insecure)
+    elif llvm_version == '110':
+        mirror = 'https://github.com/llvm/llvm-project/releases/download'
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-11.1.0.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-11.1.0.src')
+        clang_tarball = os.path.join(llvm_dir, 'clang-11.1.0.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'clang-11.1.0.src')
+        download(llvm_tarball, '%s/llvmorg-11.1.0/llvm-11.1.0.src.tar.xz' % mirror, 'ce8508e318a01a63d4e8b3090ab2ded3c598a50258cc49e2625b9120d4c03ea5', insecure=insecure)
+        download(clang_tarball, '%s/llvmorg-11.1.0/clang-11.1.0.src.tar.xz' % mirror, '0a8288f065d1f57cb6d96da4d2965cbea32edc572aa972e466e954d17148558b', insecure=insecure)
     else:
         assert False
 
@@ -363,15 +371,9 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         if 'HOST_CXX' not in os.environ:
             raise Exception('Please set HOST_CXX in your environment')
 
-    if llvm_version == '35':
+    if llvm_version in ('35', '38'):
         llvm_use_cmake = False
-    elif llvm_version == '38':
-        llvm_use_cmake = False
-    elif llvm_version == '39':
-        llvm_use_cmake = True
-    elif llvm_version == '60':
-        llvm_use_cmake = True
-    elif llvm_version == '90':
+    elif llvm_version in ('39', '60', '90', '110'):
         llvm_use_cmake = True
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
@@ -526,7 +528,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60', '90'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60', '90', '110'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(

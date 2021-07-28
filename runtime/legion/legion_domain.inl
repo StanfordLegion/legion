@@ -1573,12 +1573,28 @@ namespace Legion {
         { ptr = rhs.ptr; stride = rhs.stride; return *this; }
       inline iterator& operator+=(int rhs) { ptr += stride; return *this; }
       inline iterator& operator-=(int rhs) { ptr -= stride; return *this; }
-      inline const FT& operator*(void) const
-        { return *reinterpret_cast<const FT*>(ptr); }
+      inline const FT& operator*(void) const 
+        { 
+          FT *result = NULL;
+          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          memcpy(&result, &ptr, sizeof(result));
+          return *result;
+        }
       inline const FT* operator->(void) const
-        { return reinterpret_cast<const FT*>(ptr); }
-      inline const FT& operator[](int rhs) const 
-        { return *reinterpret_cast<const FT*>(ptr + rhs * stride); }
+        { 
+          FT *result = NULL;
+          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          memcpy(&result, &ptr, sizeof(result));
+          return result;
+        }
+      inline const FT& operator[](int rhs) const
+        { 
+          FT *result = NULL;
+          const uint8_t *ptr2 = ptr + rhs * stride;
+          static_assert(sizeof(result) == sizeof(ptr2), "C++ is dumb");
+          memcpy(&result, &ptr2, sizeof(result));
+          return *result;
+        }
     public:
       inline iterator& operator++(void) { ptr += stride; return *this; }
       inline iterator& operator--(void) { ptr -= stride; return *this; }
@@ -1620,12 +1636,28 @@ namespace Legion {
         { ptr -= stride; return *this; }
       inline reverse_iterator& operator-=(int rhs) 
         { ptr += stride; return *this; }
-      inline const FT& operator*(void) const
-        { return *reinterpret_cast<const FT*>(ptr); }
+      inline const FT& operator*(void) const 
+        { 
+          FT *result = NULL;
+          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          memcpy(&result, &ptr, sizeof(result));
+          return *result;
+        }
       inline const FT* operator->(void) const
-        { return reinterpret_cast<const FT*>(ptr); }
-      inline const FT& operator[](int rhs) const 
-        { return *reinterpret_cast<const FT*>(ptr - rhs * stride); }
+        { 
+          FT *result = NULL;
+          static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+          memcpy(&result, &ptr, sizeof(result));
+          return result;
+        }
+      inline const FT& operator[](int rhs) const
+        { 
+          FT *result = NULL;
+          const uint8_t *ptr2 = ptr - rhs * stride;
+          static_assert(sizeof(result) == sizeof(ptr2), "C++ is dumb");
+          memcpy(&result, &ptr2, sizeof(result));
+          return *result;
+        }
     public:
       inline reverse_iterator& operator++(void) 
         { ptr -= stride; return *this; }
@@ -1659,7 +1691,11 @@ namespace Legion {
   public:
     Span(void) : base(NULL), extent(0), stride(0) { }
     Span(const FT *b, size_t e, size_t s = sizeof(FT))
-      : base(reinterpret_cast<const uint8_t*>(b)), extent(e), stride(s) { }
+      : base(NULL), extent(e), stride(s)
+      { 
+        static_assert(sizeof(base) == sizeof(b), "C++ is dumb");
+        memcpy(&base, &b, sizeof(base));
+      }
   public:
     inline iterator begin(void) const { return iterator(base, stride); }
     inline iterator end(void) const 
@@ -1669,14 +1705,36 @@ namespace Legion {
     inline reverse_iterator rend(void) const
       { return reverse_iterator(base - stride, stride); }
   public:
-    inline const FT& front(void) const
-      { return *reinterpret_cast<const FT*>(base); }
+    inline const FT& front(void) const 
+      { 
+        FT *result = NULL;
+        static_assert(sizeof(result) == sizeof(base), "C++ is dumb");
+        memcpy(&result, &base, sizeof(result));
+        return *result;
+      }
     inline const FT& back(void) const
-      { return *reinterpret_cast<const FT*>(base + (extent-1)*stride); }
+      {
+        FT *result = NULL;
+        const uint8_t *ptr = base + (extent-1)*stride;
+        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        memcpy(&result, &ptr, sizeof(result));
+        return *result;
+      }
     inline const FT& operator[](int index) const
-      { return *reinterpret_cast<const FT*>(base + index * stride); }
-    inline const FT* data(void) const 
-      { return reinterpret_cast<const FT*>(base); }
+      { 
+        FT *result = NULL;
+        const uint8_t *ptr = base + index * stride;
+        static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
+        memcpy(&result, &ptr, sizeof(result));
+        return *result;
+      }
+    inline const FT* data(void) const
+      {
+        FT *result = NULL;
+        static_assert(sizeof(result) == sizeof(base), "C++ is dumb");
+        memcpy(&result, &base, sizeof(result));
+        return result;
+      }
     inline uintptr_t get_base(void) const { return uintptr_t(base); } 
   public:
     inline size_t size(void) const { return extent; }

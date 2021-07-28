@@ -89,6 +89,49 @@ namespace Realm {
     }
   }
 
+  template <typename T>
+  static void memset_1d_typed(uintptr_t dst_base, size_t bytes, T val)
+  {
+    std::fill(reinterpret_cast<T *>(dst_base),
+	      reinterpret_cast<T *>(dst_base + bytes),
+              val);
+  }
+
+  template <typename T>
+  static void memset_2d_typed(uintptr_t dst_base, uintptr_t dst_lstride,
+			      size_t bytes, size_t lines, T val)
+  {
+    for(size_t i = 0; i < lines; i++) {
+      std::fill(reinterpret_cast<T *>(dst_base),
+		reinterpret_cast<T *>(dst_base + bytes),
+                val);
+      // manual strength reduction
+      dst_base += dst_lstride;
+    }
+  }
+
+  template <typename T>
+  static void memset_3d_typed(uintptr_t dst_base, uintptr_t dst_lstride,
+			      uintptr_t dst_pstride,
+			      size_t bytes, size_t lines, size_t planes,
+                              T val)
+  {
+    // adjust plane stride amounts to account for line strides (so we don't have
+    //  to subtract the line strides back out in the loop)
+    uintptr_t dst_pstride_adj = dst_pstride - (lines * dst_lstride);
+
+    for(size_t j = 0; j < planes; j++) {
+      for(size_t i = 0; i < lines; i++) {
+	std::fill(reinterpret_cast<T *>(dst_base),
+		  reinterpret_cast<T *>(dst_base + bytes),
+                  val);
+	// manual strength reduction
+	dst_base += dst_lstride;
+      }
+      dst_base += dst_pstride_adj;
+    }
+  }
+
   // need types with various powers-of-2 size/alignment - we have up to
   //  uint64_t as builtins, but we need trivially-copyable 16B and 32B things
   struct dummy_16b_t { uint64_t a, b; };
@@ -96,8 +139,8 @@ namespace Realm {
   REALM_ALIGNED_TYPE_CONST(aligned_16b_t, dummy_16b_t, 16);
   REALM_ALIGNED_TYPE_CONST(aligned_32b_t, dummy_32b_t, 32);
 
-  static void memcpy_1d(uintptr_t dst_base, uintptr_t src_base,
-			size_t bytes)
+  void memcpy_1d(uintptr_t dst_base, uintptr_t src_base,
+                 size_t bytes)
   {
     // by subtracting 1 from bases, strides, and lengths, we get LSBs set
     //  based on the common alignment of every parameter in the copy
@@ -125,9 +168,9 @@ namespace Realm {
       memcpy_1d_typed<uint8_t>(dst_base, src_base, bytes);
   }
 
-  static void memcpy_2d(uintptr_t dst_base, uintptr_t dst_lstride,
-			uintptr_t src_base, uintptr_t src_lstride,
-			size_t bytes, size_t lines)
+  void memcpy_2d(uintptr_t dst_base, uintptr_t dst_lstride,
+                 uintptr_t src_base, uintptr_t src_lstride,
+                 size_t bytes, size_t lines)
   {
     // by subtracting 1 from bases, strides, and lengths, we get LSBs set
     //  based on the common alignment of every parameter in the copy
@@ -166,11 +209,11 @@ namespace Realm {
 			       bytes, lines);
   }
 
-  static void memcpy_3d(uintptr_t dst_base, uintptr_t dst_lstride,
-			uintptr_t dst_pstride,
-			uintptr_t src_base, uintptr_t src_lstride,
-			uintptr_t src_pstride,
-			size_t bytes, size_t lines, size_t planes)
+  void memcpy_3d(uintptr_t dst_base, uintptr_t dst_lstride,
+                 uintptr_t dst_pstride,
+                 uintptr_t src_base, uintptr_t src_lstride,
+                 uintptr_t src_pstride,
+                 size_t bytes, size_t lines, size_t planes)
   {
     // by subtracting 1 from bases, strides, and lengths, we get LSBs set
     //  based on the common alignment of every parameter in the copy
@@ -224,6 +267,153 @@ namespace Realm {
       memcpy_3d_typed<uint8_t>(dst_base, dst_lstride, dst_pstride,
 				src_base, src_lstride, src_pstride,
 			       bytes, lines, planes);
+  }
+
+  void memset_1d(uintptr_t dst_base, size_t bytes,
+                 const void *fill_data, size_t fill_size)
+  {
+    // by subtracting 1 from bases, strides, and lengths, we get LSBs set
+    //  based on the common alignment of every parameter in the copy
+    unsigned alignment = ((dst_base - 1) & (bytes - 1));
+//define DEBUG_MEMCPYS
+#ifdef DEBUG_MEMCPYS
+    log_xd.print() << std::hex << "memcpy_1d: dst=" << dst_base
+                   << " src=" << src_base
+                   << std::dec << " bytes=" << bytes
+                   << " align=" << (alignment & 31);
+#endif
+    // alignment must be at least as good as fill size to use memset
+    // TODO: consider jump table approach?
+    if((fill_size == 32) && ((alignment & 31) == 31))
+      memset_1d_typed<aligned_32b_t>(dst_base, bytes,
+                                     *reinterpret_cast<const aligned_32b_t *>(fill_data));
+    else if((fill_size == 16) && ((alignment & 15) == 15))
+      memset_1d_typed<aligned_16b_t>(dst_base, bytes,
+                                     *reinterpret_cast<const aligned_16b_t *>(fill_data));
+    else if((fill_size == 8) && ((alignment & 7) == 7))
+      memset_1d_typed<uint64_t>(dst_base, bytes,
+                                *reinterpret_cast<const uint64_t *>(fill_data));
+    else if((fill_size == 4) && ((alignment & 3) == 3))
+      memset_1d_typed<uint32_t>(dst_base, bytes,
+                                *reinterpret_cast<const uint32_t *>(fill_data));
+    else if((fill_size == 2) && ((alignment & 1) == 1))
+      memset_1d_typed<uint16_t>(dst_base, bytes,
+                                *reinterpret_cast<const uint16_t *>(fill_data));
+    else if(fill_size == 1)
+      memset_1d_typed<uint8_t>(dst_base, bytes,
+                               *reinterpret_cast<const uint8_t *>(fill_data));
+    else {
+      // fallback based on memcpy
+      memcpy_2d(dst_base, fill_size,
+                reinterpret_cast<uintptr_t>(fill_data), 0,
+                fill_size, bytes / fill_size);
+    }
+  }
+
+  void memset_2d(uintptr_t dst_base, uintptr_t dst_lstride,
+                 size_t bytes, size_t lines,
+                 const void *fill_data, size_t fill_size)
+  {
+    // by subtracting 1 from bases, strides, and lengths, we get LSBs set
+    //  based on the common alignment of every parameter in the copy
+    unsigned alignment = ((dst_base - 1) & (dst_lstride - 1) &
+			  (bytes - 1));
+#ifdef DEBUG_MEMCPYS
+    log_xd.print() << std::hex << "memcpy_2d: dst=" << dst_base
+                   << "+" << dst_lstride
+                   << " src=" << src_base
+                   << "+" << src_lstride
+                   << std::dec << " bytes=" << bytes
+                   << " lines=" << lines
+                   << " align=" << (alignment & 31);
+#endif
+    // alignment must be at least as good as fill size to use memset
+    // TODO: consider jump table approach?
+    if((fill_size == 32) && ((alignment & 31) == 31))
+      memset_2d_typed<aligned_32b_t>(dst_base, dst_lstride,
+                                     bytes, lines,
+                                     *reinterpret_cast<const aligned_32b_t *>(fill_data));
+    else if((fill_size == 16) && ((alignment & 15) == 15))
+      memset_2d_typed<aligned_16b_t>(dst_base, dst_lstride,
+                                     bytes, lines,
+                                     *reinterpret_cast<const aligned_16b_t *>(fill_data));
+    else if((fill_size == 8) && ((alignment & 7) == 7))
+      memset_2d_typed<uint64_t>(dst_base, dst_lstride,
+                                bytes, lines,
+                                *reinterpret_cast<const uint64_t *>(fill_data));
+    else if((fill_size == 4) && ((alignment & 3) == 3))
+      memset_2d_typed<uint32_t>(dst_base, dst_lstride,
+                                bytes, lines,
+                                *reinterpret_cast<const uint32_t *>(fill_data));
+    else if((fill_size == 2) && ((alignment & 1) == 1))
+      memset_2d_typed<uint16_t>(dst_base, dst_lstride,
+                                bytes, lines,
+                                *reinterpret_cast<const uint16_t *>(fill_data));
+    else if(fill_size == 1)
+      memset_2d_typed<uint8_t>(dst_base, dst_lstride,
+                               bytes, lines,
+                               *reinterpret_cast<const uint8_t *>(fill_data));
+    else {
+      // fallback based on memcpy
+      memcpy_3d(dst_base, fill_size, dst_lstride,
+                reinterpret_cast<uintptr_t>(fill_data), 0, 0,
+                fill_size, bytes / fill_size, lines);
+    }
+  }
+
+  void memset_3d(uintptr_t dst_base, uintptr_t dst_lstride,
+                 uintptr_t dst_pstride,
+                 size_t bytes, size_t lines, size_t planes,
+                 const void *fill_data, size_t fill_size)
+  {
+    // by subtracting 1 from bases, strides, and lengths, we get LSBs set
+    //  based on the common alignment of every parameter in the copy
+    unsigned alignment = ((dst_base - 1) & (dst_lstride - 1) &
+			  (dst_pstride - 1) &
+			  (bytes - 1));
+#ifdef DEBUG_MEMCPYS
+    log_xd.print() << std::hex << "memcpy_3d: dst=" << dst_base
+                   << "+" << dst_lstride << "+" << dst_pstride
+                   << " src=" << src_base
+                   << "+" << src_lstride << "+" << src_pstride
+                   << std::dec << " bytes=" << bytes
+                   << " lines=" << lines
+                   << " planes=" << planes
+                   << " align=" << (alignment & 31);
+#endif
+    // alignment must be at least as good as fill size to use memset
+    // TODO: consider jump table approach?
+    if((fill_size == 32) && ((alignment & 31) == 31))
+      memset_3d_typed<aligned_32b_t>(dst_base, dst_lstride, dst_pstride,
+                                     bytes, lines, planes,
+                                     *reinterpret_cast<const aligned_32b_t *>(fill_data));
+    else if((fill_size == 16) && ((alignment & 15) == 15))
+      memset_3d_typed<aligned_16b_t>(dst_base, dst_lstride, dst_pstride,
+                                     bytes, lines, planes,
+                                     *reinterpret_cast<const aligned_16b_t *>(fill_data));
+    else if((fill_size == 8) && ((alignment & 7) == 7))
+      memset_3d_typed<uint64_t>(dst_base, dst_lstride, dst_pstride,
+                                bytes, lines, planes,
+                                *reinterpret_cast<const uint64_t *>(fill_data));
+    else if((fill_size == 4) && ((alignment & 3) == 3))
+      memset_3d_typed<uint32_t>(dst_base, dst_lstride, dst_pstride,
+                                bytes, lines, planes,
+                                *reinterpret_cast<const uint32_t *>(fill_data));
+    else if((fill_size == 2) && ((alignment & 1) == 1))
+      memset_3d_typed<uint16_t>(dst_base, dst_lstride, dst_pstride,
+                                bytes, lines, planes,
+                                *reinterpret_cast<const uint16_t *>(fill_data));
+    else if(fill_size == 1)
+      memset_3d_typed<uint8_t>(dst_base, dst_lstride, dst_pstride,
+                               bytes, lines, planes,
+                               *reinterpret_cast<const uint8_t *>(fill_data));
+    else {
+      // fallback based on memcpy
+      for(size_t p = 0; p < planes; p++)
+        memcpy_3d(dst_base + (p * dst_pstride), fill_size, dst_lstride,
+                  reinterpret_cast<uintptr_t>(fill_data), 0, 0,
+                  fill_size, bytes / fill_size, lines);
+    }
   }
 
 #if 0
@@ -331,6 +521,10 @@ namespace Realm {
     //  (i.e. from [pos, pos+retval) )
     size_t SequenceAssembler::add_span(size_t pos, size_t count)
     {
+      // nothing to do for empty spans
+      if(count == 0)
+        return 0;
+
       // fastest case - try to bump the contig amount without a lock, assuming
       //  there's no noncontig spans
       size_t prev_x2 = pos << 1;
@@ -3075,16 +3269,8 @@ namespace Realm {
 		if((contig_bytes == bytes_left) ||
 		   ((contig_bytes == ocount) && (out_dim == 1))) {
 		  bytes = contig_bytes;
-		  // we only have one element worth of data, so fill
-		  //  multiple elements by using a "2d" copy with a
-		  //  source stride of 0
-		  size_t repeat_count = contig_bytes / fill_size;
-#ifdef DEBUG_REALM
-		  assert((contig_bytes % fill_size) == 0);
-#endif
-		  memcpy_2d(out_base + out_offset, fill_size,
-			    reinterpret_cast<uintptr_t>(fill_data), 0,
-			    fill_size, repeat_count);
+		  memset_1d(out_base + out_offset, contig_bytes,
+                            fill_data, fill_size);
 		  out_alc.advance(0, bytes);
 		} else {
 		  // grow to a 2D fill
@@ -3095,16 +3281,9 @@ namespace Realm {
 					  bytes_left / contig_bytes);
 
 		  bytes = contig_bytes * lines;
-		  // we only have one element worth of data, so 2d fill
-		  //  multiple elements by using a "3d" copy with a
-		  //  source stride of 0
-		  size_t repeat_count = contig_bytes / fill_size;
-#ifdef DEBUG_REALM
-		  assert((contig_bytes % fill_size) == 0);
-#endif
-		  memcpy_3d(out_base + out_offset, fill_size, out_lstride,
-			    reinterpret_cast<uintptr_t>(fill_data), 0, 0,
-			    fill_size, repeat_count, lines);
+                  memset_2d(out_base + out_offset, out_lstride,
+                            contig_bytes, lines,
+                            fill_data, fill_size);
 		  out_alc.advance(1, lines);
 		}
 	      } else {
@@ -3639,6 +3818,14 @@ namespace Realm {
 		  // source also favors 1d >> 2d >> gather
 		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
 		     (src_1d_maxbytes >= src_ga_maxbytes)) {
+                    // TODO: if congestion is telling us not to send anything
+                    //  at all, it'd be better to sleep until the network
+                    //  says it's reasonable to try again - this approach
+                    //  will effectively spinwait (but at least guarantees to
+                    //  intersperse it with calls to the network progress
+                    //  work item)
+                    if(src_1d_maxbytes == 0) break;
+
 		    // 1D source
 		    bytes = src_1d_maxbytes;
 		    //log_xd.info() << "remote write 1d: guid=" << guid

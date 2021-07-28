@@ -131,11 +131,41 @@ def run_gc(logfiles, verbose, py_exe_path):
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
 def run_prof(out_dir, logfiles, verbose, py_exe_path):
+    result_dir = os.path.join(out_dir, 'legion_prof')
     cmd = [
         py_exe_path,
         os.path.join(regent.root_dir(), 'tools', 'legion_prof.py'),
-        '-o', os.path.join(out_dir, 'legion_prof'),
+        '-o', result_dir,
     ] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
+def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
+    result_dir = os.path.join(out_dir, 'legion_prof_rs')
+    cmd = [legion_prof_rs, '-o', result_dir,] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
+def compare_prof_results(verbose, py_exe_path, profile_dirs):
+    cmd = ['diff', '-r', '-u',
+           '--exclude', 'legion_prof_ops.tsv',
+           ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -170,7 +200,7 @@ def find_labeled_flags(filename, prefix, short):
         return flags[:1]
     return flags
 
-def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
@@ -190,12 +220,12 @@ def test_compile_fail(filename, debug, verbose, short, timelimit, py_exe_path, f
     else:
         raise TestFailure(last_cmd, 1, 'Expected failure, but test ran successfully!')
 
-def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     for params in runs_with:
         run(filename, debug, verbose, timelimit, params + flags, env)
 
-def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
@@ -211,7 +241,7 @@ def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, flags, env
     finally:
         shutil.rmtree(spy_dir)
 
-def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     gc_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     gc_log = os.path.join(gc_dir, 'gc_%.log')
     gc_flags = ['-level', 'legion_gc=2', '-logfile', gc_log]
@@ -227,7 +257,7 @@ def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, flags, env)
     finally:
         shutil.rmtree(gc_dir)
 
-def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, flags, env):
+def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
     prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
@@ -239,7 +269,9 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, flags, en
 
             prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
             assert len(prof_logs) > 0
-            run_prof(prof_dir, prof_logs, verbose, py_exe_path)
+            result_py = run_prof(prof_dir, prof_logs, verbose, py_exe_path)
+            result_rs = run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
+            compare_prof_results(verbose, py_exe_path, [result_py, result_rs])
     finally:
         shutil.rmtree(prof_dir)
 
@@ -252,21 +284,21 @@ FAIL = 'fail'
 INTERRUPT = 'interrupt'
 INTERNALERROR = 'internalerror'
 
-def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path):
+def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path, legion_prof_rs):
     test_fn, test_args = test_closure
     saved_temps = []
     try:
-        test_fn(filename, debug, verbose, short, timelimit, py_exe_path, *test_args)
+        test_fn(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, *test_args)
     except KeyboardInterrupt:
-        return test_name, filename, [], INTERRUPT, 0, None
+        return test_name, filename, None, [], INTERRUPT, 0, None
     except TestFailure as e:
-        return test_name, e.command, [], FAIL, e.retcode, e.output
+        return test_name, filename, e.command, [], FAIL, e.retcode, e.output
     except Exception as e:
         if verbose:
-            return test_name, filename, [], INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
-        return test_name, filename, [], INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
+            return test_name, filename, None, [], INTERNALERROR, 0, ''.join(traceback.format_exception(*sys.exc_info()))
+        return test_name, filename, None, [], INTERNALERROR, 0, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
     else:
-        return test_name, filename, [], PASS, 0, None
+        return test_name, filename, None, [], PASS, 0, None
 
 class Counter:
     def __init__(self):
@@ -386,7 +418,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_gc, use_prof, use_hdf5, use
 def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                   openmp, cuda, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, poll_interval,
-                  short, no_pretty):
+                  short, no_pretty, legion_prof_rs):
     # run only one test at a time if '-j' isn't set
     if not thread_count:
         thread_count = 1
@@ -424,7 +456,8 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                 raise e
             thread_pool.apply_async(test_runner,
                                     (test_name, test_fn, debug, verbose,
-                                     test_path, timelimit, short, py_exe_path),
+                                     test_path, timelimit, short, py_exe_path,
+                                     legion_prof_rs),
                                     callback=callback,
                                     error_callback=error_callback)
 
@@ -445,13 +478,15 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
         while num_remaining:
             # wait for up to 'interval' seconds for something to finish
             try:
-                test_name, filename, saved_temps, outcome, retcode, output = result_queue.get(timeout=poll_interval)
+                test_name, filename, command, saved_temps, outcome, retcode, output = result_queue.get(timeout=poll_interval)
                 num_remaining -= 1
                 if len(saved_temps) > 0:
                     all_saved_temps.append((test_name, filename, saved_temps))
                 if outcome == PASS:
                     if not quiet:
                         print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
+                        if verbose and command is not None:
+                            print(command)
                     if output is not None: print(output)
                     test_counters[test_name].passed += 1
                     num_passed += 1
@@ -464,6 +499,15 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
                     else:
                         errmsg = 'return code %d' % retcode
                     print('[%sFAIL%s] (%s) (%s) %s' % (red, clear, test_name, errmsg, filename))
+                    if command is not None:
+                        print(command)
+                    if output is not None: print(output)
+                    test_counters[test_name].failed += 1
+                    num_failed += 1
+                elif outcome == INTERNALERROR:
+                    print('[%sERROR%s] (%s) %s' % (red, clear, test_name, filename))
+                    if command is not None:
+                        print(command)
                     if output is not None: print(output)
                     test_counters[test_name].failed += 1
                     num_failed += 1
@@ -476,7 +520,7 @@ def run_all_tests(thread_count, debug, max_dim, run, spy, gc, prof, hdf5,
             if poll_interval:
                 t_now = time.time()
                 if (t_now >= t_last + poll_interval) or (num_remaining == 0):
-                    print('Time elapsed: %4d s, tests passed: %4d, failed: %4d, remaining: %4d' % (int(t_now - t_start), num_passed, num_failed, num_remaining))
+                    print('Time elapsed: %4d s, tests passed: %4d, failed: %4d, remaining: %4d' % (int(t_now - t_start), num_passed, num_failed, num_remaining), flush=True)
                     t_last = t_now
 
         thread_pool.join()
@@ -597,6 +641,9 @@ def test_driver(argv):
                         action='store_true',
                         help='disable pretty-printing tests',
                         dest='no_pretty')
+    parser.add_argument('--legion-prof-rs',
+                        default='legion_prof',
+                        help='location of Legion Prof Rust binary')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
@@ -619,7 +666,8 @@ def test_driver(argv):
         args.timelimit,
         args.poll_interval,
         args.short,
-        args.no_pretty)
+        args.no_pretty,
+        args.legion_prof_rs)
 
 if __name__ == '__main__':
     test_driver(sys.argv)

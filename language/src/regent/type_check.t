@@ -48,6 +48,7 @@ function context:new_local_scope(must_epoch, breakable_loop)
     constraints = self.constraints,
     region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
+    is_cuda = self.is_cuda,
     fixup_nodes = self.fixup_nodes,
     must_epoch = must_epoch,
     breakable_loop = breakable_loop,
@@ -57,13 +58,14 @@ function context:new_local_scope(must_epoch, breakable_loop)
   return cx
 end
 
-function context:new_task_scope(expected_return_type)
+function context:new_task_scope(expected_return_type, is_cuda)
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = data.newmap(),
     constraints = data.new_recursive_map(2),
     region_universe = data.newmap(),
     expected_return_type = {expected_return_type},
+    is_cuda = is_cuda,
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
     breakable_loop = false,
@@ -1003,6 +1005,17 @@ function type_check.expr_call(cx, node)
     node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false, true)
 
   if std.is_task(fn.value) then
+    if fn.value.is_local then
+      if not fn.value:has_primary_variant() then
+        report.error(node, "cannot call a local task that does not have a variant defined")
+      end
+      local variant_ast = fn.value:get_primary_variant():get_ast()
+      local variant_is_cuda = variant_ast.annotations.cuda:is(ast.annotation.Demand)
+      if cx.is_cuda and not variant_is_cuda then
+        report.error(node, "calling a local task without a CUDA variant from a CUDA variant")
+      end
+    end
+
     if cx.must_epoch then
       -- Inside a must epoch tasks are not allowed to return.
       expr_type = terralib.types.unit
@@ -1965,31 +1978,35 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or
-           std.is_index_type(field_type) or std.is_rect_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
-  else
-    -- TODO: indexspaces should be parametrized by index types.
-    --       currently they only support 64-bit points, which is why we do this check here.
-    local function is_base_type_64bit(ty)
-      if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
-        return true
-      elseif ty:isstruct() then
-        for _, entry in pairs(ty:getentries()) do
-          local entry_type = entry[2] or entry.type
-          if not is_base_type_64bit(entry_type) then return false end
-        end
-        return true
-      else return false end
-    end
 
-    local index_type = field_type
-    if std.is_bounded_type(index_type) then
-      index_type = index_type.index_type
-    end
-    if not is_base_type_64bit(index_type.base_type) then
-      report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
-    end
+  local index_type = field_type
+  if std.is_bounded_type(index_type) then
+    index_type = index_type.index_type
+  end
+  if not (std.is_index_type(index_type) or std.is_rect_type(index_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index or rect type but got " .. tostring(field_type))
+  end
+
+  -- TODO: indexspaces should be parametrized by index types.
+  --       currently they only support 64-bit points, which is why we do this check here.
+  local function is_base_type_64bit(ty)
+    if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
+      return true
+    elseif ty:isstruct() then
+      for _, entry in pairs(ty:getentries()) do
+        local entry_type = entry[2] or entry.type
+        if not is_base_type_64bit(entry_type) then return false end
+      end
+      return true
+    else return false end
+  end
+
+  if not is_base_type_64bit(index_type.base_type) then
+    report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
+  end
+
+  if index_type.dim ~= parent_type:ispace().index_type.dim and not (index_type.dim <= 1 and parent_type:ispace().index_type.dim <= 1) then
+    report.error(node, "type mismatch in argument 3: expected field with dim " .. tostring(parent_type:ispace().index_type.dim) .. " but got " .. tostring(field_type))
   end
 
   local region_symbol
@@ -4617,7 +4634,8 @@ end
 
 function type_check.top_task(cx, node)
   local return_type = node.return_type
-  local cx = cx:new_task_scope(return_type)
+  local is_cuda = node.annotations.cuda:is(ast.annotation.Demand)
+  local cx = cx:new_task_scope(return_type, is_cuda)
 
   local is_defined = node.prototype:has_primary_variant()
   if is_defined then

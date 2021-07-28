@@ -19,6 +19,8 @@
 
 import "regent"
 
+local SAME_ADDRESS_SPACE = 4 -- (1 << 2)
+
 assert(regentlib.config["separate"], "test requires separate compilation")
 
 struct fs {
@@ -31,10 +33,12 @@ task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool
 where reads writes(r.{x, y}), reads(r.z) do
   regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
 end
-
+my_regent_task:set_mapper_id(0) -- default mapper
+my_regent_task:set_mapping_tag_id(SAME_ADDRESS_SPACE)
 
 -- Save tasks to libseparate_compilation_tasks_part1.so
 local root_dir = arg[0]:match(".*/") or "./"
 local separate_compilation_tasks_part1_h = root_dir .. "separate_compilation_tasks_part1.h"
 local separate_compilation_tasks_part1_so = root_dir .. "libseparate_compilation_tasks_part1.so"
-regentlib.save_tasks(separate_compilation_tasks_part1_h, separate_compilation_tasks_part1_so)
+-- Test with launcher interface disabled, since technically it shouldn't be required.
+regentlib.save_tasks(separate_compilation_tasks_part1_h, separate_compilation_tasks_part1_so, nil, nil, nil, nil, false)
