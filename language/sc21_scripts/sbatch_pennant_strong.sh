@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --constraint=gpu
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --mail-type=ALL
 #SBATCH -A d108
 
