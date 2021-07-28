@@ -59,67 +59,6 @@ __CUDA_HD__ constexpr T fabs(const complex<T>& arg) {
 }
 #endif
 
-template <typename T>
-struct convert_complex
-{
-};
-
-template <>
-struct convert_complex<double>
-{
-  __CUDA_HD__ static inline complex<double> from_int(unsigned long long val)
-  {
-    union
-    {
-      unsigned long long as_long;
-      double array[2];
-    } convert = {0};
-    convert.as_long = val;
-    complex<double> retval(convert.array[0], convert.array[1]);
-    return retval;
-  }
-  // cast back to integer
-  __CUDA_HD__ inline static unsigned long long as_int(complex<double> c)
-  {
-    union
-    {
-      unsigned long long as_long;
-      double array[2];
-    } convert = {0};
-    convert.array[0] = c.real();
-    convert.array[1] = c.imag();
-    return convert.as_long;
-  }
-};
-
-template <>
-struct convert_complex<float>
-{
-  __CUDA_HD__ static inline complex<float> from_int(unsigned long long val)
-  {
-    union
-    {
-      unsigned long long as_long;
-      float array[2];
-    } convert = {0};
-    convert.as_long = val;
-    complex<float> retval(convert.array[0], convert.array[1]);
-    return retval;
-  }
-  // cast back to integer
-  __CUDA_HD__ inline static unsigned long long as_int(complex<float> c)
-  {
-    union
-    {
-      unsigned long long as_long;
-      float array[2];
-    } convert = {0};
-    convert.array[0] = c.real();
-    convert.array[1] = c.imag();
-    return convert.as_long;
-  }
-};
-
 // Need to put this in COMPLEX_NAMESPACE namespace for ADL. The namespace has to
 // be changed/removed if another implementation of complex is used
 namespace COMPLEX_NAMESPACE {
@@ -238,50 +177,6 @@ inline __half abs(const complex<__half>& z) {
   return (__half)(std::sqrt(z.real() * z.real() + z.imag() * z.imag()));
 #endif
 }
-
-template <>
-struct convert_complex<__half>
-{
-  __CUDA_HD__
-  static inline complex<__half> from_int(int val)
-  {
-    union
-    {
-      int as_int;
-      unsigned short array[2];
-    } convert;
-    convert.as_int = val;
-    complex<__half> retval(
-#ifdef __CUDA_ARCH__
-    __short_as_half(convert.array[0]),
-    __short_as_half(convert.array[1])
-#else
-    *(reinterpret_cast<const __half *>(&convert.array[0])),
-    *(reinterpret_cast<const __half *>(&convert.array[1]))
-#endif
-    );
-    return retval;
-  }
-  // cast back to integer
-  __CUDA_HD__
-  inline static int as_int(complex<__half> c)
-  {
-    union
-    {
-      int as_int;
-      unsigned short array[2];
-    } convert;
-#ifdef __CUDA_ARCH__
-    convert.array[0] = __half_as_short(c.real());
-    convert.array[1] = __half_as_short(c.imag());
-#else
-    const __half real = c.real(), imag = c.imag();
-    convert.array[0] = *(reinterpret_cast<const unsigned short *>(&real));
-    convert.array[1] = *(reinterpret_cast<const unsigned short *>(&imag));
-#endif
-    return convert.as_int;
-  }
-};
 
 __CUDA_HD__
 inline complex<__half> operator+(const complex<__half> &one, const complex<__half> &two)
