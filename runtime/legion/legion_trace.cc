@@ -7184,7 +7184,11 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned pre_ = pre.exists() ? find_event(pre, tpl_lock) : 0;
-      unsigned bar_ = convert_event(bar, false/*check*/);
+#ifdef DEBUG_LEGION
+      const unsigned bar_ = convert_event(bar, false/*check*/);
+#else
+      const unsigned bar_ = convert_event(bar);
+#endif
       BarrierArrival *arrival = new BarrierArrival(*this, internal_bar, 
           bar_, pre_, arrivals, repl_ctx->shard_manager->total_shards);
       insert_instruction(arrival);
