@@ -7021,6 +7021,8 @@ namespace Legion {
       exchange_post_events.clear();
       pre_merged.clear();
       post_merged.clear();
+      src_exchanges.clear();
+      dst_exchanges.clear();
       src_exchanged.clear();
       dst_exchanged.clear();
       commit_preconditions.clear();
@@ -7542,7 +7544,9 @@ namespace Legion {
             post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
-          if (exchange_pre_events[index].size() == points.size())
+          if (index >= src_exchanges.size())
+            src_exchanges.resize(index+1, 0);
+          if (++src_exchanges[index] == points.size())
           {
             to_trigger = src_exchanged[index];
             if (dst_indirect_requirements.empty())
@@ -7571,10 +7575,9 @@ namespace Legion {
             post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
-          size_t expected_points = points.size();
-          if (index < src_indirect_requirements.size())
-            expected_points *= 2;
-          if (exchange_pre_events[index].size() == expected_points)
+          if (index >= dst_exchanges.size())
+            dst_exchanges.resize(index+1, 0);
+          if (++dst_exchanges[index] == points.size())
           {
             to_trigger = dst_exchanged[index];
             done_all_exchanges = true;
