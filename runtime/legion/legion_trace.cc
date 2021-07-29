@@ -6073,6 +6073,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_collective_barrier(ShardID owner_shard,
+                                    ApBarrier bar, ApEvent pre, size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called on sharded physical templates
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
@@ -6865,7 +6874,7 @@ namespace Legion {
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
-        total_replays(0), updated_advances(0), 
+        total_replays(0), refreshed_barriers(0), 
         recording_barrier(repl_ctx->get_next_trace_recording_barrier()),
         recurrent_replays(0), updated_frontiers(0)
     //--------------------------------------------------------------------------
@@ -7158,6 +7167,106 @@ namespace Legion {
       assert(finder->second != NO_INDEX);
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_collective_barrier(ShardID owner_shard,
+                                    ApBarrier bar, ApEvent pre, size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+#endif
+      const ApBarrier internal_bar = create_collective_barrier(bar,owner_shard);
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned pre_ = pre.exists() ? find_event(pre, tpl_lock) : 0;
+      unsigned bar_ = convert_event(bar, false/*check*/);
+      BarrierArrival *arrival = new BarrierArrival(*this, internal_bar, 
+          bar_, pre_, arrivals, repl_ctx->shard_manager->total_shards);
+      insert_instruction(arrival);
+      // If we're the owner for this shard then record that so that we can
+      // do barrier refreshses when we run out of generations
+      if (repl_ctx->owner_shard->shard_id == owner_shard)
+        remote_collectives[bar] = arrival;
+      else
+        local_collectives[bar] = arrival;
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier ShardedPhysicalTemplate::create_collective_barrier(ApBarrier bar,
+                                                            ShardID owner_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+#endif
+      if (owner_shard == repl_ctx->owner_shard->shard_id)
+      {
+        // We're the owner
+        AutoLock tpl_lock(template_lock);
+        // If we haven't made it yet then make it now
+        std::map<ApBarrier,std::pair<ApBarrier,size_t> >::iterator finder =
+          pending_collective_requests.find(bar);
+        if (finder == pending_collective_requests.end())
+        {
+          const size_t total_shards = repl_ctx->shard_manager->total_shards;
+          const ApBarrier result(Realm::Barrier::create_barrier(total_shards));
+          finder = pending_collective_requests.insert(
+              std::make_pair(bar, std::make_pair(result, total_shards))).first;
+        }
+        const ApBarrier result = finder->second.first;
+#ifdef DEBUG_LEGION
+        assert(finder->second.second > 0);
+#endif
+        if ((--finder->second.second) == 0)
+          pending_collective_requests.erase(finder);
+        return result;
+      }
+      else
+      {
+        // Not the owner so send a request to the owner
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        ShardManager *manager = repl_ctx->shard_manager;
+        Serializer rez;
+        rez.serialize(manager->repl_id);
+        rez.serialize(owner_shard);
+        rez.serialize(template_index);
+        rez.serialize(CREATE_COLLECTIVE_BARRIER_REQUEST);
+        rez.serialize(bar);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+        rez.serialize(done_event);
+        manager->send_trace_update(owner_shard, rez); 
+        if (!done_event.has_triggered())
+          done_event.wait();
+        AutoLock tpl_lock(template_lock);
+        std::map<ApBarrier,std::pair<ApBarrier,size_t> >::iterator finder =
+          pending_collective_requests.find(bar);
+#ifdef DEBUG_LEGION
+        // Better be there after the event triggers
+        assert(finder != pending_collective_requests.end());
+        assert(finder->second.second == 1);
+#endif
+        const ApBarrier result = finder->second.first;
+        pending_collective_requests.erase(finder);
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_remote_collective_barrier(
+                                                ApBarrier bar, ApBarrier result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(pending_collective_requests.find(bar) ==
+              pending_collective_requests.end());
+#endif
+      pending_collective_requests[bar] = std::pair<ApBarrier,size_t>(result,1);
     }
 
     //--------------------------------------------------------------------------
@@ -7639,24 +7748,33 @@ namespace Legion {
                 derez.deserialize(bar);
                 std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
                   local_advances.find(key);
+                if (finder == local_advances.end())
+                {
+                  std::map<ApEvent,BarrierArrival*>::const_iterator 
+                    arrival_finder = local_collectives.find(key);
 #ifdef DEBUG_LEGION
-                assert(finder != local_advances.end());
+                  assert(arrival_finder != local_collectives.end());
 #endif
-                finder->second->refresh_barrier(bar);
+                  arrival_finder->second->remote_refresh_barrier(bar);
+                }
+                else
+                  finder->second->refresh_barrier(bar);
               }
-              updated_advances += num_barriers;
+              refreshed_barriers += num_barriers;
 #ifdef DEBUG_LEGION
-              assert(updated_advances <= local_advances.size());
+              assert(refreshed_barriers <= 
+                      (local_advances.size() + local_collectives.size()));
 #endif
               // See if the wait has already been done by the local shard
               // If so, trigger it, otherwise do nothing so it can come
               // along and see that everything is done
-              if (updated_advances == local_advances.size())
+              if (refreshed_barriers ==
+                  (local_advances.size() + local_collectives.size()))
               {
                 done = update_advances_ready;
                 // We're done so reset everything for the next refresh
                 update_advances_ready = RtUserEvent::NO_RT_USER_EVENT;
-                updated_advances = 0;
+                refreshed_barriers = 0;
               }
             }
             else
@@ -7733,6 +7851,39 @@ namespace Legion {
                 derez.deserialize(pending_refresh_frontiers[oldbar]);
               }
             }
+            break;
+          }
+        case CREATE_COLLECTIVE_BARRIER_REQUEST:
+          {
+            ApBarrier bar;
+            derez.deserialize(bar);
+            ShardID request_shard;
+            derez.deserialize(request_shard);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            const ApBarrier result =
+              create_collective_barrier(bar, repl_ctx->owner_shard->shard_id);
+            ShardManager *manager = repl_ctx->shard_manager;
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(request_shard);
+            rez.serialize(template_index);
+            rez.serialize(CREATE_COLLECTIVE_BARRIER_RESPONSE);
+            rez.serialize(bar);
+            rez.serialize(result);
+            rez.serialize(done_event);
+            manager->send_trace_update(request_shard, rez);
+            break;
+          }
+        case CREATE_COLLECTIVE_BARRIER_RESPONSE:
+          {
+            ApBarrier bar, result;
+            derez.deserialize(bar);
+            derez.deserialize(result);
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            record_remote_collective_barrier(bar, result);
+            Runtime::trigger_event(done_event);
             break;
           }
         default:
@@ -8301,13 +8452,25 @@ namespace Legion {
         for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
               remote_arrivals.begin(); it != remote_arrivals.end(); it++)
           it->second->refresh_barrier(it->first, notifications);
+        const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+        for (std::map<ApEvent,BarrierArrival*>::const_iterator it =
+              remote_collectives.begin(); it != remote_collectives.end(); it++)
+        {
+          it->second->refresh_barrier(it->first, notifications);
+          // We don't actually record the notifications for the collective
+          // barriers because we know what they need to be broadcast
+          const ApBarrier new_bar = it->second->get_current_barrier();
+          for (ShardID s = 0; s < repl_ctx->shard_manager->total_shards; s++)
+            if (s != local_shard)
+              notifications[s][it->first] = new_bar;
+        }
         // Send out the notifications to all the shards
         ShardManager *manager = repl_ctx->shard_manager;
         for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
               nit = notifications.begin(); nit != notifications.end(); nit++)
         {
 #ifdef DEBUG_LEGION
-          assert(nit->first != repl_ctx->owner_shard->shard_id);
+          assert(nit->first != local_shard);
 #endif
           Serializer rez;
           rez.serialize(manager->repl_id);
@@ -8337,24 +8500,33 @@ namespace Legion {
             {
               std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
                 local_advances.find(it->first);
+              if (finder == local_advances.end())
+              {
+                std::map<ApEvent,BarrierArrival*>::const_iterator
+                  arrival_finder = local_collectives.find(it->first);
 #ifdef DEBUG_LEGION
-              assert(finder != local_advances.end());
+                assert(arrival_finder != local_collectives.end());
 #endif
-              finder->second->refresh_barrier(it->second);
+                arrival_finder->second->remote_refresh_barrier(it->second);
+              }
+              else
+                finder->second->refresh_barrier(it->second);
             }
-            updated_advances += pending_refresh_barriers.size();
+            refreshed_barriers += pending_refresh_barriers.size();
 #ifdef DEBUG_LEGION
-            assert(updated_advances <= local_advances.size());
+            assert(refreshed_barriers <=
+                (local_advances.size() + local_collectives.size()));
 #endif
             pending_refresh_barriers.clear();
           }
-          if (updated_advances < local_advances.size())
+          if (refreshed_barriers <
+              (local_advances.size() + local_collectives.size()))
           {
             update_advances_ready = Runtime::create_rt_user_event();
             replay_precondition = update_advances_ready;
           }
           else // Reset this back to zero for the next round
-            updated_advances = 0;
+            refreshed_barriers = 0;
         }
         // Reset it back to one after updating our barriers
         total_replays = 1;
@@ -9695,10 +9867,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    BarrierArrival::BarrierArrival(PhysicalTemplate &tpl, 
-                                   ApBarrier bar, unsigned _lhs, unsigned _rhs)
+    BarrierArrival::BarrierArrival(PhysicalTemplate &tpl, ApBarrier bar,
+                                   unsigned _lhs, unsigned _rhs,
+                                   size_t arrivals, size_t total)
       : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
-        lhs(_lhs), rhs(_rhs)
+        lhs(_lhs), rhs(_rhs), arrival_count(arrivals), total_arrivals(total)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9725,7 +9898,7 @@ namespace Legion {
       assert(rhs < events.size());
       assert(lhs < events.size());
 #endif
-      Runtime::phase_barrier_arrive(barrier, 1/*count*/, events[rhs]);
+      Runtime::phase_barrier_arrive(barrier, arrival_count, events[rhs]);
       events[lhs] = barrier;
       Runtime::advance_barrier(barrier);
     }
@@ -9757,10 +9930,20 @@ namespace Legion {
       // Destroy the old barrier
       barrier.destroy_barrier();
       // Make the new barrier
-      barrier = ApBarrier(Realm::Barrier::create_barrier(1/*arrival count*/)); 
+      barrier = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
       for (std::vector<ShardID>::const_iterator it = 
             subscribed_shards.begin(); it != subscribed_shards.end(); it++)
         notifications[*it][key] = barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierArrival::remote_refresh_barrier(ApBarrier newbar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(subscribed_shards.empty()); 
+#endif
+      barrier = newbar;
     }
 
     /////////////////////////////////////////////////////////////

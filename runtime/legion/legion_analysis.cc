@@ -603,6 +603,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_collective_barrier(ShardID owner_shard,
+                                    ApBarrier bar, ApEvent pre, size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+      // Should be no cases where this is called remotely
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,

@@ -2757,6 +2757,7 @@ namespace Legion {
 #endif
       pre_indirection_barriers.clear();
       post_indirection_barriers.clear();
+      indirection_barrier_owner_shards.clear();
       if (!src_collectives.empty())
       {
         for (unsigned idx = 0; idx < src_collectives.size(); idx++)
@@ -2939,10 +2940,23 @@ namespace Legion {
         // Arrive on our indirection barriers if we have them
         if (!pre_indirection_barriers.empty())
         {
+          const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
           for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
+          {
             Runtime::phase_barrier_arrive(pre_indirection_barriers[idx], 1);
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[idx],
+                  pre_indirection_barriers[idx], ApEvent::NO_AP_EVENT);
+          }
           for (unsigned idx = 0; idx < post_indirection_barriers.size(); idx++)
+          {
             Runtime::phase_barrier_arrive(post_indirection_barriers[idx], 1);
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[idx],
+                  post_indirection_barriers[idx], ApEvent::NO_AP_EVENT);
+          }
         }
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
@@ -3054,9 +3068,31 @@ namespace Legion {
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
           exchange_pre_events[index].push_back(local_pre);
+          while (index >= pre_merged.size())
+          {
+            const size_t next = pre_merged.size();
+            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+              pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  pre_indirection_barriers[next], pre_merged.back());
+          }
           if (index >= exchange_post_events.size())
             exchange_post_events.resize(index+1);
           exchange_post_events[index].push_back(local_post);
+          while (index >= post_merged.size())
+          {
+            const size_t next = post_merged.size();
+            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+               post_indirection_barriers[next], 1/*count*/, post_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  post_indirection_barriers[next], post_merged.back());
+          }
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
           if (index >= src_exchanges.size())
@@ -3081,9 +3117,31 @@ namespace Legion {
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
           exchange_pre_events[index].push_back(local_pre);
+          while (index >= pre_merged.size())
+          {
+            const size_t next = pre_merged.size();
+            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+              pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  pre_indirection_barriers[next], pre_merged.back());
+          }
           if (index >= exchange_post_events.size())
             exchange_post_events.resize(index+1);
           exchange_post_events[index].push_back(local_post);
+          while (index >= post_merged.size())
+          {
+            const size_t next = post_merged.size();
+            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+               post_indirection_barriers[next], 1/*count*/, post_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  post_indirection_barriers[next], post_merged.back());
+          }
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
           if (index >= dst_exchanges.size())
@@ -3098,11 +3156,9 @@ namespace Legion {
         }
         if (done_all_exchanges)
         {
-          Runtime::phase_barrier_arrive(
-              pre_indirection_barriers[index], 1/*count*/,
+          Runtime::trigger_event(&trace_info, pre_merged[index],
               Runtime::merge_events(&trace_info, exchange_pre_events[index]));
-          Runtime::phase_barrier_arrive(
-              post_indirection_barriers[index], 1/*count*/,
+          Runtime::trigger_event(&trace_info, post_merged[index],
               Runtime::merge_events(&trace_info, exchange_post_events[index]));
         }
       }
@@ -3161,8 +3217,12 @@ namespace Legion {
                 src_indirect_requirements.size() : 
                 dst_indirect_requirements.size());
         post_indirection_barriers.resize(pre_indirection_barriers.size());
+        indirection_barrier_owner_shards.resize(
+            pre_indirection_barriers.size());
         for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
         {
+          indirection_barrier_owner_shards[idx] = 
+            next_indirection_index % ctx->shard_manager->total_shards; 
           ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
           pre_indirection_barriers[idx] = next_bar;
           ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
