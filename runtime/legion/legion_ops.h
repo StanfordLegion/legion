@@ -1491,14 +1491,10 @@ namespace Legion {
       std::vector<PointCopyOp*>                          points;
       std::vector<LegionVector<IndirectRecord>::aligned> src_records;
       std::vector<LegionVector<IndirectRecord>::aligned> dst_records;
-      std::vector<std::vector<ApEvent> >              src_exchange_pre_events;
-      std::vector<std::vector<ApEvent> >              src_exchange_post_events;
-      std::vector<std::vector<ApEvent> >              dst_exchange_pre_events;
-      std::vector<std::vector<ApEvent> >              dst_exchange_post_events;
-      std::vector<ApEvent>                               src_pre_merged;
-      std::vector<ApEvent>                               src_post_merged;
-      std::vector<ApEvent>                               dst_pre_merged;
-      std::vector<ApEvent>                               dst_post_merged;
+      std::vector<std::vector<ApEvent> >                 exchange_pre_events;
+      std::vector<std::vector<ApEvent> >                 exchange_post_events;
+      std::vector<ApUserEvent>                           pre_merged;
+      std::vector<ApUserEvent>                           post_merged;
       std::vector<RtUserEvent>                           src_exchanged;
       std::vector<RtUserEvent>                           dst_exchanged;
       unsigned                                           points_committed;
