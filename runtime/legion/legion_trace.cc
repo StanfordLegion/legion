@@ -2887,7 +2887,23 @@ namespace Legion {
               assert(finder != copy_views.end());
 #endif
               find_all_last_users(finder->second, users);
-              precondition_idx = &indirect->precondition_idx;
+              // This is super subtle: for indirections that are
+              // working collectively together on a set of indirect
+              // source or destination instances, we actually have
+              // a fan-in event construction. The indirect->precondition_idx
+              // points to the result of that fan-in tree which is not
+              // what we want to update here. We instead want to update
+              // the set of preconditions for our local instances for this
+              // part of the indirect which feed into the collective event
+              // tree construction. The local fan-in event is stored at
+              // indirect->trace_pre_idx so use that instead for this
+              precondition_idx = &indirect->tracing_pre_idx;
+#ifdef DEBUG_LEGION
+              // The tracing pre idx better be a merge event because
+              // we can't have it changing locations in the trace
+              assert(instructions[indirect->tracing_pre_idx]->get_kind() ==
+                      MERGE_EVENT);
+#endif
               break;
             }
 #ifdef LEGION_GPU_REDUCTIONS
@@ -4426,7 +4442,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
-                             ApEvent precondition, PredEvent pred_guard)
+                             ApEvent precondition, PredEvent pred_guard,
+                             ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4451,7 +4468,8 @@ namespace Legion {
 #ifdef LEGION_SPY
             unique_indirections_identifier,
 #endif
-            find_event(precondition)));
+            find_event(precondition),
+            find_event(tracing_precondition)));
     }
 
     //--------------------------------------------------------------------------
@@ -4625,6 +4643,7 @@ namespace Legion {
                                  IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 PrivilegeMode src_mode, PrivilegeMode dst_mode,
                                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -4651,12 +4670,48 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs);
-      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY, 
+      record_views(lhs_, expr, RegionUsage(src_mode, 
             LEGION_EXCLUSIVE, 0), tracing_srcs, src_eqs);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr, RegionUsage(LEGION_WRITE_ONLY, 
+      record_views(lhs_, expr, RegionUsage(dst_mode, 
             LEGION_EXCLUSIVE, 0), tracing_dsts, dst_eqs);
       record_copy_views(lhs_, expr, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_indirect_views(ApEvent indirect_done,
+                            ApEvent all_done, Memoizable *memo, unsigned index,
+                            IndexSpaceExpression *expr,
+                            const FieldMaskSet<InstanceView> &tracing_views,
+                            std::set<RtEvent> &applied, PrivilegeMode privilege)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memo != NULL);
+#endif
+      LegionList<FieldSet<EquivalenceSet*> >::aligned eqs;
+      // Get these before we take the lock
+      {
+        FieldMaskSet<EquivalenceSet> eq_sets;
+        const FieldMask &view_mask = tracing_views.get_valid_mask();
+        memo->find_equivalence_sets(trace->runtime, index, view_mask, eq_sets);
+        eq_sets.compute_field_sets(view_mask, eqs);
+      }
+
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned indirect = find_event(indirect_done);
+      const unsigned all = find_event(all_done);
+      // The thing about indirect views is that the event for which they
+      // are done being used is not always the same as the indirect copy
+      // that generated them because they can be collective, so we need to
+      // record the summary event for when all the indirect copies are done
+      // for their view user
+      record_views(all, expr, RegionUsage(privilege,
+            LEGION_EXCLUSIVE, 0), tracing_views, eqs);
+      record_copy_views(indirect, expr, tracing_views);
     }
 
     //--------------------------------------------------------------------------
@@ -5564,12 +5619,12 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_id,
 #endif
-                                 unsigned pi)
+                                 unsigned pi, unsigned pre_idx)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
 #ifdef LEGION_SPY
         unique_indirections_identifier(unique_indirections_id), 
 #endif
-        precondition_idx(pi)
+        precondition_idx(pi), tracing_pre_idx(pre_idx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5615,7 +5670,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                                          unique_indirections_identifier,
 #endif
-                                         precondition,PredEvent::NO_PRED_EVENT);
+                                         precondition,
+                                         PredEvent::NO_PRED_EVENT,
+                                         ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------

@@ -424,7 +424,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
       // Now that we know we're going to do this copy add any profling requests
@@ -479,7 +480,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                          unique_indirections_identifier,
 #endif
-                                         precondition, pred_guard);
+                                         precondition, pred_guard,
+                                         tracing_precondition);
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
       {
@@ -1728,7 +1730,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -1740,21 +1743,23 @@ namespace Legion {
             unique_indirections_identifier,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard);
+            pred_guard, tracing_precondition);
       else if (space_ready.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects, 
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
-                                       space_ready, pred_guard);
+                                       space_ready, pred_guard,
+                                       tracing_precondition);
       else
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
-                                       precondition, pred_guard);
+                                       precondition, pred_guard,
+                                       tracing_precondition);
     }
 
 #ifdef LEGION_GPU_REDUCTIONS
@@ -5388,7 +5393,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_identifier,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -5400,21 +5406,23 @@ namespace Legion {
             unique_indirections_identifier,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard);
+            pred_guard, tracing_precondition);
       else if (space_ready.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects, 
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
-                                       space_ready, pred_guard);
+                                       space_ready, pred_guard,
+                                       tracing_precondition);
       else
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
-                                       precondition, pred_guard);
+                                       precondition, pred_guard,
+                                       tracing_precondition);
     }
 
 #ifdef LEGION_GPU_REDUCTIONS

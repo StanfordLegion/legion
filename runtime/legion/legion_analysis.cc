@@ -621,6 +621,8 @@ namespace Legion {
                                               IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
+                                              PrivilegeMode src_mode,
+                                              PrivilegeMode dst_mode,
                                               std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
@@ -640,6 +642,8 @@ namespace Legion {
           rez.serialize(lhs);
           rez.serialize(src_idx);
           rez.serialize(dst_idx);
+          rez.serialize(src_mode);
+          rez.serialize(dst_mode);
           expr->pack_expression(rez, origin_space);
           rez.serialize<size_t>(tracing_srcs.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
@@ -661,8 +665,8 @@ namespace Legion {
       }
       else
         remote_tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
-                                      tracing_srcs, tracing_dsts, applied);
-    }
+                tracing_srcs, tracing_dsts, src_mode, dst_mode, applied);
+    } 
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_issue_indirect(Memoizable *memo, 
@@ -673,7 +677,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
-                             ApEvent precondition, PredEvent pred_guard)
+                             ApEvent precondition, PredEvent pred_guard,
+                             ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -706,6 +711,7 @@ namespace Legion {
             indirections[idx]->serializer(rez);
           rez.serialize(precondition);
           rez.serialize(pred_guard);
+          rez.serialize(tracing_precondition);
 #ifdef LEGION_SPY
           rez.serialize(unique_indirections_identifier);
 #endif
@@ -720,7 +726,53 @@ namespace Legion {
 #ifdef LEGION_SPY
                                           unique_indirections_identifier,
 #endif
-                                          precondition, pred_guard);
+                                          precondition, pred_guard,
+                                          tracing_precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_indirect_views(ApEvent indirect_done,
+                                                    ApEvent all_done,
+                                                    Memoizable *memo,
+                                                    unsigned indirect_index,
+                                                    IndexSpaceExpression *expr,
+                                        const FieldMaskSet<InstanceView> &views,
+                                                    std::set<RtEvent> &applied,
+                                                    PrivilegeMode privilege)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizable == memo);
+#endif
+      if (local_space != origin_space)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event(); 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_INDIRECT_VIEWS);
+          rez.serialize(done);
+          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(indirect_done);
+          rez.serialize(all_done);
+          rez.serialize(indirect_index);
+          expr->pack_expression(rez, origin_space);
+          rez.serialize<size_t>(views.size());
+          for (FieldMaskSet<InstanceView>::const_iterator it = 
+                views.begin(); it != views.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(privilege);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        applied.insert(done);
+      }
+      else
+        remote_tpl->record_indirect_views(indirect_done, all_done, memo,
+                        indirect_index, expr, views, applied, privilege);
     }
 
     //--------------------------------------------------------------------------
@@ -1298,6 +1350,9 @@ namespace Legion {
             unsigned src_idx, dst_idx;
             derez.deserialize(src_idx);
             derez.deserialize(dst_idx);
+            PrivilegeMode src_mode, dst_mode;
+            derez.deserialize(src_mode);
+            derez.deserialize(dst_mode);
             RegionTreeForest *forest = runtime->forest;
             IndexSpaceExpression *expr = 
               IndexSpaceExpression::unpack_expression(derez, forest, source);
@@ -1341,7 +1396,7 @@ namespace Legion {
                 wait_on.wait();
             }
             tpl->record_copy_views(lhs, memo, src_idx, dst_idx, expr,
-                                   tracing_srcs, tracing_dsts, ready_events);
+                  tracing_srcs, tracing_dsts, src_mode, dst_mode, ready_events);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
             else
@@ -1378,6 +1433,8 @@ namespace Legion {
             derez.deserialize(precondition);
             PredEvent pred_guard;
             derez.deserialize(pred_guard);
+            ApEvent tracing_precondition;
+            derez.deserialize(tracing_precondition);
 #ifdef LEGION_SPY
             unsigned unique_indirections_identifier;
             derez.deserialize(unique_indirections_identifier);
@@ -1390,7 +1447,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
 #endif
-                                       precondition, pred_guard);
+                                       precondition, pred_guard,
+                                       tracing_precondition);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1404,6 +1462,56 @@ namespace Legion {
               runtime->send_remote_trace_response(source, rez);
             }
             else // lhs was unchanged
+              Runtime::trigger_event(done);
+            if (memo->get_origin_space() != runtime->address_space)
+              delete memo;
+            break;
+          }
+        case REMOTE_TRACE_INDIRECT_VIEWS:
+          {
+            RtUserEvent done;
+            derez.deserialize(done);
+            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
+                                                           NULL/*op*/, runtime);
+            ApEvent indirect_done, all_done;
+            derez.deserialize(indirect_done);
+            derez.deserialize(all_done);
+            unsigned indirect_index;
+            derez.deserialize(indirect_index);
+            RegionTreeForest *forest = runtime->forest;
+            IndexSpaceExpression *expr = 
+              IndexSpaceExpression::unpack_expression(derez, forest, source);
+            FieldMaskSet<InstanceView> tracing_views;
+            std::set<RtEvent> ready_events;
+            size_t num_views;
+            derez.deserialize(num_views);
+            for (unsigned idx = 0; idx < num_views; idx++)
+            {
+              DistributedID did;
+              derez.deserialize(did);
+              RtEvent ready;
+              InstanceView *view = static_cast<InstanceView*>(
+                  runtime->find_or_request_logical_view(did, ready));
+              if (ready.exists() && !ready.has_triggered())
+                ready_events.insert(ready);
+              FieldMask mask;
+              derez.deserialize(mask);
+              tracing_views.insert(view, mask);
+            }
+            PrivilegeMode privilege;
+            derez.deserialize(privilege);
+            if (!ready_events.empty())
+            {
+              const RtEvent wait_on = Runtime::merge_events(ready_events);
+              ready_events.clear();
+              if (wait_on.exists() && !wait_on.has_triggered())
+                wait_on.wait();
+            }
+            tpl->record_indirect_views(indirect_done, all_done, memo,
+                indirect_index, expr, tracing_views, ready_events, privilege);
+            if (!ready_events.empty())
+              Runtime::trigger_event(done, Runtime::merge_events(ready_events));
+            else
               Runtime::trigger_event(done);
             if (memo->get_origin_space() != runtime->address_space)
               delete memo;

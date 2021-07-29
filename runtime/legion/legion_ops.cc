@@ -5023,18 +5023,23 @@ namespace Legion {
     {
       // Trigger our local completion event contingent upon 
       // the copy/reduce across being done
-      ApEvent copy_done;
+      ApEvent copy_post, copy_pre;
       LegionVector<IndirectRecord>::aligned src_records, dst_records;
-      ApUserEvent indirect_done;
+      ApUserEvent indirect_done, indirect_pre;
       if (gather_targets != NULL)
       {
 #ifdef DEBUG_LEGION
         assert(gather_targets->size() == 1);
 #endif
+        indirect_pre = Runtime::create_ap_user_event(&trace_info);
         indirect_done = Runtime::create_ap_user_event(&trace_info);
-        copy_done = exchange_indirect_records(index, indirect_done, trace_info,
-            src_targets, src_requirements[index].region.get_index_space(), 
-            index_point, src_records, true/*sources*/);
+        std::pair<ApEvent,ApEvent> result =
+          exchange_indirect_records(index, indirect_pre, indirect_done, 
+              trace_info, src_targets,
+              src_requirements[index].region.get_index_space(),
+              index_point, src_records, true/*sources*/);
+        copy_pre = result.first;
+        copy_post = result.second;
       }
       if (scatter_targets != NULL)
       {
@@ -5042,19 +5047,26 @@ namespace Legion {
         assert(scatter_targets->size() == 1);
 #endif
         if (!indirect_done.exists())
+        {
+          indirect_pre = Runtime::create_ap_user_event(&trace_info);
           indirect_done = Runtime::create_ap_user_event(&trace_info);
+        }
         // It's alright to overwrite this, it will the same as it was
         // from the gather case if this is a full-on indirection
-        copy_done = exchange_indirect_records(index, indirect_done, trace_info,
-            dst_targets, dst_requirements[index].region.get_index_space(),
-            index_point, dst_records, false/*sources*/);
+        std::pair<ApEvent,ApEvent> result =
+          exchange_indirect_records(index, indirect_pre, indirect_done,
+              trace_info, dst_targets,
+              dst_requirements[index].region.get_index_space(),
+              index_point, dst_records, false/*sources*/);
+        copy_pre = result.first;
+        copy_post = result.second;
       }
       if (scatter_targets == NULL)
       {
         if (gather_targets == NULL)
         {
           // Normal copy across
-          copy_done = runtime->forest->copy_across( 
+          copy_post = runtime->forest->copy_across( 
               src_requirements[index], dst_requirements[index],
               src_versions[index], dst_versions[index],
               src_targets, dst_targets, this, index, trace_info.dst_index,
@@ -5066,11 +5078,13 @@ namespace Legion {
           // Gather copy
           const ApEvent local_done = runtime->forest->gather_across(
               src_requirements[index], src_indirect_requirements[index],
-              dst_requirements[index], src_records,
-              (*gather_targets)[0], dst_targets, this, 
+              dst_requirements[index], src_records, src_targets,
+              (*gather_targets), dst_targets, this, index, 
+              src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, gather_is_range[index],
-              local_init_precondition, predication_guard, trace_info,
-              possible_src_indirect_out_of_range);
+              local_init_precondition, predication_guard, 
+              copy_pre, copy_post, indirect_pre, trace_info,
+              applied_conditions, possible_src_indirect_out_of_range);
           Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
       }
@@ -5081,10 +5095,13 @@ namespace Legion {
           // Scatter copy
           const ApEvent local_done = runtime->forest->scatter_across(
               src_requirements[index], dst_indirect_requirements[index],
-              dst_requirements[index], src_targets, (*scatter_targets)[0],
-              dst_records, this, index, scatter_is_range[index],
-              local_init_precondition, predication_guard, trace_info,
-              possible_dst_indirect_out_of_range, 
+              dst_requirements[index], src_targets, (*scatter_targets),
+              dst_targets, dst_records, this, index, 
+              src_requirements.size() + dst_requirements.size() + index,
+              src_requirements.size() + index, scatter_is_range[index],
+              local_init_precondition, predication_guard,
+              copy_pre, copy_post, indirect_pre, trace_info,
+              applied_conditions, possible_dst_indirect_out_of_range, 
               possible_dst_indirect_aliasing);
           Runtime::trigger_event(&trace_info, indirect_done, local_done);
         }
@@ -5097,11 +5114,15 @@ namespace Legion {
           const ApEvent local_done = runtime->forest->indirect_across(
               src_requirements[index], src_indirect_requirements[index],
               dst_requirements[index], dst_indirect_requirements[index],
-              src_records, (*gather_targets)[0],
-              dst_records, (*scatter_targets)[0], 
-              this, gather_is_range[index],
-              local_init_precondition, predication_guard, trace_info,
-              possible_src_indirect_out_of_range,
+              src_targets, dst_targets, src_records, (*gather_targets),
+              dst_records, (*scatter_targets), this, index,
+              src_requirements.size() + index,
+              src_requirements.size() + dst_requirements.size() + index,
+              src_requirements.size() + dst_requirements.size() +
+              src_indirect_requirements.size() + index, gather_is_range[index],
+              local_init_precondition, predication_guard,
+              copy_pre, copy_post, indirect_pre, trace_info,
+              applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing);
           Runtime::trigger_event(&trace_info, indirect_done, local_done);
@@ -5113,10 +5134,10 @@ namespace Legion {
         assert((tpl != NULL) && tpl->is_recording());
 #endif
         // This can happen in cases when the copy index space is empty
-        if (!copy_done.exists())
-          copy_done = execution_fence_event;
+        if (!copy_post.exists())
+          copy_post = execution_fence_event;
       }
-      Runtime::trigger_event(&trace_info, local_completion, copy_done);
+      Runtime::trigger_event(&trace_info, local_completion, copy_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&src_requirements[index], index);
       dump_physical_state(&dst_requirements[index], 
@@ -5228,43 +5249,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CopyOp::exchange_indirect_records(const unsigned index,
-       const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-       const InstanceSet &insts, const IndexSpace space, const DomainPoint &key,
-       LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    std::pair<ApEvent,ApEvent> CopyOp::exchange_indirect_records(
+        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
+        const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
+        const IndexSpace space, const DomainPoint &key,
+        LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = runtime->forest->get_node(space);
       ApEvent domain_ready;
       const Domain dom = node->get_domain(domain_ready, true/*tight*/);
-      if (domain_ready.exists())
+      for (unsigned idx = 0; idx < insts.size(); idx++)
       {
-        for (unsigned idx = 0; idx < insts.size(); idx++)
-        {
-          const InstanceRef &ref = insts[idx];
-          records.push_back(IndirectRecord(ref.get_valid_fields(),
-                ref.get_manager(), key, space, ref.get_ready_event(), dom));
-        }
+        const InstanceRef &ref = insts[idx];
+        records.push_back(IndirectRecord(ref.get_valid_fields(),
+              ref.get_manager(), key, space, dom));
       }
-      else
-      {
-        for (unsigned idx = 0; idx < insts.size(); idx++)
-        {
-          const InstanceRef &ref = insts[idx];
-          const ApEvent inst_ready = ref.get_ready_event();
-          if (inst_ready.exists())
-          {
-            records.push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager(), key, space,
-                  Runtime::merge_events(&trace_info, domain_ready, inst_ready),
-                  dom));
-          }
-          else
-            records.push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager(), key, space, domain_ready, dom));
-        }
-      }
-      return local_done;
+      return std::make_pair(local_pre, local_post);
     }
 
     //--------------------------------------------------------------------------
@@ -6380,8 +6381,10 @@ namespace Legion {
                 idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
         src_records.resize(gather_size);
-        src_exchange_events.resize(gather_size);
-        src_merged.resize(gather_size);
+        src_exchange_pre_events.resize(gather_size);
+        src_exchange_post_events.resize(gather_size);
+        src_pre_merged.resize(gather_size);
+        src_post_merged.resize(gather_size);
         src_exchanged.resize(gather_size);
         possible_src_indirect_out_of_range =
           launcher.possible_src_indirect_out_of_range;
@@ -6413,8 +6416,10 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         scatter_is_range = launcher.dst_indirect_is_range;
         dst_records.resize(scatter_size);
-        dst_exchange_events.resize(scatter_size);
-        dst_merged.resize(scatter_size);
+        dst_exchange_pre_events.resize(scatter_size);
+        dst_exchange_post_events.resize(scatter_size);
+        dst_pre_merged.resize(scatter_size);
+        dst_post_merged.resize(scatter_size);
         dst_exchanged.resize(scatter_size);
         possible_dst_indirect_out_of_range = 
           launcher.possible_dst_indirect_out_of_range;
@@ -6477,10 +6482,14 @@ namespace Legion {
       points.clear();
       src_records.clear();
       dst_records.clear();
-      src_exchange_events.clear();
-      dst_exchange_events.clear();
-      src_merged.clear();
-      dst_merged.clear();
+      src_exchange_pre_events.clear();
+      src_exchange_post_events.clear();
+      dst_exchange_pre_events.clear();
+      dst_exchange_post_events.clear();
+      src_pre_merged.clear();
+      src_post_merged.clear();
+      dst_pre_merged.clear();
+      dst_post_merged.clear();
       src_exchanged.clear();
       dst_exchanged.clear();
       commit_preconditions.clear();
@@ -6952,20 +6961,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexCopyOp::exchange_indirect_records(const unsigned index,
-       const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-       const InstanceSet &insts, const IndexSpace space, const DomainPoint &key,
-       LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    std::pair<ApEvent,ApEvent> IndexCopyOp::exchange_indirect_records(
+        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
+        const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
+        const IndexSpace space, const DomainPoint &key,
+        LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
-        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                           insts, space, key, records, sources);
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                              trace_info, insts, space, key, records, sources);
       if (!sources && !collective_dst_indirect_points)
-        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                           insts, space, key, records, sources);
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                              trace_info, insts, space, key, records, sources);
 #ifdef DEBUG_LEGION
-      assert(local_done.exists());
+      assert(local_pre.exists());
+      assert(local_post.exists());
 #endif
       RtEvent wait_on;
       RtUserEvent to_trigger;
@@ -6977,74 +6988,34 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (sources)
         {
-          if (domain_ready.exists())
+          for (unsigned idx = 0; idx < insts.size(); idx++)
           {
-            for (unsigned idx = 0; idx < insts.size(); idx++)
-            {
-              const InstanceRef &ref = insts[idx];
-              const ApEvent inst_ready = ref.get_ready_event();
-              if (inst_ready.exists())
-                src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), key, space,
-                      Runtime::merge_events(&trace_info, domain_ready,
-                        inst_ready), dom));
-              else
-                src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), 
-                      key, space, domain_ready, dom));
-            }
+            const InstanceRef &ref = insts[idx];
+            src_records[index].push_back(IndirectRecord(
+                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          else
-          {
-            for (unsigned idx = 0; idx < insts.size(); idx++)
-            {
-              const InstanceRef &ref = insts[idx];
-              src_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(), ref.get_manager(), 
-                    key, space, ref.get_ready_event(), dom));
-            }
-          }
-          src_exchange_events[index].insert(local_done);
+          src_exchange_pre_events[index].push_back(local_pre);
+          src_exchange_post_events[index].push_back(local_post);
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
-          if (src_exchange_events[index].size() == points.size())
+          if (src_exchange_pre_events[index].size() == points.size())
             to_trigger = src_exchanged[index];
           else
             wait_on = src_exchanged[index];
         }
         else
         {
-          if (domain_ready.exists())
+          for (unsigned idx = 0; idx < insts.size(); idx++)
           {
-            for (unsigned idx = 0; idx < insts.size(); idx++)
-            {
-              const InstanceRef &ref = insts[idx];
-              const ApEvent inst_ready = ref.get_ready_event();
-              if (inst_ready.exists())
-                dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), key, space,
-                      Runtime::merge_events(&trace_info, domain_ready,
-                        inst_ready), dom));
-              else
-                dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), 
-                      key, space, domain_ready, dom));
-            }
+            const InstanceRef &ref = insts[idx];
+            dst_records[index].push_back(IndirectRecord(
+                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          else
-          {
-            for (unsigned idx = 0; idx < insts.size(); idx++)
-            {
-              const InstanceRef &ref = insts[idx];
-              dst_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(), ref.get_manager(), 
-                    key, space, ref.get_ready_event(), dom));
-            }
-          }
-          dst_exchange_events[index].insert(local_done);
+          dst_exchange_pre_events[index].push_back(local_pre);
+          dst_exchange_post_events[index].push_back(local_post);
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
-          if (dst_exchange_events[index].size() == points.size())
+          if (dst_exchange_pre_events[index].size() == points.size())
             to_trigger = dst_exchanged[index];
           else
             wait_on = dst_exchanged[index];
@@ -7053,11 +7024,19 @@ namespace Legion {
       if (to_trigger.exists())
       {
         if (sources)
-          src_merged[index] = 
-            Runtime::merge_events(&trace_info, src_exchange_events[index]);
+        {
+          src_pre_merged[index] = 
+            Runtime::merge_events(&trace_info, src_exchange_pre_events[index]);
+          src_post_merged[index] =
+            Runtime::merge_events(&trace_info, src_exchange_post_events[index]);
+        }
         else
-          dst_merged[index] = 
-            Runtime::merge_events(&trace_info, dst_exchange_events[index]);
+        {
+          dst_pre_merged[index] = 
+            Runtime::merge_events(&trace_info, dst_exchange_pre_events[index]);
+          dst_post_merged[index] =
+            Runtime::merge_events(&trace_info, dst_exchange_post_events[index]);
+        }
         Runtime::trigger_event(to_trigger);
       }
       else if (!wait_on.has_triggered())
@@ -7066,12 +7045,12 @@ namespace Legion {
       if (sources)
       {
         records = src_records[index];
-        return src_merged[index];
+        return std::make_pair(src_pre_merged[index], src_post_merged[index]);
       }
       else
       {
         records = dst_records[index];
-        return dst_merged[index];
+        return std::make_pair(dst_pre_merged[index], dst_post_merged[index]);
       }
     }
 
@@ -7372,15 +7351,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PointCopyOp::exchange_indirect_records(const unsigned index,
-       const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-       const InstanceSet &insts, const IndexSpace space, const DomainPoint &key,
-       LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    std::pair<ApEvent,ApEvent> PointCopyOp::exchange_indirect_records(
+        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
+        const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
+        const IndexSpace space, const DomainPoint &key,
+        LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
-      return owner->exchange_indirect_records(index, local_done, trace_info, 
-                                insts, space, index_point, records, sources);
+      return owner->exchange_indirect_records(index, local_pre, local_post,
+                  trace_info, insts, space, index_point, records, sources);
     }
 
     //--------------------------------------------------------------------------
