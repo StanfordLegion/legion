@@ -3040,6 +3040,7 @@ namespace Legion {
         IndexSpaceNode *node = runtime->forest->get_node(space);
         ApEvent domain_ready;
         const Domain dom = node->get_domain(domain_ready, true/*tight*/);
+        bool done_all_exchanges = false;
         // Take the lock and record our sets and instances
         AutoLock o_lock(op_lock);
         if (sources)
@@ -3050,12 +3051,22 @@ namespace Legion {
             src_records[index].push_back(IndirectRecord(
                   ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          src_exchange_pre_events[index].insert(local_pre);
-          src_exchange_post_events[index].insert(local_post);
+          if (index >= exchange_pre_events.size())
+            exchange_pre_events.resize(index+1);
+          exchange_pre_events[index].push_back(local_pre);
+          if (index >= exchange_post_events.size())
+            exchange_post_events.resize(index+1);
+          exchange_post_events[index].push_back(local_post);
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
-          if (src_exchange_pre_events[index].size() == points.size())
+          if (index >= src_exchanges.size())
+            src_exchanges.resize(index+1, 0);
+          if (++src_exchanges[index] == points.size())
+          {
             to_trigger = src_exchanged[index];
+            if (dst_indirect_requirements.empty())
+              done_all_exchanges = true;
+          }
           else
             wait_on = src_exchanged[index];
         }
@@ -3067,39 +3078,42 @@ namespace Legion {
             dst_records[index].push_back(IndirectRecord(
                   ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          dst_exchange_pre_events[index].insert(local_pre);
-          dst_exchange_post_events[index].insert(local_post);
+          if (index >= exchange_pre_events.size())
+            exchange_pre_events.resize(index+1);
+          exchange_pre_events[index].push_back(local_pre);
+          if (index >= exchange_post_events.size())
+            exchange_post_events.resize(index+1);
+          exchange_post_events[index].push_back(local_post);
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
-          if (dst_exchange_pre_events[index].size() == points.size())
+          if (index >= dst_exchanges.size())
+            dst_exchanges.resize(index+1, 0);
+          if (++dst_exchanges[index] == points.size())
+          {
             to_trigger = dst_exchanged[index];
+            done_all_exchanges = true;
+          }
           else
             wait_on = dst_exchanged[index];
+        }
+        if (done_all_exchanges)
+        {
+          Runtime::phase_barrier_arrive(
+              pre_indirection_barriers[index], 1/*count*/,
+              Runtime::merge_events(&trace_info, exchange_pre_events[index]));
+          Runtime::phase_barrier_arrive(
+              post_indirection_barriers[index], 1/*count*/,
+              Runtime::merge_events(&trace_info, exchange_post_events[index]));
         }
       }
       if (to_trigger.exists())
       {
         // Perform the collective
         if (sources)
-        {
           src_collectives[index]->exchange_records(src_records[index]);
-          src_pre_merged[index] = 
-            Runtime::merge_events(&trace_info, src_exchange_pre_events[index]);
-          src_post_merged[index] =
-            Runtime::merge_events(&trace_info, src_exchange_post_events[index]);
-        }
         else
-        {
           dst_collectives[index]->exchange_records(dst_records[index]);
-          dst_pre_merged[index] = 
-            Runtime::merge_events(&trace_info, dst_exchange_pre_events[index]);
-          dst_post_merged[index] =
-            Runtime::merge_events(&trace_info, dst_exchange_post_events[index]);
-        }
         Runtime::trigger_event(to_trigger);
-        if (!arrival_events.empty())
-          Runtime::phase_barrier_arrive(indirection_barriers[index],
-              1/*count*/, Runtime::merge_events(&trace_info, arrival_events));
       }
       else if (!wait_on.has_triggered())
         wait_on.wait();
@@ -3108,7 +3122,7 @@ namespace Legion {
         records = src_records[index];
       else
         records = dst_records[index];
-      return std::make_pair<ApEvent,ApEvent>(
+      return std::pair<ApEvent,ApEvent>(
           pre_indirection_barriers[index], post_indirection_barriers[index]);
     }
 
@@ -3147,7 +3161,7 @@ namespace Legion {
                 src_indirect_requirements.size() : 
                 dst_indirect_requirements.size());
         post_indirection_barriers.resize(pre_indirection_barriers.size());
-        for (unsigned idx = 0; idx < indirection_barriers.size(); idx++)
+        for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
         {
           ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
           pre_indirection_barriers[idx] = next_bar;
