@@ -6381,10 +6381,6 @@ namespace Legion {
                 idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
         src_records.resize(gather_size);
-        src_exchange_pre_events.resize(gather_size);
-        src_exchange_post_events.resize(gather_size);
-        src_pre_merged.resize(gather_size);
-        src_post_merged.resize(gather_size);
         src_exchanged.resize(gather_size);
         possible_src_indirect_out_of_range =
           launcher.possible_src_indirect_out_of_range;
@@ -6416,10 +6412,6 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         scatter_is_range = launcher.dst_indirect_is_range;
         dst_records.resize(scatter_size);
-        dst_exchange_pre_events.resize(scatter_size);
-        dst_exchange_post_events.resize(scatter_size);
-        dst_pre_merged.resize(scatter_size);
-        dst_post_merged.resize(scatter_size);
         dst_exchanged.resize(scatter_size);
         possible_dst_indirect_out_of_range = 
           launcher.possible_dst_indirect_out_of_range;
@@ -6482,14 +6474,10 @@ namespace Legion {
       points.clear();
       src_records.clear();
       dst_records.clear();
-      src_exchange_pre_events.clear();
-      src_exchange_post_events.clear();
-      dst_exchange_pre_events.clear();
-      dst_exchange_post_events.clear();
-      src_pre_merged.clear();
-      src_post_merged.clear();
-      dst_pre_merged.clear();
-      dst_post_merged.clear();
+      exchange_pre_events.clear();
+      exchange_post_events.clear();
+      pre_merged.clear();
+      post_merged.clear();
       src_exchanged.clear();
       dst_exchanged.clear();
       commit_preconditions.clear();
@@ -6980,10 +6968,12 @@ namespace Legion {
 #endif
       RtEvent wait_on;
       RtUserEvent to_trigger;
+      std::pair<ApEvent,ApEvent> result;
       {
         IndexSpaceNode *node = runtime->forest->get_node(space);
         ApEvent domain_ready;
         const Domain dom = node->get_domain(domain_ready, true/*tight*/);
+        bool done_all_exchanges = false;
         // Take the lock and record our sets and instances
         AutoLock o_lock(op_lock);
         if (sources)
@@ -6994,12 +6984,24 @@ namespace Legion {
             src_records[index].push_back(IndirectRecord(
                   ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          src_exchange_pre_events[index].push_back(local_pre);
-          src_exchange_post_events[index].push_back(local_post);
+          if (index >= exchange_pre_events.size())
+            exchange_pre_events.resize(index+1);
+          exchange_pre_events[index].push_back(local_pre);
+          while (index >= pre_merged.size())
+            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+          if (index >= exchange_post_events.size())
+            exchange_post_events.resize(index+1);
+          exchange_post_events[index].push_back(local_post);
+          while (index >= post_merged.size())
+            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
-          if (src_exchange_pre_events[index].size() == points.size())
+          if (exchange_pre_events[index].size() == points.size())
+          {
             to_trigger = src_exchanged[index];
+            if (dst_indirect_requirements.empty())
+              done_all_exchanges = true;
+          }
           else
             wait_on = src_exchanged[index];
         }
@@ -7011,47 +7013,48 @@ namespace Legion {
             dst_records[index].push_back(IndirectRecord(
                   ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          dst_exchange_pre_events[index].push_back(local_pre);
-          dst_exchange_post_events[index].push_back(local_post);
+          if (index >= exchange_pre_events.size())
+            exchange_pre_events.resize(index+1);
+          exchange_pre_events[index].push_back(local_pre);
+          while (index >= pre_merged.size())
+            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+          if (index >= exchange_post_events.size())
+            exchange_post_events.resize(index+1);
+          exchange_post_events[index].push_back(local_post);
+          while (index >= post_merged.size())
+            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
-          if (dst_exchange_pre_events[index].size() == points.size())
+          size_t expected_points = points.size();
+          if (index < src_indirect_requirements.size())
+            expected_points *= 2;
+          if (exchange_pre_events[index].size() == expected_points)
+          {
             to_trigger = dst_exchanged[index];
+            done_all_exchanges = true;
+          }
           else
             wait_on = dst_exchanged[index];
         }
+        if (done_all_exchanges)
+        {
+          Runtime::trigger_event(&trace_info, pre_merged[index],
+              Runtime::merge_events(&trace_info, exchange_pre_events[index]));
+          Runtime::trigger_event(&trace_info, post_merged[index],
+              Runtime::merge_events(&trace_info, exchange_post_events[index]));
+        }
+        result = std::make_pair(pre_merged[index], post_merged[index]);
       }
       if (to_trigger.exists())
-      {
-        if (sources)
-        {
-          src_pre_merged[index] = 
-            Runtime::merge_events(&trace_info, src_exchange_pre_events[index]);
-          src_post_merged[index] =
-            Runtime::merge_events(&trace_info, src_exchange_post_events[index]);
-        }
-        else
-        {
-          dst_pre_merged[index] = 
-            Runtime::merge_events(&trace_info, dst_exchange_pre_events[index]);
-          dst_post_merged[index] =
-            Runtime::merge_events(&trace_info, dst_exchange_post_events[index]);
-        }
         Runtime::trigger_event(to_trigger);
-      }
       else if (!wait_on.has_triggered())
         wait_on.wait();
       // Once we wake up we can copy out the results
       if (sources)
-      {
         records = src_records[index];
-        return std::make_pair(src_pre_merged[index], src_post_merged[index]);
-      }
       else
-      {
         records = dst_records[index];
-        return std::make_pair(dst_pre_merged[index], dst_post_merged[index]);
-      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
