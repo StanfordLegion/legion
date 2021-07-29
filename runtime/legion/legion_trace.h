@@ -941,11 +941,17 @@ namespace Legion {
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
-                             ApEvent precondition, PredEvent pred_guard);
+                             ApEvent precondition, PredEvent pred_guard,
+                             ApEvent tracing_precondition);
       virtual void record_copy_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
+                           PrivilegeMode src_mode, PrivilegeMode dst_mode,
                            std::set<RtEvent> &applied);
+      virtual void record_indirect_views(ApEvent indirect_done,
+                           ApEvent all_done, IndexSpaceExpression *expr,
+                           const FieldMaskSet<InstanceView> &tracing_views,
+                           std::set<RtEvent> &applied, PrivilegeMode priv);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -1268,7 +1274,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
-                             ApEvent precondition, PredEvent pred_guard);
+                             ApEvent precondition, PredEvent pred_guard,
+                             ApEvent tracing_precondition);
       virtual void record_issue_fill(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
@@ -1689,7 +1696,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                     unsigned unique_indirections_identifier,
 #endif
-                    unsigned precondition_idx);
+                    unsigned precondition_idx,
+                    unsigned tracing_pre_idx);
       virtual ~IssueIndirect(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1712,6 +1720,7 @@ namespace Legion {
       unsigned unique_indirections_identifier;
 #endif
       unsigned precondition_idx;
+      unsigned tracing_pre_idx;
     };
 
 #ifdef LEGION_GPU_REDUCTIONS

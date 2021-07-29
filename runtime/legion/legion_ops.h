@@ -1321,7 +1321,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual ApEvent exchange_indirect_records(const unsigned index,
+      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+          const unsigned index, const ApEvent local_pre, 
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space, 
           const DomainPoint &key,
@@ -1465,7 +1466,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual ApEvent exchange_indirect_records(const unsigned index,
+      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+          const unsigned index, const ApEvent local_pre,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
@@ -1489,10 +1491,14 @@ namespace Legion {
       std::vector<PointCopyOp*>                          points;
       std::vector<LegionVector<IndirectRecord>::aligned> src_records;
       std::vector<LegionVector<IndirectRecord>::aligned> dst_records;
-      std::vector<std::set<ApEvent> >                    src_exchange_events;
-      std::vector<std::set<ApEvent> >                    dst_exchange_events;
-      std::vector<ApEvent>                               src_merged;
-      std::vector<ApEvent>                               dst_merged;
+      std::vector<std::vector<ApEvent> >              src_exchange_pre_events;
+      std::vector<std::vector<ApEvent> >              src_exchange_post_events;
+      std::vector<std::vector<ApEvent> >              dst_exchange_pre_events;
+      std::vector<std::vector<ApEvent> >              dst_exchange_post_events;
+      std::vector<ApEvent>                               src_pre_merged;
+      std::vector<ApEvent>                               src_post_merged;
+      std::vector<ApEvent>                               dst_pre_merged;
+      std::vector<ApEvent>                               dst_post_merged;
       std::vector<RtUserEvent>                           src_exchanged;
       std::vector<RtUserEvent>                           dst_exchanged;
       unsigned                                           points_committed;
@@ -1530,7 +1536,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
-      virtual ApEvent exchange_indirect_records(const unsigned index,
+      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+          const unsigned index, const ApEvent local_pre,
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,

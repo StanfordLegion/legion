@@ -4400,7 +4400,23 @@ namespace Legion {
               assert(finder != copy_views.end());
 #endif
               find_all_last_users(finder->second, users, ready_events);
-              precondition_idx = &indirect->precondition_idx;
+              // This is super subtle: for indirections that are
+              // working collectively together on a set of indirect
+              // source or destination instances, we actually have
+              // a fan-in event construction. The indirect->precondition_idx
+              // points to the result of that fan-in tree which is not
+              // what we want to update here. We instead want to update
+              // the set of preconditions for our local instances for this
+              // part of the indirect which feed into the collective event
+              // tree construction. The local fan-in event is stored at
+              // indirect->trace_pre_idx so use that instead for this
+              precondition_idx = &indirect->tracing_pre_idx;
+#ifdef DEBUG_LEGION
+              // The tracing pre idx better be a merge event because
+              // we can't have it changing locations in the trace
+              assert(instructions[indirect->tracing_pre_idx]->get_kind() ==
+                      MERGE_EVENT);
+#endif
               break;
             }
           case ISSUE_FILL:
@@ -6106,7 +6122,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
-                             ApEvent precondition, PredEvent pred_guard)
+                             ApEvent precondition, PredEvent pred_guard,
+                             ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6125,6 +6142,7 @@ namespace Legion {
 #endif
       // Do this first in case it gets preempted
       const unsigned rhs_ = find_event(precondition, tpl_lock);
+      const unsigned pre_ = find_event(tracing_precondition, tpl_lock);
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueIndirect(
             *this, lhs_, expr, find_trace_local_id(memo),
@@ -6132,7 +6150,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             unique_indirections_identifier,
 #endif
-            rhs_));
+            rhs_, pre_));
     }
 
     //--------------------------------------------------------------------------
@@ -6260,6 +6278,7 @@ namespace Legion {
                                  IndexSpaceExpression *expr,
                                  const FieldMaskSet<InstanceView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
+                                 PrivilegeMode src_mode, PrivilegeMode dst_mode,
                                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -6268,12 +6287,35 @@ namespace Legion {
       assert(is_recording());
 #endif
       const unsigned lhs_ = find_event(lhs, tpl_lock);
-      record_views(lhs_, expr, RegionUsage(LEGION_READ_ONLY,LEGION_EXCLUSIVE,0),
+      record_views(lhs_, expr, RegionUsage(src_mode, LEGION_EXCLUSIVE, 0),
                    tracing_srcs, applied_events);
       record_copy_views(lhs_, expr, tracing_srcs);
-      record_views(lhs_, expr,RegionUsage(LEGION_WRITE_ONLY,LEGION_EXCLUSIVE,0),
+      record_views(lhs_, expr,RegionUsage(dst_mode, LEGION_EXCLUSIVE, 0),
                    tracing_dsts, applied_events);
       record_copy_views(lhs_, expr, tracing_dsts);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_indirect_views(ApEvent indirect_done,
+                            ApEvent all_done, IndexSpaceExpression *expr,
+                            const FieldMaskSet<InstanceView> &tracing_views,
+                            std::set<RtEvent> &applied, PrivilegeMode privilege)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      const unsigned indirect = find_event(indirect_done, tpl_lock);
+      const unsigned all = find_event(all_done, tpl_lock);
+      // The thing about indirect views is that the event for which they
+      // are done being used is not always the same as the indirect copy
+      // that generated them because they can be collective, so we need to
+      // record the summary event for when all the indirect copies are done
+      // for their view user
+      record_views(all, expr, RegionUsage(privilege,
+            LEGION_EXCLUSIVE, 0), tracing_views, applied);
+      record_copy_views(indirect, expr, tracing_views);
     }
 
     //--------------------------------------------------------------------------
@@ -7160,7 +7202,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                              unsigned unique_indirections_identifier,
 #endif
-                             ApEvent precondition, PredEvent pred_guard)
+                             ApEvent precondition, PredEvent pred_guard,
+                             ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -7180,7 +7223,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                               unique_indirections_identifier,
 #endif
-                                              precondition, pred_guard);
+                                              precondition, pred_guard,
+                                              tracing_precondition);
     }
     
     //--------------------------------------------------------------------------
@@ -7729,7 +7773,7 @@ namespace Legion {
     {
       memcpy(buffer, derez.get_current_pointer(), buffer_size);
       derez.advance_pointer(buffer_size);
-    }
+        }
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
@@ -9141,12 +9185,12 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  unsigned unique_indirections_id,
 #endif
-                                 unsigned pi)
+                                 unsigned pi, unsigned pre_idx)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
 #ifdef LEGION_SPY
         unique_indirections_identifier(unique_indirections_id), 
 #endif
-        precondition_idx(pi)
+        precondition_idx(pi), tracing_pre_idx(pre_idx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9192,7 +9236,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                                          unique_indirections_identifier,
 #endif
-                                         precondition,PredEvent::NO_PRED_EVENT);
+                                         precondition,
+                                         PredEvent::NO_PRED_EVENT,
+                                         ApEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
