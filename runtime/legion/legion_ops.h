@@ -1420,6 +1420,8 @@ namespace Legion {
       std::vector<std::vector<ApEvent> >                 exchange_post_events;
       std::vector<ApUserEvent>                           pre_merged;
       std::vector<ApUserEvent>                           post_merged;
+      std::vector<size_t>                                src_exchanges;
+      std::vector<size_t>                                dst_exchanges;
       std::vector<RtUserEvent>                           src_exchanged;
       std::vector<RtUserEvent>                           dst_exchanged;
       unsigned                                           points_committed;
