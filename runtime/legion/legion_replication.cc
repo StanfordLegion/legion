@@ -2755,7 +2755,9 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      indirection_barriers.clear();
+      pre_indirection_barriers.clear();
+      post_indirection_barriers.clear();
+      indirection_barrier_owner_shards.clear();
       if (!src_collectives.empty())
       {
         for (unsigned idx = 0; idx < src_collectives.size(); idx++)
@@ -2936,10 +2938,25 @@ namespace Legion {
           }
         }
         // Arrive on our indirection barriers if we have them
-        if (!indirection_barriers.empty())
+        if (!pre_indirection_barriers.empty())
         {
-          for (unsigned idx = 0; idx < indirection_barriers.size(); idx++)
-            Runtime::phase_barrier_arrive(indirection_barriers[idx],1/*count*/);
+          const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
+          for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
+          {
+            Runtime::phase_barrier_arrive(pre_indirection_barriers[idx], 1);
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[idx],
+                  pre_indirection_barriers[idx], ApEvent::NO_AP_EVENT);
+          }
+          for (unsigned idx = 0; idx < post_indirection_barriers.size(); idx++)
+          {
+            Runtime::phase_barrier_arrive(post_indirection_barriers[idx], 1);
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[idx],
+                  post_indirection_barriers[idx], ApEvent::NO_AP_EVENT);
+          }
         }
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
@@ -3010,114 +3027,139 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReplIndexCopyOp::exchange_indirect_records(const unsigned index,
-             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
-             const InstanceSet &instances, const IndexSpace space,
-             const DomainPoint &key,
-             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    std::pair<ApEvent,ApEvent> ReplIndexCopyOp::exchange_indirect_records(
+        const unsigned index, const ApEvent local_pre, const ApEvent local_post,
+        const PhysicalTraceInfo &trace_info, const InstanceSet &instances,
+        const IndexSpace space, const DomainPoint &key,
+        LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
-        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                        instances, space, key, records, sources);
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                          trace_info, instances, space, key, records, sources);
       if (!sources && !collective_dst_indirect_points)
-        return CopyOp::exchange_indirect_records(index, local_done, trace_info,
-                                        instances, space, key, records, sources);
+        return CopyOp::exchange_indirect_records(index, local_pre, local_post,
+                          trace_info, instances, space, key, records, sources);
 #ifdef DEBUG_LEGION
-      assert(local_done.exists());
-      assert(index < indirection_barriers.size());
-      assert(indirection_barriers[index].exists());
+      assert(local_pre.exists());
+      assert(local_post.exists());
+      assert(index < pre_indirection_barriers.size());
+      assert(pre_indirection_barriers[index].exists());
+      assert(index < post_indirection_barriers.size());
+      assert(post_indirection_barriers[index].exists());
 #endif
       RtEvent wait_on;
       RtUserEvent to_trigger;
-      std::set<ApEvent> arrival_events;
       {
         IndexSpaceNode *node = runtime->forest->get_node(space);
         ApEvent domain_ready;
         const Domain dom = node->get_domain(domain_ready, true/*tight*/);
+        bool done_all_exchanges = false;
         // Take the lock and record our sets and instances
         AutoLock o_lock(op_lock);
         if (sources)
         {
-          if (domain_ready.exists() && !domain_ready.has_triggered())
+          for (unsigned idx = 0; idx < instances.size(); idx++)
           {
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-            {
-              const InstanceRef &ref = instances[idx];
-              const ApEvent inst_ready = ref.get_ready_event();
-              if (inst_ready.exists() && !inst_ready.has_triggered())
-                src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), key, space,
-                      Runtime::merge_events(&trace_info, domain_ready,
-                        inst_ready), dom));
-              else
-                src_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), key,
-                      space, domain_ready, dom));
-            }
+            const InstanceRef &ref = instances[idx];
+            src_records[index].push_back(IndirectRecord(
+                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          else
+          if (index >= exchange_pre_events.size())
+            exchange_pre_events.resize(index+1);
+          exchange_pre_events[index].push_back(local_pre);
+          while (index >= pre_merged.size())
           {
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-            {
-              const InstanceRef &ref = instances[idx];
-              src_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(), ref.get_manager(), key,
-                    space, ref.get_ready_event(), dom));
-            }
+            const size_t next = pre_merged.size();
+            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+              pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  pre_indirection_barriers[next], pre_merged.back());
           }
-          src_exchange_events[index].insert(local_done);
+          if (index >= exchange_post_events.size())
+            exchange_post_events.resize(index+1);
+          exchange_post_events[index].push_back(local_post);
+          while (index >= post_merged.size())
+          {
+            const size_t next = post_merged.size();
+            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+               post_indirection_barriers[next], 1/*count*/, post_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  post_indirection_barriers[next], post_merged.back());
+          }
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
-          if (src_exchange_events[index].size() == points.size())
+          if (index >= src_exchanges.size())
+            src_exchanges.resize(index+1, 0);
+          if (++src_exchanges[index] == points.size())
           {
             to_trigger = src_exchanged[index];
-            arrival_events.insert(src_exchange_events[index].begin(),
-                src_exchange_events[index].end());
+            if (dst_indirect_requirements.empty())
+              done_all_exchanges = true;
           }
           else
             wait_on = src_exchanged[index];
         }
         else
         {
-          if (domain_ready.exists() && !domain_ready.has_triggered())
+          for (unsigned idx = 0; idx < instances.size(); idx++)
           {
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-            {
-              const InstanceRef &ref = instances[idx];
-              const ApEvent inst_ready = ref.get_ready_event();
-              if (inst_ready.exists() && !inst_ready.has_triggered())
-                dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), key, space,
-                      Runtime::merge_events(&trace_info, domain_ready,
-                        inst_ready), dom));
-              else
-                dst_records[index].push_back(IndirectRecord(
-                      ref.get_valid_fields(), ref.get_manager(), key,
-                      space, domain_ready, dom));
-            }
+            const InstanceRef &ref = instances[idx];
+            dst_records[index].push_back(IndirectRecord(
+                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
           }
-          else
+          if (index >= exchange_pre_events.size())
+            exchange_pre_events.resize(index+1);
+          exchange_pre_events[index].push_back(local_pre);
+          while (index >= pre_merged.size())
           {
-            for (unsigned idx = 0; idx < instances.size(); idx++)
-            {
-              const InstanceRef &ref = instances[idx];
-              dst_records[index].push_back(IndirectRecord(
-                    ref.get_valid_fields(), ref.get_manager(), key,
-                    space, ref.get_ready_event(), dom));
-            }
+            const size_t next = pre_merged.size();
+            pre_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+              pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  pre_indirection_barriers[next], pre_merged.back());
           }
-          dst_exchange_events[index].insert(local_done);
+          if (index >= exchange_post_events.size())
+            exchange_post_events.resize(index+1);
+          exchange_post_events[index].push_back(local_post);
+          while (index >= post_merged.size())
+          {
+            const size_t next = post_merged.size();
+            post_merged.push_back(Runtime::create_ap_user_event(&trace_info));
+            Runtime::phase_barrier_arrive(
+               post_indirection_barriers[next], 1/*count*/, post_merged.back());
+            if (trace_info.recording)
+              trace_info.record_collective_barrier(
+                  indirection_barrier_owner_shards[next],
+                  post_indirection_barriers[next], post_merged.back());
+          }
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
-          if (dst_exchange_events[index].size() == points.size())
+          if (index >= dst_exchanges.size())
+            dst_exchanges.resize(index+1, 0);
+          if (++dst_exchanges[index] == points.size())
           {
             to_trigger = dst_exchanged[index];
-            arrival_events.insert(dst_exchange_events[index].begin(),
-                dst_exchange_events[index].end());
+            done_all_exchanges = true;
           }
           else
             wait_on = dst_exchanged[index];
+        }
+        if (done_all_exchanges)
+        {
+          Runtime::trigger_event(&trace_info, pre_merged[index],
+              Runtime::merge_events(&trace_info, exchange_pre_events[index]));
+          Runtime::trigger_event(&trace_info, post_merged[index],
+              Runtime::merge_events(&trace_info, exchange_post_events[index]));
         }
       }
       if (to_trigger.exists())
@@ -3128,9 +3170,6 @@ namespace Legion {
         else
           dst_collectives[index]->exchange_records(dst_records[index]);
         Runtime::trigger_event(to_trigger);
-        if (!arrival_events.empty())
-          Runtime::phase_barrier_arrive(indirection_barriers[index],
-              1/*count*/, Runtime::merge_events(&trace_info, arrival_events));
       }
       else if (!wait_on.has_triggered())
         wait_on.wait();
@@ -3139,7 +3178,8 @@ namespace Legion {
         records = src_records[index];
       else
         records = dst_records[index];
-      return indirection_barriers[index];
+      return std::pair<ApEvent,ApEvent>(
+          pre_indirection_barriers[index], post_indirection_barriers[index]);
     }
 
     //--------------------------------------------------------------------------
@@ -3171,15 +3211,22 @@ namespace Legion {
                (src_indirect_requirements.size() == 
                 dst_indirect_requirements.size()));
 #endif
-        indirection_barriers.resize(
+        pre_indirection_barriers.resize(
             (src_indirect_requirements.size() > 
               dst_indirect_requirements.size()) ?
                 src_indirect_requirements.size() : 
                 dst_indirect_requirements.size());
-        for (unsigned idx = 0; idx < indirection_barriers.size(); idx++)
+        post_indirection_barriers.resize(pre_indirection_barriers.size());
+        indirection_barrier_owner_shards.resize(
+            pre_indirection_barriers.size());
+        for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
         {
+          indirection_barrier_owner_shards[idx] = 
+            next_indirection_index % ctx->shard_manager->total_shards; 
           ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
-          indirection_barriers[idx] = next_bar;
+          pre_indirection_barriers[idx] = next_bar;
+          ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
+          post_indirection_barriers[idx] = next_bar;
           ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
           if (next_indirection_index == indirection_bars.size())
             next_indirection_index = 0;
@@ -12176,7 +12223,7 @@ namespace Legion {
       for (LegionVector<IndirectRecord>::aligned::const_iterator it = 
             local_records.begin(); it != local_records.end(); it++)
       {
-        const IndirectKey key(it->inst, it->ready_event, it->domain);
+        const IndirectKey key(it->inst, it->domain);
         records[key] = it->fields;
       }
       perform_collective_sync();
@@ -12187,7 +12234,6 @@ namespace Legion {
       {
         IndirectRecord &record = local_records[index];
         record.inst = it->first.inst;
-        record.ready_event = it->first.ready_event;
         record.domain = it->first.domain;
         record.fields = it->second;
       }
@@ -12203,7 +12249,6 @@ namespace Legion {
             records.begin(); it != records.end(); it++)
       {
         rez.serialize(it->first.inst);
-        rez.serialize(it->first.ready_event);
         rez.serialize(it->first.domain);
         rez.serialize(it->second);
       }
@@ -12220,7 +12265,6 @@ namespace Legion {
       {
         IndirectKey key;
         derez.deserialize(key.inst);
-        derez.deserialize(key.ready_event);
         derez.deserialize(key.domain);
         LegionMap<IndirectKey,FieldMask>::aligned::iterator finder = 
           records.find(key);

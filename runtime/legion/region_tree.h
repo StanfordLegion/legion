@@ -51,7 +51,7 @@ namespace Legion {
       IndirectRecord(void) { }
       IndirectRecord(const FieldMask &m, InstanceManager *p, 
                      const DomainPoint &key, IndexSpace handle, 
-                     ApEvent e, const Domain &d);
+                     const Domain &d);
     public:
       FieldMask fields;
       PhysicalInstance inst;
@@ -59,7 +59,6 @@ namespace Legion {
       ApEvent instance_event;
       IndexSpace index_space;
 #endif
-      ApEvent ready_event;
       Domain domain;
     };
 
@@ -581,39 +580,59 @@ namespace Legion {
                             const RegionRequirement &idx_req,
                             const RegionRequirement &dst_req,
                           const LegionVector<IndirectRecord>::aligned &records,
-                            const InstanceRef &idx_target,
+                            const InstanceSet &src_targets,
+                            const InstanceSet &idx_targets,
                             const InstanceSet &dst_targets,
-                            CopyOp *op, unsigned dst_index,
+                            CopyOp *op, unsigned src_index,
+                            unsigned idx_index, unsigned dst_index,
                             const bool gather_is_range,
-                            const ApEvent precondition, 
+                            const ApEvent init_precondition, 
                             const PredEvent pred_guard,
+                            const ApEvent collective_precondition,
+                            const ApEvent collective_postcondition,
+                            const ApUserEvent local_precondition,
                             const PhysicalTraceInfo &trace_info,
+                            std::set<RtEvent> &map_applied_events,
                             const bool possible_src_out_of_range);
       ApEvent scatter_across(const RegionRequirement &src_req,
                              const RegionRequirement &idx_req,
                              const RegionRequirement &dst_req,
                              const InstanceSet &src_targets,
-                             const InstanceRef &idx_target,
+                             const InstanceSet &idx_targets,
+                             const InstanceSet &dst_targets,
                           const LegionVector<IndirectRecord>::aligned &records,
                              CopyOp *op, unsigned src_index,
+                             unsigned idx_index, unsigned dst_index,
                              const bool scatter_is_range,
-                             const ApEvent precondition, 
+                             const ApEvent init_precondition, 
                              const PredEvent pred_guard,
+                             const ApEvent collective_precondition,
+                             const ApEvent collective_postcondition,
+                             const ApUserEvent local_precondition,
                              const PhysicalTraceInfo &trace_info,
+                             std::set<RtEvent> &map_applied_events,
                              const bool possible_dst_out_of_range,
                              const bool possible_dst_aliasing);
       ApEvent indirect_across(const RegionRequirement &src_req,
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
                               const RegionRequirement &dst_idx_req,
+                              const InstanceSet &src_targets,
+                              const InstanceSet &dst_targets,
                       const LegionVector<IndirectRecord>::aligned &src_records,
-                              const InstanceRef &src_idx_target,
+                              const InstanceSet &src_idx_target,
                       const LegionVector<IndirectRecord>::aligned &dst_records,
-                              const InstanceRef &dst_idx_target, CopyOp *op,
+                              const InstanceSet &dst_idx_target, CopyOp *op,
+                              unsigned src_index, unsigned dst_index,
+                              unsigned src_idx_index, unsigned dst_idx_index,
                               const bool both_are_range,
-                              const ApEvent precondition, 
+                              const ApEvent init_precondition, 
                               const PredEvent pred_guard,
+                              const ApEvent collective_precondition,
+                              const ApEvent collective_postcondition,
+                              const ApUserEvent local_precondition,
                               const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing);
@@ -1220,7 +1239,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           ApEvent tracing_precondition) = 0;
 #ifdef LEGION_GPU_REDUCTIONS
       virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1321,7 +1341,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                unsigned unique_indirections_identifier,
 #endif
-                               ApEvent precondition, PredEvent pred_guard);
+                               ApEvent precondition, PredEvent pred_guard,
+                               ApEvent tracing_precondition);
 #ifdef LEGION_GPU_REDUCTIONS
       template<int DIM, typename T>
       inline ApEvent gpu_reduction_internal(RegionTreeForest *forest,
@@ -1510,7 +1531,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           ApEvent tracing_precondition);
 #ifdef LEGION_GPU_REDUCTIONS
       virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -2496,7 +2518,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                            unsigned unique_indirections_identifier,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           ApEvent tracing_precondition);
 #ifdef LEGION_GPU_REDUCTIONS
       virtual ApEvent gpu_reduction(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,

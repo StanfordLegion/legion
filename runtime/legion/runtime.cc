@@ -1096,6 +1096,8 @@ namespace Legion {
                   pending_instances[target] =
                     PendingInstance(instance, inst_ready);
                 }
+                else if (inst_ready.exists())
+                  Runtime::trigger_event(NULL, inst_ready);
               }
               else
               {
