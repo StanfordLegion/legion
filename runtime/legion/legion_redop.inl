@@ -475,7 +475,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval || rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -519,7 +519,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval || rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -1059,7 +1059,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -1126,7 +1126,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -1163,7 +1163,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -1195,7 +1195,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -1240,7 +1240,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -1285,7 +1285,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -1391,7 +1391,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
@@ -1431,7 +1431,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
@@ -1486,7 +1486,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
     for (unsigned i = 0; i < 2; ++i) {
@@ -1543,7 +1543,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval + rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
     for (unsigned i = 0; i < 2; ++i) {
@@ -2108,7 +2108,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -2184,7 +2184,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -2230,7 +2230,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -2271,7 +2271,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -2312,7 +2312,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -2353,7 +2353,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -2459,7 +2459,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
@@ -2499,7 +2499,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval - rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
@@ -2543,7 +2543,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval && rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -2587,7 +2587,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval || rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -2631,7 +2631,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2674,7 +2674,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2745,7 +2745,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2816,7 +2816,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2853,7 +2853,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2890,7 +2890,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2931,7 +2931,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -2972,7 +2972,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3015,7 +3015,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3058,7 +3058,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3125,7 +3125,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3192,7 +3192,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3229,7 +3229,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3266,7 +3266,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3303,7 +3303,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3340,7 +3340,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3412,7 +3412,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -3488,7 +3488,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -3534,7 +3534,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -3575,7 +3575,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -3616,7 +3616,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -3657,7 +3657,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -3763,7 +3763,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
@@ -3803,7 +3803,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval * rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
@@ -3847,7 +3847,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3890,7 +3890,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -3961,7 +3961,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4032,7 +4032,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4069,7 +4069,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4106,7 +4106,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4147,7 +4147,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4188,7 +4188,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4231,7 +4231,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4274,7 +4274,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4341,7 +4341,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4408,7 +4408,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4445,7 +4445,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4482,7 +4482,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4519,7 +4519,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4556,7 +4556,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -4628,7 +4628,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -4704,7 +4704,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -4750,7 +4750,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -4791,7 +4791,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -4832,7 +4832,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -4873,7 +4873,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -4979,7 +4979,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval / rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
@@ -5055,7 +5055,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval || rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -5100,7 +5100,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval || rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -5145,7 +5145,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5189,7 +5189,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5261,7 +5261,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5333,7 +5333,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5365,7 +5365,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5397,7 +5397,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5439,7 +5439,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5481,7 +5481,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5525,7 +5525,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5569,7 +5569,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5637,7 +5637,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5705,7 +5705,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5737,7 +5737,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5769,7 +5769,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5812,7 +5812,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5855,7 +5855,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -5928,7 +5928,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -6005,7 +6005,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -6052,7 +6052,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -6094,7 +6094,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -6136,7 +6136,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -6178,7 +6178,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -6319,7 +6319,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MAX__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
@@ -6364,7 +6364,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval && rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -6409,7 +6409,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval && rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -6454,7 +6454,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6498,7 +6498,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6570,7 +6570,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6642,7 +6642,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6674,7 +6674,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6706,7 +6706,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6748,7 +6748,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6790,7 +6790,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6834,7 +6834,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6878,7 +6878,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -6946,7 +6946,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7014,7 +7014,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7046,7 +7046,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7078,7 +7078,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7121,7 +7121,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7164,7 +7164,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7237,7 +7237,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -7319,7 +7319,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap
     TypePunning::Alias<int32_t,std::array<short,2> > oldval, newval;
@@ -7366,7 +7366,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -7408,7 +7408,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int32_t,float> oldval, newval;
@@ -7450,7 +7450,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -7492,7 +7492,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic floating point operations so use compare and swap 
     TypePunning::Alias<int64_t,double> oldval, newval;
@@ -7633,7 +7633,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = __MIN__(oldval, rhs2);
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
@@ -7677,7 +7677,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7720,7 +7720,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7791,7 +7791,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7862,7 +7862,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7893,7 +7893,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7924,7 +7924,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -7965,7 +7965,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8006,7 +8006,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8049,7 +8049,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8092,7 +8092,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8159,7 +8159,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8226,7 +8226,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8257,7 +8257,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8288,7 +8288,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8330,7 +8330,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8372,7 +8372,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval | rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8415,7 +8415,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8458,7 +8458,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8529,7 +8529,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8600,7 +8600,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8631,7 +8631,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8662,7 +8662,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8703,7 +8703,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8744,7 +8744,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8787,7 +8787,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8830,7 +8830,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8897,7 +8897,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8964,7 +8964,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -8995,7 +8995,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9026,7 +9026,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9068,7 +9068,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9110,7 +9110,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval & rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9153,7 +9153,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval != rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -9197,7 +9197,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval != rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     TypePunning::Alias<int8_t,bool> oldval, newval;
@@ -9241,7 +9241,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9284,7 +9284,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9355,7 +9355,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9426,7 +9426,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9457,7 +9457,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9488,7 +9488,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9529,7 +9529,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9570,7 +9570,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9613,7 +9613,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9656,7 +9656,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9723,7 +9723,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9790,7 +9790,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9821,7 +9821,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9852,7 +9852,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9894,7 +9894,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
@@ -9936,7 +9936,7 @@ namespace Legion {
     RHS newval;
     do {
       newval = oldval ^ rhs2;
-    } while (atomic.compare_exchange_weak(oldval, newval));
+    } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
     RHS oldval, newval;
