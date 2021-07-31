@@ -608,7 +608,7 @@ namespace Legion {
       oldval = newval;
       newval += rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -664,7 +664,7 @@ namespace Legion {
       oldval = newval;
       newval += rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -752,7 +752,7 @@ namespace Legion {
       oldval = newval;
       newval += rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
     __sync_fetch_and_add(&lhs, rhs);
@@ -778,7 +778,7 @@ namespace Legion {
       oldval = newval;
       newval += rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
@@ -1230,7 +1230,7 @@ namespace Legion {
       oldval = newval;
       newval += rhs;
       newval = __ulonglong_as_double(atomicCAS(ptr,
-            __double_as_ulonglong(oldval), __double_as_ulonglong(oldval)));
+            __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #endif
 #else
@@ -1275,7 +1275,7 @@ namespace Legion {
       oldval = newval;
       newval += rhs2;
       newval = __ulonglong_as_double(atomicCAS(ptr,
-            __double_as_ulonglong(oldval), __double_as_ulonglong(oldval)));
+            __double_as_ulonglong(oldval), __double_as_ulonglong(newval)));
     } while (oldval != newval);
 #endif
 #else
@@ -1634,7 +1634,7 @@ namespace Legion {
       oldval = newval;
       newval -= rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -1690,7 +1690,7 @@ namespace Legion {
       oldval = newval;
       newval -= rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -1778,7 +1778,7 @@ namespace Legion {
       oldval = newval;
       newval -= rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
     __sync_fetch_and_sub(&lhs, rhs);
@@ -1804,7 +1804,7 @@ namespace Legion {
       oldval = newval;
       newval -= rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
     __sync_fetch_and_add(&rhs1, rhs2);
@@ -2069,7 +2069,7 @@ namespace Legion {
       oldval = newval;
       newval = newval - rhs;
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -2145,7 +2145,7 @@ namespace Legion {
       oldval = newval;
       newval = newval - rhs2;
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -2706,7 +2706,7 @@ namespace Legion {
       oldval = newval;
       newval *= rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -2777,7 +2777,7 @@ namespace Legion {
       oldval = newval;
       newval *= rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -2922,7 +2922,7 @@ namespace Legion {
       oldval = newval;
       newval *= rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -2963,7 +2963,7 @@ namespace Legion {
       oldval = newval;
       newval *= rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -3373,7 +3373,7 @@ namespace Legion {
       oldval = newval;
       newval = newval * rhs;
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -3449,7 +3449,7 @@ namespace Legion {
       oldval = newval;
       newval = newval * rhs2;
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -3922,7 +3922,7 @@ namespace Legion {
       oldval = newval;
       newval /= rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -3993,7 +3993,7 @@ namespace Legion {
       oldval = newval;
       newval /= rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -4138,7 +4138,7 @@ namespace Legion {
       oldval = newval;
       newval /= rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -4179,7 +4179,7 @@ namespace Legion {
       oldval = newval;
       newval /= rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -4589,7 +4589,7 @@ namespace Legion {
       oldval = newval;
       newval = newval / rhs;
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -4665,7 +4665,7 @@ namespace Legion {
       oldval = newval;
       newval = newval / rhs2;
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -5222,7 +5222,7 @@ namespace Legion {
       oldval = newval;
       newval = __MAX__(newval, rhs);
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -5294,7 +5294,7 @@ namespace Legion {
       oldval = newval;
       newval = __MAX__(newval, rhs2);
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -5430,7 +5430,7 @@ namespace Legion {
       oldval = newval;
       newval = __MAX__(newval, rhs);
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -5472,7 +5472,7 @@ namespace Legion {
       oldval = newval;
       newval = __MAX__(newval, rhs2);
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -5793,8 +5793,8 @@ namespace Legion {
   void MaxReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicMax
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval = lhs;
     do {
@@ -5836,8 +5836,8 @@ namespace Legion {
   void MaxReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicMax
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval = rhs1;
     do {
@@ -5889,7 +5889,7 @@ namespace Legion {
       oldval = newval;
       newval = __MAX__(newval, rhs);
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -5966,7 +5966,7 @@ namespace Legion {
       oldval = newval;
       newval = __MAX__(newval, rhs2);
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -6531,7 +6531,7 @@ namespace Legion {
       oldval = newval;
       newval = __MIN__(newval, rhs);
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -6603,7 +6603,7 @@ namespace Legion {
       oldval = newval;
       newval = __MIN__(newval, rhs2);
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -6739,7 +6739,7 @@ namespace Legion {
       oldval = newval;
       newval = __MIN__(newval, rhs);
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -6781,7 +6781,7 @@ namespace Legion {
       oldval = newval;
       newval = __MIN__(newval, rhs2);
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -7102,8 +7102,8 @@ namespace Legion {
   void MinReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicMin
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval = lhs;
     do {
@@ -7145,8 +7145,8 @@ namespace Legion {
   void MinReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicMin
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval = rhs1;
     do {
@@ -7198,7 +7198,7 @@ namespace Legion {
       oldval = newval;
       newval = __MIN__(newval, rhs);
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -7280,7 +7280,7 @@ namespace Legion {
       oldval = newval;
       newval = __MIN__(newval, rhs2);
       newval = __ushort_as_half(atomicCAS(ptr,
-            __half_as_ushort(oldval), __half_as_ushort(oldval)));
+            __half_as_ushort(oldval), __half_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -7752,7 +7752,7 @@ namespace Legion {
       oldval = newval;
       newval |= rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -7823,7 +7823,7 @@ namespace Legion {
       oldval = newval;
       newval |= rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -7956,7 +7956,7 @@ namespace Legion {
       oldval = newval;
       newval |= rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -7997,7 +7997,7 @@ namespace Legion {
       oldval = newval;
       newval |= rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -8311,8 +8311,8 @@ namespace Legion {
   void OrReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicOr
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval = lhs;
     do {
@@ -8353,8 +8353,8 @@ namespace Legion {
   void OrReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicOr
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval = rhs1;
     do {
@@ -8490,7 +8490,7 @@ namespace Legion {
       oldval = newval;
       newval &= rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -8561,7 +8561,7 @@ namespace Legion {
       oldval = newval;
       newval &= rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -8694,7 +8694,7 @@ namespace Legion {
       oldval = newval;
       newval &= rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -8735,7 +8735,7 @@ namespace Legion {
       oldval = newval;
       newval &= rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -9049,8 +9049,8 @@ namespace Legion {
   void AndReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicAnd
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval = lhs;
     do {
@@ -9091,8 +9091,8 @@ namespace Legion {
   void AndReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicAnd
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval = rhs1;
     do {
@@ -9316,7 +9316,7 @@ namespace Legion {
       oldval = newval;
       newval ^= rhs;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -9387,7 +9387,7 @@ namespace Legion {
       oldval = newval;
       newval ^= rhs2;
       newval = __ushort_as_short(atomicCAS(ptr,
-            __short_as_ushort(oldval), __short_as_ushort(oldval)));
+            __short_as_ushort(oldval), __short_as_ushort(newval)));
     } while (oldval != newval);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -9520,7 +9520,7 @@ namespace Legion {
       oldval = newval;
       newval ^= rhs;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -9561,7 +9561,7 @@ namespace Legion {
       oldval = newval;
       newval ^= rhs2;
       newval = __ulonglong_as_longlong(atomicCAS(ptr,
-            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(oldval)));
+            __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
 #if __cplusplus >= 202002L 
@@ -9875,8 +9875,8 @@ namespace Legion {
   void XorReduction<uint64_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicXor
     unsigned long long *target = (unsigned long long *)&lhs;
     unsigned long long oldval, newval = lhs;
     do {
@@ -9917,8 +9917,8 @@ namespace Legion {
   void XorReduction<uint64_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #ifdef __CUDA_ARCH__
-#if __cplusplus >= 201402L && __CUDACC_VER_MAJOR__ < 11
-    // Old versions of CUDA are dumb as shit when it comes to new C++
+#if __CUDACC_VER_MAJOR__ < 11
+    // Older versions of CUDA don't have 64-bit atomicXor
     unsigned long long *target = (unsigned long long *)&rhs1;
     unsigned long long oldval, newval = rhs1;
     do {
