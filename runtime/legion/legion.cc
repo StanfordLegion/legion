@@ -1936,7 +1936,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexAttachLauncher::IndexAttachLauncher(ExternalResource r,
                                              LogicalRegion p, const bool restr)
-      : resource(r), parent(p), restricted(restr), mode(LEGION_FILE_READ_ONLY),
+      : resource(r), parent(p), restricted(restr), 
+        deduplicate_across_shards(false), mode(LEGION_FILE_READ_ONLY),
         static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6192,10 +6193,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExternalResources Runtime::attach_external_resources(Context ctx,
-            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+                                            const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return ctx->attach_resources(launcher, deduplicate_across_shards);
+      return ctx->attach_resources(launcher);
     }
 
     //--------------------------------------------------------------------------
