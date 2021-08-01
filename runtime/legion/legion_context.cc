@@ -6936,7 +6936,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExternalResources InnerContext::attach_resources(
-            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+                                            const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -17583,7 +17583,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExternalResources ReplicateContext::attach_resources(
-            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+                                            const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -17595,6 +17595,7 @@ namespace Legion {
         hasher.hash(launcher.resource);
         hasher.hash(launcher.parent);
         hasher.hash(launcher.restricted);
+        hasher.hash(launcher.deduplicate_across_shards);
         // Everything else other than the privilege fields is sharded already
         for (std::set<FieldID>::const_iterator it = 
               launcher.privilege_fields.begin(); it !=
@@ -17604,7 +17605,7 @@ namespace Legion {
         verify_replicable(hasher, "attach_resources");
       }
       std::vector<unsigned> indexes;
-      if (!deduplicate_across_shards)
+      if (!launcher.deduplicate_across_shards)
       {
         indexes.resize(launcher.handles.size());
         for (unsigned idx = 0; idx < indexes.size(); idx++)
@@ -22519,7 +22520,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExternalResources LeafContext::attach_resources(
-            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+                                            const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_ATTACH_RESOURCE_OPERATION,
