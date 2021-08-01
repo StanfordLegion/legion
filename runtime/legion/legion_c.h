@@ -4346,6 +4346,13 @@ extern "C" {
       legion_index_attach_launcher_t handle, bool restricted);
 
   /**
+   * @see Legion::IndexAttachLauncher::deduplicate_across_shards
+   */
+  void
+  legion_index_attach_launcher_set_deduplicate_across_shards(
+      legion_index_attach_launcher_t handle, bool deduplicate);
+
+  /**
    * @see Legion::IndexAttachLauncher::attach_file
    */
   void
@@ -4404,8 +4411,7 @@ extern "C" {
   legion_external_resources_t
   legion_attach_external_resources(legion_runtime_t runtime,
                                    legion_context_t ctx,
-                                   legion_attach_launcher_t launcher,
-                                   bool deduplicate_across_shards);
+                                   legion_attach_launcher_t launcher);
 
   /**
    * @return Caller takes ownership of return value

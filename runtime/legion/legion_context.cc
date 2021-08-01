@@ -6256,7 +6256,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExternalResources InnerContext::attach_resources(
-            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+                                            const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -12018,7 +12018,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExternalResources LeafContext::attach_resources(
-            const IndexAttachLauncher &launcher, bool deduplicate_across_shards)
+                                            const IndexAttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_ATTACH_RESOURCE_OPERATION,

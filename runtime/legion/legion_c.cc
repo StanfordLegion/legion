@@ -5485,6 +5485,16 @@ legion_index_attach_launcher_set_restricted(
 }
 
 void
+legion_index_attach_launcher_set_deduplicate_across_shards(
+    legion_index_attach_launcher_t handle_,
+    bool deduplicate)
+{
+  IndexAttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->deduplicate_across_shards = deduplicate;
+}
+
+void
 legion_index_attach_launcher_attach_file(legion_index_attach_launcher_t handle_,
                                          legion_logical_region_t region_,
                                          const char *filename,
@@ -5567,15 +5577,14 @@ legion_index_attach_launcher_destroy(legion_index_attach_launcher_t handle_)
 legion_external_resources_t
 legion_attach_external_resources(legion_runtime_t runtime_,
                                  legion_context_t ctx_,
-                                 legion_index_attach_launcher_t launcher_,
-                                 bool deduplicate_across_shards)
+                                 legion_index_attach_launcher_t launcher_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexAttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   ExternalResources resources = 
-    runtime->attach_external_resources(ctx, *launcher, deduplicate_across_shards);
+    runtime->attach_external_resources(ctx, *launcher);
   return CObjectWrapper::wrap(new ExternalResources(resources));
 }
 
