@@ -2266,8 +2266,7 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual ExternalResources attach_resources(
-                                          const IndexAttachLauncher &launcher,
-                                          bool deduplicate_across_shards);
+                                          const IndexAttachLauncher &launcher);
       virtual RegionTreeNode* compute_index_attach_upper_bound(
                                         const IndexAttachLauncher &launcher,
                                         const std::vector<unsigned> &indexes);
