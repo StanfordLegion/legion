@@ -10816,7 +10816,6 @@ function codegen.top_task(cx, node)
 
       if not cx.variant:get_config_options().inner and
         (not cx.region_usage or cx.region_usage[region_type]) and
-        not variant:is_external() and
         flag ~= std.no_access_flag
       then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
