@@ -3746,7 +3746,6 @@ namespace Legion {
       ApEvent termination_event;
       bool restricted;
       bool mapping;
-      bool local_files;
     };
 
     /**

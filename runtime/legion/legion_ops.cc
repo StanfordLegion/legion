@@ -18802,7 +18802,6 @@ namespace Legion {
       footprint = launcher.footprint;
       restricted = launcher.restricted;
       mapping = launcher.mapped;
-      local_files = launcher.local_files;
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -18968,7 +18967,6 @@ namespace Legion {
       footprint = 0;
       termination_event = ApEvent::NO_AP_EVENT;
       restricted = true;
-      local_files = false;
     }
 
     //--------------------------------------------------------------------------
@@ -19335,7 +19333,7 @@ namespace Legion {
       else // Local so we can just do this call here
         return node->column_source->create_external_manager(result, ready_event,
             footprint, constraints, field_set, sizes, external_mask,
-            mask_index_map, node, serdez);
+            mask_index_map,node,serdez,runtime->get_available_distributed_id());
     }
 
     //--------------------------------------------------------------------------

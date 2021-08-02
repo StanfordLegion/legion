@@ -11146,11 +11146,12 @@ namespace Legion {
         index_partition_allocator_shard(0), field_space_allocator_shard(0), 
         field_allocator_shard(0), logical_region_allocator_shard(0), 
         dynamic_id_allocator_shard(0), equivalence_set_allocator_shard(0), 
-        next_available_collective_index(0), next_logical_collective_index(1),
-        next_physical_template_index(0), 
-        sharding_launch_space(IndexSpace::NO_SPACE),next_replicate_bar_index(0),
-        next_logical_bar_index(0), unordered_ops_counter(0), 
-        unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
+        attach_did_allocator_shard(0), next_available_collective_index(0),
+        next_logical_collective_index(1), next_physical_template_index(0), 
+        sharding_launch_space(IndexSpace::NO_SPACE),
+        collective_map_launch_space(IndexSpace::NO_SPACE),
+        next_replicate_bar_index(0), next_logical_bar_index(0),
+        unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -11160,6 +11161,7 @@ namespace Legion {
       deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
       deletion_execution_barrier = manager->get_deletion_execution_barrier();
       attach_resource_barrier = manager->get_attach_resource_barrier();
+      attach_instance_barrier = manager->get_attach_instance_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
@@ -17505,6 +17507,8 @@ namespace Legion {
         hasher.hash(launcher.parent);
         hasher.hash(launcher.restricted);
         hasher.hash(launcher.mapped);
+        hasher.hash(launcher.collective);
+        hasher.hash(launcher.deduplicate_across_shards);
         if (launcher.file_name != NULL)
           hasher.hash(launcher.file_name, strlen(launcher.file_name));
         hasher.hash(launcher.mode);
@@ -17519,7 +17523,6 @@ namespace Legion {
           hasher.hash(it->first);
           hasher.hash(it->second, strlen(it->second));
         }
-        hasher.hash(launcher.local_files);
         Serializer rez;
         launcher.constraints.serialize(rez);
         hasher.hash(rez.get_buffer(), rez.get_used_bytes());
@@ -17539,9 +17542,8 @@ namespace Legion {
             get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher);
-      attach_op->initialize_replication(this, 
-          find_sharding_launch_space(true/*can create*/),
-          shard_manager->find_sharding_function(0/*cyclic*/),
+      attach_op->initialize_replication(this, attach_instance_barrier, 
+          launcher.collective, launcher.deduplicate_across_shards,
           shard_manager->is_first_local_shard(owner_shard));
 
       bool parent_conflict = false, inline_conflict = false;
@@ -20118,6 +20120,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardID ReplicateContext::get_next_attach_did_origin(void)
+    //--------------------------------------------------------------------------
+    {
+      const ShardID result = attach_did_allocator_shard++;
+      if (attach_did_allocator_shard == total_shards)
+        attach_did_allocator_shard = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     ShardID ReplicateContext::get_next_equivalence_set_origin(void)
     //--------------------------------------------------------------------------
     {
@@ -20441,6 +20453,18 @@ namespace Legion {
           DomainPoint(shard_manager->total_shards-1));
       sharding_launch_space = find_index_launch_space(shard_domain);
       return sharding_launch_space;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::find_collective_map_launch_space(void)
+    //--------------------------------------------------------------------------
+    {
+      if (collective_map_launch_space.exists())
+        return collective_map_launch_space;
+      const Domain collective_domain(DomainPoint(0),
+          shard_manager->get_collective_mapping().size()-1);
+      collective_map_launch_space = find_index_launch_space(collective_domain);
+      return collective_map_launch_space;
     }
 
     //--------------------------------------------------------------------------

@@ -2392,6 +2392,7 @@ namespace Legion {
                                                          AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
     public:
+      ShardID get_next_attach_did_origin(void);
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);
       bool replicate_partition_equivalence_sets(PartitionNode *node) const;
@@ -2445,8 +2446,9 @@ namespace Legion {
       // This one can only be called inside the logical dependence analysis
       void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
       void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
-    protected:
+    public:
       IndexSpace find_sharding_launch_space(bool can_create);
+      IndexSpace find_collective_map_launch_space(void);
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
       ShardingFunction* get_attach_detach_sharding_function(void);
@@ -2512,6 +2514,7 @@ namespace Legion {
       ShardID logical_region_allocator_shard;
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
+      ShardID attach_did_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
       RtBarrier creation_barrier;
@@ -2519,6 +2522,7 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier attach_resource_barrier;
+      ApBarrier attach_instance_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
@@ -2608,6 +2612,7 @@ namespace Legion {
       };
       std::vector<AttachLaunchSpace*> index_attach_launch_spaces;
       IndexSpace sharding_launch_space;
+      IndexSpace collective_map_launch_space;
     protected:
       unsigned next_replicate_bar_index;
       unsigned next_logical_bar_index;

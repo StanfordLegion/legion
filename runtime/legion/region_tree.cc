@@ -14299,7 +14299,8 @@ namespace Legion {
 
       PhysicalManager *manager = fs->create_external_manager(inst, ready_event,
           footprint, constraints, field_set, field_sizes, file_mask,
-          mask_index_map, region_node, serdez);
+          mask_index_map, region_node, serdez,
+          runtime->get_available_distributed_id());
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14333,7 +14334,8 @@ namespace Legion {
             const std::vector<size_t> &field_sizes, 
             const FieldMask &external_mask,
             const std::vector<unsigned> &mask_index_map,
-            RegionNode *node, const std::vector<CustomSerdezID> &serdez)
+            RegionNode *node, const std::vector<CustomSerdezID> &serdez,
+            DistributedID did)
     //--------------------------------------------------------------------------
     {
       // Pull out the pointer constraint so that we can use it separately
@@ -14356,11 +14358,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
-      DistributedID did = context->runtime->get_available_distributed_id();
       MemoryManager *memory = 
         context->runtime->find_memory_manager(inst.get_location());
       IndividualManager *result = new IndividualManager(context, did, 
-                                         context->runtime->address_space,
+                                         context->runtime->determine_owner(did),
                                          memory, inst, node->row_source, 
                                          NULL/*piece list*/, 
                                          0/*piece list size*/,

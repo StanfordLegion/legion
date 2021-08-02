@@ -2029,8 +2029,9 @@ namespace Legion {
       ReplAttachOp& operator=(const ReplAttachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  IndexSpace shard_space,
-                                  ShardingFunction *shard_fn,
+                                  ApBarrier &attach_barriers,
+                                  bool collective_instances,
+                                  bool deduplicate_across_shards,
                                   bool first_local_shard);
     public:
       virtual void activate(void);
@@ -2048,7 +2049,12 @@ namespace Legion {
                                               const FieldMask &external_mask);
     protected:
       IndexSpace shard_space;
+      IndexSpace point_space;
+      ApBarrier attach_barrier;
       ShardingFunction *shard_fn;
+      size_t exchange_index;
+      bool collective_instance;
+      bool deduplicate_across_shards;
       bool is_first_local_shard;
     protected:
       RtBarrier resource_barrier;
@@ -2457,6 +2463,8 @@ namespace Legion {
         { return deletion_mapping_barrier; }
       inline RtBarrier get_attach_resource_barrier(void) const
         { return attach_resource_barrier; }
+      inline ApBarrier get_attach_instance_barrier(void) const
+        { return attach_instance_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
       inline RtBarrier get_resource_return_barrier(void) const
@@ -2515,9 +2523,31 @@ namespace Legion {
                                 std::vector<unsigned> &indexes);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
-      void exchange_shard_local_op_event(size_t context_index,
-                                         ApEvent complete_event);
-      ApEvent find_shard_local_op_event(size_t context_index);
+      template<typename T>
+      inline void exchange_shard_local_op_data(size_t context_index,
+                                               size_t exchange_index,
+                                               const T &data)
+      {
+        static_assert(std::is_trivially_copyable<T>(), "not copyable");
+        exchange_shard_local_op_data(context_index, exchange_index,
+                                     &data, sizeof(data));
+      }
+      void exchange_shard_local_op_data(size_t context_index,
+                                        size_t exchange_index,
+                                        const void *data, size_t size);
+      template<typename T>
+      inline T find_shard_local_op_data(size_t context_index,
+                                        size_t exchange_index)
+      {
+        static_assert(std::is_trivially_copyable<T>(), "not copyable");
+        T result;
+        find_shard_local_op_data(context_index, exchange_index, 
+                                 &result, sizeof(result));
+        return result;
+      }
+      void find_shard_local_op_data(size_t context_index,
+                                    size_t exchange_index,
+                                    void *data, size_t size);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(FutureInstance *instance, void *metadata,
@@ -2638,6 +2668,7 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier attach_resource_barrier;
+      ApBarrier attach_instance_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
@@ -2670,15 +2701,16 @@ namespace Legion {
                                unique_registration_callbacks;
 #endif
     protected:
-      struct ShardLocalEvent {
+      struct ShardLocalData {
       public:
-        ShardLocalEvent(void) : remaining(0) { }
+        ShardLocalData(void) : buffer(NULL), size(0), remaining(0) { }
       public:
-        ApEvent result;
+        void *buffer;
+        size_t size;
         RtUserEvent pending;
         unsigned remaining;
       };
-      std::map<size_t,ShardLocalEvent> shard_local_events;
+      std::map<std::pair<size_t,size_t>,ShardLocalData> shard_local_data;
     protected:
       AttachDeduplication *attach_deduplication;
     };

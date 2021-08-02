@@ -628,6 +628,8 @@ namespace Legion {
     public:
       CollectiveManager& operator=(const CollectiveManager &rh);
     public:
+      void record_collective_instance(const DomainPoint &point,
+                                      PhysicalInstance instance);
       void finalize_collective_instance(ApUserEvent instance_event);
       CollectiveMapping* get_collective_mapping(void) const;
     public:

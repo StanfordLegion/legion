@@ -1923,8 +1923,9 @@ namespace Legion {
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
       : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
-        static_dependences(NULL)
+        collective((r == LEGION_EXTERNAL_INSTANCE) ? true : false),
+        deduplicate_across_shards(false), file_name(NULL),
+        mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1936,7 +1937,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexAttachLauncher::IndexAttachLauncher(ExternalResource r,
                                              LogicalRegion p, const bool restr)
-      : resource(r), parent(p), restricted(restr), 
+      : resource(r), parent(p), restricted(restr),
         deduplicate_across_shards(false), mode(LEGION_FILE_READ_ONLY),
         static_dependences(NULL)
     //--------------------------------------------------------------------------
