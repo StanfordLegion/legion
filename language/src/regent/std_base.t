@@ -1029,14 +1029,6 @@ function base.variant:is_openmp()
   return self.openmp
 end
 
-function base.variant:set_is_external(external)
-  self.external = external
-end
-
-function base.variant:is_external()
-  return self.external
-end
-
 function base.variant:set_is_inline(inline)
   self.inline = inline
 end
@@ -1236,7 +1228,6 @@ do
       definition = false,
       cuda = false,
       openmp = false,
-      external = false,
       inline = false,
       cudakernels = false,
       config_options = false,
