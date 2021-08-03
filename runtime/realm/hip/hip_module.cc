@@ -2752,24 +2752,23 @@ namespace Realm {
 
       // peer access
       for(std::vector<GPU *>::iterator it = module->gpus.begin();
-	        it != module->gpus.end();
-	        it++) {
-	      // ignore ourselves
-	      if(*it == this) continue;
+	  it != module->gpus.end();
+	  it++) {
+	// ignore ourselves
+	if(*it == this) continue;
 
-	      // ignore gpus that we don't expect to be able to peer with
-	      if(info->peers.count((*it)->info->device) == 0)
-	        continue;
+	// ignore gpus that we don't expect to be able to peer with
+	if(info->peers.count((*it)->info->device) == 0)
+	  continue;
 
-	      // ignore gpus with no fb
-	      if(!((*it)->fbmem))
-	        continue;
+	// ignore gpus with no fb
+	if(!((*it)->fbmem))
+	  continue;
 
-      	// enable peer access
+      	// enable peer access (this part is different from CUDA since runtime API has no CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED)
       	{
           printf("id %d\n", (*it)->device_id);
       	  AutoGPUContext agc(this);
-      	  //CHECK_CU( hipCtxEnablePeerAccess((*it)->context, 0) );
           CHECK_CU( hipDeviceEnablePeerAccess((*it)->device_id, 0) );
       	}
       	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
