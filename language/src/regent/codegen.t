@@ -9361,6 +9361,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
           [task_args_cleanup]
         end
+        c.legion_domain_point_iterator_destroy(it)
       end
     end
     task_args_loop_cleanup = quote
