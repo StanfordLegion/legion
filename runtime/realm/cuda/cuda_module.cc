@@ -2801,10 +2801,14 @@ namespace Realm {
 	if(!((*it)->fbmem))
 	  continue;
 
-	// enable peer access
+	// enable peer access (it's ok if it's already been enabled)
 	{
 	  AutoGPUContext agc(this);
-	  CHECK_CU( cuCtxEnablePeerAccess((*it)->context, 0) );
+
+          CUresult ret = cuCtxEnablePeerAccess((*it)->context, 0);
+          if((ret != CUDA_SUCCESS) &&
+             (ret != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED))
+            REPORT_CU_ERROR("cuCtxEnablePeerAccess((*it)->context, 0)", ret);
 	}
 	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
 	peer_fbs.insert((*it)->fbmem->me);

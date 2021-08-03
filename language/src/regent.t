@@ -63,7 +63,6 @@ local language = {
     "__delete",
     "__demand",
     "__execution",
-    "__external",
     "__fence",
     "__fields",
     "__forbid",

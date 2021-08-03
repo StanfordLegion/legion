@@ -37,7 +37,7 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"constant_time_launch", "cuda", "external",
+ast.annotation:leaf("Set", {"constant_time_launch", "cuda",
                             "idempotent", "index_launch", "inline", "inner",
                             "leaf", "local_launch", "openmp", "optimize", "parallel",
                             "predicate", "replicable", "spmd", "trace",
@@ -49,7 +49,6 @@ function ast.default_annotations()
   return ast.annotation.Set {
     constant_time_launch = allow,
     cuda = allow,
-    external = allow,
     idempotent = allow,
     index_launch = allow,
     inline = allow,

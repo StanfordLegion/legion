@@ -8480,16 +8480,7 @@ namespace Legion {
                                 PhysicalManager *manager, MapperID mapper_id, 
                                 Processor processor, GCPriority priority)
     //--------------------------------------------------------------------------
-    {
-      // Ignore garbage collection priorities on external instances
-      if (manager->is_external_instance())
-      {
-        MapperManager *manager = runtime->find_mapper(processor, mapper_id);
-        REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
-            "Ignoring request for mapper %s to set garbage collection "
-            "priority on an external instance", manager->get_mapper_name())
-        return;
-      }
+    { 
       bool remove_min_reference = false;
       IgnoreReferenceMutator mutator;
       if (!is_owner)
@@ -19197,9 +19188,19 @@ namespace Legion {
         delete mapper;
         return;
       }
+      const bool all_local_procs = !proc.exists();
+      if (all_local_procs)
+      {
+        std::vector<Processor> all_local_processors;
+        all_local_processors.reserve(proc_managers.size());
+        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+              proc_managers.begin(); it != proc_managers.end(); it++)
+          all_local_processors.push_back(it->first);
+        proc = find_processor_group(all_local_processors);
+      }
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, mapper, map_id, proc);
-      if (!proc.exists())
+      if (all_local_procs)
       {
         bool own = true;
         // Save it to all the managers
@@ -19210,7 +19211,7 @@ namespace Legion {
           own = false;
         }
       }
-      else
+      else if (proc.address_space() == address_space)
       {
 #ifdef DEBUG_LEGION
         assert(proc_managers.find(proc) != proc_managers.end());
@@ -19218,6 +19219,12 @@ namespace Legion {
         proc_managers[proc]->add_mapper(map_id, manager, 
                                         true/*check*/, true/*own*/);
       }
+      else
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_MAPPER_PROCESSOR,
+            "Illegal attempt to register mapper %s as mapper %d "
+            "for processor " IDFMT ". That processor is not local to the "
+            "process where 'Runtime::add_mapper' was called.",
+            manager->get_mapper_name(), map_id, proc.id);
     }
 
     //--------------------------------------------------------------------------
@@ -19382,9 +19389,19 @@ namespace Legion {
         delete mapper;
         return;
       }
+      const bool all_local_procs = !proc.exists();
+      if (all_local_procs)
+      {
+        std::vector<Processor> all_local_processors;
+        all_local_processors.reserve(proc_managers.size());
+        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+              proc_managers.begin(); it != proc_managers.end(); it++)
+          all_local_processors.push_back(it->first);
+        proc = find_processor_group(all_local_processors);
+      }
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, mapper, 0, proc); 
-      if (!proc.exists())
+      if (all_local_procs)
       {
         bool own = true;
         // Save it to all the managers
@@ -19395,13 +19412,19 @@ namespace Legion {
           own = false;
         }
       }
-      else
+      else if (proc.address_space() == address_space)
       {
 #ifdef DEBUG_LEGION
         assert(proc_managers.find(proc) != proc_managers.end());
 #endif
         proc_managers[proc]->replace_default_mapper(manager, true/*own*/);
       }
+      else
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_MAPPER_PROCESSOR,
+            "Illegal attempt to register mapper %s as the default mapper "
+            "for processor " IDFMT ". That processor is not local to the "
+            "process where 'Runtime::replace_default_mapper' was called.",
+            manager->get_mapper_name(), proc.id);
     }
 
     //--------------------------------------------------------------------------
