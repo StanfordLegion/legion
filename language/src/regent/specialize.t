@@ -2108,7 +2108,7 @@ end
 function specialize.top_task(cx, node)
   local cx = cx:new_local_scope()
 
-  local task = std.new_task(node.name, node.span)
+  local task = std.new_task(node.name, node.span, not node.body)
 
   if node.body then
     local variant = task:make_variant("primary")

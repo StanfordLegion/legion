@@ -1533,6 +1533,10 @@ function base.task:get_name()
   return self.name
 end
 
+function base.task:is_extern()
+  return self.extern
+end
+
 function base.task:has_calling_convention()
   return self.calling_convention
 end
@@ -1562,7 +1566,7 @@ function base.task:get_variant(name)
 end
 
 function base.task:set_primary_variant(task)
-  assert(not self.primary_variant)
+  assert(not self.primary_variant and not self:is_extern())
   self.primary_variant = task
 end
 
@@ -1576,7 +1580,7 @@ function base.task:get_primary_variant()
 end
 
 function base.task:set_cuda_variant(task)
-  assert(not self.cuda_variant)
+  assert(not self.cuda_variant and not self:is_extern())
   self.cuda_variant = task
 end
 
@@ -1585,7 +1589,7 @@ function base.task:get_cuda_variant()
 end
 
 function base.task:set_parallel_task(task)
-  assert(not self.parallel_task)
+  assert(not self.parallel_task and not self:is_extern())
   self.parallel_task = task
 end
 
@@ -1654,7 +1658,7 @@ do
   if not base.config["separate"] then
     next_task_id = base.initial_regent_task_id
   end
-  function base.new_task(name, span)
+  function base.new_task(name, span, extern)
     if type(name) == "string" then
       name = data.newtuple(name)
     elseif data.is_tuple(name) then
@@ -1666,9 +1670,12 @@ do
     local unique_id = make_unique_task_identifier(name)
     local task_id
     if base.config["separate"] then
-      task_id = terralib.global(
-        c.legion_task_id_t, c.AUTO_GENERATE_ID,
-        "__regent_task_" .. unique_id .. "_task_id")
+      local global_name = "__regent_task_" .. unique_id .. "_task_id"
+      if extern then
+        task_id = terralib.global(c.legion_task_id_t, nil, global_name, true)
+      else
+        task_id = terralib.global(c.legion_task_id_t, c.AUTO_GENERATE_ID, global_name)
+      end
     else
       task_id = terralib.constant(c.legion_task_id_t, next_task_id)
       next_task_id = next_task_id + 1
@@ -1676,21 +1683,28 @@ do
 
     local mapper_id = false
     if base.config["separate"] then
-      mapper_id = terralib.global(
-        c.legion_mapper_id_t, 0,
-        "__regent_task_" .. unique_id .. "_mapper_id")
+      local global_name = "__regent_task_" .. unique_id .. "_mapper_id"
+      if extern then
+        mapper_id = terralib.global(c.legion_mapper_id_t, nil, global_name, true)
+      else
+        mapper_id = terralib.global(c.legion_mapper_id_t, 0, global_name)
+      end
     end
 
     local mapping_tag_id = false
     if base.config["separate"] then
-      mapping_tag_id = terralib.global(
-        c.legion_mapping_tag_id_t, 0,
-        "__regent_task_" .. unique_id .. "_mapping_tag_id")
+      local global_name = "__regent_task_" .. unique_id .. "_mapping_tag_id"
+      if extern then
+        mapping_tag_id = terralib.global(c.legion_mapping_tag_id_t, nil, global_name, true)
+      else
+        mapping_tag_id = terralib.global(c.legion_mapping_tag_id_t, 0, global_name)
+      end
     end
 
     return setmetatable({
       name = name,
       span = span,
+      extern = extern or false,
       unique_task_identifier = unique_id,
       taskid = task_id,
       variants = terralib.newlist(),
