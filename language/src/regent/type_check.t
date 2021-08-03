@@ -52,7 +52,6 @@ function context:new_local_scope(must_epoch, breakable_loop)
     fixup_nodes = self.fixup_nodes,
     must_epoch = must_epoch,
     breakable_loop = breakable_loop,
-    external = self.external,
   }
   setmetatable(cx, context)
   return cx
@@ -69,7 +68,6 @@ function context:new_task_scope(expected_return_type, is_cuda)
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
     breakable_loop = false,
-    external = false,
   }
   setmetatable(cx, context)
   return cx
@@ -97,14 +95,6 @@ end
 function context:set_return_type(t)
   assert(self.expected_return_type)
   self.expected_return_type[1] = t
-end
-
-function context:get_external()
-  return self.external
-end
-
-function context:set_external(external)
-  self.external = external
 end
 
 function type_check.region_field(cx, node, region, prefix_path, value_type)
@@ -3352,10 +3342,6 @@ function type_check.expr_deref(cx, node)
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
 
-  if cx:get_external() then
-    report.error(node, "dereference in an external task")
-  end
-
   local expr_type
   if value_type:ispointer() then
     expr_type = std.rawref(value_type)
@@ -4638,9 +4624,6 @@ function type_check.top_task(cx, node)
   local cx = cx:new_task_scope(return_type, is_cuda)
 
   local is_defined = node.prototype:has_primary_variant()
-  if is_defined then
-    cx:set_external(node.prototype:get_primary_variant():is_external())
-  end
 
   local mapping = {}
   local params = node.params:map(

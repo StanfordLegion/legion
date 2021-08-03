@@ -18,7 +18,6 @@
 #define REALM_HIP_INTERNAL_H
 
 #include <hip/hip_runtime.h>
-#define HIP_VERBOSE_ERROR_MSG 1
 #ifdef __HIP_PLATFORM_NVCC__
 #define hipDeviceScheduleBlockingSync CU_CTX_SCHED_BLOCKING_SYNC 
 typedef CUdeviceptr hipDeviceCharptr_t;
@@ -45,29 +44,20 @@ typedef char* hipDeviceCharptr_t;
   } \
 } while(0)
   
-// Need CUDA 6.5 or later for good error reporting
-#if HIP_VERBOSE_ERROR_MSG == 1
-#define CHECK_CU(cmd) do { \
-  hipError_t ret = (cmd); \
-  if(ret != hipSuccess) { \
+#define REPORT_CU_ERROR(cmd, ret) \
+  do { \
     const char *name, *str; \
     name = hipGetErrorName(ret); \
     str = hipGetErrorString(ret); \
-    fprintf(stderr, "CU: %s = %d (%s): %s\n", #cmd, ret, name, str); \
-    assert(0); \
-    exit(1); \
-  } \
-} while(0)
-#else
-#define CHECK_CU(cmd) do { \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } while(0)
+
+#define CHECK_CU(cmd) do {                      \
   hipError_t ret = (cmd); \
-  if(ret != hipSuccess) { \
-    fprintf(stderr, "CU: %s = %d\n", #cmd, ret); \
-    assert(0); \
-    exit(1); \
-  } \
+  if(ret != hipSuccess) REPORT_CU_ERROR(#cmd, ret); \
 } while(0)
-#endif
+
 
 namespace Realm {
   
