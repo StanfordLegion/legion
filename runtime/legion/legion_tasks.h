@@ -927,7 +927,7 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
+                                  Memory memory, size_t *footprint,
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index,
                                   DomainPoint &collective_point);
@@ -1384,7 +1384,7 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
+                                  Memory memory, size_t *footprint,
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index,
                                   DomainPoint &collective_point);

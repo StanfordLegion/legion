@@ -2100,14 +2100,14 @@ namespace Legion {
           unsigned unsat_index = 0;
           collective = ctx->operation->find_or_create_collective_instance(
               ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+              target_memory, footprint, &unsat_kind, &unsat_index,point);
           if (collective == NULL)
             *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
         }
         else
           collective = ctx->operation->find_or_create_collective_instance(
               ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
+              target_memory, footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -2208,15 +2208,15 @@ namespace Legion {
           LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
           unsigned unsat_index = 0;
           collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+              ctx->kind, ctx->collective_count++, *cons, regions,
+              target_memory, footprint, &unsat_kind, &unsat_index, point);
           if (collective == NULL)
             *unsat = cons->convert_unsatisfied(unsat_kind, unsat_index);
         }
         else
           collective = ctx->operation->find_or_create_collective_instance(
-              ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
+              ctx->kind, ctx->collective_count++, *cons, regions,
+              target_memory, footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -2322,14 +2322,14 @@ namespace Legion {
           unsigned unsat_index = 0;
           collective = ctx->operation->find_or_create_collective_instance(
               ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+              target_memory, footprint, &unsat_kind, &unsat_index,point);
           if (collective == NULL)
             *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
         }
         else
           collective = ctx->operation->find_or_create_collective_instance(
               ctx->kind, ctx->collective_count++, constraints, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
+              target_memory, footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)
@@ -2464,14 +2464,14 @@ namespace Legion {
           unsigned unsat_index = 0;
           collective = ctx->operation->find_or_create_collective_instance(
               ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, &unsat_kind, &unsat_index,point);
+              target_memory, footprint, &unsat_kind, &unsat_index,point);
           if (collective == NULL)
             *unsat = cons->convert_unsatisfied(unsat_kind, unsat_index);
         }
         else
           collective = ctx->operation->find_or_create_collective_instance(
               ctx->kind, ctx->collective_count++, *cons, regions, 
-              target_memory.kind(), footprint, NULL, NULL, point);
+              target_memory, footprint, NULL, NULL, point);
         if (collective == NULL)
         {
           if (point.get_dim() > 0)

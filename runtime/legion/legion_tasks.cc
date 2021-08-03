@@ -7408,7 +7408,7 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
+                                  Memory memory, size_t *footprint,
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index,
                                   DomainPoint &collective_point)
@@ -7419,7 +7419,7 @@ namespace Legion {
 #endif
       collective_point = index_point;
       return slice_owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, kind, footprint, unsat_kind, unsat_index, 
+          constraints, regions, memory, footprint, unsat_kind, unsat_index, 
           collective_point);
     }
 
@@ -12109,7 +12109,7 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
+                                  Memory memory, size_t *footprint,
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index,
                                   DomainPoint &collective_point)
@@ -12131,7 +12131,7 @@ namespace Legion {
           for (std::vector<LogicalRegion>::const_iterator it = 
                 regions.begin(); it != regions.end(); it++)
             rez.serialize(*it);
-          rez.serialize(kind);
+          rez.serialize(memory);
           rez.serialize(footprint);
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
@@ -12145,7 +12145,7 @@ namespace Legion {
       }
       else
         return index_owner->find_or_create_collective_instance(mapper_call, 
-            index, constraints, regions, kind, footprint, unsat_kind, 
+            index, constraints, regions, memory, footprint, unsat_kind, 
             unsat_index, collective_point);
     }
 
@@ -12229,8 +12229,8 @@ namespace Legion {
             std::vector<LogicalRegion> regions(num_regions);
             for (unsigned idx = 0; idx < num_regions; idx++)
               derez.deserialize(regions[idx]);
-            Memory::Kind mem_kind;
-            derez.deserialize(mem_kind);
+            Memory memory;
+            derez.deserialize(memory);
             size_t *remote_footprint;
             derez.deserialize(remote_footprint);
             LayoutConstraintKind *remote_unsat_kind;
@@ -12249,7 +12249,7 @@ namespace Legion {
             unsigned unsat_index = 0;
             CollectiveManager *result = 
               index_owner->find_or_create_collective_instance(mapper_call,
-                  index, constraints, regions, mem_kind, &footprint,
+                  index, constraints, regions, memory, &footprint,
                   &unsat_kind, &unsat_index, point);
             if ((result != NULL) || (remote_footprint != NULL) || 
                 (remote_unsat_kind != NULL) || (remote_unsat_index != NULL))

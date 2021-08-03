@@ -2403,6 +2403,23 @@ namespace Legion {
                     const FieldMaskSet<EquivalenceSet> &to_untrack,
                     std::set<RtEvent> &applied_events, bool local_only = false);
     public:
+      // Support for creating collective instances with control replication
+      CollectiveManager* find_or_create_collective_instance(size_t op_index,
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, IndexSpaceNode *point_node,
+                                  size_t shard_points, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      bool finalize_collective_instance(size_t op_index, 
+                                  MappingCallKind mapper_call, 
+                                  unsigned index, bool success); 
+      void report_total_collective_instance_calls(size_t op_index,
+                                  MappingCallKind call_kind,
+                                  unsigned total_calls);
+    public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);

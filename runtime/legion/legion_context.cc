@@ -20257,6 +20257,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* ReplicateContext::find_or_create_collective_instance(
+                        size_t op_index, MappingCallKind mapper_call, 
+                        unsigned index, const LayoutConstraintSet &constraints,
+                        const std::vector<LogicalRegion> &regions,
+                        Memory memory, IndexSpaceNode *point_node,
+                        size_t shard_points, size_t *footprint,
+                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
+                        DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::finalize_collective_instance(size_t op_index,
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::report_total_collective_instance_calls(
+              size_t op_kindex, MappingCallKind call_kind, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     RtBarrier ReplicateContext::get_next_mapping_fence_barrier(void)
     //--------------------------------------------------------------------------
     {

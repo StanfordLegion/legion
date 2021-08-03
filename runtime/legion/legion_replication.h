@@ -1328,6 +1328,19 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
+    public:
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(
+                             MappingCallKind call_kind, unsigned total_calls);
     protected:
       virtual void finalize_output_regions(void);
     protected:
@@ -1481,6 +1494,18 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(
+                             MappingCallKind call_kind, unsigned total_calls);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1560,6 +1585,18 @@ namespace Legion {
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(
+                             MappingCallKind call_kind, unsigned total_calls);
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   std::vector<ApBarrier> &indirection_bars,
@@ -1797,6 +1834,18 @@ namespace Legion {
       virtual void trigger_ready(void);  
       virtual void finalize_mapping(void);
       virtual void select_partition_projection(void);
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(
+                             MappingCallKind call_kind, unsigned total_calls);
     protected:
       void select_sharding_function(void);
     protected:
@@ -2008,6 +2057,18 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
       virtual IndexSpaceNode* get_collective_space(void) const;
+      virtual CollectiveManager* find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point);
+      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
+                                                unsigned index, bool success);
+      virtual void report_total_collective_instance_calls(
+                             MappingCallKind call_kind, unsigned total_calls);
     protected:
       CollectiveID collective_check;
       IndexSpace shard_space;
@@ -2029,7 +2090,7 @@ namespace Legion {
       ReplAttachOp& operator=(const ReplAttachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  ApBarrier &attach_barriers,
+                                  ApBarrier &attach_barrier,
                                   bool collective_instances,
                                   bool deduplicate_across_shards,
                                   bool first_local_shard);
@@ -2059,6 +2120,7 @@ namespace Legion {
     protected:
       RtBarrier resource_barrier;
       ValueBroadcast<DistributedID> *did_broadcast;
+      ValueBroadcast<std::pair<PhysicalInstance,ApEvent> > *single_broadcast;
     };
 
     /**
@@ -2360,40 +2422,7 @@ namespace Legion {
       void unpack_mapping(Deserializer &derez);
     protected:
       std::vector<AddressSpaceID> address_spaces;
-    };
-
-    /**
-     * \class CollectiveMapping
-     * A collective mapping is an ordering of unique address spaces
-     * and can be used to construct broadcast and reduction trees.
-     */
-    class CollectiveMapping : public Collectable {
-    public:
-      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
-      CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
-      CollectiveMapping(Deserializer &derez, size_t size = 0);
-    public:
-      inline AddressSpaceID operator[](unsigned idx) const
-        { return unique_sorted_spaces[idx]; }
-      inline size_t size(void) const { return unique_sorted_spaces.size(); }
-      bool operator==(const CollectiveMapping &rhs) const;
-      bool operator!=(const CollectiveMapping &rhs) const;
-    public:
-      AddressSpaceID get_parent(const AddressSpaceID origin, 
-                                const AddressSpaceID local) const;
-      void get_children(const AddressSpaceID origin, const AddressSpaceID local,
-                        std::vector<AddressSpaceID> &children) const;
-      bool contains(const AddressSpaceID space) const;
-    public:
-      void pack(Serializer &rez) const;
-    protected:
-      unsigned find_index(const AddressSpaceID space) const;
-      unsigned convert_to_offset(unsigned index, unsigned origin) const;
-      unsigned convert_to_index(unsigned offset, unsigned origin) const;
-    protected:
-      std::vector<AddressSpaceID> unique_sorted_spaces;
-      size_t radix;
-    };
+    }; 
 
     /**
      * \class ShardManager

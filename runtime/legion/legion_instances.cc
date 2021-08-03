@@ -23,6 +23,7 @@
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
+#include "legion/legion_replication.h"
 
 namespace LegionRuntime {
   namespace Accessor {
@@ -571,6 +572,185 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Collective Mapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(
+                            const std::vector<AddressSpaceID> &spaces, size_t r)
+      : radix(r)
+    //--------------------------------------------------------------------------
+    {
+      std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
+      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
+                                  unique_spaces.begin(), unique_spaces.end());
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
+      : radix(r)
+    //--------------------------------------------------------------------------
+    {
+      std::set<AddressSpaceID> unique_spaces;
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
+        unique_spaces.insert(mapping[idx]);
+      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
+                                  unique_spaces.begin(), unique_spaces.end());
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t num_spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (num_spaces == 0)
+        derez.deserialize(num_spaces);
+#ifdef DEBUG_LEGION
+      assert(num_spaces > 0);
+#endif
+      unique_sorted_spaces.resize(num_spaces);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(unique_sorted_spaces[idx]);
+      if (num_spaces > 0)
+        derez.deserialize(radix);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::operator==(const CollectiveMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (radix != rhs.radix)
+        return false;
+      if (size() != rhs.size())
+        return false;
+      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
+        if (unique_sorted_spaces[idx] != rhs[idx])
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::operator!=(const CollectiveMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin, 
+                                               const AddressSpaceID local) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = convert_to_offset(local_index, origin_index);
+      const unsigned index = convert_to_index((offset-1) / radix, origin_index);
+      return unique_sorted_spaces[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveMapping::get_children(const AddressSpaceID origin,
+        const AddressSpaceID local, std::vector<AddressSpaceID> &children) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = radix * 
+        convert_to_offset(local_index, origin_index);
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < unique_sorted_spaces.size())
+        {
+          const unsigned index = convert_to_index(child_offset, origin_index);
+          children.push_back(unique_sorted_spaces[index]); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveMapping::contains(const AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      return (find_index(space) < unique_sorted_spaces.size()); 
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveMapping::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(unique_sorted_spaces.size());
+      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
+        rez.serialize(unique_sorted_spaces[idx]);
+      if (!unique_sorted_spaces.empty())
+        rez.serialize(radix);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::find_index(const AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      // Binary search, will be fast
+      unsigned first = 0;
+      unsigned last = unique_sorted_spaces.size() - 1;
+      unsigned mid = 0;
+      while (first <= last)
+      {
+        mid = (first + last) / 2;
+        const AddressSpaceID midval = unique_sorted_spaces[mid];
+        if (space == midval)
+          return mid;
+        else if (space < midval)
+          last = mid - 1;
+        else if (midval < space)
+          first = mid + 1;
+        else
+          break;
+      }
+      return unique_sorted_spaces.size();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::convert_to_offset(unsigned index, 
+                                                  unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      if (index < origin_index)
+      {
+        // Modulus arithmetic here
+        return ((index + unique_sorted_spaces.size()) - origin_index);
+      }
+      else
+        return (index - origin_index);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CollectiveMapping::convert_to_index(unsigned offset,
+                                                 unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(offset < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      unsigned result = origin_index + offset;
+      if (result >= unique_sorted_spaces.size())
+        result -= unique_sorted_spaces.size();
       return result;
     }
 
@@ -2262,7 +2442,8 @@ namespace Legion {
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
             ctx->runtime->get_reduction(redop_id),
           node, instance_domain, pl, pl_size, tree_id, u_event, register_now), 
-        point_space(points), finalize_messages(0), deleted_or_detached(false)
+        point_space(points), collective_mapping(NULL), finalize_messages(0),
+        deleted_or_detached(false)
     //--------------------------------------------------------------------------
     {
       point_space->add_nested_valid_ref(did);
@@ -2297,6 +2478,9 @@ namespace Legion {
     {
       if (point_space->remove_nested_valid_ref(did))
         delete point_space;
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference()) 
+        delete collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -2310,11 +2494,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::finalize_collective_instance(ApUserEvent inst_event)
+    void CollectiveManager::finalize_collective_instance(
+                             CollectiveMapping *mapping, ApUserEvent inst_event)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* CollectiveManager::get_collective_mapping(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      return collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -3659,7 +3854,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
-                RegionTreeForest *forest, CollectiveManager *collective_inst,
+                RegionTreeForest *forest, CollectiveManager *collective_manager,
                 DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
                 unsigned *unsat_index, size_t *footprint)
     //--------------------------------------------------------------------------
@@ -3785,6 +3980,17 @@ namespace Legion {
         if (unsat_index != NULL)
           *unsat_index = 0;
         return NULL;
+      }
+      // If we're making a collective instance then record the 
+      // instance for the specific point in the collective manager
+      if (collective_manager != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(collective_point != NULL);
+#endif
+        collective_manager->record_point_instance(*collective_point, 
+                                                  instance, ready);
+        return collective_manager;
       }
       // For Legion Spy we need a unique ready event if it doesn't already
       // exist so we can uniquely identify the instance

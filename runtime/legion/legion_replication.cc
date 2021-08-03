@@ -1200,6 +1200,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* ReplIndexTask::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->find_or_create_collective_instance(context_index, 
+          mapper_call, index, constraints, regions, memory,
+          get_collective_space(), total_points, footprint, unsat_kind,
+          unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplIndexTask::finalize_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->finalize_collective_instance(context_index, 
+                                      mapper_call, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::report_total_collective_instance_calls(
+                                MappingCallKind call_kind, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      repl_ctx->report_total_collective_instance_calls(context_index,
+                                                       call_kind, total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
@@ -2474,6 +2527,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* ReplIndexFillOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->find_or_create_collective_instance(context_index, 
+          mapper_call, index, constraints, regions, memory,
+          get_collective_space(), launch_space->get_volume(), footprint, 
+          unsat_kind, unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplIndexFillOp::finalize_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->finalize_collective_instance(context_index, 
+                                      mapper_call, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::report_total_collective_instance_calls(
+                                MappingCallKind call_kind, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      repl_ctx->report_total_collective_instance_calls(context_index,
+                                                       call_kind, total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
@@ -3180,6 +3286,59 @@ namespace Legion {
         records = dst_records[index];
       return std::pair<ApEvent,ApEvent>(
           pre_indirection_barriers[index], post_indirection_barriers[index]);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* ReplIndexCopyOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->find_or_create_collective_instance(context_index, 
+          mapper_call, index, constraints, regions, memory,
+          get_collective_space(), launch_space->get_volume(), footprint,
+          unsat_kind, unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplIndexCopyOp::finalize_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->finalize_collective_instance(context_index, 
+                                      mapper_call, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::report_total_collective_instance_calls(
+                                MappingCallKind call_kind, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      repl_ctx->report_total_collective_instance_calls(context_index,
+                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -4328,6 +4487,60 @@ namespace Legion {
       else
         precondition = mapping_barrier;
       complete_mapping(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* 
+        ReplDependentPartitionOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->find_or_create_collective_instance(context_index, 
+          mapper_call, index, constraints, regions, memory,
+          get_collective_space(), launch_space->get_volume(), footprint,
+          unsat_kind, unsat_index, collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDependentPartitionOp::finalize_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->finalize_collective_instance(context_index, 
+                                      mapper_call, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::report_total_collective_instance_calls(
+                                MappingCallKind call_kind, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      repl_ctx->report_total_collective_instance_calls(context_index,
+                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -6212,6 +6425,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager* ReplMapOp::find_or_create_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  Memory memory, size_t *footprint,
+                                  LayoutConstraintKind *unsat_kind,
+                                  unsigned *unsat_index,
+                                  DomainPoint &collective_point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      IndexSpaceNode *point_space = runtime->forest->get_node(shard_space);
+      return repl_ctx->find_or_create_collective_instance(context_index, 
+          mapper_call, index, constraints, regions, memory, point_space,
+          1/*total points*/,footprint,unsat_kind,unsat_index,collective_point);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplMapOp::finalize_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return repl_ctx->finalize_collective_instance(context_index, 
+                                      mapper_call, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMapOp::report_total_collective_instance_calls(
+                                MappingCallKind call_kind, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      repl_ctx->report_total_collective_instance_calls(context_index,
+                                                       call_kind, total_calls);
+    }
+
+    //--------------------------------------------------------------------------
     DomainPoint ReplMapOp::get_shard_point(void) const
     //--------------------------------------------------------------------------
     {
@@ -6306,6 +6572,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       //assert(resource_bar.exists());
       assert(did_broadcast == NULL);
+      assert(single_broadcast == NULL);
 #endif
       //resource_barrier = resource_bar;
       //ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
@@ -6321,7 +6588,7 @@ namespace Legion {
           point_space = ctx->find_collective_map_launch_space();
         else
           point_space = shard_space;
-        attach_barrier = attach_bar;
+        attach_barrier = attach_bar; 
         ctx->advance_replicate_barrier(attach_bar, ctx->total_shards);
         const ShardID owner_shard = ctx->get_next_attach_did_origin();
         did_broadcast = 
@@ -6363,6 +6630,9 @@ namespace Legion {
           new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_78);
         if (did_broadcast->is_origin())
           did_broadcast->broadcast(runtime->get_available_distributed_id());
+        single_broadcast =
+          new ValueBroadcast<std::pair<PhysicalInstance,ApEvent> >(
+              ctx, owner_shard, COLLECTIVE_LOC_75);
       }
     }
 
@@ -6381,6 +6651,7 @@ namespace Legion {
       is_first_local_shard = false;
       resource_barrier = RtBarrier::NO_RT_BARRIER;
       did_broadcast = NULL;
+      single_broadcast = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -6390,6 +6661,8 @@ namespace Legion {
       deactivate_attach_op();
       if (did_broadcast != NULL)
         delete did_broadcast;
+      if (single_broadcast != NULL)
+        delete single_broadcast;
       runtime->free_repl_attach_op(this);
     }
 
@@ -6551,8 +6824,16 @@ namespace Legion {
               {
                 field_ids[idx] = *it;
               }
-              instance = node->row_source->create_file_instance(file_name,
-                          field_ids, field_sizes, file_mode, ready_event);
+              // Do the call to make the instance if we're collective
+              // or we're the origin for the single instance case
+              if (collective_instance || single_broadcast->is_origin())
+              {
+                instance = node->row_source->create_file_instance(file_name,
+                            field_ids, field_sizes, file_mode, ready_event);
+                if (!collective_instance)
+                  single_broadcast->broadcast(
+                      std::make_pair(instance, ready_event));
+              }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);
               constraints.field_constraint = 
@@ -6578,11 +6859,17 @@ namespace Legion {
                 field_files[idx] = it->second;
               }
               // Now ask the low-level runtime to create the instance
-              instance = node->row_source->create_hdf5_instance(file_name,
+              if (collective_instance || single_broadcast->is_origin())
+              {
+                instance = node->row_source->create_hdf5_instance(file_name,
                                       field_ids, field_sizes, field_files,
                                       layout_constraint_set.ordering_constraint,
                                       (file_mode == LEGION_FILE_READ_ONLY),
                                       ready_event);
+                if (!collective_instance)
+                  single_broadcast->broadcast(
+                      std::make_pair(instance, ready_event));
+              }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
               constraints.field_constraint = 
@@ -6604,8 +6891,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(pointer.is_valid);
 #endif
-              instance = node->row_source->create_external_instance(
-                      pointer.memory, pointer.ptr, ilg, ready_event);
+              if (collective_instance || single_broadcast->is_origin())
+              {
+                instance = node->row_source->create_external_instance(
+                        pointer.memory, pointer.ptr, ilg, ready_event);
+                if (!collective_instance)
+                  single_broadcast->broadcast(
+                      std::make_pair(instance, ready_event));
+              }
               constraints = layout_constraint_set;
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
@@ -6616,8 +6909,14 @@ namespace Legion {
         }
       }
       // Do the arrival on the attach barrier for any collective instances
-      if (collective_instance)
-        Runtime::phase_barrier_arrive(attach_barrier, 1/*count*/, ready_event);
+      if ((single_broadcast != NULL) && !single_broadcast->is_origin())
+      {
+        // If we're making a single instance get the name
+        const std::pair<PhysicalInstance,ApEvent> result =
+          single_broadcast->get_value();
+        instance = result.first;
+        ready_event = result.second;
+      }
       if (runtime->legion_spy_enabled)
       {
         ApEvent attach_event = 
@@ -6657,8 +6956,7 @@ namespace Legion {
         // Make the manager first
         if (is_first_local_shard)
         {
-          // Copy this out so we don't overwrite it
-          const PointerConstraint temp = constraints.pointer_constraint;
+          // Pointer constraint doesn't matter here
           constraints.pointer_constraint = PointerConstraint();
           const size_t total_dims = node->row_source->get_num_dims();
           FieldSpaceNode *field_node = node->column_source;
@@ -6699,35 +6997,59 @@ namespace Legion {
               manager->update_remote_instances(space);
             }
           }
-          // Send the manager to the other shards
-          shard_manager->exchange_shard_local_op_data(context_index, 
-                                          exchange_index++, manager);
-          // Restore the pointer constraint
-          constraints.pointer_constraint = temp;
+          // Send the manager to the other shards if we're not
+          // deduplicating so we can set the points
+          if (!deduplicate_across_shards)
+            shard_manager->exchange_shard_local_op_data(context_index, 
+                                            exchange_index++, manager);
         }
-        else
+        else if (!deduplicate_across_shards)
           manager = shard_manager->find_shard_local_op_data<CollectiveManager*>(
                                                context_index, exchange_index++);
         // Then record the local instance data with the manager
         if (!deduplicate_across_shards)
         {
           const DomainPoint point(repl_ctx->owner_shard->shard_id);
-          manager->record_collective_instance(point, instance);
+          manager->record_point_instance(point, instance, ready_event);
+          CollectiveMapping &mapping = 
+            shard_manager->get_collective_mapping();
+          manager->finalize_collective_instance(&mapping,attach_barrier,point);
         }
         else if (is_first_local_shard)
         {
           // Figure out which point we are in the collective mapping
-          const CollectiveMapping &mapping = 
+          CollectiveMapping &mapping = 
             shard_manager->get_collective_mapping();
+#if defined(DEBUG_LEGION) && !defined(NDEBUG)
+          bool found = false;
+#endif
           for (unsigned idx = 0; idx < mapping.size(); idx++)
           {
             const AddressSpaceID space = mapping[idx];
             if (space != runtime->address_space)
               continue;
             const DomainPoint point(idx);
-            manager->record_collective_instance(point, instance);
+            manager->record_point_instance(point, instance, ready_event);
+            manager->finalize_collective_instance(&mapping,
+                                                  attach_barrier, point);
+#if defined(DEBUG_LEGION) && !defined(NDEBUG)
+            found = true;
+#endif
             break;
           }
+#ifdef DEBUG_LEGION
+          assert(found);
+#endif
+          shard_manager->exchange_shard_local_op_data(context_index,
+                                          exchange_index++, manager);
+        }
+        else
+        {
+          manager = shard_manager->find_shard_local_op_data<CollectiveManager*>(
+                                               context_index, exchange_index++);
+          // Do the extra arrivals on the barrier since it is expecting
+          // one arrival per shard
+          Runtime::phase_barrier_arrive(attach_barrier, 1/*count*/);
         }
         return manager;
       }
@@ -8477,186 +8799,7 @@ namespace Legion {
       address_spaces.resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize(address_spaces[idx]);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Collective Mapping
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(
-                            const std::vector<AddressSpaceID> &spaces, size_t r)
-      : radix(r)
-    //--------------------------------------------------------------------------
-    {
-      std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
-      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
-                                  unique_spaces.begin(), unique_spaces.end());
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
-      : radix(r)
-    //--------------------------------------------------------------------------
-    {
-      std::set<AddressSpaceID> unique_spaces;
-      for (unsigned idx = 0; idx < mapping.size(); idx++)
-        unique_spaces.insert(mapping[idx]);
-      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
-                                  unique_spaces.begin(), unique_spaces.end());
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t num_spaces)
-    //--------------------------------------------------------------------------
-    {
-      if (num_spaces == 0)
-        derez.deserialize(num_spaces);
-#ifdef DEBUG_LEGION
-      assert(num_spaces > 0);
-#endif
-      unique_sorted_spaces.resize(num_spaces);
-      for (unsigned idx = 0; idx < num_spaces; idx++)
-        derez.deserialize(unique_sorted_spaces[idx]);
-      if (num_spaces > 0)
-        derez.deserialize(radix);
-    }
-
-    //--------------------------------------------------------------------------
-    bool CollectiveMapping::operator==(const CollectiveMapping &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (radix != rhs.radix)
-        return false;
-      if (size() != rhs.size())
-        return false;
-      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
-        if (unique_sorted_spaces[idx] != rhs[idx])
-          return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool CollectiveMapping::operator!=(const CollectiveMapping &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      return !((*this) == rhs);
-    }
-
-    //--------------------------------------------------------------------------
-    AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin, 
-                                               const AddressSpaceID local) const
-    //--------------------------------------------------------------------------
-    {
-      const unsigned local_index = find_index(local);
-      const unsigned origin_index = find_index(origin);
-#ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
-#endif
-      const unsigned offset = convert_to_offset(local_index, origin_index);
-      const unsigned index = convert_to_index((offset-1) / radix, origin_index);
-      return unique_sorted_spaces[index];
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveMapping::get_children(const AddressSpaceID origin,
-        const AddressSpaceID local, std::vector<AddressSpaceID> &children) const
-    //--------------------------------------------------------------------------
-    {
-      const unsigned local_index = find_index(local);
-      const unsigned origin_index = find_index(origin);
-#ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
-#endif
-      const unsigned offset = radix * 
-        convert_to_offset(local_index, origin_index);
-      for (unsigned idx = 1; idx <= radix; idx++)
-      {
-        const unsigned child_offset = offset + idx;
-        if (child_offset < unique_sorted_spaces.size())
-        {
-          const unsigned index = convert_to_index(child_offset, origin_index);
-          children.push_back(unique_sorted_spaces[index]); 
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool CollectiveMapping::contains(const AddressSpaceID space) const
-    //--------------------------------------------------------------------------
-    {
-      return (find_index(space) < unique_sorted_spaces.size()); 
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveMapping::pack(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<size_t>(unique_sorted_spaces.size());
-      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
-        rez.serialize(unique_sorted_spaces[idx]);
-      if (!unique_sorted_spaces.empty())
-        rez.serialize(radix);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned CollectiveMapping::find_index(const AddressSpaceID space) const
-    //--------------------------------------------------------------------------
-    {
-      // Binary search, will be fast
-      unsigned first = 0;
-      unsigned last = unique_sorted_spaces.size() - 1;
-      unsigned mid = 0;
-      while (first <= last)
-      {
-        mid = (first + last) / 2;
-        const AddressSpaceID midval = unique_sorted_spaces[mid];
-        if (space == midval)
-          return mid;
-        else if (space < midval)
-          last = mid - 1;
-        else if (midval < space)
-          first = mid + 1;
-        else
-          break;
-      }
-      return unique_sorted_spaces.size();
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned CollectiveMapping::convert_to_offset(unsigned index, 
-                                                  unsigned origin_index) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
-#endif
-      if (index < origin_index)
-      {
-        // Modulus arithmetic here
-        return ((index + unique_sorted_spaces.size()) - origin_index);
-      }
-      else
-        return (index - origin_index);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned CollectiveMapping::convert_to_index(unsigned offset,
-                                                 unsigned origin_index) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(offset < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
-#endif
-      unsigned result = origin_index + offset;
-      if (result >= unique_sorted_spaces.size())
-        result -= unique_sorted_spaces.size();
-      return result;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Shard Manager 

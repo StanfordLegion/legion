@@ -106,6 +106,41 @@ namespace Legion {
     }; 
 
     /**
+     * \class CollectiveMapping
+     * A collective mapping is an ordering of unique address spaces
+     * and can be used to construct broadcast and reduction trees.
+     * This is especialy useful for collective instances and for
+     * parts of control replication.
+     */
+    class CollectiveMapping : public Collectable {
+    public:
+      CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
+      CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
+      CollectiveMapping(Deserializer &derez, size_t size = 0);
+    public:
+      inline AddressSpaceID operator[](unsigned idx) const
+        { return unique_sorted_spaces[idx]; }
+      inline size_t size(void) const { return unique_sorted_spaces.size(); }
+      bool operator==(const CollectiveMapping &rhs) const;
+      bool operator!=(const CollectiveMapping &rhs) const;
+    public:
+      AddressSpaceID get_parent(const AddressSpaceID origin, 
+                                const AddressSpaceID local) const;
+      void get_children(const AddressSpaceID origin, const AddressSpaceID local,
+                        std::vector<AddressSpaceID> &children) const;
+      bool contains(const AddressSpaceID space) const;
+    public:
+      void pack(Serializer &rez) const;
+    protected:
+      unsigned find_index(const AddressSpaceID space) const;
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
+    protected:
+      std::vector<AddressSpaceID> unique_sorted_spaces;
+      size_t radix;
+    };
+
+    /**
      * \class InstanceManager
      * This is the abstract base class for all instances of a physical
      * resource manager for memory.
@@ -628,9 +663,15 @@ namespace Legion {
     public:
       CollectiveManager& operator=(const CollectiveManager &rh);
     public:
-      void record_collective_instance(const DomainPoint &point,
-                                      PhysicalInstance instance);
-      void finalize_collective_instance(ApUserEvent instance_event);
+      void record_point_instance(const DomainPoint &point,
+                                 PhysicalInstance instance, ApEvent inst_ready);
+      // Single version called from a single node
+      void finalize_collective_instance(CollectiveMapping *mapping,
+                                        ApUserEvent to_trigger);
+      // Collective version called once per point in the space
+      void finalize_collective_instance(CollectiveMapping *mapping,
+                                        ApBarrier to_arrive,
+                                        const DomainPoint &point);
       CollectiveMapping* get_collective_mapping(void) const;
     public:
       virtual ApEvent get_use_event(void) const;
@@ -728,6 +769,7 @@ namespace Legion {
     public:
       IndexSpaceNode *const point_space;
     protected:
+      CollectiveMapping *collective_mapping;
       std::vector<MemoryManager*> memories; // local memories
       std::vector<PhysicalInstance> instances; // local instances
       std::vector<AddressSpaceID> right_spaces;

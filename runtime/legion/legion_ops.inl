@@ -50,14 +50,13 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
+                                  Memory memory, size_t *footprint,
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index,
                                   DomainPoint &collective_point)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
-      bool found = false;
       CollectiveManager *manager = NULL;
       const CollectiveKey key(mapper_call, index);
       {
@@ -68,7 +67,6 @@ namespace Legion {
         {
           if (finder->second.remaining > 0)
           {
-            found = true;
             manager = finder->second.manager;
             if ((manager == NULL) && (--finder->second.remaining == 0) &&
                 (finder->second.pending == 0))
@@ -83,7 +81,7 @@ namespace Legion {
           inst.ready_event = Runtime::create_rt_user_event();
         }
       }
-      if (!found)
+      if (manager == NULL)
       {
         if (!wait_on.exists())
         {
@@ -96,8 +94,8 @@ namespace Legion {
           InstanceBuilder builder(regions, constraints, this->runtime);
           ApUserEvent instance_ready = Runtime::create_ap_user_event(NULL);
           manager = builder.create_collective_instance(this->runtime->forest,
-              kind, collective_space, unsat_kind, unsat_index, instance_ready, 
-              footprint);
+              memory.kind(), collective_space, unsat_kind, unsat_index,
+              instance_ready, footprint);
           if (manager == NULL)
           {
             Runtime::trigger_event(NULL, instance_ready);
@@ -187,6 +185,7 @@ namespace Legion {
       RtUserEvent wait_on;
       ApUserEvent instance_event;
       CollectiveManager *manager = NULL;
+      CollectiveMapping *mapping = NULL;
       const CollectiveKey key(call_kind, index);
       {
         AutoLock o_lock(this->op_lock);
@@ -227,14 +226,22 @@ namespace Legion {
         {
           manager = finder->second.manager;
           instance_event = finder->second.instance_event;
+          const std::vector<AddressSpaceID> spaces(
+              finder->second.unique_spaces.begin(),
+              finder->second.unique_spaces.end());
+          mapping = new CollectiveMapping(spaces,
+              this->runtime->legion_collective_radix);
+          mapping->add_reference();
         }
         else
           wait_on = finder->second.ready_event;
       }
       if (manager != NULL)
       {
-        manager->finalize_collective_instance(instance_event);
+        manager->finalize_collective_instance(mapping, instance_event);
         Runtime::trigger_event(wait_on);
+        if (mapping->remove_reference())
+          delete mapping;
       }
       else
         wait_on.wait();
