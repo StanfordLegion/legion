@@ -55,6 +55,9 @@ namespace Legion {
         is_default_mapper(is_default)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(processor.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2411,7 +2414,13 @@ namespace Legion {
         return;
       pause_mapper_call(ctx);
       PhysicalManager *manager = man->as_physical_manager();
-      manager->set_garbage_collection_priority(mapper_id, processor, priority);
+      // Ignore garbage collection priorities on external instances
+      if (manager->is_external_instance())
+        REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
+            "Ignoring request for mapper %s to set garbage collection "
+            "priority on an external instance", get_mapper_name())
+      else
+        manager->set_garbage_collection_priority(mapper_id,processor,priority);
       resume_mapper_call(ctx);
     }
 
