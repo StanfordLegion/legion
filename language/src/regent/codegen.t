@@ -4678,6 +4678,9 @@ function codegen.expr_region(cx, node)
     var [r] = [region_type]{ impl = [lr] }
     [tag_imported(cx, lr)]
   end
+
+  cx:add_cleanup_item(quote c.free([field_id_array_buffer]) end)
+
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   if not cx.variant:get_config_options().inner and
     (not cx.region_usage or cx.region_usage[region_type])
@@ -8048,6 +8051,7 @@ function codegen.expr_projection(cx, node)
       end
     end)]
   end
+  cx:add_cleanup_item(quote c.free([field_id_array_buffer]) end)
 
   local field_mapping = data.map_from_table(data.dict(data.zip(field_paths, orig_field_paths)))
   local function map_dict(dict)
