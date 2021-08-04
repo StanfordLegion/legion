@@ -8317,9 +8317,13 @@ function codegen.block(cx, node)
     function(stat) return codegen.stat(cx, stat) end)
 end
 
+local function cleanup(cx)
+  return quote [cx:get_cleanup_items()] end
+end
+
 local function cleanup_after(cx, block)
   local result = terralib.newlist({quote [block] end})
-  result:insert(cx:get_cleanup_items())
+  result:insert(cleanup(cx))
   return quote [result] end
 end
 
@@ -9095,6 +9099,7 @@ end
 local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
+  local loop_cx = cx:new_local_scope()
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
   local loop_vars = node.loop_vars:map(function(stat) return codegen.stat(cx, stat) end)
   local has_preamble = #preamble > 0
@@ -9142,7 +9147,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           region = region_expr,
         }
       end
-      local region = codegen.expr(cx, region_expr):read(cx)
+      local region = codegen.expr(loop_cx, region_expr):read(loop_cx)
       args:insert(region)
     end
     args_partitions:insert(partition)
@@ -9212,7 +9217,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     end
   end
   expr_call_setup_task_args(
-    cx, fn.value, arg_values, arg_types, param_types,
+    loop_cx, fn.value, arg_values, arg_types, param_types,
     params_struct_type, fn.value:has_params_map_label(), fn.value:has_params_map_type(),
     task_args, task_args_setup, task_args_cleanup)
 
@@ -9286,7 +9291,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       local partition = args_partitions[i]
       assert(partition)
       expr_call_setup_partition_arg(
-        cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
+        loop_cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
         args_setup, node.free_vars[i], loop_vars)
     end
   end
@@ -9364,12 +9369,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           c.legion_index_launcher_set_global_arg([launcher], [global_args])
 
           [task_args_cleanup]
+          [cleanup(loop_cx)]
         end
         c.legion_domain_point_iterator_destroy(it)
       end
     end
     task_args_loop_cleanup = quote
       c.free([global_args].args)
+      [cleanup(cx)]
     end
   else
     task_args_loop_setup = quote
@@ -9391,11 +9398,14 @@ local function stat_index_launch_setup(cx, node, domain, actions)
           end
 
           [task_args_cleanup]
+          [cleanup(loop_cx)]
         end
         c.legion_domain_point_iterator_destroy(it)
       end
     end
-    task_args_loop_cleanup = quote end
+    task_args_loop_cleanup = quote
+      [cleanup(cx)]
+    end
   end
 
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
