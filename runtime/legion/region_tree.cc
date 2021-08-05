@@ -37,18 +37,18 @@ namespace Legion {
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
-               const DomainPoint &key, IndexSpace s, ApEvent e, const Domain &d)
+               const DomainPoint &key, IndexSpace s, const Domain &d)
       : fields(m),inst(p->get_instance(key)),
         instance_event(p->get_unique_event()),
-        index_space(s), ready_event(e), domain(d)
+        index_space(s), domain(d)
     //--------------------------------------------------------------------------
     {
     }
 #else
     //--------------------------------------------------------------------------
     IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
-               const DomainPoint &key, IndexSpace s, ApEvent e, const Domain &d)
-      : fields(m), inst(p->get_instance(key)), ready_event(e), domain(d)
+               const DomainPoint &key, IndexSpace s, const Domain &d)
+      : fields(m), inst(p->get_instance(key)), domain(d)
     //--------------------------------------------------------------------------
     {
     }
@@ -2620,13 +2620,20 @@ namespace Legion {
                                             const RegionRequirement &idx_req,
                                             const RegionRequirement &dst_req,
                     const LegionVector<IndirectRecord>::aligned &src_records,
-                                            const InstanceRef &idx_target,
+                                            const InstanceSet &src_targets,
+                                            const InstanceSet &idx_targets,
                                             const InstanceSet &dst_targets,
-                                            CopyOp *op, unsigned dst_index,
+                                            CopyOp *op, unsigned src_index,
+                                            unsigned idx_index,
+                                            unsigned dst_index,
                                             const bool gather_is_range,
-                                            const ApEvent precondition, 
+                                            const ApEvent init_precondition, 
                                             const PredEvent pred_guard,
+                                            const ApEvent collective_pre,
+                                            const ApEvent collective_post,
+                                            const ApUserEvent copy_pre,
                                             const PhysicalTraceInfo &trace_info,
+                                          std::set<RtEvent> &map_applied_events,
                                            const bool possible_src_out_of_range)
     //--------------------------------------------------------------------------
     {
@@ -2637,6 +2644,7 @@ namespace Legion {
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(idx_req.privilege_fields.size() == 1);
 #endif  
+      const InstanceRef &idx_target = idx_targets[0];
       const FieldID idx_field = *(idx_req.privilege_fields.begin());
       // Get the field indexes for src/dst fields
       RegionNode *src_node = get_node(src_req.region);
@@ -2723,27 +2731,53 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_fields.size(); idx++)
           dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
       }
-      // Also add any other copy preconditions
-      for (unsigned idx = 0; idx < src_records.size(); idx++)
+      // Also add our local source copy preconditions
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
       {
-        const ApEvent src_event = src_records[idx].ready_event;
+        const ApEvent src_event = src_targets[idx].get_ready_event();
         if (src_event.exists())
           copy_preconditions.insert(src_event);
       }
       const ApEvent indirect_event = idx_target.get_ready_event();
       if (indirect_event.exists())
         copy_preconditions.insert(indirect_event);
-      if (precondition.exists())
-        copy_preconditions.insert(precondition);
-      ApEvent copy_pre;
+      if (init_precondition.exists())
+        copy_preconditions.insert(init_precondition);
+      ApEvent local_pre;
       if (!copy_preconditions.empty())
-        copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+        local_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+#ifdef DEBUG_LEGION
+      assert(copy_pre.exists());
+#endif
+      Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
         copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
-                                  copy_pre, pred_guard);
+                                  collective_pre, pred_guard, local_pre);
+      if (trace_info.recording)
+      {
+        // If we're tracing record the views for this copy
+        FieldMaskSet<InstanceView> src_views, idx_views, dst_views;
+        std::vector<InstanceView*> source_views;
+        InnerContext *idx_context = op->find_physical_context(idx_index); 
+        idx_context->convert_target_views(src_targets, source_views);
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+          src_views.insert(source_views[idx],
+              src_targets[idx].get_valid_fields());
+        std::vector<InstanceView*> indirect_views;
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        dst_context->convert_target_views(idx_targets, indirect_views);
+        idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+          dst_views.insert(target_views[idx],
+              dst_targets[idx].get_valid_fields());
+        trace_info.record_indirect_views(copy_post, collective_post,
+            src_node->row_source,src_views,map_applied_events,LEGION_READ_PRIV);
+        trace_info.record_copy_views(copy_post, LEGION_READ_PRIV,
+            LEGION_WRITE_PRIV,copy_expr,idx_views,dst_views,map_applied_events);
+      }
       // Clean up our indirections
       for (std::vector<CopyIndirection*>::const_iterator it =
             indirections.begin(); it != indirections.end(); it++)
@@ -2756,13 +2790,20 @@ namespace Legion {
                                              const RegionRequirement &idx_req,
                                              const RegionRequirement &dst_req,
                                              const InstanceSet &src_targets,
-                                             const InstanceRef &idx_target,
+                                             const InstanceSet &idx_targets,
+                                             const InstanceSet &dst_targets,
                     const LegionVector<IndirectRecord>::aligned &dst_records,
                                              CopyOp *op, unsigned src_index,
+                                             unsigned idx_index,
+                                             unsigned dst_index,
                                              const bool scatter_is_range,
-                                             const ApEvent precondition, 
+                                             const ApEvent init_precondition, 
                                              const PredEvent pred_guard,
+                                             const ApEvent collective_pre,
+                                             const ApEvent collective_post,
+                                             const ApUserEvent copy_pre,
                                             const PhysicalTraceInfo &trace_info,
+                                          std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
                                              const bool possible_dst_aliasing)
     //--------------------------------------------------------------------------
@@ -2773,7 +2814,9 @@ namespace Legion {
       assert(dst_req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(idx_req.privilege_fields.size() == 1);
+      assert(idx_targets.size() == 1);
 #endif  
+      const InstanceRef idx_target = idx_targets[0];
       const FieldID idx_field = *(idx_req.privilege_fields.begin());
       // Get the field indexes for src/dst fields
       RegionNode *src_node = get_node(src_req.region);
@@ -2857,26 +2900,52 @@ namespace Legion {
           dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
       }
       // Also add any other copy preconditions
-      for (unsigned idx = 0; idx < dst_records.size(); idx++)
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
-        const ApEvent dst_event = dst_records[idx].ready_event;
+        const ApEvent dst_event = dst_targets[idx].get_ready_event();
         if (dst_event.exists())
           copy_preconditions.insert(dst_event);
       }
       const ApEvent indirect_event = idx_target.get_ready_event();
       if (indirect_event.exists())
         copy_preconditions.insert(indirect_event);
-      if (precondition.exists())
-        copy_preconditions.insert(precondition);
-      ApEvent copy_pre;
+      if (init_precondition.exists())
+        copy_preconditions.insert(init_precondition);
+      ApEvent local_pre;
       if (!copy_preconditions.empty())
-        copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+        local_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+#ifdef DEBUG_LEGION
+      assert(copy_pre.exists());
+#endif
+      Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
         copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
-                                  copy_pre, pred_guard);
+                                  collective_pre, pred_guard, local_pre);
+      if (trace_info.recording)
+      {
+        // If we're tracing record the views for this copy
+        FieldMaskSet<InstanceView> src_views, dst_views, idx_views;
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+          src_views.insert(source_views[idx],
+              src_targets[idx].get_valid_fields());
+        std::vector<InstanceView*> indirect_views;
+        InnerContext *idx_context = op->find_physical_context(idx_index);
+        idx_context->convert_target_views(idx_targets, indirect_views);
+        idx_views.insert(indirect_views.back(), idx_target.get_valid_fields());
+        std::vector<InstanceView*> target_views;
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        dst_context->convert_target_views(dst_targets, target_views);
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+          dst_views.insert(target_views[idx],
+              dst_targets[idx].get_valid_fields());
+        trace_info.record_copy_views(copy_post, LEGION_READ_PRIV,
+            LEGION_READ_PRIV,copy_expr,idx_views,dst_views,map_applied_events);
+        trace_info.record_indirect_views(copy_post, collective_post,
+          dst_node->row_source,dst_views,map_applied_events,LEGION_WRITE_PRIV);
+      }
       // Clean up our indirections
       for (std::vector<CopyIndirection*>::const_iterator it =
             indirections.begin(); it != indirections.end(); it++)
@@ -2889,14 +2958,22 @@ namespace Legion {
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
                               const RegionRequirement &dst_idx_req,
+                              const InstanceSet &src_targets,
+                              const InstanceSet &dst_targets,
                       const LegionVector<IndirectRecord>::aligned &src_records,
-                              const InstanceRef &src_idx_target,
+                              const InstanceSet &src_idx_targets,
                       const LegionVector<IndirectRecord>::aligned &dst_records,
-                              const InstanceRef &dst_idx_target, CopyOp *op,
+                              const InstanceSet &dst_idx_targets, CopyOp *op,
+                              unsigned src_index, unsigned dst_index,
+                              unsigned src_idx_index, unsigned dst_idx_index,
                               const bool both_are_range,
-                              const ApEvent precondition, 
+                              const ApEvent init_precondition, 
                               const PredEvent pred_guard,
+                              const ApEvent collective_pre,
+                              const ApEvent collective_post,
+                              const ApUserEvent copy_pre,
                               const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &map_applied_events,
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing)
@@ -2910,7 +2987,11 @@ namespace Legion {
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(src_idx_req.privilege_fields.size() == 1);
       assert(dst_idx_req.privilege_fields.size() == 1);
+      assert(src_idx_targets.size() == 1);
+      assert(dst_idx_targets.size() == 1);
 #endif  
+      const InstanceRef &src_idx_target = src_idx_targets[0];
+      const InstanceRef &dst_idx_target = dst_idx_targets[0];
       const FieldID src_idx_field = *(src_idx_req.privilege_fields.begin());
       const FieldID dst_idx_field = *(dst_idx_req.privilege_fields.begin());
       // Get the field indexes for src/dst fields
@@ -2989,15 +3070,15 @@ namespace Legion {
           dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
       }
       // Also add any other copy preconditions
-      for (unsigned idx = 0; idx < src_records.size(); idx++)
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
       {
-        const ApEvent src_event = src_records[idx].ready_event;
+        const ApEvent src_event = src_targets[idx].get_ready_event();
         if (src_event.exists())
           copy_preconditions.insert(src_event);
       }
-      for (unsigned idx = 0; idx < dst_records.size(); idx++)
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
-        const ApEvent dst_event = dst_records[idx].ready_event;
+        const ApEvent dst_event = dst_targets[idx].get_ready_event();
         if (dst_event.exists())
           copy_preconditions.insert(dst_event);
       }
@@ -3007,17 +3088,60 @@ namespace Legion {
       const ApEvent dst_indirect_event = dst_idx_target.get_ready_event();
       if (dst_indirect_event.exists())
         copy_preconditions.insert(dst_indirect_event);
-      if (precondition.exists())
-        copy_preconditions.insert(precondition);
-      ApEvent copy_pre;
+      if (init_precondition.exists())
+        copy_preconditions.insert(init_precondition);
+      ApEvent local_pre;
       if (!copy_preconditions.empty())
-        copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+        local_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+#ifdef DEBUG_LEIGON
+      assert(copy_pre.exists());
+#endif
+      Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
         copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
-                                  copy_pre, pred_guard);
+                                  collective_pre, pred_guard, local_pre);
+      if (trace_info.recording)
+      {
+        // If we're tracing record the views for this copy
+        FieldMaskSet<InstanceView> src_views, src_idx_views;
+        FieldMaskSet<InstanceView> dst_idx_views, dst_views;
+        std::vector<InstanceView*> source_views;
+        InnerContext *src_context = op->find_physical_context(src_index);
+        src_context->convert_target_views(src_targets, source_views);
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+          src_views.insert(source_views[idx],
+              src_targets[idx].get_valid_fields());
+        std::vector<InstanceView*> src_indirect_views, dst_indirect_views;
+        InnerContext *src_idx_context =
+          op->find_physical_context(src_idx_index);
+        src_idx_context->convert_target_views(src_idx_targets,
+                                              src_indirect_views);
+        src_idx_views.insert(src_indirect_views.back(),
+            src_idx_target.get_valid_fields());
+        InnerContext *dst_idx_context =
+          op->find_physical_context(dst_idx_index);
+        dst_idx_context->convert_target_views(dst_idx_targets,
+                                              dst_indirect_views);
+        dst_idx_views.insert(dst_indirect_views.back(),
+            dst_idx_target.get_valid_fields());
+        std::vector<InstanceView*> target_views;
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        dst_context->convert_target_views(dst_targets, target_views);
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+          dst_views.insert(target_views[idx],
+              dst_targets[idx].get_valid_fields());
+
+        trace_info.record_indirect_views(copy_post, collective_post,
+            src_node->row_source,src_views,map_applied_events,LEGION_READ_PRIV);
+        trace_info.record_indirect_views(copy_post, collective_post,
+           dst_node->row_source,dst_views,map_applied_events,LEGION_WRITE_PRIV);
+        trace_info.record_copy_views(copy_post, LEGION_READ_PRIV,
+            LEGION_READ_PRIV, copy_expr, src_idx_views, dst_idx_views,
+            map_applied_events); 
+      }
       // Clean up our indirections
       for (std::vector<CopyIndirection*>::const_iterator it =
             indirections.begin(); it != indirections.end(); it++)

@@ -594,8 +594,8 @@ namespace Legion {
       struct IndirectKey {
       public:
         IndirectKey(void) { }
-        IndirectKey(PhysicalInstance i, ApEvent e, const Domain &d)
-          : inst(i), ready_event(e), domain(d) { }
+        IndirectKey(PhysicalInstance i, const Domain &d)
+          : inst(i), domain(d) { }
       public:
         inline bool operator<(const IndirectKey &rhs) const 
         {
@@ -603,23 +603,16 @@ namespace Legion {
             return true;
           if (inst.id > rhs.inst.id)
             return false;
-          if (ready_event.id < rhs.ready_event.id)
-            return true;
-          if (ready_event.id > rhs.ready_event.id)
-            return false;
           return (domain < rhs.domain);
         }
         inline bool operator==(const IndirectKey &rhs) const
         {
           if (inst.id != rhs.inst.id)
             return false;
-          if (ready_event.id != rhs.ready_event.id)
-            return false;
           return (domain == rhs.domain);
         }
       public:
         PhysicalInstance inst;
-        ApEvent ready_event;
         Domain domain;
       };
     public:
@@ -1540,8 +1533,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
-      virtual ApEvent exchange_indirect_records(const unsigned index,
-          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+      virtual std::pair<ApEvent,ApEvent> exchange_indirect_records(
+          const unsigned index, const ApEvent local_pre,
+          const ApEvent local_post, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
@@ -1552,7 +1546,9 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      std::vector<ApBarrier> indirection_barriers;
+      std::vector<ApBarrier> pre_indirection_barriers;
+      std::vector<ApBarrier> post_indirection_barriers;
+      std::vector<ShardID> indirection_barrier_owner_shards;
       std::vector<IndirectRecordExchange*> src_collectives;
       std::vector<IndirectRecordExchange*> dst_collectives;
 #ifdef DEBUG_LEGION

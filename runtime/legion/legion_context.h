@@ -414,8 +414,7 @@ namespace Legion {
       virtual PhysicalRegion attach_resource(
                                   const AttachLauncher &launcher) = 0;
       virtual ExternalResources attach_resources(
-                                  const IndexAttachLauncher &launcher,
-                                  bool deduplicate_across_shards) = 0;
+                                  const IndexAttachLauncher &launcher) = 0;
       virtual Future detach_resource(PhysicalRegion region, 
                                      const bool flush,const bool unordered) = 0;
       virtual Future detach_resources(ExternalResources resources,
@@ -1284,8 +1283,7 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual ExternalResources attach_resources(
-                                        const IndexAttachLauncher &launcher,
-                                        bool deduplicate_across_shards);
+                                        const IndexAttachLauncher &launcher);
       virtual RegionTreeNode* compute_index_attach_upper_bound(
                                         const IndexAttachLauncher &launcher,
                                         const std::vector<unsigned> &indexes);
@@ -2268,8 +2266,7 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual ExternalResources attach_resources(
-                                          const IndexAttachLauncher &launcher,
-                                          bool deduplicate_across_shards);
+                                          const IndexAttachLauncher &launcher);
       virtual RegionTreeNode* compute_index_attach_upper_bound(
                                         const IndexAttachLauncher &launcher,
                                         const std::vector<unsigned> &indexes);
@@ -3055,8 +3052,7 @@ namespace Legion {
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual ExternalResources attach_resources(
-                                          const IndexAttachLauncher &launcher,
-                                          bool deduplicate_across_shards);
+                                          const IndexAttachLauncher &launcher);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered);
       virtual Future detach_resources(ExternalResources resources,

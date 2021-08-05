@@ -4131,7 +4131,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
               end
               layouts = terralib.newlist { layout_reduction[dim][op][field_type] }
             end
-            if options.inner or variant:is_external() then
+            if options.inner then
               -- No layout constraints for inner tasks
               layouts = terralib.newlist { layout_unconstrained }
             end

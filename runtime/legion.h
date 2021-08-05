@@ -2200,6 +2200,10 @@ namespace Legion {
       LogicalRegion                                 parent;
       // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
+      // Whether the runtime should check for duplicate resources across the 
+      // shards in a control replicated context, it is illegal to pass in the
+      // same resource to different shards if this is set to false
+      bool                                          deduplicate_across_shards;
     public:
       // Data for files
       LegionFileMode                                mode;
@@ -6793,17 +6797,12 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param launcher the index attach launcher describing the external
        *        resources to be attached
-       * @param deduplicate_across_shards whether the runtime should check
-       *        for duplicate resources across the shards in a control
-       *        replicated context, it is illegal to pass in the same
-       *        resource to different shards if this is set to false
        * @return an external resources objects containing the physical
        *        regions for the attached resources with regions in the
        *        same order as specified in the launcher
        */
       ExternalResources attach_external_resources(Context ctx,
-                                     const IndexAttachLauncher &launcher,
-                                     bool deduplicate_across_shards = false);
+                                     const IndexAttachLauncher &launcher);
 
       /**
        * Detach multiple external resources that were all created by 
