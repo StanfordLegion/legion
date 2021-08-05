@@ -4548,8 +4548,10 @@ namespace Legion {
             }
           case ISSUE_INDIRECT:
             {
+              // See comment in elide_fences for why we use
+              // tracing_pre_idx instead of precondition_idx
               IssueIndirect *indirect = inst->as_issue_indirect();
-              used[gen[indirect->precondition_idx]] = true;
+              used[gen[indirect->tracing_pre_idx]] = true;
               break;
             }
           case ISSUE_FILL:
@@ -4990,9 +4992,11 @@ namespace Legion {
             }
           case ISSUE_INDIRECT :
             {
+              // See elide_fences for comment about why we use
+              // tracing_pre_idx here instead of precondition_idx
               IssueIndirect *indirect = inst->as_issue_indirect();
-              incoming[indirect->lhs].push_back(indirect->precondition_idx);
-              outgoing[indirect->precondition_idx].push_back(indirect->lhs);
+              incoming[indirect->lhs].push_back(indirect->tracing_pre_idx);
+              outgoing[indirect->tracing_pre_idx].push_back(indirect->lhs);
               break;
             }
           case ISSUE_FILL :
@@ -5374,9 +5378,11 @@ namespace Legion {
             }
           case ISSUE_INDIRECT :
             {
+              // See elide_fences for the comment describing why we use
+              // tracing_pre_idx here instead of precondition_idx
               IssueIndirect *indirect = inst->as_issue_indirect();
-              int subst = substs[indirect->precondition_idx];
-              if (subst >= 0) indirect->precondition_idx = (unsigned)subst;
+              int subst = substs[indirect->tracing_pre_idx];
+              if (subst >= 0) indirect->tracing_pre_idx = (unsigned)subst;
               lhs = indirect->lhs;
               break;
             }
@@ -5536,10 +5542,12 @@ namespace Legion {
           case ISSUE_INDIRECT:
             {
               IssueIndirect *indirect = inst->as_issue_indirect();
+              // See elide_fences for the comment about why we use
+              // tracing_pre_idx instead of precondition_idx
 #ifdef DEBUG_LEGION
-              assert(gen[indirect->precondition_idx] != -1U);
+              assert(gen[indirect->tracing_pre_idx] != -1U);
 #endif
-              used[gen[indirect->precondition_idx]] = true;
+              used[gen[indirect->tracing_pre_idx]] = true;
               break;
             }
           case ISSUE_FILL:
