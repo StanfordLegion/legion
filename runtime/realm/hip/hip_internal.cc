@@ -443,7 +443,7 @@ namespace Realm {
                                                 stringbuilder() << "hip channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
     {
       src_gpu = _src_gpu;
-
+        
       // switch out of ordered mode if multi-threaded dma is requested
       if(_src_gpu->module->cfg_multithread_dma)
         xdq.ordered_mode = false;
@@ -453,38 +453,28 @@ namespace Realm {
       switch(_kind) {
       case XFER_GPU_TO_FB:
         {
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
+          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
               it != src_gpu->pinned_sysmems.end();
               ++it)
-            add_path(*it, fbm, bw, latency, false, false,
-                     XFER_GPU_TO_FB);
-
-          // for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
-          //     it != src_gpu->managed_mems.end();
-          //     ++it)
-          //   add_path(*it, fbm, bw, latency, false, false,
-          //            XFER_GPU_TO_FB);
+            add_path(*it, fbm, bw, latency, frag_overhead, XFER_GPU_TO_FB)
+              .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
 
           break;
         }
 
       case XFER_GPU_FROM_FB:
         {
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
+          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
               it != src_gpu->pinned_sysmems.end();
               ++it)
-            add_path(fbm, *it, bw, latency, false, false,
-                     XFER_GPU_FROM_FB);
-
-          // for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
-          //     it != src_gpu->managed_mems.end();
-          //     ++it)
-          //   add_path(fbm, *it, bw, latency, false, false,
-          //            XFER_GPU_FROM_FB);
+            add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_FROM_FB)
+              .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
 
           break;
         }
@@ -492,10 +482,11 @@ namespace Realm {
       case XFER_GPU_IN_FB:
         {
           // self-path
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
-          add_path(fbm, fbm, bw, latency, false, false,
-                   XFER_GPU_IN_FB);
+          unsigned bw = 200000;  // HACK - estimate at 200 GB/s
+          unsigned latency = 250;  // HACK - estimate at 250 ns
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+          add_path(fbm, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+            .set_max_dim(3);
 
           break;
         }
@@ -503,13 +494,14 @@ namespace Realm {
       case XFER_GPU_PEER_FB:
         {
           // just do paths to peers - they'll do the other side
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
+          unsigned bw = 50000;  // HACK - estimate at 50 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->peer_fbs.begin();
               it != src_gpu->peer_fbs.end();
               ++it)
-            add_path(fbm, *it, bw, latency, false, false,
-                     XFER_GPU_PEER_FB);
+            add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+              .set_max_dim(3);
 
           break;
         }
@@ -946,11 +938,12 @@ namespace Realm {
       {
         Memory fbm = gpu->fbmem->me;
 
-        unsigned bw = 0; // TODO
-        unsigned latency = 0;
+        unsigned bw = 300000;  // HACK - estimate at 300 GB/s
+        unsigned latency = 250;  // HACK - estimate at 250 ns
+        unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
-        add_path(Memory::NO_MEMORY, fbm,
-                 bw, latency, false, false, XFER_GPU_IN_FB);
+        add_path(Memory::NO_MEMORY, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+          .set_max_dim(2);
 
         xdq.add_to_manager(bgwork);
       }
