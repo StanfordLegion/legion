@@ -474,38 +474,40 @@ namespace Realm {
       switch(_kind) {
       case XFER_GPU_TO_FB:
         {
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
+          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
               it != src_gpu->pinned_sysmems.end();
               ++it)
-            add_path(*it, fbm, bw, latency, false, false,
-                     XFER_GPU_TO_FB);
+            add_path(*it, fbm, bw, latency, frag_overhead, XFER_GPU_TO_FB)
+              .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
 
           for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
               it != src_gpu->managed_mems.end();
               ++it)
-            add_path(*it, fbm, bw, latency, false, false,
-                     XFER_GPU_TO_FB);
+            add_path(*it, fbm, bw, latency, frag_overhead, XFER_GPU_TO_FB)
+              .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
 
           break;
         }
 
       case XFER_GPU_FROM_FB:
         {
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
+          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
               it != src_gpu->pinned_sysmems.end();
               ++it)
-            add_path(fbm, *it, bw, latency, false, false,
-                     XFER_GPU_FROM_FB);
+            add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_FROM_FB)
+              .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
 
           for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
               it != src_gpu->managed_mems.end();
               ++it)
-            add_path(fbm, *it, bw, latency, false, false,
-                     XFER_GPU_FROM_FB);
+            add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_FROM_FB)
+              .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
 
           break;
         }
@@ -513,10 +515,11 @@ namespace Realm {
       case XFER_GPU_IN_FB:
         {
           // self-path
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
-          add_path(fbm, fbm, bw, latency, false, false,
-                   XFER_GPU_IN_FB);
+          unsigned bw = 200000;  // HACK - estimate at 200 GB/s
+          unsigned latency = 250;  // HACK - estimate at 250 ns
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+          add_path(fbm, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+            .set_max_dim(3);
 
           break;
         }
@@ -524,13 +527,14 @@ namespace Realm {
       case XFER_GPU_PEER_FB:
         {
           // just do paths to peers - they'll do the other side
-          unsigned bw = 0; // TODO
-          unsigned latency = 0;
+          unsigned bw = 50000;  // HACK - estimate at 50 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->peer_fbs.begin();
               it != src_gpu->peer_fbs.end();
               ++it)
-            add_path(fbm, *it, bw, latency, false, false,
-                     XFER_GPU_PEER_FB);
+            add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+              .set_max_dim(3);
 
           break;
         }
@@ -1019,11 +1023,12 @@ namespace Realm {
     {
       Memory fbm = gpu->fbmem->me;
 
-      unsigned bw = 0; // TODO
-      unsigned latency = 0;
+      unsigned bw = 300000;  // HACK - estimate at 300 GB/s
+      unsigned latency = 250;  // HACK - estimate at 250 ns
+      unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
-      add_path(Memory::NO_MEMORY, fbm,
-               bw, latency, false, false, XFER_GPU_IN_FB);
+      add_path(Memory::NO_MEMORY, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+        .set_max_dim(2);
 
       xdq.add_to_manager(bgwork);
     }
@@ -1355,19 +1360,20 @@ namespace Realm {
     {
       Memory fbm = gpu->fbmem->me;
 
-      unsigned bw = 0; // TODO
-      unsigned latency = 0;
+      unsigned bw = 100000;  // HACK - estimate at 100 GB/s
+      unsigned latency = 250;  // HACK - estimate at 250 ns
+      unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
       // intra-FB reduction
-      add_path(fbm, fbm,
-               bw, latency, true /*redops*/, false, XFER_GPU_IN_FB);
+      add_path(fbm, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+        .allow_redops();
 
       // zero-copy to FB (no need for intermediate buffer in FB)
       for(std::set<Memory>::const_iterator it = gpu->pinned_sysmems.begin();
           it != gpu->pinned_sysmems.end();
           ++it)
-        add_path(*it, fbm,
-                 bw, latency, true /*redops*/, false, XFER_GPU_IN_FB);
+        add_path(*it, fbm, bw, latency, frag_overhead, XFER_GPU_TO_FB)
+          .allow_redops();
 
       // unlike normal cuda p2p copies where we want to push from the source,
       //  reductions are always sent to the destination memory's gpu to keep the
@@ -1375,8 +1381,8 @@ namespace Realm {
       for(std::set<Memory>::const_iterator it = gpu->peer_fbs.begin();
           it != gpu->peer_fbs.end();
           ++it)
-        add_path(*it, fbm,
-                 bw, latency, true /*redops*/, false, XFER_GPU_IN_FB);
+        add_path(*it, fbm, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+          .allow_redops();
 
       xdq.add_to_manager(bgwork);
     }
@@ -1397,23 +1403,27 @@ namespace Realm {
       return true;
     }
 
-    bool GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                         CustomSerdezID src_serdez_id,
-                                         CustomSerdezID dst_serdez_id,
-                                         ReductionOpID redop_id,
-                                         XferDesKind *kind_ret /*= 0*/,
-                                         unsigned *bw_ret /*= 0*/,
-                                         unsigned *lat_ret /*= 0*/)
+    uint64_t GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                             CustomSerdezID src_serdez_id,
+                                             CustomSerdezID dst_serdez_id,
+                                             ReductionOpID redop_id,
+                                             size_t total_bytes,
+                                             const std::vector<size_t> *src_frags,
+                                             const std::vector<size_t> *dst_frags,
+                                             XferDesKind *kind_ret /*= 0*/,
+                                             unsigned *bw_ret /*= 0*/,
+                                             unsigned *lat_ret /*= 0*/)
     {
-      // give all the normal supports_path logic a chance to reject it first
-      if(!Channel::supports_path(src_mem, dst_mem, src_serdez_id, dst_serdez_id,
-                                 redop_id, kind_ret, bw_ret, lat_ret))
-        return false;
+      // first check that we have a reduction op (if not, we want the cudamemcpy
+      //   path to pick this up instead) and that it has cuda kernels available
+      if(!is_gpu_redop(redop_id))
+        return 0;
 
-      // if everything else was ok, check that we have a reduction op (if not,
-      //   we want the cudamemcpy path to pick this up instead) and that it has
-      //   cuda kernels available
-      return is_gpu_redop(redop_id);
+      // then delegate to the normal supports_path logic
+      return Channel::supports_path(src_mem, dst_mem,
+                                    src_serdez_id, dst_serdez_id, redop_id,
+                                    total_bytes, src_frags, dst_frags,
+                                    kind_ret, bw_ret, lat_ret);
     }
 
     RemoteChannelInfo *GPUreduceChannel::construct_remote_info() const
@@ -1509,23 +1519,27 @@ namespace Realm {
       : RemoteChannel(_remote_ptr)
     {}
 
-    bool GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                               CustomSerdezID src_serdez_id,
-                                               CustomSerdezID dst_serdez_id,
-                                               ReductionOpID redop_id,
-                                               XferDesKind *kind_ret /*= 0*/,
-                                               unsigned *bw_ret /*= 0*/,
-                                               unsigned *lat_ret /*= 0*/)
+    uint64_t GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                                   CustomSerdezID src_serdez_id,
+                                                   CustomSerdezID dst_serdez_id,
+                                                   ReductionOpID redop_id,
+                                                   size_t total_bytes,
+                                                   const std::vector<size_t> *src_frags,
+                                                   const std::vector<size_t> *dst_frags,
+                                                   XferDesKind *kind_ret /*= 0*/,
+                                                   unsigned *bw_ret /*= 0*/,
+                                                   unsigned *lat_ret /*= 0*/)
     {
-      // give all the normal supports_path logic a chance to reject it first
-      if(!Channel::supports_path(src_mem, dst_mem, src_serdez_id, dst_serdez_id,
-                                 redop_id, kind_ret, bw_ret, lat_ret))
-        return false;
+      // check first that we have a reduction op (if not, we want the cudamemcpy
+      //   path to pick this up instead) and that it has cuda kernels available
+      if(!GPUreduceChannel::is_gpu_redop(redop_id))
+        return 0;
 
-      // if everything else was ok, check that we have a reduction op (if not,
-      //   we want the cudamemcpy path to pick this up instead) and that it has
-      //   cuda kernels available
-      return GPUreduceChannel::is_gpu_redop(redop_id);
+      // then delegate to the normal supports_path logic
+      return Channel::supports_path(src_mem, dst_mem,
+                                    src_serdez_id, dst_serdez_id, redop_id,
+                                    total_bytes, src_frags, dst_frags,
+                                    kind_ret, bw_ret, lat_ret);
     }
 
 

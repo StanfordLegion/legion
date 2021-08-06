@@ -931,13 +931,16 @@ namespace Realm {
 
       // override this because we have to be picky about which reduction ops
       //  we support
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 
@@ -982,13 +985,16 @@ namespace Realm {
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
 
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
     };
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD

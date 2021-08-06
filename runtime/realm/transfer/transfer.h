@@ -139,6 +139,12 @@ namespace Realm {
 				  bool force_fortran_order,
 				  size_t max_stride) const = 0;
 
+    virtual void count_fragments(RegionInstance inst,
+                                 const std::vector<int>& dim_order,
+                                 const std::vector<FieldID>& fields,
+                                 const std::vector<size_t>& fld_sizes,
+                                 std::vector<size_t>& fragments) const = 0;
+
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      const std::vector<int>& dim_order,
 					      const std::vector<FieldID>& fields,

@@ -588,23 +588,24 @@ namespace Realm {
 						     XFER_NONE /*FIXME*/,
 						     "hdf5 channel")
       {
-	unsigned bw = 0; // TODO
-	unsigned latency = 0;
+        unsigned bw = 10; // HACK - estimate 10 MB/s
+        unsigned latency = 10000; // HACK - estimate 10 us
+        unsigned frag_overhead = 10000; // HACK - estimate 10 us
 	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
 	for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
 	  add_path(Memory::HDF_MEM, false,
 		   cpu_mem_kinds[i], false,
-		   bw, latency, false, false, XFER_HDF5_READ);
+		   bw, latency, frag_overhead, XFER_HDF5_READ);
 
 	  add_path(cpu_mem_kinds[i], false,
 		   Memory::HDF_MEM, false,
-		   bw, latency, false, false, XFER_HDF5_WRITE);
+		   bw, latency, frag_overhead, XFER_HDF5_WRITE);
 	}
 
         // also indicate willingness to handle fills to HDF5 (src == NO_MEMORY)
         add_path(Memory::NO_MEMORY,
                  Memory::HDF_MEM, false,
-                 bw, latency, false, false, XFER_HDF5_WRITE);
+                 bw, latency, frag_overhead, XFER_HDF5_WRITE);
       }
 
       HDF5Channel::~HDF5Channel() {}
