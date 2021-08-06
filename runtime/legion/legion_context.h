@@ -1250,7 +1250,8 @@ namespace Legion {
                              AddressSpaceID source, RtEvent *ready = NULL);
       virtual FillView* find_or_create_fill_view(FillOp *op, 
                              std::set<RtEvent> &map_applied_events,
-                             const void *value, const size_t value_size);
+                             const void *value, const size_t value_size,
+                             bool &took_ownership);
       static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 

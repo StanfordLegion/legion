@@ -15774,8 +15774,16 @@ namespace Legion {
 #endif
         // This comes back with a reference to prevent collection
         // that we need to free after we have been mapped
+        bool lost_ownership = true;
         fill_view = context->find_or_create_fill_view(this, 
-                      map_applied_conditions, value, value_size);
+            map_applied_conditions, value, value_size, lost_ownership);
+        // If we lost ownership of the buffer to the context then 
+        // we no longer need to free it
+        if (lost_ownership)
+        {
+          value = NULL;
+          value_size = 0;
+        }
         ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info, 
@@ -15791,10 +15799,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
 #endif
-        // Clear value and value size since the forest ended up 
-        // taking ownership of them
-        value = NULL;
-        value_size = 0;
+        
         if (!map_applied_conditions.empty())
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
@@ -15855,8 +15860,11 @@ namespace Legion {
 #endif
       // This comes back with a reference to prevent collection
       // that we need to free after we have been mapped
-      fill_view = context->find_or_create_fill_view(this, 
-                    map_applied_conditions, result, result_size);
+      bool lost_ownership = false;
+      fill_view = context->find_or_create_fill_view(this,
+          map_applied_conditions, result, result_size, lost_ownership);
+      if (!lost_ownership)
+        free(result);
       ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info,
