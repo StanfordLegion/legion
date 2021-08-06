@@ -32,6 +32,7 @@ namespace Realm {
   extern Logger log_dma;
   extern Logger log_ib_alloc;
   Logger log_xplan("xplan");
+  Logger log_xpath("xpath");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -169,6 +170,76 @@ namespace Realm {
 	return is_done;
       }
     }
+  }
+
+  // finds the largest subrectangle of 'domain' that starts with 'start',
+  //  lies entirely within 'restriction', and is consistent with an iteration
+  //  order (over the original 'domain') of 'dim_order'
+  // the subrectangle is returned in 'subrect', the start of the next subrect
+  //  is in 'next_start', and the return value indicates whether the 'domain'
+  //  has been fully covered
+  template <int N, typename T>
+  static bool next_subrect(const Rect<N,T>& domain, const Point<N,T>& start,
+                           const Rect<N,T>& restriction, const int *dim_order,
+                           Rect<N,T>& subrect, Point<N,T>& next_start)
+  {
+    // special case for when we can do the whole domain in one subrect
+    if((start == domain.lo) && restriction.contains(domain)) {
+      subrect = domain;
+      return true;
+    }
+
+#ifdef DEBUG_REALM
+    // starting point better be inside the restriction
+    assert(restriction.contains(start));
+#endif
+    subrect.lo = start;
+
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+
+      // can we go to the end of the domain in this dimension?
+      if(domain.hi[d] <= restriction.hi[d]) {
+        // we can go to the end of the domain in this dimension ...
+        subrect.hi[d] = domain.hi[d];
+        next_start[d] = domain.lo[d];
+
+        if(start[d] == domain.lo[d]) {
+          // ... and since we started at the start, we can continue to next dim
+          continue;
+        } else {
+          // ... but we have to stop since this wasn't a full span
+          if(++di < N) {
+            d = dim_order[di];
+            subrect.hi[d] = start[d];
+            next_start[d] = start[d] + 1;
+
+            while(++di < N) {
+              d = dim_order[di];
+              subrect.hi[d] = start[d];
+              next_start[d] = start[d];
+            }
+
+            return false;  // still more to do
+          }
+        }
+      } else {
+        // we didn't get to the end, so we'll have to pick up where we left off
+        subrect.hi[d] = restriction.hi[d];
+        next_start[d] = restriction.hi[d] + 1;
+
+        while(++di < N) {
+          d = dim_order[di];
+          subrect.hi[d] = start[d];
+          next_start[d] = start[d];
+        }
+
+        return false;  // still more to do
+      }
+    }
+
+    // if we got through all dimensions, we're done with this domain
+    return true;
   }
 
   template <int N, typename T>
@@ -1359,6 +1430,12 @@ namespace Realm {
 				  bool force_fortran_order,
 				  size_t max_stride) const;
 
+    virtual void count_fragments(RegionInstance inst,
+                                 const std::vector<int>& dim_order,
+                                 const std::vector<FieldID>& fields,
+                                 const std::vector<size_t>& fld_sizes,
+                                 std::vector<size_t>& fragments) const;
+
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      const std::vector<int>& dim_order,
 					      const std::vector<FieldID>& fields,
@@ -1574,6 +1651,136 @@ namespace Realm {
 #ifdef DEBUG_REALM
       assert(dim_order.size() == N);
 #endif
+    }
+  }
+
+  template <int N, typename T>
+  static void add_fragments_for_rect(const Rect<N,T>& rect,
+                                     size_t field_size,
+                                     size_t field_count,
+                                     const Point<N,size_t>& strides,
+                                     const std::vector<int>& dim_order,
+                                     std::vector<size_t>& fragments)
+  {
+    int collapsed[N+1];
+    int breaks = 0;
+    collapsed[0] = 1;
+    size_t exp_stride = field_size;
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+      // skip trivial dimensions
+      if(rect.lo[d] == rect.hi[d]) continue;
+
+      size_t extent = size_t(rect.hi[d]) - size_t(rect.lo[d]) + 1;
+
+      if(exp_stride == strides[d]) {
+        // stride match?  collapse more
+        collapsed[breaks] *= extent;
+        exp_stride *= extent;
+      } else {
+        // stride mismatch - break here
+        breaks++;
+        collapsed[breaks] = extent;
+        exp_stride = strides[d] * extent;
+      }
+    }
+
+    // now work back down from the top dimension and increase fragment
+    //  count for each break
+    size_t frags = field_count;
+    for(int d = N+1; d >= 0; d--) {
+      if(d <= breaks)
+        frags *= collapsed[d];
+      fragments[d] += frags;
+    }
+  }
+
+  template <int N, typename T>
+  void TransferDomainIndexSpace<N,T>::count_fragments(RegionInstance inst,
+                                                      const std::vector<int>& dim_order,
+                                                      const std::vector<FieldID>& fields,
+                                                      const std::vector<size_t>& fld_sizes,
+                                                      std::vector<size_t>& fragments) const
+  {
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+#ifdef DEBUG_REALM
+    assert(inst_impl->metadata.is_valid());
+#endif
+    const InstanceLayout<N,T> *inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst_impl->metadata.layout);
+
+    fragments.assign(N+2, 0);
+
+    for(size_t i = 0; i < fields.size(); i++) {
+      FieldID fid = fields[i];
+      size_t field_size = fld_sizes[i];
+
+      const InstancePieceList<N,T> *ipl;
+      {
+        std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(fid);
+        assert(it != inst_layout->fields.end());
+        ipl = &inst_layout->piece_lists[it->second.list_idx];
+      }
+
+      IndexSpaceIterator<N,T> isi(is);
+
+      // get the piece for the first index
+      const InstanceLayoutPiece<N,T> *layout_piece = ipl->find_piece(isi.rect.lo);
+      assert(layout_piece != 0);
+
+      if(layout_piece->bounds.contains(is)) {
+        // easy case: one piece covers our entire domain and the iteration order
+        //  doesn't impact the fragment count
+        if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
+          const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+          do {
+            add_fragments_for_rect(isi.rect, field_size, 1 /*field count*/,
+                                   affine->strides, dim_order, fragments);
+            isi.step();
+          } while(isi.valid);
+        } else {
+          // not affine - add one fragment for each rectangle
+          size_t num_rects;
+          if(is.dense()) {
+            num_rects = 1;
+          } else {
+            SparsityMapPublicImpl<N,T> *s_impl = is.sparsity.impl();
+            num_rects = s_impl->get_entries().size();
+          }
+
+          for(int i = 0; i < (N + 2); i++)
+            fragments[i] += num_rects;
+        }
+      } else {
+        size_t non_affine_rects = 0;
+        do {
+          Point<N,T> next_start = isi.rect.lo;
+          while(true) {
+            // look up new piece if needed
+            if(!layout_piece->bounds.contains(next_start)) {
+              layout_piece = ipl->find_piece(next_start);
+              assert(layout_piece != 0);
+            }
+
+            Rect<N,T> subrect;
+            bool last = next_subrect(isi.rect, next_start, layout_piece->bounds,
+                                     dim_order.data(), subrect, next_start);
+            if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
+              const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+              add_fragments_for_rect(isi.rect, field_size, 1 /*field count*/,
+                                     affine->strides, dim_order, fragments);
+            } else
+              non_affine_rects++;
+
+            if(last) break;
+          }
+
+          isi.step();
+        } while(isi.valid);
+
+        if(non_affine_rects > 0)
+          for(int i = 0; i < (N + 2); i++)
+            fragments[i] += non_affine_rects;
+      }
     }
   }
 
@@ -2159,6 +2366,234 @@ namespace Realm {
   }
   
   
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // transfer path search logic
+  //
+
+  static bool best_channel_for_mem_pair(Memory src_mem, Memory dst_mem,
+                                        CustomSerdezID src_serdez_id,
+                                        CustomSerdezID dst_serdez_id,
+                                        ReductionOpID redop_id,
+                                        size_t total_bytes,
+                                        const std::vector<size_t> *src_frags,
+                                        const std::vector<size_t> *dst_frags,
+                                        uint64_t& best_cost,
+                                        Channel *& best_channel,
+                                        XferDesKind& best_kind)
+  {
+    // consider dma channels available on either source or dest node
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
+
+    best_cost = 0;
+    best_channel = 0;
+    best_kind = XFER_NONE;
+
+    {
+      const Node& n = get_runtime()->nodes[src_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+	  it != n.dma_channels.end();
+	  ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+                                             src_serdez_id, dst_serdez_id,
+                                             redop_id,
+                                             total_bytes, src_frags, dst_frags,
+                                             &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    if(dst_node != src_node) {
+      const Node& n = get_runtime()->nodes[dst_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+	  it != n.dma_channels.end();
+	  ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+                                             src_serdez_id, dst_serdez_id,
+                                             redop_id,
+                                             total_bytes, src_frags, dst_frags,
+                                             &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    return (best_cost != 0);
+  }
+
+  static bool find_fastest_path(Memory src_mem, Memory dst_mem,
+                                CustomSerdezID serdez_id,
+                                ReductionOpID redop_id,
+                                size_t total_bytes,
+                                const std::vector<size_t> *src_frags,
+                                const std::vector<size_t> *dst_frags,
+                                MemPathInfo& info,
+                                bool skip_final_memcpy = false)
+  {
+    std::vector<size_t> empty_vec;
+    log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem
+                     << " serdez=" << serdez_id
+                     << " redop=" << redop_id
+                     << " bytes=" << total_bytes
+                     << " frags=" << PrettyVector<size_t>(*(src_frags ? src_frags : &empty_vec))
+                     << "/" << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));
+
+    // baseline - is a direct path possible?
+    uint64_t best_cost = 0;
+    {
+      Channel *channel;
+      XferDesKind kind;
+      if(best_channel_for_mem_pair(src_mem, dst_mem, serdez_id, serdez_id,
+                                   redop_id, total_bytes, src_frags, dst_frags,
+                                   best_cost, channel, kind)) {
+        log_xpath.info() << "direct: " << src_mem << "->" << dst_mem
+                         << " cost=" << best_cost;
+	info.path.assign(1, src_mem);
+	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+	  info.path.push_back(dst_mem);
+	  info.xd_channels.assign(1, channel);
+        } else
+          info.xd_channels.clear();
+      }
+    }
+
+    // multi-hop search (have to do this even if a direct path exists)
+    // any intermediate memory on the src or dst node is a candidate
+    struct PartialPath {
+      Memory ib_mem;
+      uint64_t cost;
+      std::vector<Memory> path;
+      std::vector<Channel *> channels;
+    };
+    std::vector<PartialPath> partials;
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
+    size_t num_src_ibs, total_ibs;
+    {
+      const Node& n = get_runtime()->nodes[src_node];
+      num_src_ibs = n.ib_memories.size();
+      partials.resize(num_src_ibs);
+      for(size_t i = 0; i < n.ib_memories.size(); i++) {
+        partials[i].ib_mem = n.ib_memories[i]->me;
+        partials[i].cost = 0;
+      }
+    }
+    if(dst_node != src_node) {
+      const Node& n = get_runtime()->nodes[dst_node];
+      total_ibs = num_src_ibs + n.ib_memories.size();
+      partials.resize(total_ibs);
+      for(size_t i = 0; i < n.ib_memories.size(); i++) {
+        partials[num_src_ibs + i].ib_mem = n.ib_memories[i]->me;
+        partials[num_src_ibs + i].cost = 0;
+      }
+    } else
+      total_ibs = num_src_ibs;
+
+    // see which of the ib memories we can get to from the original srcmem
+    std::set<size_t> active_ibs;
+    for(size_t i = 0; i < total_ibs; i++) {
+      uint64_t cost;
+      Channel *channel;
+      XferDesKind kind;
+      if(best_channel_for_mem_pair(src_mem, partials[i].ib_mem,
+                                   serdez_id, 0 /*no dst serdez*/,
+                                   0 /*no redop on not-last hops*/,
+                                   total_bytes, src_frags, 0 /*no dst_frags*/,
+                                   cost, channel, kind)) {
+        log_xpath.info() << "first: " << src_mem << "->" << partials[i].ib_mem
+                         << " cost=" << cost;
+        // ignore anything that's already worse than the direct path
+        if((best_cost == 0) || (cost < best_cost)) {
+          active_ibs.insert(i);
+          partials[i].cost = cost;
+          partials[i].path.resize(2);
+          partials[i].path[0] = src_mem;
+          partials[i].path[1] = partials[i].ib_mem;
+          partials[i].channels.assign(1, channel);
+        }
+      }
+    }
+
+    // look for multi-ib-hop paths (as long as they improve on the shorter
+    //  ones)
+    while(!active_ibs.empty()) {
+      size_t src_idx = *(active_ibs.begin());
+      active_ibs.erase(active_ibs.begin());
+      // an ib on the dst node isn't allowed to go back to the source
+      size_t first_dst_idx = ((src_idx < num_src_ibs) ? 0 : num_src_ibs);
+      for(size_t dst_idx = first_dst_idx; dst_idx < total_ibs; dst_idx++) {
+        // no self-loops either
+        if(dst_idx == src_idx) continue;
+
+        uint64_t cost;
+        Channel *channel;
+        XferDesKind kind;
+        if(best_channel_for_mem_pair(partials[src_idx].ib_mem,
+                                     partials[dst_idx].ib_mem,
+                                     0, 0, 0, // no serdez or redop on interhops
+                                     total_bytes, 0, 0, // no fragmentation also
+                                     cost, channel, kind)) {
+          size_t total_cost = partials[src_idx].cost + cost;
+          log_xpath.info() << "inter: " << partials[src_idx].ib_mem << "->" << partials[dst_idx].ib_mem
+                           << " cost=" << partials[src_idx].cost << "+" << cost << " = " << total_cost << " <? " << partials[dst_idx].cost;
+          // also prune any path that already exceeds the cost of the direct path
+          if(((partials[dst_idx].cost == 0) ||
+              (total_cost < partials[dst_idx].cost)) &&
+             ((best_cost == 0) || (total_cost < best_cost))) {
+            // replace existing path to this dst ibmem
+            partials[dst_idx].cost = total_cost;
+            partials[dst_idx].path = partials[src_idx].path;
+            partials[dst_idx].path.push_back(partials[dst_idx].ib_mem);
+            partials[dst_idx].channels = partials[src_idx].channels;
+            partials[dst_idx].channels.push_back(channel);
+            active_ibs.insert(dst_idx);
+          }
+        }
+      }
+    }
+
+    // finally, see which (reachable) ibs can get to the destination mem
+    //  (and do it better than any previously known path)
+    for(size_t i = 0; i < total_ibs; i++) {
+      if(partials[i].cost == 0) continue;
+
+      uint64_t cost;
+      Channel *channel;
+      XferDesKind kind;
+      if(best_channel_for_mem_pair(partials[i].ib_mem, dst_mem,
+                                   0 /*no src serdez*/, serdez_id, redop_id,
+                                   total_bytes, 0 /*no src_frags*/, dst_frags,
+                                   cost, channel, kind)) {
+        size_t total_cost = partials[i].cost + cost;
+        log_xpath.info() << "last: " << partials[i].ib_mem << "->" << dst_mem
+                         << " cost=" << partials[i].cost << "+" << cost << " = " << total_cost << " <? " << best_cost;
+        if((best_cost == 0) || (total_cost < best_cost)) {
+          best_cost = total_cost;
+          info.path.swap(partials[i].path);
+          info.xd_channels.swap(partials[i].channels);
+
+          if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+            info.path.push_back(dst_mem);
+            info.xd_channels.push_back(channel);
+          }
+        }
+      }
+    }
+
+    return (best_cost != 0);
+  }
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndirectionInfoBase
@@ -3288,10 +3723,22 @@ namespace Realm {
         Memory src_mem = srcs[i].inst.get_location();
         Memory dst_mem = dsts[i].inst.get_location();
 
+        std::vector<size_t> src_frags, dst_frags;
+        domain->count_fragments(srcs[i].inst, dim_order,
+                                std::vector<FieldID>(1, srcs[i].field_id),
+                                std::vector<size_t>(1, srcs[i].size),
+                                src_frags);
+        domain->count_fragments(dsts[i].inst, dim_order,
+                                std::vector<FieldID>(1, dsts[i].field_id),
+                                std::vector<size_t>(1, dsts[i].size),
+                                dst_frags);
+
         MemPathInfo path_info;
-        bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
-                                     dsts[i].redop_id,
-                                     path_info);
+        bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+                                    dsts[i].redop_id,
+                                    domain_size * combined_field_size,
+                                    &src_frags, &dst_frags,
+                                    path_info);
         if(!ok) {
           log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (redop=" << dsts[i].redop_id << ")";
           assert(0);
@@ -3418,10 +3865,25 @@ namespace Realm {
 	  if(dsts[i].indirect_index == -1) {
 	    Memory dst_mem = dsts[i].inst.get_location();
 
+            std::vector<size_t> src_frags, dst_frags;
+            domain->count_fragments(srcs[i].inst, dim_order,
+                                    std::vector<FieldID>(1, srcs[i].field_id),
+                                    std::vector<size_t>(1, srcs[i].size),
+                                    src_frags);
+            domain->count_fragments(dsts[i].inst, dim_order,
+                                    std::vector<FieldID>(1, dsts[i].field_id),
+                                    std::vector<size_t>(1, dsts[i].size),
+                                    dst_frags);
+            //log_new_dma.print() << "fragments: domain=" << *domain
+            //                    << " src_inst=" << srcs[i].inst << " frags=" << PrettyVector<size_t>(src_frags)
+            //                    << " dst_inst=" << dsts[i].inst << " frags=" << PrettyVector<size_t>(dst_frags);
+
 	    MemPathInfo path_info;
-	    bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
-                                         0 /*redop_id*/,
-					 path_info);
+            bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+                                        0 /*redop_id*/,
+                                        domain_size * combined_field_size,
+                                        &src_frags, &dst_frags,
+                                        path_info);
 	    if(!ok) {
 	      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
 	      assert(0);

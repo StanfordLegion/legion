@@ -4386,14 +4386,14 @@ namespace Realm {
 
           // estimate transfer time
           uint64_t xfer_time = uint64_t(total_bytes) * 1000 / it->bandwidth;
-          uint64_t frags = 1;
+          size_t frags = 1;
           if(src_frags)
             frags = std::max(frags, (*src_frags)[std::min<size_t>(src_frags->size()-1,
                                                                   it->max_src_dim)]);
           if(dst_frags)
             frags = std::max(frags, (*dst_frags)[std::min<size_t>(dst_frags->size()-1,
                                                                   it->max_dst_dim)]);
-          xfer_time += frags * it->frag_overhead;
+          xfer_time += uint64_t(frags) * it->frag_overhead;
 
           // make sure returned value is strictly positive
 	  return std::max<uint64_t>(xfer_time, 1);
