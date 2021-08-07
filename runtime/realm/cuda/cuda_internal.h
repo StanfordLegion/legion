@@ -36,6 +36,7 @@
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -103,6 +104,7 @@ namespace Realm {
     class GPUStream;
     class GPUFBMemory;
     class GPUZCMemory;
+    class GPUFBIBMemory;
     class GPU;
     class CudaModule;
 
@@ -508,7 +510,7 @@ namespace Realm {
 #endif
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
-      void create_fb_memory(RuntimeImpl *runtime, size_t size);
+      void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
@@ -608,9 +610,10 @@ namespace Realm {
       GPUWorker *worker;
       GPUProcessor *proc;
       GPUFBMemory *fbmem;
+      GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
-      CUdeviceptr fbmem_base;
+      CUdeviceptr fbmem_base, fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -768,6 +771,16 @@ namespace Realm {
     public:
       CUdeviceptr gpu_base;
       char *cpu_base;
+      NetworkSegment local_segment;
+    };
+
+    class GPUFBIBMemory : public IBMemory {
+    public:
+      GPUFBIBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
+
+    public:
+      GPU *gpu;
+      CUdeviceptr base;
       NetworkSegment local_segment;
     };
 

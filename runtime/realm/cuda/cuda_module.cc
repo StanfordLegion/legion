@@ -2257,7 +2257,7 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPU
+    // class GPUFBMemory
 
     GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size)
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
@@ -2326,6 +2326,25 @@ namespace Realm {
     {
       return (cpu_base + offset);
     }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUFBIBMemory
+
+    GPUFBIBMemory::GPUFBIBMemory(Memory _me, GPU *_gpu,
+                                 CUdeviceptr _base, size_t _size)
+      : IBMemory(_me, _size, MKIND_GPUFB, Memory::GPU_FB_MEM,
+                 reinterpret_cast<void *>(_base), 0)
+      , gpu(_gpu)
+      , base(_base)
+    {
+      // advertise for potential gpudirect support
+      local_segment.assign(NetworkSegmentInfo::CudaDeviceMem,
+			   reinterpret_cast<void *>(_base), _size,
+			   reinterpret_cast<uintptr_t>(_gpu));
+      segment = &local_segment;
+    }
+
 
     // Helper methods for emulating the cuda runtime
     /*static*/ GPUProcessor* GPUProcessor::get_current_gpu_proc(void)
@@ -2757,7 +2776,9 @@ namespace Realm {
 	     CUcontext _context,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), context(_context), fbmem_base(0), next_stream(0)
+      , proc(0), fbmem(0), fb_ibmem(0)
+      , context(_context), fbmem_base(0), fb_ibmem_base(0)
+      , next_stream(0)
     {
       push_context();
 
@@ -2812,6 +2833,9 @@ namespace Realm {
       // free memory
       if(fbmem_base)
         CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fbmem_base) );
+
+      if(fb_ibmem_base)
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fb_ibmem_base) );
 
       CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(info->device) );
     }
@@ -2902,6 +2926,9 @@ namespace Realm {
 	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
 	peer_fbs.insert((*it)->fbmem->me);
 
+        if((*it)->fb_ibmem)
+          peer_fbs.insert((*it)->fb_ibmem->me);
+
 	{
 	  Machine::ProcessorMemoryAffinity pma;
 	  pma.p = p;
@@ -2913,7 +2940,7 @@ namespace Realm {
       }
     }
 
-    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size)
+    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size)
     {
       // need the context so we can get an allocation in the right place
       {
@@ -2944,6 +2971,39 @@ namespace Realm {
       Memory m = runtime->next_local_memory_id();
       fbmem = new GPUFBMemory(m, this, fbmem_base, size);
       runtime->add_memory(fbmem);
+
+      // FB ibmem is a separate allocation for now (consider merging to make
+      //  total number of allocations, network registrations, etc. smaller?)
+      if(ib_size > 0) {
+        {
+          AutoGPUContext agc(this);
+
+          CUresult ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fb_ibmem_base, ib_size);
+          if(ret != CUDA_SUCCESS) {
+            if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
+              size_t free_bytes, total_bytes;
+              CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)
+                        (&free_bytes, &total_bytes) );
+              log_gpu.fatal() << "insufficient memory on gpu " << info->index
+                              << ": " << ib_size << " bytes needed (from -ll:ib_fsize), "
+                              << free_bytes << " (out of " << total_bytes << ") available";
+	  } else {
+              const char *errstring = "error message not available";
+#if CUDA_VERSION >= 6050
+              CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
+#endif
+              log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
+                              << ": result=" << ret
+                              << " (" << errstring << ")";
+            }
+            abort();
+          }
+        }
+
+        Memory m = runtime->next_local_ib_memory_id();
+        fb_ibmem = new GPUFBIBMemory(m, this, fb_ibmem_base, ib_size);
+        runtime->add_ib_memory(fb_ibmem);
+      }
     }
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -3163,6 +3223,7 @@ namespace Realm {
       , cfg_zc_mem_size(64 << 20)
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
+      , cfg_fb_ib_size(128 << 20)
       , cfg_uvm_mem_size(0)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
@@ -3317,6 +3378,7 @@ namespace Realm {
 
 	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
 	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+	  .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
 	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
           .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
@@ -3616,7 +3678,7 @@ namespace Realm {
 	for(std::vector<GPU *>::iterator it = gpus.begin();
 	    it != gpus.end();
 	    it++)
-	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size);
+	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size > 0) && !gpus.empty()) {

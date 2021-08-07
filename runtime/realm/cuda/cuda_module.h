@@ -70,7 +70,7 @@ namespace Realm {
 
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
-      size_t cfg_fb_mem_size;
+      size_t cfg_fb_mem_size, cfg_fb_ib_size;
       size_t cfg_uvm_mem_size;
       unsigned cfg_num_gpus, cfg_gpu_streams;
       bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
