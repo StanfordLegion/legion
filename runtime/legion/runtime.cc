@@ -8089,11 +8089,6 @@ namespace Legion {
               runtime->handle_shared_ownership(derez);
               break;
             }
-          case SEND_INDEX_SPACE_NODE:
-            {
-              runtime->handle_index_space_node(derez, remote_address_space);
-              break;
-            }
           case SEND_INDEX_SPACE_REQUEST:
             {
               runtime->handle_index_space_request(derez, remote_address_space);
@@ -8101,7 +8096,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_RETURN:
             {
-              runtime->handle_index_space_return(derez);
+              runtime->handle_index_space_return(derez, remote_address_space);
               break;
             }
           case SEND_INDEX_SPACE_SET:
@@ -8169,11 +8164,6 @@ namespace Legion {
               runtime->handle_index_partition_notification(derez);
               break;
             }
-          case SEND_INDEX_PARTITION_NODE:
-            {
-              runtime->handle_index_partition_node(derez, remote_address_space);
-              break;
-            }
           case SEND_INDEX_PARTITION_REQUEST:
             {
               runtime->handle_index_partition_request(derez, 
@@ -8182,7 +8172,8 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_RETURN:
             {
-              runtime->handle_index_partition_return(derez);
+              runtime->handle_index_partition_return(derez,
+                                                     remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_CHILD_REQUEST:
@@ -8308,12 +8299,8 @@ namespace Legion {
             }
           case SEND_TOP_LEVEL_REGION_RETURN:
             {
-              runtime->handle_top_level_region_return(derez);
-              break;
-            }
-          case SEND_LOGICAL_REGION_NODE:
-            {
-              runtime->handle_logical_region_node(derez, remote_address_space);
+              runtime->handle_top_level_region_return(derez,
+                                                      remote_address_space);
               break;
             }
           case INDEX_SPACE_DESTRUCTION_MESSAGE:
@@ -15969,15 +15956,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // Will be flushed by index space return
-      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_space_request(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15991,7 +15969,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
-            INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16110,16 +16088,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_node(AddressSpaceID target, 
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // Will be flushed by the return
-      find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_NODE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16134,7 +16102,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_RETURN,
-              INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16163,11 +16131,9 @@ namespace Legion {
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This has to go on the index space virtual channel so that it is
-      // ordered with respect to the index_partition_node messages
       find_messenger(target)->send_message(rez, 
                                 SEND_INDEX_PARTITION_DISJOINT_UPDATE, 
-                                INDEX_SPACE_VIRTUAL_CHANNEL,
+                                DEFAULT_VIRTUAL_CHANNEL,
                                 true/*flush*/, true/*response*/); 
     }
 
@@ -16362,17 +16328,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_RETURN,
-                LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_logical_region_node(AddressSpaceID target, 
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // flushed by return
-      find_messenger(target)->send_message(rez, SEND_LOGICAL_REGION_NODE,
-                                  LOGICAL_TREE_VIRTUAL_CHANNEL, false/*flush*/);
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17777,14 +17733,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_node(Deserializer &derez, 
-                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode::handle_node_creation(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_index_space_request(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -17793,10 +17741,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_return(Deserializer &derez)
+    void Runtime::handle_index_space_return(Deserializer &derez,
+                                            AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_return(derez); 
+      IndexSpaceNode::handle_node_return(forest, derez, source); 
     }
 
     //--------------------------------------------------------------------------
@@ -17892,14 +17841,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_node(Deserializer &derez,
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartNode::handle_node_creation(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_index_partition_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -17908,10 +17849,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_return(Deserializer &derez)
+    void Runtime::handle_index_partition_return(Deserializer &derez,
+                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_return(derez);
+      IndexPartNode::handle_node_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -18085,18 +18027,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_region_return(Deserializer &derez)
+    void Runtime::handle_top_level_region_return(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionNode::handle_top_level_return(derez);   
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_node(Deserializer &derez, 
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode::handle_node_creation(forest, derez, source);
+      RegionNode::handle_top_level_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

@@ -8070,6 +8070,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::send_node(AddressSpaceID target, RtEvent done,
+                                   std::vector<SendNodeRecord> &nodes_to_send,
                                    const bool above /* = false */)
     //--------------------------------------------------------------------------
     {
@@ -8086,7 +8087,8 @@ namespace Legion {
               return false;
             send_references++;
           }
-          const bool result = parent->send_node(target, done, true/*above*/);
+          const bool result =
+            parent->send_node(target, done, nodes_to_send, true/*above*/);
           // Remove the reference
           bool remove_reference = false;
           {
@@ -8168,7 +8170,7 @@ namespace Legion {
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
       if (still_valid && (parent != NULL) &&
-          !parent->send_node(target, done, true/*above*/))
+          !parent->send_node(target, done, nodes_to_send, true/*above*/))
       {
         if (above)
         {
@@ -8216,41 +8218,53 @@ namespace Legion {
         else
           still_valid = false;
       }
+      // Record that we're going to send this node
+      nodes_to_send.emplace_back(SendNodeRecord(this, still_valid,
+            add_remote_reference, pack_space, has_reference));
+      return still_valid;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::pack_node(Serializer &rez, AddressSpaceID target,
+                                   const SendNodeRecord &record)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(record.node == this);
+#endif
       bool remove_reference = false;
       {
         AutoLock n_lock(node_lock); 
         {
-          Serializer rez;
+          // Do this before the rez check
+          rez.serialize<bool>(true); // is an index space node
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(did);
+          if (record.still_valid && (parent != NULL))
+            rez.serialize(parent->handle);
+          else
+            rez.serialize(IndexPartition::NO_PART);
+          rez.serialize(color);
+          rez.serialize(index_space_ready);
+          rez.serialize(expr_id);
+          rez.serialize(initialized);
+          rez.serialize<bool>(record.add_remote_reference);
+          if (record.pack_space)
+            pack_index_space(rez, true/*include size*/);
+          else
+            rez.serialize<size_t>(0);
+          rez.serialize<size_t>(semantic_info.size());
+          for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
+                semantic_info.begin(); it != semantic_info.end(); it++)
           {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize(did);
-            if (still_valid && (parent != NULL))
-              rez.serialize(parent->handle);
-            else
-              rez.serialize(IndexPartition::NO_PART);
-            rez.serialize(color);
-            rez.serialize(index_space_ready);
-            rez.serialize(expr_id);
-            rez.serialize(initialized);
-            rez.serialize<bool>(add_remote_reference);
-            if (pack_space)
-              pack_index_space(rez, true/*include size*/);
-            else
-              rez.serialize<size_t>(0);
-            rez.serialize<size_t>(semantic_info.size());
-            for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
-                  semantic_info.begin(); it != semantic_info.end(); it++)
-            {
-              rez.serialize(it->first);
-              rez.serialize(it->second.size);
-              rez.serialize(it->second.buffer, it->second.size);
-              rez.serialize(it->second.is_mutable);
-            }
+            rez.serialize(it->first);
+            rez.serialize(it->second.size);
+            rez.serialize(it->second.buffer, it->second.size);
+            rez.serialize(it->second.is_mutable);
           }
-          context->runtime->send_index_space_node(target, rez); 
         }
-        if (has_reference)
+        if (record.has_reference)
         {
 #ifdef DEBUG_LEGION
           assert(send_references > 0);
@@ -8277,7 +8291,6 @@ namespace Legion {
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
         delete parent;
-      return still_valid;
     }
 
     //--------------------------------------------------------------------------
@@ -8378,10 +8391,18 @@ namespace Legion {
       IndexSpaceNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       if (target != NULL)
       {
-        target->send_node(source, to_trigger);
-        // Now send back the flush
+        std::vector<SendNodeRecord> nodes_to_send;
+        target->send_node(source, to_trigger, nodes_to_send);
+        // Now send back the results
         Serializer rez;
-        rez.serialize(to_trigger);
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(nodes_to_send.size());
+          for (std::vector<SendNodeRecord>::const_iterator it =
+                nodes_to_send.begin(); it != nodes_to_send.end(); it++)
+            it->node->pack_node(rez, source, *it);
+          rez.serialize(to_trigger);
+        }
         forest->runtime->send_index_space_return(source, rez);
       }
       else
@@ -8389,9 +8410,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_node_return(Deserializer &derez)
+    /*static*/ void IndexSpaceNode::handle_node_return(
+          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
+      size_t node_count;
+      derez.deserialize(node_count);
+      for (unsigned idx = 0; idx < node_count; idx++)
+      {
+        bool is_index_space;
+        derez.deserialize<bool>(is_index_space);
+        if (is_index_space)
+          IndexSpaceNode::handle_node_creation(context, derez, source);
+        else
+          IndexPartNode::handle_node_creation(context, derez, source);
+      }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       Runtime::trigger_event(to_trigger);
@@ -10083,6 +10117,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexPartNode::send_node(AddressSpaceID target, RtEvent done,
+                                  std::vector<SendNodeRecord> &nodes_to_send,
                                   const bool above /* = false */)
     //--------------------------------------------------------------------------
     {
@@ -10095,9 +10130,9 @@ namespace Legion {
         assert(above);
 #endif
         // See if anything above or the color space needs to be sent
-        if (!parent->send_node(target, done, true/*above*/))
+        if (!parent->send_node(target, done, nodes_to_send, true/*above*/))
           return false;
-        color_space->send_node(target, done, false/*above*/);
+        color_space->send_node(target, done, nodes_to_send, false/*above*/);
         return true;
       }
       // At this point we are the owner
@@ -10129,7 +10164,7 @@ namespace Legion {
         add_pending_send(n_lock, target);
         update_remote_instances(target);
       }
-      if (!parent->send_node(target, done, true/*above*/))
+      if (!parent->send_node(target, done, nodes_to_send, true/*above*/))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -10143,7 +10178,17 @@ namespace Legion {
         remove_pending_send(n_lock, target);
         return false;
       }
-      color_space->send_node(target, done, false/*above*/);
+      color_space->send_node(target, done, nodes_to_send, false/*above*/);
+      // Record that we will be sending this node
+      nodes_to_send.emplace_back(SendNodeRecord(this));
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::pack_node(Serializer &rez, AddressSpaceID target,
+                                  const SendNodeRecord &record)
+    //--------------------------------------------------------------------------
+    {
       AutoLock n_lock(node_lock);
       // We're guaranteed to send at this point so we can remove the guard
 #ifdef DEBUG_LEGION
@@ -10160,8 +10205,9 @@ namespace Legion {
       const bool has_disjoint = 
         (!disjoint_ready.exists() || disjoint_ready.has_triggered());
       const bool disjoint_result = has_disjoint ? is_disjoint() : false;
-      Serializer rez;
       {
+        // Do this before the rez check
+        rez.serialize<bool>(false); // is not an index space node
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(did);
@@ -10199,9 +10245,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      context->runtime->send_index_partition_node(target, rez);
       remove_pending_send(n_lock, target);
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10287,21 +10331,48 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
-      if ((target != NULL) && target->send_node(source, to_trigger))
+      std::vector<SendNodeRecord> nodes_to_send;
+      if ((target != NULL) &&
+          target->send_node(source, to_trigger, nodes_to_send))
       {
-        // Now send back the flush
+        // Now send back the results
         Serializer rez;
-        rez.serialize(to_trigger);
+        {
+          RezCheck z(rez);
+          rez.serialize<size_t>(nodes_to_send.size());
+          for (std::vector<SendNodeRecord>::const_iterator it =
+                nodes_to_send.begin(); it != nodes_to_send.end(); it++)
+            it->node->pack_node(rez, source, *it);
+          rez.serialize(to_trigger);
+        }
         forest->runtime->send_index_partition_return(source, rez);
       }
       else
+      {
+#ifdef DEBUG_LEGION
+        assert(nodes_to_send.empty());
+#endif
         Runtime::trigger_event(to_trigger);
+      }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void IndexPartNode::handle_node_return(Deserializer &derez)
+    /*static*/ void IndexPartNode::handle_node_return(
+          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
+      size_t node_count;
+      derez.deserialize(node_count);
+      for (unsigned idx = 0; idx < node_count; idx++)
+      {
+        bool is_index_space;
+        derez.deserialize<bool>(is_index_space);
+        if (is_index_space)
+          IndexSpaceNode::handle_node_creation(context, derez, source);
+        else
+          IndexPartNode::handle_node_creation(context, derez, source);
+      }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       Runtime::trigger_event(to_trigger);
@@ -17436,7 +17507,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::send_node(AddressSpaceID target)
+    void RegionNode::send_node(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Check to see if we have it in our creation set in which
@@ -17455,7 +17526,7 @@ namespace Legion {
         if (parent != NULL)
         {
           // Send the parent node first
-          parent->send_node(target);
+          parent->send_node(rez, target);
           AutoLock n_lock(node_lock);
           for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
@@ -17476,24 +17547,19 @@ namespace Legion {
         }
         else
         {
-          // We've made it to the top, send this node
-          Serializer rez;
+          // We've made it to the top, pack this node
+          rez.serialize(handle);
+          rez.serialize(did);
+          rez.serialize(initialized);
+          rez.serialize<size_t>(semantic_info.size());
+          for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
+                semantic_info.begin(); it != semantic_info.end(); it++)
           {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize(did);
-            rez.serialize(initialized);
-            rez.serialize<size_t>(semantic_info.size());
-            for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
-                  semantic_info.begin(); it != semantic_info.end(); it++)
-            {
-              rez.serialize(it->first);
-              rez.serialize(it->second.size);
-              rez.serialize(it->second.buffer, it->second.size);
-              rez.serialize(it->second.is_mutable);
-            }
+            rez.serialize(it->first);
+            rez.serialize(it->second.size);
+            rez.serialize(it->second.buffer, it->second.size);
+            rez.serialize(it->second.is_mutable);
           }
-          context->runtime->send_logical_region_node(target, rez);
         }
       }
     }
@@ -17503,7 +17569,6 @@ namespace Legion {
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       LogicalRegion handle;
       derez.deserialize(handle);
       DistributedID did;
@@ -17742,18 +17807,24 @@ namespace Legion {
       RegionTreeID tid;
       derez.deserialize(tid);
       RegionNode *node = forest->get_tree(tid);
-      node->send_node(source);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Serializer rez;
-      rez.serialize(done_event);
+      {
+        RezCheck z(rez);
+        node->send_node(rez, source);
+        rez.serialize(done_event);
+      }
       forest->runtime->send_top_level_region_return(source, rez);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionNode::handle_top_level_return(Deserializer &derez)
+    /*static*/ void RegionNode::handle_top_level_return(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
+      handle_node_creation(forest, derez, source);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
@@ -18638,7 +18709,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::send_node(AddressSpaceID target)
+    void PartitionNode::send_node(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Check to see if we have it in our creation set in which
@@ -18658,7 +18729,7 @@ namespace Legion {
         assert(parent != NULL);
 #endif
         // Send the parent node first
-        parent->send_node(target);
+        parent->send_node(rez, target);
         AutoLock n_lock(node_lock);
         for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
               semantic_info.begin(); it != semantic_info.end(); it++)

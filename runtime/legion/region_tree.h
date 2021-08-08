@@ -1690,6 +1690,20 @@ namespace Legion {
      */
     class IndexTreeNode : public DistributedCollectable {
     public:
+      struct SendNodeRecord {
+      public:
+        SendNodeRecord(IndexTreeNode *n, bool valid = false,
+            bool add = false, bool pack = false, bool has_ref = false)
+          : node(n), still_valid(valid), add_remote_reference(add),
+            pack_space(pack), has_reference(has_ref) { }
+      public:
+        IndexTreeNode *node;
+        bool still_valid;
+        bool add_remote_reference;
+        bool pack_space;
+        bool has_reference;
+      };
+    public:
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
                     LegionColor color, DistributedID did,
                     AddressSpaceID owner, RtEvent init_event); 
@@ -1703,7 +1717,10 @@ namespace Legion {
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
       virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false) = 0;
+      virtual void pack_node(Serializer &rez, AddressSpaceID target,
+                             const SendNodeRecord &record) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -1878,7 +1895,10 @@ namespace Legion {
                                            IndexPartNode *right); 
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false);
+      virtual void pack_node(Serializer &rez, AddressSpaceID target,
+                             const SendNodeRecord &record);
       void remove_send_reference(void);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
@@ -1887,7 +1907,9 @@ namespace Legion {
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
                                       AddressSpaceID source);
-      static void handle_node_return(Deserializer &derez);
+      static void handle_node_return(RegionTreeForest *context,
+                                     Deserializer &derez,
+                                     AddressSpaceID source);
       static void handle_node_child_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
@@ -2796,7 +2818,10 @@ namespace Legion {
                                            IndexSpaceNode *right);
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false);
+      virtual void pack_node(Serializer &rez, AddressSpaceID target,
+                             const SendNodeRecord &record);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -2804,7 +2829,9 @@ namespace Legion {
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
                                       AddressSpaceID source);
-      static void handle_node_return(Deserializer &derez);
+      static void handle_node_return(RegionTreeForest *context,
+                                     Deserializer &derez,
+                                     AddressSpaceID source);
       static void handle_node_child_request(
           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
@@ -3439,7 +3466,7 @@ namespace Legion {
       virtual bool dominates(RegionTreeNode *other) = 0;
     public:
       virtual size_t get_num_children(void) const = 0;
-      virtual void send_node(AddressSpaceID target) = 0;
+      virtual void send_node(Serializer &rez, AddressSpaceID target) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
@@ -3570,7 +3597,7 @@ namespace Legion {
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
-      virtual void send_node(AddressSpaceID target);
+      virtual void send_node(Serializer &rez, AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
     public:
@@ -3587,7 +3614,8 @@ namespace Legion {
     public:
       static void handle_top_level_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
-      static void handle_top_level_return(Deserializer &derez);
+      static void handle_top_level_return(RegionTreeForest *forest,
+                                   Deserializer &derez, AddressSpaceID source);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
@@ -3699,7 +3727,7 @@ namespace Legion {
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
-      virtual void send_node(AddressSpaceID target);
+      virtual void send_node(Serializer &rez, AddressSpaceID target);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
