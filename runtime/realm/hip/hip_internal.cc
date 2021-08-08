@@ -45,12 +45,16 @@ namespace Realm {
       src_gpus.resize(inputs_info.size(), 0);
       for(size_t i = 0; i < input_ports.size(); i++)
 	      if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
-          src_gpus[i] = checked_cast<GPUFBMemory *>(input_ports[0].mem)->gpu;
+          src_gpus[i] = (ID(input_ports[i].mem->me).is_memory() ?
+                           (checked_cast<GPUFBMemory *>(input_ports[i].mem))->gpu :
+                           (checked_cast<GPUFBIBMemory *>(input_ports[i].mem))->gpu);
 
       dst_gpus.resize(outputs_info.size(), 0);
       for(size_t i = 0; i < output_ports.size(); i++)
         if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
-          dst_gpus[i] = checked_cast<GPUFBMemory *>(output_ports[0].mem)->gpu;
+          dst_gpus[i] = (ID(output_ports[i].mem->me).is_memory() ?
+                           (checked_cast<GPUFBMemory *>(output_ports[i].mem))->gpu :
+                           (checked_cast<GPUFBIBMemory *>(output_ports[i].mem))->gpu);
     }
 	
     long GPUXferDes::get_requests(Request** requests, long nr)
@@ -92,7 +96,7 @@ namespace Realm {
         if(in_port != 0) {
           if(out_port != 0) {
             // input and output both exist - transfer what we can
-            log_xd.info() << "cuda memcpy chunk: min=" << min_xfer_size
+            log_xd.info() << "hip memcpy chunk: min=" << min_xfer_size
                           << " max=" << max_bytes;
 
             uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
@@ -449,6 +453,7 @@ namespace Realm {
         xdq.ordered_mode = false;
 
       Memory fbm = src_gpu->fbmem->me;
+      Memory fbib = (src_gpu->fb_ibmem ? src_gpu->fb_ibmem->me : Memory::NO_MEMORY);
 
       switch(_kind) {
       case XFER_GPU_TO_FB:
@@ -458,10 +463,15 @@ namespace Realm {
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
               it != src_gpu->pinned_sysmems.end();
-              ++it)
+              ++it) {
             add_path(*it, fbm, bw, latency, frag_overhead, XFER_GPU_TO_FB)
               .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
-
+            
+            if(fbib.exists())
+              add_path(*it, fbib, bw, latency, frag_overhead, XFER_GPU_TO_FB)
+                .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
+          }
+          
           break;
         }
 
@@ -472,9 +482,13 @@ namespace Realm {
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
               it != src_gpu->pinned_sysmems.end();
-              ++it)
+              ++it) {
             add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_FROM_FB)
               .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
+            if(fbib.exists())
+              add_path(fbib, *it, bw, latency, frag_overhead, XFER_GPU_FROM_FB)
+                .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies 
+          }
 
           break;
         }
@@ -487,6 +501,13 @@ namespace Realm {
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           add_path(fbm, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
             .set_max_dim(3);
+          if(fbib.exists()) {
+            add_path(fbm, fbib, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+              .set_max_dim(3);
+            add_path(fbib, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+              .set_max_dim(3);
+            // TODO: do we need to add the self-path for the ibmem?
+          }
 
           break;
         }
@@ -499,9 +520,13 @@ namespace Realm {
           unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
           for(std::set<Memory>::const_iterator it = src_gpu->peer_fbs.begin();
               it != src_gpu->peer_fbs.end();
-              ++it)
+              ++it) {
             add_path(fbm, *it, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
-              .set_max_dim(3);
+              .set_max_dim(3);     
+            if(fbib.exists())
+              add_path(fbib, *it, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+                .set_max_dim(3);
+          }     
 
           break;
         }

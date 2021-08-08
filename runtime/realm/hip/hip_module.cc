@@ -2255,7 +2255,7 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPU
+    // class GPUFBMemory
 
     GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, hipDeviceCharptr_t _base, size_t _size)
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
@@ -2323,6 +2323,25 @@ namespace Realm {
     {
       return (cpu_base + offset);
     }
+    
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUFBIBMemory
+
+    GPUFBIBMemory::GPUFBIBMemory(Memory _me, GPU *_gpu,
+                                 hipDeviceCharptr_t _base, size_t _size)
+      : IBMemory(_me, _size, MKIND_GPUFB, Memory::GPU_FB_MEM,
+                 reinterpret_cast<void *>(_base), 0)
+      , gpu(_gpu)
+      , base(_base)
+    {
+      // advertise for potential gpudirect support
+      local_segment.assign(NetworkSegmentInfo::HipDeviceMem,
+			   reinterpret_cast<void *>(_base), _size,
+			   reinterpret_cast<uintptr_t>(_gpu));
+      segment = &local_segment;
+    }
+    
 
     // Helper methods for emulating the cuda runtime
     /*static*/ GPUProcessor* GPUProcessor::get_current_gpu_proc(void)
@@ -2668,7 +2687,9 @@ namespace Realm {
              int _device_id,
 	     int num_streams)
       : module(_module), info(_info), worker(_worker)
-      , proc(0), fbmem(0), device_id(_device_id), next_stream(0)
+      , proc(0), fbmem(0), fb_ibmem(0)
+      , device_id(_device_id), fbmem_base(0), fb_ibmem_base(0)
+      , next_stream(0)
     {
       push_context();
 
@@ -2721,7 +2742,11 @@ namespace Realm {
       }
 
       // free memory
-      CHECK_CU( hipFree((void *)fbmem_base) );
+      if(fbmem_base)
+        CHECK_CU( hipFree((void *)fbmem_base) );
+      
+      if(fb_ibmem_base)
+        CHECK_CU( hipFree((void *)fb_ibmem_base) );
 
       //CHECK_CU( hipDevicePrimaryCtxRelease(info->device) );
     }
@@ -2790,6 +2815,9 @@ namespace Realm {
       	}
       	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
       	peer_fbs.insert((*it)->fbmem->me);
+        
+        if((*it)->fb_ibmem)
+          peer_fbs.insert((*it)->fb_ibmem->me);
 
       	{
       	  Machine::ProcessorMemoryAffinity pma;
@@ -2802,7 +2830,7 @@ namespace Realm {
       }
     }
 
-    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size)
+    void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size)
     {
       // need the context so we can get an allocation in the right place
       {
@@ -2816,16 +2844,14 @@ namespace Realm {
       	    size_t free_bytes, total_bytes;
       	    CHECK_CU( hipMemGetInfo(&free_bytes, &total_bytes) );
       	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
-      			    << ": " << size << " bytes needed (from -ll:fsize), "
-      			    << free_bytes << " (out of " << total_bytes << ") available";
+                            << ": " << size << " bytes needed (from -ll:fsize), "
+                            << free_bytes << " (out of " << total_bytes << ") available";
 	        } else {
 	          const char *errstring = "error message not available";
-#if HIP_VERBOSE_ERROR_MSG == 1
 	          errstring = hipGetErrorName(ret);
-#endif
-      	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
-      			    << ": result=" << ret
-      			    << " (" << errstring << ")";
+      	    log_gpu.fatal() << "unexpected error from hipMalloc on gpu " << info->index
+                            << ": result=" << ret
+                            << " (" << errstring << ")";
 	        }
 	        abort();
 	      }
@@ -2834,6 +2860,37 @@ namespace Realm {
       Memory m = runtime->next_local_memory_id();
       fbmem = new GPUFBMemory(m, this, (hipDeviceCharptr_t)fbmem_base, size);
       runtime->add_memory(fbmem);
+      
+      // FB ibmem is a separate allocation for now (consider merging to make
+      //  total number of allocations, network registrations, etc. smaller?)
+      if(ib_size > 0) {
+        {
+          AutoGPUContext agc(this);
+
+          hipError_t ret = hipMalloc((void **)&fb_ibmem_base, ib_size);
+          printf("ib hipmalloc %p, size %ld\n", (void *)fb_ibmem_base, ib_size);
+          if(ret != hipSuccess) {
+            if(ret == hipErrorMemoryAllocation) {
+              size_t free_bytes, total_bytes;
+              CHECK_CU( hipMemGetInfo(&free_bytes, &total_bytes) );
+              log_gpu.fatal() << "insufficient memory on gpu " << info->index
+                              << ": " << ib_size << " bytes needed (from -ll:ib_fsize), "
+                              << free_bytes << " (out of " << total_bytes << ") available";
+            } else {
+                const char *errstring = "error message not available";
+                errstring = hipGetErrorName(ret);
+                log_gpu.fatal() << "unexpected error from hipMalloc on gpu " << info->index
+                                << ": result=" << ret
+                                << " (" << errstring << ")";
+            }
+            abort();
+          }
+        }
+
+        Memory m = runtime->next_local_ib_memory_id();
+        fb_ibmem = new GPUFBIBMemory(m, this, fb_ibmem_base, ib_size);
+        runtime->add_ib_memory(fb_ibmem);
+      }
     }
 
 #ifdef REALM_USE_HIP_HIJACK
@@ -3007,6 +3064,7 @@ namespace Realm {
       , cfg_zc_mem_size(64 << 20)
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
+      , cfg_fb_ib_size(128 << 20)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
       , cfg_use_worker_threads(false)
@@ -3048,6 +3106,7 @@ namespace Realm {
 
       	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
       	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+          .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
       	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
       	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
       	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
@@ -3321,7 +3380,7 @@ namespace Realm {
 	for(std::vector<GPU *>::iterator it = gpus.begin();
 	    it != gpus.end();
 	    it++)
-	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size);
+	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size > 0) && !gpus.empty()) {
