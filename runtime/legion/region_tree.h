@@ -1717,6 +1717,7 @@ namespace Legion {
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
       virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             RtEvent &send_precondition,
                              std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false) = 0;
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
@@ -1765,6 +1766,9 @@ namespace Legion {
       // Recording that there are pending sends to be done for this
       // node to remove nodes (only valid on the owner node)
       std::map<AddressSpaceID,RtUserEvent> pending_sends;
+    protected:
+      // Map tracking send events for creating this tree node on remote nodes
+      std::map<AddressSpaceID,RtEvent> send_effects;
     };
 
     /**
@@ -1830,15 +1834,15 @@ namespace Legion {
       };
       class InvalidFunctor {
       public:
-        InvalidFunctor(IndexSpaceNode *n, ReferenceMutator *m, RtEvent pre)
-          : node(n), mutator(m), precondition(pre) { }
+        InvalidFunctor(IndexSpaceNode *n, ReferenceMutator *m,
+                       std::map<AddressSpaceID,RtEvent> &effects)
+          : node(n), mutator(m), send_effects(effects) { }
       public:
         void apply(AddressSpaceID target);
       public:
         IndexSpaceNode *const node;
         ReferenceMutator *const mutator;
-        const RtEvent precondition;
-        std::set<RtEvent> applied;
+        std::map<AddressSpaceID,RtEvent> &send_effects;
       };
     public:
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
@@ -1895,6 +1899,7 @@ namespace Legion {
                                            IndexPartNode *right); 
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             RtEvent &send_precondition,
                              std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false);
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
@@ -2076,9 +2081,7 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     protected:
-      unsigned                  send_references;
-      // An event for tracking the effects of sends
-      RtEvent                   send_effects; 
+      unsigned                  send_references; 
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
@@ -2716,15 +2719,15 @@ namespace Legion {
       };
       class InvalidFunctor {
       public:
-        InvalidFunctor(IndexPartNode *n, ReferenceMutator *m, RtEvent pre)
-          : node(n), mutator(m), precondition(pre) { }
+        InvalidFunctor(IndexPartNode *n, ReferenceMutator *m,
+                       std::map<AddressSpaceID,RtEvent> &effects)
+          : node(n), mutator(m), send_effects(effects) { }
       public:
         void apply(AddressSpaceID target);
       public:
         IndexPartNode *const node;
         ReferenceMutator *const mutator;
-        const RtEvent precondition;
-        std::set<RtEvent> applied;
+        std::map<AddressSpaceID,RtEvent> &send_effects;
       }; 
     public:
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
@@ -2818,6 +2821,7 @@ namespace Legion {
                                            IndexSpaceNode *right);
     public:
       virtual bool send_node(AddressSpaceID target, RtEvent done,
+                             RtEvent &send_precondition,
                              std::vector<SendNodeRecord> &nodes_to_send,
                              const bool above = false);
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
@@ -2870,7 +2874,6 @@ namespace Legion {
       bool tree_valid;
       unsigned send_count;
       RtUserEvent send_done;
-      RtEvent send_effects;
       volatile IndexSpaceExpression *union_expr;
     };
 

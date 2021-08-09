@@ -7582,10 +7582,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
-                         bool flush, Runtime *runtime, Processor target, 
+                         bool flush, RtEvent flush_precondition,
+                         Runtime *runtime, Processor target, 
                          bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!flush_precondition.exists() || flush);
+#endif
       // First check to see if the message fits in the current buffer    
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
@@ -7599,7 +7603,8 @@ namespace Legion {
         // Make sure we can at least get the meta-data into the buffer
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= header_size)
-          send_message(true/*complete*/, runtime, target, k, response,shutdown);
+          send_message(true/*complete*/, runtime, target, k,
+                       response, shutdown, flush_precondition);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -7612,8 +7617,8 @@ namespace Legion {
         {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
-            send_message(false/*complete*/, runtime, 
-                         target, k, response, shutdown);
+            send_message(false/*complete*/, runtime, target, k,
+                         response, shutdown, flush_precondition);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -7642,12 +7647,15 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target, k, response, shutdown);
+        send_message(true/*complete*/, runtime, target, k, 
+                     response, shutdown, flush_precondition);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-               Processor target, MessageKind kind, bool response, bool shutdown)
+                                      Processor target, MessageKind kind,
+                                      bool response, bool shutdown,
+                                      RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -7704,7 +7712,9 @@ namespace Legion {
               sending_buffer, sending_index, requests, 
               (ordered_channel || 
                ((header != FULL_MESSAGE) && !first_partial)) ?
-               last_message_event : RtEvent::NO_RT_EVENT, 
+                (send_precondition.exists() ? 
+                  Runtime::merge_events(send_precondition, last_message_event) :
+                  last_message_event) : RtEvent::NO_RT_EVENT, 
               response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
@@ -7724,7 +7734,9 @@ namespace Legion {
                 sending_buffer, sending_index, 
                 (ordered_channel || 
                  ((header != FULL_MESSAGE) && !first_partial)) ?
-                  last_message_event : RtEvent::NO_RT_EVENT, 
+                  (send_precondition.exists() ? 
+                   Runtime::merge_events(send_precondition,last_message_event) :
+                   last_message_event) : RtEvent::NO_RT_EVENT, 
                 response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
@@ -9108,14 +9120,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
-           VirtualChannelKind channel, bool flush, bool response, bool shutdown)
+           VirtualChannelKind channel, bool flush, bool response, 
+           bool shutdown, RtEvent flush_precondition)
     //--------------------------------------------------------------------------
     {
       // Always flush for the profiler if we're doing that
       if (!flush && always_flush)
         flush = true;
-      channels[channel].package_message(rez, kind, flush, runtime, 
-                                        target, response, shutdown);
+      channels[channel].package_message(rez, kind, flush, flush_precondition,
+                                        runtime, target, response, shutdown);
     }
 
     //--------------------------------------------------------------------------
@@ -15965,11 +15978,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_return(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_index_space_return(AddressSpaceID target,
+                                     Serializer &rez, RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
-            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/,
+            false/*shutdown*/, send_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -16098,11 +16113,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_return(AddressSpaceID target,
-                                              Serializer &rez)
+                                     Serializer &rez, RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_RETURN,
-              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/,
+              false/*shutdown*/, send_precondition);
     }
 
     //--------------------------------------------------------------------------

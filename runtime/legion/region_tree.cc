@@ -7111,11 +7111,22 @@ namespace Legion {
     IndexTreeNode::~IndexTreeNode(void)
     //--------------------------------------------------------------------------
     {
+      // make sure all our gc updates are on the wire before sending unregisters
+      // we do this in a hacky way by setting the reentrant_event, see the
+      // comment on the reentrant_event member of DistributedCollectable to
+      // see why we do it this way
+      if (!send_effects.empty())
+      {
+        std::vector<RtEvent> effects;
+        for (std::map<AddressSpaceID,RtEvent>::const_iterator it =
+              send_effects.begin(); it != send_effects.end(); it++)
+          if (!it->second.has_triggered())
+            effects.push_back(it->second);
+        reentrant_event = Runtime::merge_events(effects);
+      }
       for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
-      {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
-      }
     } 
 
     //--------------------------------------------------------------------------
@@ -7413,12 +7424,6 @@ namespace Legion {
         Runtime::trigger_event(realm_index_space_set);
       if (!tight_index_space_set.has_triggered())
         Runtime::trigger_event(tight_index_space_set);
-      // make sure all our gc updates are on the wire before sending unregisters
-      // we do this in a hacky way by setting the reentrant_event, see the
-      // comment on the reentrant_event member of DistributedCollectable to
-      // see why we do it this way
-      if (send_effects.exists())
-        reentrant_event = send_effects;
     }
 
     //--------------------------------------------------------------------------
@@ -7446,8 +7451,13 @@ namespace Legion {
     void IndexSpaceNode::InvalidFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      applied.insert(
-          node->send_remote_gc_decrement(target, mutator, precondition));
+      std::map<AddressSpaceID,RtEvent>::iterator finder =
+        send_effects.find(target);
+      if (finder != send_effects.end())
+        finder->second =
+            node->send_remote_gc_decrement(target, mutator, finder->second);
+      else
+        send_effects[target] = node->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -7465,12 +7475,8 @@ namespace Legion {
         if ((send_references == 0) && has_remote_instances())
         {
           // Make sure invalidation are not handled before send effects
-          InvalidFunctor functor(this, mutator,
-              (send_effects.exists() && !send_effects.has_triggered()) ?
-              send_effects : RtEvent::NO_RT_EVENT);
+          InvalidFunctor functor(this, mutator, send_effects);
           map_over_remote_instances(functor);
-          if (!functor.applied.empty())
-            send_effects = Runtime::merge_events(functor.applied);
         }
       }
       else
@@ -8070,6 +8076,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::send_node(AddressSpaceID target, RtEvent done,
+                                   RtEvent &send_precondition,
                                    std::vector<SendNodeRecord> &nodes_to_send,
                                    const bool above /* = false */)
     //--------------------------------------------------------------------------
@@ -8087,8 +8094,8 @@ namespace Legion {
               return false;
             send_references++;
           }
-          const bool result =
-            parent->send_node(target, done, nodes_to_send, true/*above*/);
+          const bool result = parent->send_node(target, done, send_precondition,
+                                                nodes_to_send, true/*above*/);
           // Remove the reference
           bool remove_reference = false;
           {
@@ -8125,10 +8132,16 @@ namespace Legion {
           if (tree_valid)
           {
             // Still need to record the effects so this is not collected early
-            if (send_effects.exists() && !send_effects.has_triggered())
-              send_effects = Runtime::merge_events(send_effects, done);
+            std::map<AddressSpaceID,RtEvent>::iterator finder =
+              send_effects.find(target);
+#ifdef DEBUG_LEGION
+            assert(finder != send_effects.end());
+#endif
+            send_precondition = finder->second;
+            if (!send_precondition.has_triggered())
+              finder->second = Runtime::merge_events(send_precondition, done);
             else
-              send_effects = done;
+              finder->second = done;
             return true;
           }
           else
@@ -8145,11 +8158,6 @@ namespace Legion {
             send_references++;
             has_reference = true;
           }
-          // Record this as an effect for when the node is no longer valid
-          if (send_effects.exists() && !send_effects.has_triggered())
-            send_effects = Runtime::merge_events(send_effects, done);
-          else
-            send_effects = done;
         }
         else if (above)
           return false;
@@ -8160,6 +8168,11 @@ namespace Legion {
           // yet so we need one to be there when it arrives
           add_remote_reference = true;
         }
+        // Record this as an effect for when the node is no longer valid
+#ifdef DEBUG_LEGION
+        assert(send_effects.find(target) == send_effects.end());
+#endif
+        send_effects[target] = done;
         // Record a pending send so anything that comes later to send to
         // the target node will wait for the send to be put on the wire
         add_pending_send(n_lock, target);
@@ -8170,13 +8183,15 @@ namespace Legion {
       // If we have a parent check to see if it is the owner
       // If it is then we can continue traversing up
       if (still_valid && (parent != NULL) &&
-          !parent->send_node(target, done, nodes_to_send, true/*above*/))
+          !parent->send_node(target, done, send_precondition, 
+                             nodes_to_send, true/*above*/))
       {
         if (above)
         {
           // If this is above then we don't care about it if it
           // is not still valid
           bool remove_reference = false;
+          LocalReferenceMutator mutator;
           if (has_reference)
           {
             AutoLock n_lock(node_lock);
@@ -8191,16 +8206,8 @@ namespace Legion {
             if (remove_reference && !tree_valid && has_remote_instances())
             {
               // Make sure invalidation are not handled before send effects
-              LocalReferenceMutator mutator;
-              InvalidFunctor functor(this, &mutator,
-                  (send_effects.exists() && !send_effects.has_triggered()) ?
-                  send_effects : RtEvent::NO_RT_EVENT);
+              InvalidFunctor functor(this, &mutator, send_effects);
               map_over_remote_instances(functor);
-              const RtEvent done = mutator.get_done_event();
-              if (done.exists())
-                functor.applied.insert(done);
-              if (!functor.applied.empty())
-                send_effects = Runtime::merge_events(functor.applied);
             }
             // Remove our pending send
             remove_pending_send(n_lock, target); 
@@ -8233,6 +8240,7 @@ namespace Legion {
       assert(record.node == this);
 #endif
       bool remove_reference = false;
+      LocalReferenceMutator mutator;
       {
         AutoLock n_lock(node_lock); 
         {
@@ -8274,16 +8282,8 @@ namespace Legion {
           if (remove_reference && !tree_valid && has_remote_instances())
           {
             // Make sure invalidation are not handled before send effects
-            LocalReferenceMutator mutator;
-            InvalidFunctor functor(this, &mutator,
-                (send_effects.exists() && !send_effects.has_triggered()) ?
-                send_effects : RtEvent::NO_RT_EVENT);
+            InvalidFunctor functor(this, &mutator, send_effects);
             map_over_remote_instances(functor);
-            const RtEvent done = mutator.get_done_event();
-            if (done.exists())
-              functor.applied.insert(done);
-            if (!functor.applied.empty())
-              send_effects = Runtime::merge_events(functor.applied);
           }
         }
         // remove the pending send before we release the lock
@@ -8298,6 +8298,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool remove_reference;
+      LocalReferenceMutator mutator;
       {
         AutoLock n_lock(node_lock);
         remove_reference = (--send_references == 0);
@@ -8306,16 +8307,8 @@ namespace Legion {
             !tree_valid && has_remote_instances())
         {
           // Make sure invalidation are not handled before send effects
-          LocalReferenceMutator mutator;
-          InvalidFunctor functor(this, &mutator,
-              (send_effects.exists() && !send_effects.has_triggered()) ?
-              send_effects : RtEvent::NO_RT_EVENT);
+          InvalidFunctor functor(this, &mutator, send_effects);
           map_over_remote_instances(functor);
-          const RtEvent done = mutator.get_done_event();
-          if (done.exists())
-            functor.applied.insert(done);
-          if (!functor.applied.empty())
-            send_effects = Runtime::merge_events(functor.applied);
         }
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
@@ -8391,8 +8384,9 @@ namespace Legion {
       IndexSpaceNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       if (target != NULL)
       {
+        RtEvent send_precondition;
         std::vector<SendNodeRecord> nodes_to_send;
-        target->send_node(source, to_trigger, nodes_to_send);
+        target->send_node(source, to_trigger, send_precondition, nodes_to_send);
         // Now send back the results
         Serializer rez;
         {
@@ -8403,7 +8397,7 @@ namespace Legion {
             it->node->pack_node(rez, source, *it);
           rez.serialize(to_trigger);
         }
-        forest->runtime->send_index_space_return(source, rez);
+        forest->runtime->send_index_space_return(source, rez,send_precondition);
       }
       else
         Runtime::trigger_event(to_trigger);
@@ -8971,12 +8965,6 @@ namespace Legion {
             color_map.begin(); it != color_map.end(); it++)
         if (it->second->remove_nested_resource_ref(did))
           delete it->second;
-      // make sure all our gc updates are on the wire before sending unregisters
-      // we do this in a hacky way by setting the reentrant_event, see the
-      // comment on the reentrant_event member of DistributedCollectable to
-      // see why we do it this way
-      if (send_effects.exists())
-        reentrant_event = send_effects;
     }
 
     //--------------------------------------------------------------------------
@@ -8992,8 +8980,13 @@ namespace Legion {
     void IndexPartNode::InvalidFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      applied.insert(
-          node->send_remote_gc_decrement(target, mutator, precondition));
+      std::map<AddressSpaceID,RtEvent>::iterator finder =
+        send_effects.find(target);
+      if (finder != send_effects.end())
+        finder->second =
+            node->send_remote_gc_decrement(target, mutator, finder->second);
+      else
+        send_effects[target] = node->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -9042,11 +9035,8 @@ namespace Legion {
         if (has_remote_instances())
         {
           // Make sure invalidation are not handled before send effects
-          InvalidFunctor functor(this, mutator, (send_effects.exists() &&
-          !send_effects.has_triggered()) ? send_effects : RtEvent::NO_RT_EVENT);
+          InvalidFunctor functor(this, mutator, send_effects);
           map_over_remote_instances(functor);
-          if (!functor.applied.empty())
-            send_effects = Runtime::merge_events(functor.applied);
         }
         // Remove the valid reference that we hold on the color space
         if (color_space->parent != NULL)
@@ -10117,6 +10107,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexPartNode::send_node(AddressSpaceID target, RtEvent done,
+                                  RtEvent &send_precondition,
                                   std::vector<SendNodeRecord> &nodes_to_send,
                                   const bool above /* = false */)
     //--------------------------------------------------------------------------
@@ -10130,9 +10121,20 @@ namespace Legion {
         assert(above);
 #endif
         // See if anything above or the color space needs to be sent
-        if (!parent->send_node(target, done, nodes_to_send, true/*above*/))
+        if (!parent->send_node(target, done, send_precondition,
+                               nodes_to_send, true/*above*/))
           return false;
-        color_space->send_node(target, done, nodes_to_send, false/*above*/);
+        RtEvent temp_precondition;
+        color_space->send_node(target, done, temp_precondition,
+                               nodes_to_send, false/*above*/);
+        if (temp_precondition.exists())
+        {
+          if (send_precondition.exists())
+            send_precondition =
+              Runtime::merge_events(send_precondition, temp_precondition);
+          else
+            send_precondition = temp_precondition;
+        }
         return true;
       }
       // At this point we are the owner
@@ -10145,26 +10147,36 @@ namespace Legion {
         // While we have a pending send we need to wait for that to
         // process first before we traverse any more of this node
         wait_for_pending_send(n_lock, target); 
-        // Always update the effects if we're sending this
-        if (tree_valid)
-        {
-          // Record this as an effect for when the node is no longer valid
-          if (send_effects.exists() && !send_effects.has_triggered())
-            send_effects = Runtime::merge_events(send_effects, done);
-          else
-            send_effects = done;
-        }
-        else
+        if (!tree_valid)
           return false;
         if (has_remote_instance(target))
+        {
+          // Still need to record the effects so this is not collected early
+          std::map<AddressSpaceID,RtEvent>::iterator finder =
+            send_effects.find(target);
+#ifdef DEBUG_LEGION
+          assert(finder != send_effects.end());
+#endif
+          send_precondition = finder->second;
+          if (!send_precondition.has_triggered())
+            finder->second = Runtime::merge_events(send_precondition, done);
+          else
+            finder->second = done;
           return true;
+        }
+        // Record this as an effect for when the node is no longer valid
+#ifdef DEBUG_LEGION
+        assert(send_effects.find(target) == send_effects.end());
+#endif
+        send_effects[target] = done; 
         send_count++;
         // Record a pending send so anything that comes later to send to
         // the target node will wait for the send to be put on the wire
         add_pending_send(n_lock, target);
         update_remote_instances(target);
       }
-      if (!parent->send_node(target, done, nodes_to_send, true/*above*/))
+      if (!parent->send_node(target, done, send_precondition, 
+                             nodes_to_send, true/*above*/))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -10178,7 +10190,17 @@ namespace Legion {
         remove_pending_send(n_lock, target);
         return false;
       }
-      color_space->send_node(target, done, nodes_to_send, false/*above*/);
+      RtEvent temp_precondition;
+      color_space->send_node(target, done, temp_precondition,
+                             nodes_to_send, false/*above*/);
+      if (temp_precondition.exists())
+      {
+        if (send_precondition.exists())
+          send_precondition =
+            Runtime::merge_events(send_precondition, temp_precondition);
+        else
+          send_precondition = temp_precondition;
+      }
       // Record that we will be sending this node
       nodes_to_send.emplace_back(SendNodeRecord(this));
       return true;
@@ -10331,9 +10353,11 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
+      RtEvent send_precondition;
       std::vector<SendNodeRecord> nodes_to_send;
       if ((target != NULL) &&
-          target->send_node(source, to_trigger, nodes_to_send))
+          target->send_node(source, to_trigger, 
+                            send_precondition, nodes_to_send))
       {
         // Now send back the results
         Serializer rez;
@@ -10345,7 +10369,8 @@ namespace Legion {
             it->node->pack_node(rez, source, *it);
           rez.serialize(to_trigger);
         }
-        forest->runtime->send_index_partition_return(source, rez);
+        forest->runtime->send_index_partition_return(source, rez,
+                                                     send_precondition);
       }
       else
       {

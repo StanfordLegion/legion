@@ -1099,6 +1099,7 @@ namespace Legion {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
+                           RtEvent flush_precondition,
                            Runtime *runtime, Processor target, 
                            bool response, bool shutdown);
       void process_message(const void *args, size_t arglen, 
@@ -1106,7 +1107,8 @@ namespace Legion {
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
       void send_message(bool complete, Runtime *runtime, Processor target, 
-                        MessageKind kind, bool response, bool shutdown);
+                        MessageKind kind, bool response, bool shutdown,
+                        RtEvent send_precondition);
       bool handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen) const;
@@ -1184,7 +1186,8 @@ namespace Legion {
     public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush, 
-                        bool response = false, bool shutdown = false);
+                        bool response = false, bool shutdown = false,
+                        RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
@@ -2197,7 +2200,8 @@ namespace Legion {
       void send_remote_task_profiling_response(Processor tar, Serializer &rez);
       void send_shared_ownership(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
-      void send_index_space_return(AddressSpaceID target, Serializer &rez);
+      void send_index_space_return(AddressSpaceID target, Serializer &rez,
+                                   RtEvent precondition);
       void send_index_space_set(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
@@ -2222,7 +2226,8 @@ namespace Legion {
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
-      void send_index_partition_return(AddressSpaceID target, Serializer &rez);
+      void send_index_partition_return(AddressSpaceID target, Serializer &rez,
+                                       RtEvent precondition);
       void send_index_partition_child_request(AddressSpaceID target,
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
