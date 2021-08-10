@@ -5392,14 +5392,16 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5412,14 +5414,16 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5433,14 +5437,16 @@ namespace Legion {
                         const AffineTransform<M,N,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5455,14 +5461,16 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5549,15 +5557,17 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5571,15 +5581,17 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5594,15 +5606,17 @@ namespace Legion {
                         const AffineTransform<M,N,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5618,15 +5632,17 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5743,14 +5759,16 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5763,14 +5781,16 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5784,7 +5804,9 @@ namespace Legion {
                         const AffineTransform<M,1,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
@@ -5806,14 +5828,16 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5890,15 +5914,17 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5912,15 +5938,17 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5935,15 +5963,17 @@ namespace Legion {
                         const AffineTransform<M,1,T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, transform.transform, transform.offset, fid))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -5959,15 +5989,17 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance,transform.transform,transform.offset,fid,source_bounds))
           region.report_incompatible_accessor("AffineAccessor", instance, fid);
@@ -8715,14 +8747,16 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -8736,14 +8770,16 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -8860,15 +8896,17 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -8883,15 +8921,17 @@ namespace Legion {
                         const Rect<N,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -9034,14 +9074,16 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -9055,14 +9097,16 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -9168,15 +9212,17 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, is.bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
@@ -9191,15 +9237,17 @@ namespace Legion {
                         const Rect<1,T> source_bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t offset = 0)
+                        size_t offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false)
         : field(fid)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
               warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
+              check_field_size, redop);
         if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
               instance, fid, source_bounds))
           region.report_incompatible_accessor("MultiAffineAccessor", 
