@@ -10222,7 +10222,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillView* InnerContext::find_or_create_fill_view(FillOp *op, 
                                      std::set<RtEvent> &map_applied_events,
-                                     const void *value, const size_t value_size)
+                                     const void *value, const size_t value_size,
+                                     bool &took_ownership)
     //--------------------------------------------------------------------------
     {
       // Two versions of this method depending on whether we are doing 
@@ -10243,6 +10244,7 @@ namespace Legion {
         fill_view_cache.erase(it);
         fill_view_cache.push_front(result);
         result->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        took_ownership = false;
         return result;
       }
       // At this point we have to make it since we couldn't find it
@@ -10271,6 +10273,7 @@ namespace Legion {
           delete oldest;
       }
 #endif
+      took_ownership = true;
       return fill_view;
     }
 

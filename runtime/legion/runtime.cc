@@ -4827,19 +4827,16 @@ namespace Legion {
                               "Error creating reduction field accessor "
                               "without reduction privileges on field %d in "
                               "task %s", fid, context->get_task_name())
-              else if (redop != req.redop)
+              else if ((redop != req.redop) && 
+                       (req.privilege != LEGION_READ_WRITE))
                 REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                               "Error creating reduction field accessor "
                               "with mismatched reduction operators %d and %d "
                               "on field %d in task %s", redop, req.redop,
                               fid, context->get_task_name())
-              else
-                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
-                              "Error creating reduction-only field accessor "
-                              "for a region requirement with more than "
-                              "reduction-only privileges for field %d in task "
-                              "%s. Please use a read-write accessor instead.",
-                              fid, context->get_task_name())
+#ifdef DEBUG_LEGION
+              assert(req.privilege == LEGION_READ_WRITE);
+#endif
             }
             break;
           }
