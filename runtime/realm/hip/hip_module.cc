@@ -552,12 +552,14 @@ namespace Realm {
 #else
       hipMemcpyKind copy_type;
       if (kind == GPU_MEMCPY_PEER_TO_PEER) {
-       // If we're doing peer to peer, just let unified memory it deal with it
-       copy_type = hipMemcpyDefault;
+        // If we're doing peer to peer, just let unified memory it deal with it
+        copy_type = hipMemcpyDefault;
       } else if (kind == GPU_MEMCPY_HOST_TO_DEVICE) {
-       copy_type = hipMemcpyHostToDevice;
+        copy_type = hipMemcpyHostToDevice;
       } else if (kind == GPU_MEMCPY_DEVICE_TO_HOST) {
-       copy_type = hipMemcpyDeviceToHost;
+        copy_type = hipMemcpyDeviceToHost;
+      } else if (kind == GPU_MEMCPY_DEVICE_TO_DEVICE) {
+        copy_type = hipMemcpyDeviceToDevice;
       } else {
        assert(0);
       }
@@ -620,6 +622,8 @@ namespace Realm {
           copy_type = cudaMemcpyHostToDevice;
         } else if (kind == GPU_MEMCPY_DEVICE_TO_HOST) {
           copy_type = cudaMemcpyDeviceToHost;
+        } else if (kind == GPU_MEMCPY_DEVICE_TO_DEVICE) {
+          copy_type = cudaMemcpyDeviceToDevice;
         } else {
           assert(0);
         }
@@ -632,6 +636,8 @@ namespace Realm {
           copy_type = hipMemcpyHostToDevice;
         } else if (kind == GPU_MEMCPY_DEVICE_TO_HOST) {
           copy_type = hipMemcpyDeviceToHost;
+        } else if (kind == GPU_MEMCPY_DEVICE_TO_DEVICE) {
+          copy_type = hipMemcpyDeviceToDevice;
         } else {
           assert(0);
         }

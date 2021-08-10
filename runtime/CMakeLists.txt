@@ -220,7 +220,7 @@ foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
     foreach(SRCFILE realm/deppart/image realm/deppart/preimage realm/deppart/byfield)
       # use cmake's configure_file for a portable way of creating wrapper
       #  source files
-      configure_file(${CMAKE_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
+      configure_file(${PROJECT_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
       list(APPEND REALM_SRC ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
     endforeach()
   endforeach()
@@ -273,11 +273,11 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   if(Legion_EMBED_GASNet)
     # we need to configure/build gasnet at cmake configuration time so that
     #  we can read in libraries and flags and stuff
-    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/embed-gasnet)
-    set(GASNet_SOURCE_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/source)
-    set(GASNet_BUILD_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/build)
-    set(GASNet_INSTALL_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/install)
-    set(GASNet_BUILD_OUTPUT ${CMAKE_BINARY_DIR}/embed-gasnet/build.log)
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/embed-gasnet)
+    set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/source)
+    set(GASNet_BUILD_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/build)
+    set(GASNet_INSTALL_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/install)
+    set(GASNet_BUILD_OUTPUT ${PROJECT_BINARY_DIR}/embed-gasnet/build.log)
     # if we're building shared libraries, we need -fPIC in the gasnet build
     if(BUILD_SHARED_LIBS)
       set(GASNET_CFLAGS -fPIC)
@@ -288,11 +288,11 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     endif()
     # we'll write the GASNet configuration to a file so that we can rebuild
     #  (only) if it changes
-    set(GASNet_CONFIG_FILE ${CMAKE_BINARY_DIR}/embed-gasnet/config.txt)
+    set(GASNet_CONFIG_FILE ${PROJECT_BINARY_DIR}/embed-gasnet/config.txt)
     set(GASNet_CONFIG_SETTINGS "CONDUIT=${GASNet_CONDUIT}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
     if(Legion_EMBED_GASNet_VERSION)
       # make the source directory version-specific
-      set(GASNet_SOURCE_DIR ${CMAKE_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
+      set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
       list(APPEND GASNet_CONFIG_SETTINGS "GASNET_VERSION=${Legion_EMBED_GASNet_VERSION}")
     endif()
     if(EXISTS ${GASNet_CONFIG_FILE})
@@ -323,7 +323,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 	get_filename_component(
 	  EMBEDDED_GASNET_SRC
 	  "${Legion_EMBED_GASNet_LOCALSRC}"
-	  ABSOLUTE BASE_DIR ${CMAKE_BINARY_DIR})
+	  ABSOLUTE BASE_DIR ${PROJECT_BINARY_DIR})
       else()
 	# fetchcontent requires cmake 3.11+
 	cmake_minimum_required(VERSION 3.11)
@@ -701,11 +701,11 @@ foreach(INST_N1 RANGE 1 ${LEGION_MAX_DIM})
   # use cmake's configure_file for a portable way of creating wrapper
   #  source files
   set(SRCFILE legion/region_tree)
-  configure_file(${CMAKE_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}.cc)
+  configure_file(${PROJECT_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}.cc)
   list(APPEND LEGION_SRC ${SRCFILE}_${INST_N1}.cc)
   
   foreach(INST_N2 RANGE 1 ${LEGION_MAX_DIM})
-    configure_file(${CMAKE_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
+    configure_file(${PROJECT_SOURCE_DIR}/cmake/deppart_tmpl.cc.in ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
     list(APPEND LEGION_SRC ${SRCFILE}_${INST_N1}_${INST_N2}.cc)
   endforeach()
   unset(SRCFILE)
