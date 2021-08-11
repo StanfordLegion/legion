@@ -4812,19 +4812,16 @@ namespace Legion {
                               "Error creating reduction field accessor "
                               "without reduction privileges on field %d in "
                               "task %s", fid, context->get_task_name())
-              else if (redop != req.redop)
+              else if ((redop != req.redop) && 
+                       (req.privilege != LEGION_READ_WRITE))
                 REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                               "Error creating reduction field accessor "
                               "with mismatched reduction operators %d and %d "
                               "on field %d in task %s", redop, req.redop,
                               fid, context->get_task_name())
-              else
-                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
-                              "Error creating reduction-only field accessor "
-                              "for a region requirement with more than "
-                              "reduction-only privileges for field %d in task "
-                              "%s. Please use a read-write accessor instead.",
-                              fid, context->get_task_name())
+#ifdef DEBUG_LEGION
+              assert(req.privilege == LEGION_READ_WRITE);
+#endif
             }
             break;
           }
@@ -5344,7 +5341,7 @@ namespace Legion {
           "is allocated on memory " IDFMT ".",
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id(),
-          instance.get_location().id, manager->get_memory().id);
+          manager->get_memory().id, instance.get_location().id);
 
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance

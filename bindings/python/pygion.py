@@ -1147,7 +1147,6 @@ class RegionField(numpy.ndarray):
         for i in xrange(dim):
             assert subrect[0].lo.x[i] == rect.lo.x[i]
             assert subrect[0].hi.x[i] == rect.hi.x[i]
-        assert offsets[0].offset == region.fspace.field_types[field_name].size
 
         shape = tuple(rect.hi.x[i] - rect.lo.x[i] + 1 for i in xrange(dim))
         strides = tuple(offsets[i].offset for i in xrange(dim))

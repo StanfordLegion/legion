@@ -2736,7 +2736,9 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t subfield_offset = 0) { }
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
       // affine transformations for using alternative coordinates spaces
@@ -2746,7 +2748,9 @@ namespace Legion {
                         const Rect<N,COORD_T> bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t subfield_offset = 0) { }
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false) { }
       // Specify a specific Affine transform to use for interpreting points
       // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2755,7 +2759,9 @@ namespace Legion {
                         const AffineTransform<M,N,COORD_T> transform,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t subfield_offset = 0) { }
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false) { }
       // Specify both a transform and a bounds to use
       // Not available for Realm::MultiAffineAccessor specializations
       template<int M>
@@ -2765,7 +2771,9 @@ namespace Legion {
                         const Rect<N,COORD_T> bounds,
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
-                        size_t subfield_offset = 0) { }
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        bool check_field_size = false) { }
     public:
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
