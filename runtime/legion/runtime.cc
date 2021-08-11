@@ -5356,7 +5356,7 @@ namespace Legion {
           "is allocated on memory " IDFMT ".",
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id(),
-          instance.get_location().id, manager->get_memory().id);
+          manager->get_memory().id, instance.get_location().id);
 
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
