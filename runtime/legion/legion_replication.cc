@@ -835,7 +835,12 @@ namespace Legion {
         if (serdez_redop_fns == NULL)
           complete_mapping();
         if (redop > 0)
+        {
+          std::vector<Memory> reduction_futures;
+          tpl->get_premap_output(this, reduction_futures);
+          create_future_instances(reduction_futures);
           finish_index_task_reduction();
+        }
         complete_execution(finish_index_task_complete());
         resolve_speculation();
         trigger_children_complete();
