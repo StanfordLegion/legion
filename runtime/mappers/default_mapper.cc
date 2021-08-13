@@ -15,6 +15,7 @@
 
 #include "legion.h"
 #include "mappers/default_mapper.h"
+#include "mappers/mapping_utilities.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -2411,7 +2412,7 @@ namespace Legion {
     {
       log_mapper.error("Default mapper failed allocation of size %zd bytes for "
                        "region  requirement %d of task %s (UID %lld) in memory "
-                       IDFMT " for processor " IDFMT ". This means the working "
+                       IDFMT " (%s) for processor " IDFMT " (%s). This means the working "
                        "set of your application is too big for the allotted "
                        "capacity of the given memory under the default "
                        "mapper's mapping scheme. You have three choices: "
@@ -2419,7 +2420,8 @@ namespace Legion {
                        "mapper to better manage working sets, or find a bigger "
                        "machine.", footprint, index,
                        task.get_task_name(), task.get_unique_id(),
-                       target_mem.id, target_proc.id);
+                       target_mem.id, Utilities::to_string(target_mem.kind()),
+                       target_proc.id, Utilities::to_string(target_proc.kind()));
       assert(false);
     }
 
@@ -2632,8 +2634,8 @@ namespace Legion {
         // If we failed to make it that is bad
         log_mapper.error("Default mapper failed allocation of size %zd bytes "
                          "for region requirement of inline mapping in task %s "
-                         "(UID %lld) in memory " IDFMT "for processor " IDFMT
-                         ". This means the working set of your application is "
+                         "(UID %lld) in memory " IDFMT " (%s) for processor " IDFMT
+                         " (%s). This means the working set of your application is "
                          "too big for the allotted capacity of the given memory"
                          " under the default mapper's mapping scheme. You have "
                          "three choices: ask Realm to allocate more memory, "
@@ -2642,7 +2644,10 @@ namespace Legion {
                          inline_op.parent_task->get_task_name(),
                          inline_op.parent_task->get_unique_id(),
                          target_memory.id,
-                         inline_op.parent_task->current_proc.id);
+                         Utilities::to_string(target_memory.kind()),
+                         inline_op.parent_task->current_proc.id,
+                         Utilities::to_string(inline_op.parent_task->current_proc.kind())
+                         );
         assert(false);
       }
     }
@@ -2832,7 +2837,7 @@ namespace Legion {
           // If we failed to make it that is bad
           log_mapper.error("Default mapper failed allocation of size %zd bytes "
                          "for region requirement of close in task %s (UID %lld)"
-                         " in memory " IDFMT "for processor " IDFMT ". This "
+                         " in memory " IDFMT " (%s) for processor " IDFMT " (%s). This "
                          "means the working set of your application is too big "
                          "for the allotted capacity of the given memory under "
                          "the default mapper's mapping scheme. You have three "
@@ -2841,8 +2846,11 @@ namespace Legion {
                          "a bigger machine.", footprint,
                          close.parent_task->get_task_name(),
                          close.parent_task->get_unique_id(),
+                         target_memory.id,
+                         Utilities::to_string(target_memory.kind()),
                          close.parent_task->current_proc.id,
-                         target_memory.id);
+                         Utilities::to_string(close.parent_task->current_proc.kind())
+                         );
           assert(false);
         }
       }
@@ -3040,7 +3048,7 @@ namespace Legion {
         // If we failed to make it that is bad
         log_mapper.error("Default mapper failed allocation of size %zd bytes "
                          "for region requirement of partition in task %s (UID "
-                         "%lld) in memory " IDFMT "for processor " IDFMT ". "
+                         "%lld) in memory " IDFMT " (%s) for processor " IDFMT " (%s). "
                          "This means the working set of your application is too"
                          " big for the allotted capacity of the given memory "
                          "under the default mapper's mapping scheme. You have "
@@ -3050,7 +3058,10 @@ namespace Legion {
                          partition.parent_task->get_task_name(),
                          partition.parent_task->get_unique_id(),
                          target_memory.id,
-                         partition.parent_task->current_proc.id);
+                         Utilities::to_string(target_memory.kind()),
+                         partition.parent_task->current_proc.id,
+                         Utilities::to_string(partition.parent_task->current_proc.kind())
+                         );
         assert(false);
       }
     }
