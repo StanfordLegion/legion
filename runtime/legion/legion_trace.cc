@@ -5351,6 +5351,7 @@ namespace Legion {
               BarrierArrival *arrival = inst->as_barrier_arrival();
               int subst = substs[arrival->rhs];
               if (subst >= 0) arrival->rhs = (unsigned)subst;
+              lhs = arrival->lhs;
               break;
             }
           case MERGE_EVENT:
