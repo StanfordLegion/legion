@@ -559,14 +559,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(Runtime *rt)
-      : IndexTask(rt)
+      : ReplCollectiveInstanceCreator<IndexTask>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(const ReplIndexTask &rhs)
-      : IndexTask(rhs)
+      : ReplCollectiveInstanceCreator<IndexTask>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1202,59 +1202,6 @@ namespace Legion {
       }
       else // The next shard is ourself, so we can do the normal thing
         IndexTask::record_intra_space_dependence(point, next, point_mapped);
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveManager* ReplIndexTask::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->find_or_create_collective_instance(context_index, 
-          mapper_call, index, constraints, regions, memory,
-          get_collective_space(), total_points, footprint, unsat_kind,
-          unsat_index, collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexTask::finalize_collective_instance(
-                      MappingCallKind mapper_call, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->finalize_collective_instance(context_index, 
-                                      mapper_call, index, success);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexTask::report_total_collective_instance_calls(
-                                MappingCallKind call_kind, unsigned total_calls)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      repl_ctx->report_total_collective_instance_calls(context_index,
-                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -2320,14 +2267,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(Runtime *rt)
-      : IndexFillOp(rt)
+      : ReplCollectiveInstanceCreator<IndexFillOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(const ReplIndexFillOp &rhs)
-      : IndexFillOp(rhs)
+      : ReplCollectiveInstanceCreator<IndexFillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2529,59 +2476,6 @@ namespace Legion {
         sharding_collective->elide_collective();
 #endif
       IndexFillOp::resolve_false(speculated, launched);
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveManager* ReplIndexFillOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->find_or_create_collective_instance(context_index, 
-          mapper_call, index, constraints, regions, memory,
-          get_collective_space(), launch_space->get_volume(), footprint, 
-          unsat_kind, unsat_index, collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexFillOp::finalize_collective_instance(
-                      MappingCallKind mapper_call, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->finalize_collective_instance(context_index, 
-                                      mapper_call, index, success);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexFillOp::report_total_collective_instance_calls(
-                                MappingCallKind call_kind, unsigned total_calls)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      repl_ctx->report_total_collective_instance_calls(context_index,
-                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -2817,14 +2711,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(Runtime *rt)
-      : IndexCopyOp(rt)
+      : ReplCollectiveInstanceCreator<IndexCopyOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(const ReplIndexCopyOp &rhs)
-      : IndexCopyOp(rhs)
+      : ReplCollectiveInstanceCreator<IndexCopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3291,59 +3185,6 @@ namespace Legion {
         records = dst_records[index];
       return std::pair<ApEvent,ApEvent>(
           pre_indirection_barriers[index], post_indirection_barriers[index]);
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveManager* ReplIndexCopyOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->find_or_create_collective_instance(context_index, 
-          mapper_call, index, constraints, regions, memory,
-          get_collective_space(), launch_space->get_volume(), footprint,
-          unsat_kind, unsat_index, collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplIndexCopyOp::finalize_collective_instance(
-                      MappingCallKind mapper_call, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->finalize_collective_instance(context_index, 
-                                      mapper_call, index, success);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::report_total_collective_instance_calls(
-                                MappingCallKind call_kind, unsigned total_calls)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      repl_ctx->report_total_collective_instance_calls(context_index,
-                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -3982,7 +3823,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplDependentPartitionOp(Runtime *rt)
-      : DependentPartitionOp(rt)
+      : ReplCollectiveInstanceCreator<DependentPartitionOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -3990,7 +3831,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplDependentPartitionOp(
                                             const ReplDependentPartitionOp &rhs)
-      : DependentPartitionOp(rhs)
+      : ReplCollectiveInstanceCreator<DependentPartitionOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4492,60 +4333,6 @@ namespace Legion {
       else
         precondition = mapping_barrier;
       complete_mapping(precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveManager* 
-        ReplDependentPartitionOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->find_or_create_collective_instance(context_index, 
-          mapper_call, index, constraints, regions, memory,
-          get_collective_space(), launch_space->get_volume(), footprint,
-          unsat_kind, unsat_index, collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplDependentPartitionOp::finalize_collective_instance(
-                      MappingCallKind mapper_call, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->finalize_collective_instance(context_index, 
-                                      mapper_call, index, success);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::report_total_collective_instance_calls(
-                                MappingCallKind call_kind, unsigned total_calls)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      repl_ctx->report_total_collective_instance_calls(context_index,
-                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------
@@ -6148,14 +5935,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplMapOp::ReplMapOp(Runtime *rt)
-      : CollectiveInstanceCreator<MapOp>(rt)
+      : ReplCollectiveInstanceCreator<CollectiveInstanceCreator<MapOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplMapOp::ReplMapOp(const ReplMapOp &rhs)
-      : CollectiveInstanceCreator<MapOp>(rhs)
+      : ReplCollectiveInstanceCreator<CollectiveInstanceCreator<MapOp> >(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6427,59 +6214,6 @@ namespace Legion {
         complete_execution(Runtime::protect_event(effects_done));
       else
         complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveManager* ReplMapOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      IndexSpaceNode *point_space = runtime->forest->get_node(shard_space);
-      return repl_ctx->find_or_create_collective_instance(context_index, 
-          mapper_call, index, constraints, regions, memory, point_space,
-          1/*total points*/,footprint,unsat_kind,unsat_index,collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReplMapOp::finalize_collective_instance(
-                      MappingCallKind mapper_call, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      return repl_ctx->finalize_collective_instance(context_index, 
-                                      mapper_call, index, success);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplMapOp::report_total_collective_instance_calls(
-                                MappingCallKind call_kind, unsigned total_calls)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      repl_ctx->report_total_collective_instance_calls(context_index,
-                                                       call_kind, total_calls);
     }
 
     //--------------------------------------------------------------------------

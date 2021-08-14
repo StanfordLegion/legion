@@ -1123,18 +1123,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* Operation::find_or_create_collective_instance(
+    RtEvent Operation::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* Operation::create_pending_collective_instance(
                                   MappingCallKind call_kind, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index, 
-                                  DomainPoint &collective_point)
+                                  size_t points)
     //--------------------------------------------------------------------------
     {
-      // we do not do anything here in this case
+      assert(false);
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::match_collective_instances(
+                         MappingCallKind mapper_call, unsigned index,
+                         std::vector<MappingInstance> &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -1147,8 +1171,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::finalize_collective_instance(MappingCallKind call,
-                                              unsigned total_calls, bool succes)
+    bool Operation::finalize_pending_collective_instance(MappingCallKind call,
+                               unsigned total_calls, bool succes, size_t points)
     //--------------------------------------------------------------------------
     {
       // should only be called for inherited types
@@ -1157,11 +1181,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    unsigned Operation::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do here for this case
+      return total_calls;
     }
 
     //--------------------------------------------------------------------------
@@ -2090,6 +2114,507 @@ namespace Legion {
       }
       return true;
     }
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveInstanceCreator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveInstanceCreator<OP>::CollectiveInstanceCreator(Runtime *rt)
+      : OP(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveInstanceCreator<OP>::CollectiveInstanceCreator(
+                                      const CollectiveInstanceCreator<OP> &rhs)
+      : OP(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent 
+      CollectiveInstanceCreator<OP>::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      const std::set<Memory> *all_targets = NULL;
+      do
+      {
+        const InstanceKey key(mapper_call, index);
+        AutoLock o_lock(this->op_lock);
+        typename std::map<InstanceKey,PendingPrivilege>::iterator finder =
+          pending_privileges.find(key);
+        if (finder == pending_privileges.end())
+        {
+          to_trigger = Runtime::create_rt_user_event();
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          if (total_points == 1)
+          {
+            all_targets = &targets;
+            break;
+          }
+          finder = pending_privileges.insert(
+              std::pair<InstanceKey,PendingPrivilege>(key,
+                PendingPrivilege(targets, total_points, to_trigger))).first;
+        }
+        else
+          finder->second.targets.insert(targets.begin(), targets.end());
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= points);
+#endif
+        finder->second.remaining_points -= points;
+        if (finder->second.remaining_points == 0)
+        {
+          to_trigger = finder->second.to_trigger;
+          all_targets = &finder->second.targets;
+          // Reset this back to the total points so that we can remove
+          // it when we do the release calls
+          finder->second.remaining_points = 
+            get_total_collective_instance_points();
+        }
+        else
+          return finder->second.to_trigger;
+      } while (false);
+      // If we make it here then we're performing the acquire
+      perform_acquire_collective_allocation_privileges(mapper_call, index,
+                                                       *all_targets,to_trigger);
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void 
+      CollectiveInstanceCreator<OP>::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Memory> targets;
+      do
+      {
+        const InstanceKey key(mapper_call, index);
+        AutoLock o_lock(this->op_lock);
+        typename std::map<InstanceKey,PendingPrivilege>::iterator finder =
+          pending_privileges.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_privileges.end());
+        assert(finder->second.remaining_points >= points);
+#endif
+        finder->second.remaining_points -= points;
+        if (finder->second.remaining_points == 0)
+        {
+          targets.swap(finder->second.targets);
+          pending_privileges.erase(finder);
+        }
+        else
+          return;
+      } while (false);
+      perform_release_collective_allocation_privileges(mapper_call,
+                                                       index, targets);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveManager* 
+        CollectiveInstanceCreator<OP>::create_pending_collective_instance(
+                       MappingCallKind mapper_call, unsigned index,
+                       const LayoutConstraintSet &constraints,
+                       const std::vector<LogicalRegion> &regions, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      bool perform_create = false;
+      const InstanceKey key(mapper_call, index);
+      {
+        AutoLock o_lock(this->op_lock);
+        typename std::map<InstanceKey,PendingCollective>::iterator finder =
+          pending_collectives.find(key);
+        if (finder == pending_collectives.end())
+        {
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          finder = pending_collectives.insert(
+            std::pair<InstanceKey,PendingCollective>(key,
+              PendingCollective(constraints,regions,total_points,done))).first;
+          ready_event = done;
+        }
+        else
+        {
+          ready_event = finder->second.ready_event;
+          // TODO: Check to see if the constraints and regions are equivalent
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= points);
+#endif
+        finder->second.remaining_points -= points;
+        if (finder->second.remaining_points == 0)
+          perform_create = true;
+      }
+      if (perform_create)
+        perform_create_pending_collective_instance(mapper_call, index,
+                                                   constraints, regions);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      AutoLock o_lock(this->op_lock);
+      typename std::map<InstanceKey,PendingCollective>::iterator finder =
+          pending_collectives.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_collectives.end());
+      assert(finder->second.remaining_points >= points);
+#endif
+      CollectiveManager *result = finder->second.collective;
+      finder->second.remaining_points -= points;
+      if (finder->second.remaining_points == 0)
+        pending_collectives.erase(finder);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void 
+      CollectiveInstanceCreator<OP>::return_create_pending_collective_instance(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    CollectiveManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      const InstanceKey key(mapper_call, index);
+      AutoLock o_lock(this->op_lock);
+      typename std::map<InstanceKey,PendingCollective>::iterator finder =
+          pending_collectives.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_collectives.end());
+      assert(finder->second.remaining_points == 0);
+      assert(finder->second.collective == NULL);
+      assert(finder->second.ready_event.exists());
+      assert(!finder->second.ready_event.has_triggered());
+#endif
+      finder->second.collective = manager;
+      finder->second.remaining_points = get_total_collective_instance_points();
+      Runtime::trigger_event(finder->second.ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::match_collective_instances(
+                         MappingCallKind mapper_call, unsigned index,
+                         std::vector<MappingInstance> &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      bool perform_match = false;
+      std::vector<MappingInstance> match_instances;
+      const InstanceKey key(mapper_call, index);
+      {
+        AutoLock o_lock(this->op_lock);
+        typename std::map<InstanceKey,PendingMatch>::iterator finder =
+          pending_matches.find(key);
+        if (finder == pending_matches.end())
+        {
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          finder = pending_matches.insert(
+            std::pair<InstanceKey,PendingMatch>(key,
+              PendingMatch(instances, total_points, done))).first;
+          ready_event = done;
+        }
+        else
+        {
+          ready_event = finder->second.ready_event;
+          // Do the intersection for the match as part of this process
+          for (std::vector<MappingInstance>::iterator it =
+                finder->second.instances.begin(); it !=
+                finder->second.instances.end(); /*nothing*/)
+          {
+            bool found = false;
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              if (instances[idx] != (*it))
+                continue;
+              found = true;
+              break;
+            }
+            if (found)
+              it++;
+            else
+              it = finder->second.instances.erase(it);
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= points);
+#endif
+        finder->second.remaining_points -= points;
+        if (finder->second.remaining_points == 0)
+        {
+          perform_match = true;
+          match_instances.swap(finder->second.instances);
+        }
+      }
+      if (perform_match)
+        perform_match_collective_instances(mapper_call, index, match_instances);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      AutoLock o_lock(this->op_lock);
+      typename std::map<InstanceKey,PendingMatch>::iterator finder =
+          pending_matches.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_matches.end());
+      assert(finder->second.remaining_points >= points);
+#endif
+      instances = finder->second.instances;
+      finder->second.remaining_points -= points;
+      if (finder->second.remaining_points == 0)
+        pending_matches.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::return_match_collective_instances(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    std::vector<MappingInstance> &instances)
+    //--------------------------------------------------------------------------
+    {
+      const InstanceKey key(mapper_call, index);
+      AutoLock o_lock(this->op_lock);
+      typename std::map<InstanceKey,PendingMatch>::iterator finder =
+          pending_matches.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_matches.end());
+      assert(finder->second.remaining_points == 0);
+      assert(finder->second.instances.empty());
+      assert(finder->second.ready_event.exists());
+      assert(!finder->second.ready_event.has_triggered());
+#endif
+      finder->second.instances.swap(instances);
+      finder->second.remaining_points = get_total_collective_instance_points();
+      Runtime::trigger_event(finder->second.ready_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool CollectiveInstanceCreator<OP>::finalize_pending_collective_instance(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    bool success, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      bool perform_finalize = false;
+      const InstanceKey key(mapper_call, index);
+      {
+        AutoLock o_lock(this->op_lock);
+        typename std::map<InstanceKey,PendingFinalize>::iterator finder =
+          pending_finalizes.find(key);
+        if (finder == pending_finalizes.end())
+        {
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          finder = pending_finalizes.insert(
+            std::pair<InstanceKey,PendingFinalize>(key,
+              PendingFinalize(success, total_points, done))).first;
+          ready_event = done;
+        }
+        else
+        {
+          ready_event = finder->second.ready_event;
+          // If anything failed then record that
+          if (!success)
+            finder->second.success = false;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= points);
+#endif
+        finder->second.remaining_points -= points;
+        if (finder->second.remaining_points == 0)
+        {
+          perform_finalize = true;
+          success = finder->second.success;
+        }
+      }
+      if (perform_finalize)
+        perform_finalize_pending_collective_instance(mapper_call,index,success);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      AutoLock o_lock(this->op_lock);
+      typename std::map<InstanceKey,PendingFinalize>::iterator finder =
+          pending_finalizes.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_finalizes.end());
+      assert(finder->second.remaining_points >= points);
+#endif
+      success = finder->second.success;
+      finder->second.remaining_points -= points;
+      if (finder->second.remaining_points == 0)
+        pending_finalizes.erase(finder); 
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void
+     CollectiveInstanceCreator<OP>::return_finalize_pending_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      const InstanceKey key(mapper_call, index);
+      AutoLock o_lock(this->op_lock);
+      typename std::map<InstanceKey,PendingFinalize>::iterator finder =
+          pending_finalizes.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_finalizes.end());
+      assert(finder->second.remaining_points == 0);
+      assert(finder->second.ready_event.exists());
+      assert(!finder->second.ready_event.has_triggered());
+#endif
+      finder->second.success = success;
+      finder->second.remaining_points = get_total_collective_instance_points();
+      Runtime::trigger_event(finder->second.ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    unsigned 
+        CollectiveInstanceCreator<OP>::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points) 
+    //--------------------------------------------------------------------------
+    {
+      RtEvent wait_on;
+      bool perform_verification = false;
+      {
+        AutoLock o_lock(this->op_lock);
+        typename std::map<MappingCallKind,PendingVerification>::iterator
+          finder = pending_verifications.find(mapper_call);
+        if (finder == pending_verifications.end())
+        {
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          if (total_points == 1)
+            return total_calls;
+          const RtUserEvent ready_event = Runtime::create_rt_user_event();
+          pending_verifications.insert(
+              std::pair<MappingCallKind,PendingVerification>(mapper_call,
+                PendingVerification(total_calls, total_points, ready_event)));
+          perform_verification = true;
+          wait_on = ready_event;
+        }
+        else
+        {
+          if (total_calls != finder->second.total_calls)
+          {
+            const unsigned result = finder->second.total_calls;
+#ifdef DEBUG_LEGION
+            assert(finder->second.remaining_points >= points); 
+#endif
+            finder->second.remaining_points -= points;
+            if (!finder->second.ready_event.exists() &&
+                (finder->second.remaining_points == 0))
+              pending_verifications.erase(finder);
+            return result;
+          }
+          else
+            wait_on = finder->second.ready_event;
+        }
+      }
+      if (perform_verification)
+        perform_verify_total_collective_instance_calls(mapper_call,total_calls);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock o_lock(this->op_lock);
+      typename std::map<MappingCallKind,PendingVerification>::iterator finder =
+          pending_verifications.find(mapper_call);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_verifications.end());
+      assert(finder->second.remaining_points >= points);
+      assert(!finder->second.ready_event.exists());
+#endif
+      const unsigned result = finder->second.total_calls;
+      finder->second.remaining_points -= points;
+      if (finder->second.remaining_points == 0)
+        pending_verifications.erase(finder);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::
+              return_verify_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(this->op_lock);
+      typename std::map<MappingCallKind,PendingVerification>::iterator finder =
+          pending_verifications.find(mapper_call);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_verifications.end());
+      assert(finder->second.ready_event.exists());
+      assert(!finder->second.ready_event.has_triggered());
+#endif
+      finder->second.total_calls = total_calls;
+      Runtime::trigger_event(finder->second.ready_event);
+      if (finder->second.remaining_points == 0)
+        pending_verifications.erase(finder);
+      else
+        finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::perform_match_collective_instances(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    std::vector<MappingInstance> &instances)
+    //--------------------------------------------------------------------------
+    {
+      // A straight pass-through in the common case since we already
+      // did all the intersections earlier
+      return_match_collective_instances(mapper_call, index, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void
+    CollectiveInstanceCreator<OP>::perform_finalize_pending_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+      // A straight pass-through since we did all the work before
+      return_finalize_pending_collective_instance(mapper_call, index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::
+              perform_verify_total_collective_instance_calls(
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+      // A straight pass-through since we did all the work before
+      return_verify_total_collective_instance_calls(mapper_call, total_calls);
+    }
+
+    // Explicit instantiations for classes in other translation units
+    template class CollectiveInstanceCreator<TaskOp>;
+    template class CollectiveInstanceCreator<MapOp>;
 
     ///////////////////////////////////////////////////////////// 
     // Remote Memoizable
@@ -7912,23 +8437,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointCopyOp::find_or_create_collective_instance(
+    RtEvent PointCopyOp::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      return owner->acquire_collective_allocation_privileges(mapper_call, 
+                                                    index, targets, points);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      owner->release_collective_allocation_privileges(mapper_call,index,points);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointCopyOp::create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
+                                  size_t points)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_point.get_dim() > 0);
-#endif
-      collective_point = index_point;
-      return owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, memory, footprint, unsat_kind, unsat_index, 
-          collective_point);
+      return owner->create_pending_collective_instance(mapper_call, index,
+                                            constraints, regions, points); 
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::match_collective_instances(MappingCallKind mapper_call,
+         unsigned index, std::vector<MappingInstance> &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      owner->match_collective_instances(mapper_call, index, instances, points);
     }
 
     //--------------------------------------------------------------------------
@@ -7939,19 +8482,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointCopyOp::finalize_collective_instance(MappingCallKind call_kind,
-                                                   unsigned index, bool success)
+    bool PointCopyOp::finalize_pending_collective_instance(
+         MappingCallKind call_kind, unsigned index, bool success, size_t points)
     //--------------------------------------------------------------------------
     {
-      return owner->finalize_collective_instance(call_kind, index, success);
+      return owner->finalize_pending_collective_instance(call_kind, index, 
+                                                         success, points);
     }
 
     //--------------------------------------------------------------------------
-    void PointCopyOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    unsigned PointCopyOp::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points)
     //--------------------------------------------------------------------------
     {
-      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+      return owner->verify_total_collective_instance_calls(mapper_call,
+                                                  total_calls, points);
     }
 
     //--------------------------------------------------------------------------
@@ -16916,52 +17461,89 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* DependentPartitionOp::find_or_create_collective_instance(
-                                  MappingCallKind call_kind, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index, 
-                                  DomainPoint &collective_point)
+    RtEvent DependentPartitionOp::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (points.empty())
-        return Operation::find_or_create_collective_instance(call_kind, index,
-                            constraints, regions, memory, footprint, unsat_kind,
-                            unsat_index, collective_point);
+      if (this->points.empty())
+        return Operation::acquire_collective_allocation_privileges(
+                                mapper_call, index, targets, points);
       else
-        return 
-          CollectiveInstanceCreator<Operation>::
-                find_or_create_collective_instance(
-                call_kind, index, constraints, regions, memory, footprint,
-                unsat_kind, unsat_index, collective_point);
-    } 
-
-    //--------------------------------------------------------------------------
-    bool DependentPartitionOp::finalize_collective_instance(
-                        MappingCallKind call_kind, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-      if (points.empty())
-        return Operation::finalize_collective_instance(call_kind,index,success);
-      else
-        return 
-          CollectiveInstanceCreator<Operation>::finalize_collective_instance(
-                                                    call_kind, index, success);
+        return CollectiveInstanceCreator<Operation>::
+          acquire_collective_allocation_privileges(mapper_call, index,
+                                                   targets, points);
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    void DependentPartitionOp::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
     //--------------------------------------------------------------------------
     {
-      if (points.empty())
-        Operation::report_total_collective_instance_calls(mapper_call, 
-                                                          total_calls);
+      if (this->points.empty())
+        return Operation::release_collective_allocation_privileges(
+                                                mapper_call, index, points);
       else
-        CollectiveInstanceCreator<Operation>::
-          report_total_collective_instance_calls(mapper_call, total_calls);
+        return CollectiveInstanceCreator<Operation>::
+          release_collective_allocation_privileges(mapper_call, index, points);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* DependentPartitionOp::create_pending_collective_instance(
+                                  MappingCallKind call_kind, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions,
+                                  size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (this->points.empty())
+        return Operation::create_pending_collective_instance(call_kind, index,
+                                                constraints, regions, points); 
+      else
+        return 
+          CollectiveInstanceCreator<Operation>::
+                create_pending_collective_instance(call_kind, index,
+                                      constraints, regions, points); 
+    } 
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::match_collective_instances(
+                         MappingCallKind mapper_call, unsigned index,
+                         std::vector<MappingInstance> &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (this->points.empty())
+        return Operation::match_collective_instances(mapper_call, index,
+                                                     instances, points);
+      else
+        return CollectiveInstanceCreator<Operation>::match_collective_instances(
+                                         mapper_call, index, instances, points);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DependentPartitionOp::finalize_pending_collective_instance(
+         MappingCallKind call_kind, unsigned index, bool success, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (this->points.empty())
+        return Operation::finalize_pending_collective_instance(call_kind, index,
+                                                               success, points);
+      else
+        return CollectiveInstanceCreator<Operation>::
+        finalize_pending_collective_instance(call_kind, index, success, points);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DependentPartitionOp::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      if (this->points.empty())
+        return Operation::verify_total_collective_instance_calls(mapper_call, 
+                                                          total_calls, points);
+      else
+        return CollectiveInstanceCreator<Operation>::
+         verify_total_collective_instance_calls(mapper_call,total_calls,points);
     }
 
     //--------------------------------------------------------------------------
@@ -17271,23 +17853,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointDepPartOp::find_or_create_collective_instance(
+    RtEvent PointDepPartOp::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      return owner->acquire_collective_allocation_privileges(mapper_call,
+                                                  index, targets, points);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      owner->release_collective_allocation_privileges(mapper_call,index,points);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointDepPartOp::create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
+                                  size_t points)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_point.get_dim() > 0);
-#endif
-      collective_point = index_point;
-      return owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, memory, footprint, unsat_kind, unsat_index,
-          collective_point);
+      return owner->create_pending_collective_instance(mapper_call, index,
+                                            constraints, regions, points); 
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::match_collective_instances(MappingCallKind mapper_call,
+         unsigned index, std::vector<MappingInstance> &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      owner->match_collective_instances(mapper_call, index, instances, points);
     }
 
     //--------------------------------------------------------------------------
@@ -17298,19 +17898,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointDepPartOp::finalize_collective_instance(MappingCallKind call_kind,
-                                                   unsigned index, bool success)
+    bool PointDepPartOp::finalize_pending_collective_instance(
+         MappingCallKind call_kind, unsigned index, bool success, size_t points)
     //--------------------------------------------------------------------------
     {
-      return owner->finalize_collective_instance(call_kind, index, success);
+      return owner->finalize_pending_collective_instance(call_kind, index, 
+                                                         success, points);
     }
 
     //--------------------------------------------------------------------------
-    void PointDepPartOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    unsigned PointDepPartOp::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points)
     //--------------------------------------------------------------------------
     {
-      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+      return owner->verify_total_collective_instance_calls(mapper_call,
+                                                  total_calls, points);
     }
 
     //--------------------------------------------------------------------------
@@ -18697,23 +19299,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointFillOp::find_or_create_collective_instance(
+    RtEvent PointFillOp::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      return owner->acquire_collective_allocation_privileges(mapper_call,
+                                                  index, targets, points);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::release_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      owner->release_collective_allocation_privileges(mapper_call,index,points);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveManager* PointFillOp::create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
+                                  size_t points)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_point.get_dim() > 0);
-#endif
-      collective_point = index_point;
-      return owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, memory, footprint, unsat_kind, unsat_index,
-          collective_point);
+      return owner->create_pending_collective_instance(mapper_call, index,
+                                            constraints, regions, points);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::match_collective_instances(MappingCallKind mapper_call,
+         unsigned index, std::vector<MappingInstance> &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      owner->match_collective_instances(mapper_call, index, instances, points);
     }
 
     //--------------------------------------------------------------------------
@@ -18724,19 +19344,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointFillOp::finalize_collective_instance(MappingCallKind call_kind,
-                                                   unsigned index, bool success)
+    bool PointFillOp::finalize_pending_collective_instance(
+         MappingCallKind call_kind, unsigned index, bool success, size_t points)
     //--------------------------------------------------------------------------
     {
-      return owner->finalize_collective_instance(call_kind, index, success);
+      return owner->finalize_pending_collective_instance(call_kind, index,
+                                                         success, points);
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    unsigned PointFillOp::verify_total_collective_instance_calls(
+               MappingCallKind mapper_call, unsigned total_calls, size_t points)
     //--------------------------------------------------------------------------
     {
-      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+      return owner->verify_total_collective_instance_calls(mapper_call,
+                                                  total_calls, points);
     }
 
     //--------------------------------------------------------------------------

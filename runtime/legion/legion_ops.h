@@ -482,19 +482,32 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual CollectiveManager* find_or_create_collective_instance(
+    public:
+      // Collective instance support
+      virtual DomainPoint get_collective_instance_point(void) const;
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual DomainPoint get_collective_instance_point(void) const;
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call,
+                                  unsigned total_calls, size_t points = 1);
+    public:
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,
@@ -783,8 +796,9 @@ namespace Legion {
 
     /**
      * \class CollectiveInstanceCreator
-     * This class provides a common base class for operations that need to 
-     * provide support for the creation of collective instances
+     * This class provides a common base class for operations that
+     * perform parallel rendezvous operations for the creation of 
+     * collective instances.
      */
     template<typename OP>
     class CollectiveInstanceCreator : public OP {
@@ -793,34 +807,129 @@ namespace Legion {
       CollectiveInstanceCreator(const CollectiveInstanceCreator<OP> &rhs);
     public:
       virtual IndexSpaceNode* get_collective_space(void) const = 0;
+      virtual size_t get_total_collective_instance_points(void) = 0;
     public:
       // For collective instances
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
-    protected:
-      typedef std::pair<MappingCallKind,unsigned> CollectiveKey;
-      struct CollectiveInstance {
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call, unsigned total_calls,
+                                  size_t points = 1);
+    public:
+      // invoked when all the points have been seen
+      virtual void perform_acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  RtUserEvent to_trigger);
+      virtual void perform_release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets);
+      virtual void perform_create_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions);
+      virtual void perform_match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &instances);
+      virtual void perform_finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success);
+      virtual void perform_verify_total_collective_instance_calls(
+                                  MappingCallKind mapper_call,
+                                  unsigned total_calls);
+    public:
+      // Called to return the result of the actions
+      virtual void return_create_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  CollectiveManager *manager);
+      virtual void return_match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &instances);
+      virtual void return_finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success);
+      virtual void return_verify_total_collective_instance_calls(
+                                  MappingCallKind mapper_call, unsigned count);
+    private:
+      typedef std::pair<MappingCallKind,unsigned> InstanceKey;
+      struct PendingPrivilege {
       public:
-        CollectiveInstance(void) : manager(NULL), remaining(0), pending(0) { }
+        PendingPrivilege(const std::set<Memory> &memories, size_t points,
+                         RtUserEvent trigger)
+          : targets(memories), remaining_points(points), to_trigger(trigger) { }
       public:
-        std::set<AddressSpaceID> unique_spaces;
-        CollectiveManager *manager;
-        RtUserEvent ready_event;
-        ApUserEvent instance_event;
-        size_t remaining;
-        size_t pending;
+        std::set<Memory> targets;
+        size_t remaining_points;
+        RtUserEvent to_trigger;
       };
-      std::map<CollectiveKey,CollectiveInstance> collective_instances;
+      std::map<InstanceKey,PendingPrivilege> pending_privileges;
+    private:
+      struct PendingCollective {
+      public:
+        PendingCollective(const LayoutConstraintSet &cons,
+            const std::vector<LogicalRegion> &regs,
+            size_t points, RtUserEvent ready)
+          : constraints(cons), regions(regs), remaining_points(points),
+            collective(NULL), ready_event(ready) { }
+      public:
+        const LayoutConstraintSet &constraints;
+        const std::vector<LogicalRegion> &regions;
+        size_t remaining_points;
+        CollectiveManager *collective;
+        RtUserEvent ready_event;
+      };
+      std::map<InstanceKey,PendingCollective> pending_collectives;
+    private:
+      struct PendingMatch {
+      public:
+        PendingMatch(const std::vector<MappingInstance> &insts,
+                     size_t points, RtUserEvent ready)
+          : instances(insts), remaining_points(points), ready_event(ready) { }
+      public:
+        std::vector<MappingInstance> instances;
+        size_t remaining_points;
+        RtUserEvent ready_event;
+      };
+      std::map<InstanceKey,PendingMatch> pending_matches;
+    private:
+      struct PendingFinalize {
+      public:
+        PendingFinalize(bool succeeded, size_t points, RtUserEvent ready)
+          : remaining_points(points), ready_event(ready), success(succeeded) { }
+      public:
+        size_t remaining_points;
+        RtUserEvent ready_event;
+        bool success;
+      };
+      std::map<InstanceKey,PendingFinalize> pending_finalizes;
+    private:
+      struct PendingVerification {
+      public:
+        PendingVerification(size_t calls, size_t points, RtUserEvent ready)
+          : total_calls(calls), remaining_points(points), ready_event(ready) { }
+      public:
+        size_t total_calls;
+        size_t remaining_points;
+        RtUserEvent ready_event;
+      };
+      std::map<MappingCallKind,PendingVerification> pending_verifications;
     };
 
     /**
@@ -1481,6 +1590,8 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
+      virtual size_t get_total_collective_instance_points(void)
+        { return points.size(); }
     public:
       void enumerate_points(bool replaying);
       void handle_point_commit(RtEvent point_committed);
@@ -1544,19 +1655,29 @@ namespace Legion {
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       // For collective instances
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual DomainPoint get_collective_instance_point(void) const;
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual DomainPoint get_collective_instance_point(void) const;
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call,
+                                  unsigned total_calls, size_t points = 1);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3372,20 +3493,32 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
+      virtual size_t get_total_collective_instance_points(void)
+        { return points.size(); }
     public:
       // For collective instances
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call,
+                                  unsigned total_calls, size_t points = 1);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -3463,19 +3596,29 @@ namespace Legion {
       virtual PartitionKind get_partition_kind(void) const;
     public:
       // For collective instances
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual DomainPoint get_collective_instance_point(void) const;
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual DomainPoint get_collective_instance_point(void) const;
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call,
+                                  unsigned total_calls, size_t points = 1);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3617,6 +3760,8 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
+      virtual size_t get_total_collective_instance_points(void)
+        { return points.size(); }
     public:
       void perform_base_dependence_analysis(void);
       void enumerate_points(bool replaying);
@@ -3658,19 +3803,29 @@ namespace Legion {
       virtual void trigger_commit(void);
     public:
       // For collective instances
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual DomainPoint get_collective_instance_point(void) const;
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual DomainPoint get_collective_instance_point(void) const;
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call,
+                                  unsigned total_calls, size_t points = 1);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;

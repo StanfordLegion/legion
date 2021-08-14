@@ -1241,6 +1241,55 @@ namespace Legion {
     };
 
     /**
+     * \class ReplCollectiveInstanceCreator
+     * This provides a special implementation of the 
+     * CollectiveInstanceCreator class for operations that are being
+     * execute in control replicated contexts
+     */
+    template<typename OP>
+    class ReplCollectiveInstanceCreator : public OP {
+    public:
+      ReplCollectiveInstanceCreator(Runtime *rt);
+      ReplCollectiveInstanceCreator(
+          const ReplCollectiveInstanceCreator<OP> &rhs);
+    public:
+      // invoked when all the points have been seen
+      virtual void perform_acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  RtUserEvent to_trigger);
+      virtual void perform_release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets);
+      virtual void perform_create_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const LayoutConstraintSet &constraints,
+                                  const std::vector<LogicalRegion> &regions);
+      virtual void perform_match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &instances);
+      virtual void perform_finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success);
+      virtual void perform_verify_total_collective_instance_calls(
+                                  MappingCallKind mapper_call,
+                                  unsigned total_calls);
+    public:
+      // Called to return the result of the actions
+      virtual void return_create_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  CollectiveManager *manager);
+      virtual void return_match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &instances);
+      virtual void return_finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success);
+      virtual void return_verify_total_collective_instance_calls(
+                                  MappingCallKind mapper_call, unsigned count);
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -1292,7 +1341,7 @@ namespace Legion {
      * An individual task that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexTask : public IndexTask {
+    class ReplIndexTask : public ReplCollectiveInstanceCreator<IndexTask> {
     public:
       ReplIndexTask(Runtime *rt);
       ReplIndexTask(const ReplIndexTask &rhs);
@@ -1328,19 +1377,6 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
-    public:
-      virtual CollectiveManager* find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(
-                             MappingCallKind call_kind, unsigned total_calls);
     protected:
       virtual void finalize_output_regions(void);
     protected:
@@ -1478,7 +1514,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexFillOp : public IndexFillOp {
+    class ReplIndexFillOp : public ReplCollectiveInstanceCreator<IndexFillOp> {
     public:
       ReplIndexFillOp(Runtime *rt);
       ReplIndexFillOp(const ReplIndexFillOp &rhs);
@@ -1494,18 +1530,6 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
-      virtual CollectiveManager* find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(
-                             MappingCallKind call_kind, unsigned total_calls);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1563,7 +1587,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexCopyOp : public IndexCopyOp {
+    class ReplIndexCopyOp : public ReplCollectiveInstanceCreator<IndexCopyOp> {
     public:
       ReplIndexCopyOp(Runtime *rt);
       ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
@@ -1585,18 +1609,6 @@ namespace Legion {
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
-      virtual CollectiveManager* find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(
-                             MappingCallKind call_kind, unsigned total_calls);
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   std::vector<ApBarrier> &indirection_bars,
@@ -1685,7 +1697,8 @@ namespace Legion {
      * A dependent partitioning operation that knows that it
      * is being executed in a control replication context
      */
-    class ReplDependentPartitionOp : public DependentPartitionOp {
+    class ReplDependentPartitionOp :
+      public ReplCollectiveInstanceCreator<DependentPartitionOp> { 
     public:
       class ReplByFieldThunk : public ByFieldThunk {
       public:
@@ -1834,18 +1847,6 @@ namespace Legion {
       virtual void trigger_ready(void);  
       virtual void finalize_mapping(void);
       virtual void select_partition_projection(void);
-      virtual CollectiveManager* find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(
-                             MappingCallKind call_kind, unsigned total_calls);
     protected:
       void select_sharding_function(void);
     protected:
@@ -2036,7 +2037,8 @@ namespace Legion {
      * mappings can act like a kind of communication between shards
      * where they are all reading/writing to the same logical region.
      */
-    class ReplMapOp : public CollectiveInstanceCreator<MapOp> {
+    class ReplMapOp : public ReplCollectiveInstanceCreator<
+                                  CollectiveInstanceCreator<MapOp> > {
     public:
       ReplMapOp(Runtime *rt);
       ReplMapOp(const ReplMapOp &rhs);
@@ -2056,19 +2058,9 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual DomainPoint get_shard_point(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
+      // From collective instance creator
       virtual IndexSpaceNode* get_collective_space(void) const;
-      virtual CollectiveManager* find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(
-                             MappingCallKind call_kind, unsigned total_calls);
+      virtual size_t get_total_collective_instance_points(void);
     protected:
       CollectiveID collective_check;
       IndexSpace shard_space;

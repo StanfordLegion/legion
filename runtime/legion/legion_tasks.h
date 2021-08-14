@@ -615,7 +615,7 @@ namespace Legion {
      * This is the parent type for each of the multi-task
      * kinds of classes.
      */
-    class MultiTask : public TaskOp {
+    class MultiTask : public CollectiveInstanceCreator<TaskOp> {
     public:
       class OutputOptions {
       public:
@@ -923,19 +923,29 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
     public:
       // For collective instance creation
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual DomainPoint get_collective_instance_point(void) const;
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
+      virtual void release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  size_t points = 1);
+      virtual CollectiveManager* create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual DomainPoint get_collective_instance_point(void) const;
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  size_t points = 1);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &insts,
+                                  size_t points = 1);
+      virtual bool finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success, size_t points = 1);
+      virtual unsigned verify_total_collective_instance_calls(
+                                  MappingCallKind call,
+                                  unsigned total_calls, size_t points = 1);
     public:
       void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
@@ -1065,8 +1075,7 @@ namespace Legion {
      * slice tasks for the index space will be distributed around
      * the machine and eventually returned to this index space task.
      */
-    class IndexTask : public CollectiveInstanceCreator<MultiTask>,
-                      public LegionHeapify<IndexTask> {
+    class IndexTask : public MultiTask, public LegionHeapify<IndexTask> {
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
@@ -1191,6 +1200,8 @@ namespace Legion {
       // From CollectiveInstanceCreator
       virtual IndexSpaceNode *get_collective_space(void) const
         { return launch_space; }
+      virtual size_t get_total_collective_instance_points(void)
+        { return total_points; }
     public:
       void enumerate_futures(const Domain &domain);
     public:
@@ -1264,9 +1275,12 @@ namespace Legion {
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
       enum CollectiveInstMessage {
-        SLICE_COLLECTIVE_FIND_OR_CREATE,
+        SLICE_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE,
+        SLICE_COLLECTIVE_RELEASE_ALLOCATION_PRIVILEGE,
+        SLICE_COLLECTIVE_CREATE_PENDING_INSTANCE,
+        SLICE_COLLECTIVE_MATCH_INSTANCES,
         SLICE_COLLECTIVE_FINALIZE,
-        SLICE_COLLECTIVE_REPORT,
+        SLICE_COLLECTIVE_VERIFY,
       };
     public:
       SliceTask(Runtime *rt);
@@ -1380,20 +1394,34 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       // For collective instance creation
-      virtual CollectiveManager* find_or_create_collective_instance(
+      virtual IndexSpaceNode *get_collective_space(void) const
+        { return launch_space; }
+      virtual size_t get_total_collective_instance_points(void)
+        { return points.size(); }
+      // Special invocations of these methods to forward on the
+      // results to the index owner
+      virtual void perform_acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  RtUserEvent to_trigger);
+      virtual void perform_release_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets);
+      virtual void perform_create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory memory, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point);
-      virtual bool finalize_collective_instance(MappingCallKind mapper_call,
-                                                unsigned index, bool success);
-      virtual void report_total_collective_instance_calls(MappingCallKind call,
-                                                          unsigned total_calls);
+                                  const std::vector<LogicalRegion> &regions);
+      virtual void perform_match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::vector<MappingInstance> &instances);
+      virtual void perform_finalize_pending_collective_instance(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  bool success);
+      virtual void perform_verify_total_collective_instance_calls(
+                                  MappingCallKind mapper_call,
+                                  unsigned total_calls);
       static void handle_collective_instance_request(Deserializer &derez,
-                                       AddressSpaceID source, Runtime *rutime);
+                                AddressSpaceID source, Runtime *runtime);
       static void handle_collective_instance_response(Deserializer &derez,
                                                       Runtime *runtime);
     protected:

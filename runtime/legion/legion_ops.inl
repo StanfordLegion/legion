@@ -24,25 +24,7 @@ namespace Legion {
     // Collective Instance Creator
     /////////////////////////////////////////////////////////////
 
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    CollectiveInstanceCreator<OP>::CollectiveInstanceCreator(Runtime *rt)
-      : OP(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    CollectiveInstanceCreator<OP>::CollectiveInstanceCreator(
-                                      const CollectiveInstanceCreator<OP> &rhs)
-      : OP(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
+#if 0
     //--------------------------------------------------------------------------
     template<typename OP>
     CollectiveManager* 
@@ -290,6 +272,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Memoizable Operation 
