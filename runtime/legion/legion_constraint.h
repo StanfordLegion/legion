@@ -63,6 +63,8 @@ namespace Legion {
     public:
       inline bool operator==(const ISAConstraint &other) const
       { return isa_prop == other.isa_prop; }
+      inline bool operator!=(const ISAConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const ISAConstraint &other) const;
       bool conflicts(const ISAConstraint &other) const;
@@ -91,6 +93,8 @@ namespace Legion {
     public:
       inline bool operator==(const ProcessorConstraint &other) const
       { return valid_kinds == other.valid_kinds; }
+      inline bool operator!=(const ProcessorConstraint &other) const
+      { return !(*this == other); }
     public:
       inline bool is_valid(void) const { return !valid_kinds.empty(); }
       void add_kind(Processor::Kind kind);
@@ -123,6 +127,8 @@ namespace Legion {
                          EqualityKind eq_kind, size_t value);
     public:
       bool operator==(const ResourceConstraint &other) const;
+      inline bool operator!=(const ResourceConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const ResourceConstraint &other) const;
       bool conflicts(const ResourceConstraint &other) const;
@@ -154,6 +160,8 @@ namespace Legion {
       LaunchConstraint(LaunchKind kind, const size_t *value, int dims);
     public:
       bool operator==(const LaunchConstraint &other) const;
+      inline bool operator!=(const LaunchConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const LaunchConstraint &other) const;
       bool conflicts(const LaunchConstraint &other) const;
@@ -190,6 +198,8 @@ namespace Legion {
     public:
       inline bool operator==(const ColocationConstraint &o) const
       { return fields == o.fields && indexes == o.indexes; }
+      inline bool operator!=(const ColocationConstraint &other) const
+      { return !(*this == other); }
     public:
       bool entails(const ColocationConstraint &other) const;
       bool conflicts(const ColocationConstraint &other) const;
@@ -223,6 +233,8 @@ namespace Legion {
         add_constraint(const ColocationConstraint &constraint);
     public:
       bool operator==(const ExecutionConstraintSet &other) const;
+      inline bool operator!=(const ExecutionConstraintSet &other) const
+      { return !(*this == other); }
     public:
       void swap(ExecutionConstraintSet &rhs);
       void serialize(Serializer &rez) const;
@@ -313,6 +325,8 @@ namespace Legion {
                             int max_overhead = 0);
     public:
       bool operator==(const SpecializedConstraint &other) const;
+      inline bool operator!=(const SpecializedConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -368,6 +382,8 @@ namespace Legion {
     public:
       inline bool operator==(const MemoryConstraint &other) const
       { return kind == other.kind && has_kind == other.has_kind; }
+      inline bool operator!=(const MemoryConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -411,6 +427,8 @@ namespace Legion {
                       bool contiguous, bool inorder = true);
     public:
       bool operator==(const FieldConstraint &other) const;
+      inline bool operator!=(const FieldConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -471,6 +489,8 @@ namespace Legion {
     public:
       inline bool operator==(const OrderingConstraint &other) const
       { return ordering == other.ordering && contiguous == other.contiguous; }
+      inline bool operator!=(const OrderingConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -513,6 +533,8 @@ namespace Legion {
     public:
       inline bool operator==(const SplittingConstraint &o) const
       { return kind == o.kind && value == o.value && chunks == o.chunks; }
+      inline bool operator!=(const SplittingConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -548,6 +570,8 @@ namespace Legion {
     public:
       inline bool operator==(const DimensionConstraint &o) const
       { return kind == o.kind && eqk == o.eqk && value == o.value; }
+      inline bool operator!=(const DimensionConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -585,6 +609,8 @@ namespace Legion {
     public:
       inline bool operator==(const AlignmentConstraint &o) const
       { return fid == o.fid && eqk == o.eqk && alignment == o.alignment; }
+      inline bool operator!=(const AlignmentConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -620,6 +646,8 @@ namespace Legion {
     public:
       inline bool operator==(const OffsetConstraint &o) const
       { return fid == o.fid && offset == o.offset; }
+      inline bool operator!=(const OffsetConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -654,6 +682,8 @@ namespace Legion {
     public:
       inline bool operator==(const PointerConstraint &o) const
       { return is_valid == o.is_valid && memory == o.memory && ptr == o.ptr; }
+      inline bool operator!=(const PointerConstraint &other) const
+      { return !(*this == other); }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
@@ -704,6 +734,10 @@ namespace Legion {
         add_constraint(const PointerConstraint &constraint);
     public:
       bool operator==(const LayoutConstraintSet &other) const;
+      bool operator!=(const LayoutConstraintSet &other) const;
+      bool equals(const LayoutConstraintSet &other,
+                  LayoutConstraintKind *bad_kind = NULL,
+                  size_t *bad_index = NULL) const;
     public:
       // failed_constraint will be the one from 'other' that wasn't entailed
       bool entails(const LayoutConstraintSet &other, 

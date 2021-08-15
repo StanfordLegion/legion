@@ -2125,7 +2125,8 @@ namespace Legion {
                                    GCPriority priority = 0,
                                    bool tight_region_bounds = false,
                                    size_t *footprint = NULL,
-                                   const LayoutConstraint **unsat = NULL) const;
+                                   const LayoutConstraint **unsat = NULL,
+                                   size_t collective_tag = 0) const;
       bool create_physical_instance(
                                    MapperContext ctx, Memory target_memory,
                                    LayoutConstraintID layout_id,
@@ -2134,7 +2135,8 @@ namespace Legion {
                                    GCPriority priority = 0,
                                    bool tight_region_bounds = false,
                                    size_t *footprint = NULL,
-                                   const LayoutConstraint **unsat = NULL) const;
+                                   const LayoutConstraint **unsat = NULL,
+                                   size_t collective_tag = 0) const;
       bool find_or_create_physical_instance(
                                    MapperContext ctx, Memory target_memory,
                                    const LayoutConstraintSet &constraints, 
@@ -2143,7 +2145,8 @@ namespace Legion {
                                    bool acquire = true,GCPriority priority = 0,
                                    bool tight_region_bounds = false,
                                    size_t *footprint = NULL,
-                                   const LayoutConstraint **unsat = NULL) const;
+                                   const LayoutConstraint **unsat = NULL,
+                                   size_t collective_tag = 0) const;
       bool find_or_create_physical_instance(
                                    MapperContext ctx, Memory target_memory,
                                    LayoutConstraintID layout_id,
@@ -2152,33 +2155,38 @@ namespace Legion {
                                    bool acquire = true,GCPriority priority = 0,
                                    bool tight_region_bounds = false,
                                    size_t *footprint = NULL,
-                                   const LayoutConstraint **unsat = NULL) const;
+                                   const LayoutConstraint **unsat = NULL,
+                                   size_t collective_tag = 0) const;
       bool find_physical_instance(
                                    MapperContext ctx, Memory target_memory,
                                    const LayoutConstraintSet &constraints,
                                    const std::vector<LogicalRegion> &regions,
                                    PhysicalInstance &result, bool acquire =true,
-                                   bool tight_region_bounds = false) const;
+                                   bool tight_region_bounds = false,
+                                   size_t collective_tag = 0) const;
       bool find_physical_instance(
                                    MapperContext ctx, Memory target_memory,
                                    LayoutConstraintID layout_id,
                                    const std::vector<LogicalRegion> &regions,
                                    PhysicalInstance &result, bool acquire =true,
-                                   bool tight_region_bounds = false) const;
+                                   bool tight_region_bounds = false,
+                                   size_t collective_tag = 0) const;
       void find_physical_instances(
                                    MapperContext ctx, Memory target_memory,
                                    const LayoutConstraintSet &constraints,
                                    const std::vector<LogicalRegion> &regions,
                                    std::vector<PhysicalInstance> &results, 
                                    bool acquire = false,
-                                   bool tight_region_bounds = false) const;
+                                   bool tight_region_bounds = false,
+                                   size_t collective_tag = 0) const;
       void find_physical_instances(
                                    MapperContext ctx, Memory target_memory,
                                    LayoutConstraintID layout_id,
                                    const std::vector<LogicalRegion> &regions,
                                    std::vector<PhysicalInstance> &results, 
                                    bool acquire = false,
-                                   bool tight_region_bounds = false) const;
+                                   bool tight_region_bounds = false,
+                                   size_t collective_tag = 0) const;
       void set_garbage_collection_priority(MapperContext ctx, 
                 const PhysicalInstance &instance, GCPriority priority) const;
       // These methods will atomically check to make sure that these instances

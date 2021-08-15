@@ -380,14 +380,16 @@ namespace Legion {
                                     MappingInstance &result, 
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
+                                    const LayoutConstraint **unsat,
+                                    size_t collective_tag);
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
+                                    const LayoutConstraint **unsat,
+                                    size_t collective_tag);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
@@ -395,7 +397,8 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
+                                    const LayoutConstraint **unsat,
+                                    size_t collective_tag);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
@@ -403,27 +406,32 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
                                     bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
+                                    const LayoutConstraint **unsat,
+                                    size_t collective_tag);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds);
+                                    bool tight_region_bounds,
+                                    size_t collective_tag);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds);
+                                    bool tight_region_bounds,
+                                    size_t collective_tag);
       void find_physical_instances( MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds);
+                                    bool acquire, bool tight_region_bounds,
+                                    size_t collective_tag);
       void find_physical_instances( MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds);
+                                    bool acquire, bool tight_region_bounds,
+                                    size_t collective_tag);
       void set_garbage_collection_priority(MappingCallInfo *ctx, 
                                     const MappingInstance &instance, 
                                     GCPriority priority);

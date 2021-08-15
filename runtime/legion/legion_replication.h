@@ -1262,12 +1262,15 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const std::set<Memory> &targets);
       virtual void perform_create_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions);
+                                  MappingCallKind mapper_call, unsigned index, 
+                                  const std::map<size_t,
+                                    typename OP::PendingCollective> &instances,
+                                  LayoutConstraintKind bad_kind,
+                                  size_t bad_index, bool bad_regions);
       virtual void perform_match_collective_instances(
                                   MappingCallKind mapper_call, unsigned index,
-                                  std::vector<MappingInstance> &instances);
+                                  std::map<size_t,
+                                    std::vector<DistributedID> > &instances);
       virtual void perform_finalize_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   bool success);
@@ -1278,10 +1281,14 @@ namespace Legion {
       // Called to return the result of the actions
       virtual void return_create_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
-                                  CollectiveManager *manager);
+                                  std::map<size_t,
+                                           CollectiveManager*> &managers,
+                                  LayoutConstraintKind bad_kind,
+                                  size_t bad_index, bool bad_regions);
       virtual void return_match_collective_instances(
                                   MappingCallKind mapper_call, unsigned index,
-                                  std::vector<MappingInstance> &instances);
+                                  std::map<size_t,
+                                    std::vector<DistributedID> > &instances);
       virtual void return_finalize_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   bool success);

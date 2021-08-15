@@ -6251,6 +6251,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MapOp::activate();
+      activate_collective_instance_creator();
       collective_check = 0;
       shard_space = IndexSpace::NO_SPACE;
       shard_fn = NULL;
@@ -6262,6 +6263,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_map_op();
+      deactivate_collective_instance_creator();
       runtime->free_repl_map_op(this);
     }
 

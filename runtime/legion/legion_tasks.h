@@ -923,23 +923,26 @@ namespace Legion {
       virtual TraceLocalID get_trace_local_id(void) const;
     public:
       // For collective instance creation
+      virtual bool supports_collective_instances(void) const { return true; }
       virtual DomainPoint get_collective_instance_point(void) const;
       virtual RtEvent acquire_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
-                                  const std::set<Memory> &targets,
-                                  size_t points = 1);
+                                  Memory target);
       virtual void release_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   size_t points = 1);
       virtual CollectiveManager* create_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
+                                  MappingCallKind mapper_call,
+                                  unsigned index, size_t collective_tag,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
-                                  size_t points = 1);
+                                  LayoutConstraintKind &bad_constraint,
+                                  size_t &bad_constraint_index,
+                                  bool &bad_regions);
       virtual void match_collective_instances(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  std::vector<MappingInstance> &insts,
-                                  size_t points = 1);
+                                  MappingCallKind mapper_call,
+                                  unsigned index, size_t collective_tag,
+                                  std::vector<MappingInstance> &instances);
       virtual bool finalize_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   bool success, size_t points = 1);
@@ -1408,12 +1411,15 @@ namespace Legion {
                                   MappingCallKind mapper_call, unsigned index,
                                   const std::set<Memory> &targets);
       virtual void perform_create_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions);
+                                  MappingCallKind mapper_call, unsigned index, 
+                                  const std::map<size_t,
+                                                 PendingCollective> &instances,
+                                  LayoutConstraintKind bad_kind,
+                                  size_t bad_index, bool bad_regions);
       virtual void perform_match_collective_instances(
                                   MappingCallKind mapper_call, unsigned index,
-                                  std::vector<MappingInstance> &instances);
+                                  std::map<size_t,
+                                    std::vector<DistributedID> > &instances);
       virtual void perform_finalize_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   bool success);
