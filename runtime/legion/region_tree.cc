@@ -3501,7 +3501,8 @@ namespace Legion {
                                                   ApEvent is_ready,
                                                   IndexSpaceExprID expr_id,
                                                   std::set<RtEvent> *applied,
-                                                  bool add_remote_reference)
+                                                  bool add_remote_reference,
+                                                  unsigned depth)
     //--------------------------------------------------------------------------
     { 
       RtUserEvent local_initialized;
@@ -3514,8 +3515,8 @@ namespace Legion {
           local_applied.insert(initialized);
         initialized = local_initialized;
       }
-      IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, 
-                                color, did, is_ready, expr_id, initialized);
+      IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
+                                did, is_ready, expr_id, initialized, depth);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3584,7 +3585,8 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   ApUserEvent is_ready,
-                                                  std::set<RtEvent> *applied)
+                                                  std::set<RtEvent> *applied,
+                                                  unsigned depth)
     //--------------------------------------------------------------------------
     { 
       RtUserEvent local_initialized;
@@ -3598,7 +3600,7 @@ namespace Legion {
         initialized = local_initialized;
       }
       IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, parent,
-                                color, did, is_ready, 0/*expr id*/,initialized);
+                        color, did, is_ready, 0/*expr id*/, initialized, depth);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -4579,8 +4581,16 @@ namespace Legion {
         result = create_node(handle, parent, RtEvent::NO_RT_EVENT, 0/*did*/);
       }
       else
+      {
+#ifdef DEBUG_LEGION
+        // This better be a root node, if it's not then something requested
+        // that we construct a logical reigon node after the parent partition
+        // was destroyed which is very bad
+        assert(index_node->depth == 0);
+#endif
         // Even though this is a root node, we'll discover it's already made
         result = create_node(handle, NULL, RtEvent::NO_RT_EVENT, 0/*did*/);
+      }
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         if (!result->initialized.exists())
@@ -7365,9 +7375,10 @@ namespace Legion {
     IndexSpaceNode::IndexSpaceNode(RegionTreeForest *ctx, IndexSpace h, 
                                    IndexPartNode *par, LegionColor c,
                                    DistributedID did, ApEvent ready,
-                                   IndexSpaceExprID exp_id, RtEvent init)
-      : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
-                      did, get_owner_space(h, ctx->runtime), init),
+                                   IndexSpaceExprID exp_id, RtEvent init,
+                                   unsigned dep)
+      : IndexTreeNode(ctx, (dep == UINT_MAX) ? ((par == NULL) ? 0 : 
+         par->depth + 1) : dep, c, did, get_owner_space(h, ctx->runtime), init),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
@@ -8257,6 +8268,7 @@ namespace Legion {
           rez.serialize(index_space_ready);
           rez.serialize(expr_id);
           rez.serialize(initialized);
+          rez.serialize(depth);
           rez.serialize<bool>(record.add_remote_reference);
           if (record.pack_space)
             pack_index_space(rez, true/*include size*/);
@@ -8335,6 +8347,8 @@ namespace Legion {
       derez.deserialize(expr_id);
       RtEvent initialized;
       derez.deserialize(initialized);
+      unsigned depth;
+      derez.deserialize(depth);
       bool is_remote_valid;
       derez.deserialize(is_remote_valid);
       size_t index_space_size;
@@ -8348,7 +8362,7 @@ namespace Legion {
                         true/*can fail*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized,
-          ready_event, expr_id, NULL/*applied*/, is_remote_valid);
+          ready_event, expr_id, NULL/*applied*/, is_remote_valid, depth);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif

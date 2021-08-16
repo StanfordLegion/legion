@@ -649,12 +649,14 @@ namespace Legion {
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
                                   std::set<RtEvent> *applied = NULL,
-                                  bool add_remote_reference = true);
+                                  bool add_remote_reference = true,
+                                  unsigned depth = UINT_MAX);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   ApUserEvent is_ready,
-                                  std::set<RtEvent> *applied = NULL);
+                                  std::set<RtEvent> *applied = NULL,
+                                  unsigned depth = UINT_MAX);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
@@ -1848,7 +1850,8 @@ namespace Legion {
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
                      IndexPartNode *parent, LegionColor color,
                      DistributedID did, ApEvent index_space_ready,
-                     IndexSpaceExprID expr_id, RtEvent initialized);
+                     IndexSpaceExprID expr_id, RtEvent initialized,
+                     unsigned depth);
       IndexSpaceNode(const IndexSpaceNode &rhs);
       virtual ~IndexSpaceNode(void);
     public:
@@ -2104,7 +2107,8 @@ namespace Legion {
                       IndexPartNode *parent, LegionColor color, 
                       const void *bounds, bool is_domain,
                       DistributedID did, ApEvent ready_event,
-                      IndexSpaceExprID expr_id, RtEvent init);
+                      IndexSpaceExprID expr_id, RtEvent init,
+                      unsigned depth);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
       virtual ~IndexSpaceNodeT(void);
     public:
@@ -2599,9 +2603,9 @@ namespace Legion {
       IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *b,
                         bool is_dom, IndexPartNode *p, LegionColor c, 
                         DistributedID d, ApEvent r, IndexSpaceExprID e,
-                        RtEvent init)
+                        RtEvent init, unsigned dp)
         : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
-          color(c), did(d), ready(r), expr_id(e), initialized(init), 
+          color(c), did(d), ready(r), expr_id(e), initialized(init), depth(dp),
           result(NULL) { }
     public:
       template<typename N, typename T>
@@ -2610,7 +2614,7 @@ namespace Legion {
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
             creator->space, creator->parent, creator->color, creator->bounds,
             creator->is_domain, creator->did, creator->ready, 
-            creator->expr_id, creator->initialized);
+            creator->expr_id, creator->initialized, creator->depth);
       }
     public:
       RegionTreeForest *const forest;
@@ -2623,6 +2627,7 @@ namespace Legion {
       const ApEvent ready;
       const IndexSpaceExprID expr_id;
       const RtEvent initialized;
+      const unsigned depth;
       IndexSpaceNode *result;
     };
 
