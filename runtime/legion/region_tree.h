@@ -1028,7 +1028,8 @@ namespace Legion {
       public:
         TightenIndexSpaceArgs(IndexSpaceExpression *proxy)
           : LgTaskArgs<TightenIndexSpaceArgs>(implicit_provenance),
-            proxy_this(proxy) { proxy->add_expression_reference(); }
+            proxy_this(proxy) 
+          { proxy->add_expression_reference(true/*tree only*/); }
       public:
         IndexSpaceExpression *const proxy_this;
       };

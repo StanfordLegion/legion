@@ -6443,7 +6443,7 @@ namespace Legion {
     {
       const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
       targs->proxy_this->tighten_index_space();
-      if (targs->proxy_this->remove_expression_reference())
+      if (targs->proxy_this->remove_expression_reference(true/*tree only*/))
         delete targs->proxy_this;
     }
 
@@ -8171,7 +8171,15 @@ namespace Legion {
           }
         }
         else if (above)
+        {
+          std::map<AddressSpaceID,RtEvent>::iterator finder =
+            send_effects.find(target);
+#ifdef DEBUG_LEGION
+          assert(finder != send_effects.end());
+#endif
+          send_precondition = finder->second;
           return false;
+        }
         else if (tree_valid || (send_references > 0))
         {
           // Technically this invalid, but we still need to send a 
