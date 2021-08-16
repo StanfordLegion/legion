@@ -2054,8 +2054,7 @@ namespace Legion {
       {
         CollectiveManager *collective =
           targets[0].get_manager()->as_collective_manager();
-        CollectiveMapping *collective_mapping = 
-          collective->get_collective_mapping();
+        CollectiveMapping *collective_mapping = collective->collective_mapping;
         analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
                                       targets, target_views, source_views, 
                                       trace_info, collective_mapping, 
@@ -2078,7 +2077,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           // Each of the instances must have the same collective mapping
           // even if they have different mapppings for points to memories
-          CollectiveMapping *to_compare = collective->get_collective_mapping();
+          CollectiveMapping *to_compare = collective->collective_mapping;
           assert((collective_mapping == to_compare) ||
                   (*collective_mapping == *to_compare));
 #endif
@@ -3439,10 +3438,8 @@ namespace Legion {
         PhysicalInstance instance = collective->get_instance(local_point);
         assert(instance.address_space() == runtime->address_space);
 #endif
-        CollectiveMapping *collective_mapping =
-          collective->get_collective_mapping();
         analysis = new FilterAnalysis(runtime, detach_op, index,
-                                      collective_mapping, 
+                                      collective->collective_mapping, 
                                       region_node->row_source, local_view,
                                       registration_view,
                                       true/*remove restriction*/);

@@ -764,8 +764,10 @@ namespace Legion {
                                      DistributedID did, LayoutDescription *desc,
                                      FieldSpaceNode *node, 
                                      IndexSpaceExpression *domain,
-                                     RegionTreeID tid, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, owner_space, register_now), 
+                                     RegionTreeID tid, bool register_now,
+                                     CollectiveMapping *mapping)
+      : DistributedCollectable(ctx->runtime, did, owner_space, 
+                               register_now, mapping),
         context(ctx), layout(desc), field_space_node(node),
         instance_domain(domain), tree_id(tid)
     //--------------------------------------------------------------------------
@@ -918,14 +920,15 @@ namespace Legion {
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id, ApEvent u_event,
-                                     bool register_now, bool shadow,bool output)
+                                     bool register_now, bool shadow,
+                                     bool output, CollectiveMapping *mapping)
       : InstanceManager(ctx, owner_space, did, layout, node,
           // If we're on the owner node we need to produce the expression
           // that actually describes this points in this space
           // On remote nodes we'll already have it from the owner
           (owner_space == ctx->runtime->address_space) && !output ?
              index_domain->create_layout_expression(pl, pl_size) : index_domain,
-          tree_id, register_now), 
+          tree_id, register_now, mapping), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size), 
         shadow_instance(shadow)
@@ -2430,7 +2433,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CollectiveManager::CollectiveManager(RegionTreeForest *ctx, 
                                 DistributedID did, AddressSpaceID owner_space,
-                                IndexSpaceNode *points,
+                                IndexSpaceNode *points, size_t total,
+                                CollectiveMapping *mapping,
                                 IndexSpaceExpression *instance_domain,
                                 const void *pl, size_t pl_size,
                                 FieldSpaceNode *node, RegionTreeID tree_id,
@@ -2441,12 +2445,13 @@ namespace Legion {
             (redop_id != 0), true/*collective*/),
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
             ctx->runtime->get_reduction(redop_id),
-          node, instance_domain, pl, pl_size, tree_id, u_event, register_now), 
-        point_space(points), collective_mapping(NULL), finalize_messages(0),
-        deleted_or_detached(false)
+          node, instance_domain, pl, pl_size, tree_id, u_event, register_now,
+          false/*shadow*/, false/*output*/, mapping),  total_points(total),
+        point_space(points), finalize_messages(0), deleted_or_detached(false)
     //--------------------------------------------------------------------------
     {
-      point_space->add_nested_valid_ref(did);
+      if (point_space != NULL)
+        point_space->add_nested_valid_ref(did);
 #if 0
 #ifdef DEBUG_LEGION
       if (is_owner())
@@ -2465,7 +2470,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveManager::CollectiveManager(const CollectiveManager &rhs)
-      : PhysicalManager(rhs), point_space(rhs.point_space)
+      : PhysicalManager(rhs), total_points(rhs.total_points),
+        point_space(rhs.point_space)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2476,7 +2482,7 @@ namespace Legion {
     CollectiveManager::~CollectiveManager(void)
     //--------------------------------------------------------------------------
     {
-      if (point_space->remove_nested_valid_ref(did))
+      if ((point_space != NULL) && point_space->remove_nested_valid_ref(did))
         delete point_space;
       if ((collective_mapping != NULL) && 
           collective_mapping->remove_reference()) 
@@ -2494,22 +2500,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::finalize_collective_instance(
-                             CollectiveMapping *mapping, ApUserEvent inst_event)
+    void CollectiveManager::finalize_collective_instance(ApUserEvent inst_event)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    CollectiveMapping* CollectiveManager::get_collective_mapping(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(collective_mapping != NULL);
-#endif
-      return collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -3371,7 +3366,12 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
-        rez.serialize(point_space->handle);
+        rez.serialize(total_points);
+        if (point_space == NULL)
+          rez.serialize(IndexSpace::NO_SPACE);
+        else
+          rez.serialize(point_space->handle);
+        collective_mapping->pack(rez);
         rez.serialize(instance_footprint);
         instance_domain->pack_expression(rez, target);
         rez.serialize(field_space_node->handle);
@@ -3394,11 +3394,14 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
+      size_t total_points;
+      derez.deserialize(total_points);
       IndexSpace points_handle;
       derez.deserialize(points_handle);
       RtEvent points_ready;
-      IndexSpaceNode *point_space = 
-        runtime->forest->get_node(points_handle, &points_ready); 
+      IndexSpaceNode *point_space = points_handle.exists() ?
+        runtime->forest->get_node(points_handle, &points_ready) : NULL; 
+      CollectiveMapping *mapping = new CollectiveMapping(derez);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
       bool local_is, domain_is;
@@ -3449,9 +3452,9 @@ namespace Legion {
         {
           // We need to defer this instance creation
           DeferCollectiveManagerArgs args(did, owner_space, points_handle, 
-              inst_footprint, local_is, inst_domain, domain_is, domain_handle, 
-              domain_expr_id, handle, tree_id, layout_id, unique_event, redop,
-              piece_list, piece_list_size);
+              total_points, mapping, inst_footprint, local_is, inst_domain,
+              domain_is, domain_handle, domain_expr_id, handle, tree_id,
+              layout_id, unique_event, redop, piece_list, piece_list_size);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -3471,26 +3474,29 @@ namespace Legion {
       }
       // If we fall through here we can create the manager now
       create_collective_manager(runtime, did, owner_space, point_space,
-          inst_footprint, inst_domain, piece_list, piece_list_size, space_node,
-          tree_id, constraints, unique_event, redop);
+          total_points, mapping, inst_footprint, inst_domain, piece_list,
+          piece_list_size, space_node, tree_id, constraints,unique_event,redop);
     }
 
     //--------------------------------------------------------------------------
     CollectiveManager::DeferCollectiveManagerArgs::DeferCollectiveManagerArgs(
-            DistributedID d, AddressSpaceID own, IndexSpace points, 
-            size_t f, bool local, IndexSpaceExpression *lx, bool is, 
-            IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
+            DistributedID d, AddressSpaceID own, IndexSpace points, size_t tot,
+            CollectiveMapping *map, size_t f, bool local, 
+            IndexSpaceExpression *lx, bool is, IndexSpace dh,
+            IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent use, ReductionOpID r,
             const void *pl, size_t pl_size)
       : LgTaskArgs<DeferCollectiveManagerArgs>(implicit_provenance),
-        did(d), owner(own), point_space(points), footprint(f), local_is(local),
-        domain_is(is), local_expr(lx), domain_handle(dh), domain_expr(dx), 
-        handle(h), tree_id(tid), layout_id(l), use_event(use), redop(r), 
-        piece_list(pl), piece_list_size(pl_size)
+        did(d), owner(own), point_space(points), total_points(tot),
+        mapping(map), footprint(f), local_is(local), domain_is(is),
+        local_expr(lx), domain_handle(dh), domain_expr(dx), handle(h),
+        tree_id(tid), layout_id(l), use_event(use), redop(r), piece_list(pl),
+        piece_list_size(pl_size)
     //--------------------------------------------------------------------------
     {
       if (local_is)
         local_expr->add_expression_reference();
+      mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -3509,18 +3515,21 @@ namespace Legion {
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(dargs->layout_id);
       create_collective_manager(runtime, dargs->did, dargs->owner, point_space,
-          dargs->footprint, inst_domain, dargs->piece_list,
-          dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, dargs->redop);
+          dargs->total_points, dargs->mapping, dargs->footprint, inst_domain,
+          dargs->piece_list, dargs->piece_list_size, space_node, dargs->tree_id,
+          constraints, dargs->use_event, dargs->redop);
       // Remove the local expression reference if necessary
       if (dargs->local_is && dargs->local_expr->remove_expression_reference())
         delete dargs->local_expr;
+      if (dargs->mapping->remove_reference())
+        delete dargs->mapping;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void CollectiveManager::create_collective_manager(
           Runtime *runtime, DistributedID did, AddressSpaceID owner_space, 
-          IndexSpaceNode *point_space, size_t inst_footprint, 
+          IndexSpaceNode *point_space, size_t points,
+          CollectiveMapping *mapping, size_t inst_footprint, 
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id,LayoutConstraints *constraints,
@@ -3535,18 +3544,18 @@ namespace Legion {
       const bool external_instance = PhysicalManager::is_external_did(did);
       if (runtime->find_pending_collectable_location(did, location))
         man = new(location) CollectiveManager(runtime->forest, did,
-                                            owner_space, point_space, 
-                                            inst_domain, piece_list, 
+                                            owner_space, point_space, points,
+                                            mapping, inst_domain, piece_list, 
                                             piece_list_size, space_node,tree_id,
                                             layout, redop, false/*reg now*/, 
                                             inst_footprint, use_event, 
                                             external_instance); 
       else
         man = new CollectiveManager(runtime->forest, did, owner_space, 
-                                  point_space, inst_domain, piece_list, 
-                                  piece_list_size, space_node, tree_id, layout,
-                                  redop, false/*reg now*/, inst_footprint, 
-                                  use_event, external_instance);
+                                  point_space, points, mapping, inst_domain, 
+                                  piece_list, piece_list_size, space_node, 
+                                  tree_id, layout, redop, false/*reg now*/,
+                                  inst_footprint, use_event, external_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -4100,6 +4109,7 @@ namespace Legion {
       return result;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     CollectiveManager* InstanceBuilder::create_collective_instance(
         RegionTreeForest *forest, Memory::Kind mem_kind, 
@@ -4204,6 +4214,7 @@ namespace Legion {
       }
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(

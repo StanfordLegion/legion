@@ -949,6 +949,8 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
     public:
       void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
@@ -1284,6 +1286,7 @@ namespace Legion {
         SLICE_COLLECTIVE_MATCH_INSTANCES,
         SLICE_COLLECTIVE_FINALIZE,
         SLICE_COLLECTIVE_VERIFY,
+        SLICE_COLLECTIVE_COUNT_REGIONS,
       };
     public:
       SliceTask(Runtime *rt);
@@ -1426,6 +1429,8 @@ namespace Legion {
       virtual void perform_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call,
                                   unsigned total_calls);
+      virtual void perform_count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts);
       static void handle_collective_instance_request(Deserializer &derez,
                                 AddressSpaceID source, Runtime *runtime);
       static void handle_collective_instance_response(Deserializer &derez,

@@ -6070,7 +6070,7 @@ namespace Legion {
                   mapper->get_mapper_name(), parent_ctx->get_task_name(),
                   parent_ctx->get_unique_id())
             CollectiveManager *collective = manager->as_collective_manager();
-            if (!collective->point_space->contains_point(get_shard_point()))
+            if (!collective->contains_point(get_shard_point()))
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                   "Invalid mapper output from invocation of 'map_inline' "
                   "by mapper %s. Mapper selected a collective instance "
@@ -6122,7 +6122,7 @@ namespace Legion {
           InstanceManager *manager = mapped_instances[idx].get_manager();
           assert(manager->is_collective_manager());
           CollectiveManager *collective = manager->as_collective_manager();
-          assert(collective->point_space->contains_point(get_shard_point()));
+          assert(collective->contains_point(get_shard_point()));
           assert(collective->point_space->get_volume() ==
                   shard_manager->total_shards);
         }
@@ -6719,8 +6719,10 @@ namespace Legion {
           IndexSpaceNode *point_node = runtime->forest->get_node(point_space);
           manager = new CollectiveManager(runtime->forest, manager_did,
               runtime->determine_owner(manager_did), point_node,
-              node->row_source, NULL/*piece list*/, 0/*no piece list*/,
-              field_node, node->handle.get_tree_id(), layout, 0/*redop*/,
+              shard_manager->total_shards,
+              &shard_manager->get_collective_mapping(), node->row_source,
+              NULL/*piece list*/, 0/*no piece list*/, field_node,
+              node->handle.get_tree_id(), layout, 0/*redop*/,
               true/*register now*/, footprint, attach_barrier,
               true/*external instance*/);
           // If we're the owner address space, record that we have 
@@ -6752,9 +6754,7 @@ namespace Legion {
         {
           const DomainPoint point(repl_ctx->owner_shard->shard_id);
           manager->record_point_instance(point, instance, ready_event);
-          CollectiveMapping &mapping = 
-            shard_manager->get_collective_mapping();
-          manager->finalize_collective_instance(&mapping,attach_barrier,point);
+          manager->finalize_collective_instance(attach_barrier, point);
         }
         else if (is_first_local_shard)
         {
@@ -6771,8 +6771,7 @@ namespace Legion {
               continue;
             const DomainPoint point(idx);
             manager->record_point_instance(point, instance, ready_event);
-            manager->finalize_collective_instance(&mapping,
-                                                  attach_barrier, point);
+            manager->finalize_collective_instance(attach_barrier, point);
 #if defined(DEBUG_LEGION) && !defined(NDEBUG)
             found = true;
 #endif
@@ -6968,8 +6967,7 @@ namespace Legion {
       assert(!manager->is_reduction_manager()); 
       assert(manager->is_collective_manager());
       CollectiveManager *collective = manager->as_collective_manager();
-      assert(collective->point_space->contains_point(
-            get_collective_instance_point()));
+      assert(collective->contains_point(get_collective_instance_point()));
       assert(collective->point_space->get_volume() ==
               shard_manager->total_shards);
 #endif

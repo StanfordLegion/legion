@@ -1277,6 +1277,8 @@ namespace Legion {
       virtual void perform_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call,
                                   unsigned total_calls);
+      virtual void perform_count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts);
     public:
       // Called to return the result of the actions
       virtual void return_create_pending_collective_instance(
@@ -1294,6 +1296,8 @@ namespace Legion {
                                   bool success);
       virtual void return_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call, unsigned count);
+      virtual void return_count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts);
     };
 
     /**

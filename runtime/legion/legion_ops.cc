@@ -1190,6 +1190,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t Operation::count_collective_region_occurrences(unsigned index,
+                                                          LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for inherited types
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
                                  LogicalRegion handle, const RegionUsage usage, 
                                  const char *field_string, RtUserEvent reported)
@@ -2167,6 +2177,57 @@ namespace Legion {
     template<typename OP>
     RtEvent 
       CollectiveInstanceCreator<OP>::acquire_collective_allocation_privileges(
+                     MappingCallKind mapper_call, unsigned index, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      const std::set<Memory> *all_targets = NULL;
+      do
+      {
+        const InstanceKey key(mapper_call, index);
+        AutoLock o_lock(this->op_lock);
+        if (index > upper_bound_index)
+          upper_bound_index = index;
+        typename std::map<InstanceKey,PendingPrivilege>::iterator finder =
+          pending_privileges.find(key);
+        if (finder == pending_privileges.end())
+        {
+          to_trigger = Runtime::create_rt_user_event();
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          finder = pending_privileges.insert(
+              std::pair<InstanceKey,PendingPrivilege>(key,
+                PendingPrivilege(total_points, to_trigger))).first;
+        }
+        finder->second.targets.insert(target);
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= 1);
+#endif
+        finder->second.remaining_points--;
+        if (finder->second.remaining_points == 0)
+        {
+          to_trigger = finder->second.to_trigger;
+          all_targets = &finder->second.targets;
+          // Reset this back to the total points so that we can remove
+          // it when we do the release calls
+          finder->second.remaining_points = 
+            get_total_collective_instance_points();
+        }
+        else
+          return finder->second.to_trigger;
+      } while (false);
+      // If we make it here then we're performing the acquire
+      perform_acquire_collective_allocation_privileges(mapper_call, index,
+                                                       *all_targets,to_trigger);
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent 
+      CollectiveInstanceCreator<OP>::acquire_collective_allocation_privileges(
                                  MappingCallKind mapper_call, unsigned index,
                                  const std::set<Memory> &targets, size_t points)
     //--------------------------------------------------------------------------
@@ -3017,6 +3078,194 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
+    size_t CollectiveInstanceCreator<OP>::count_collective_region_occurrences(
+                                           unsigned index, LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      bool perform_count = false;
+      std::map<LogicalRegion,size_t> perform_counts;
+      {
+        AutoLock o_lock(this->op_lock);
+        typename std::map<unsigned,PendingCounts>::iterator finder =
+          pending_counts.find(index);
+        if (finder == pending_counts.end())
+        {
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          finder = pending_counts.insert(
+            std::pair<unsigned,PendingCounts>(index,
+              PendingCounts(total_points, done))).first;
+          finder->second.counts[region] = 1;
+          ready_event = done;
+        }
+        else
+        {
+          ready_event = finder->second.ready_event;
+          std::map<LogicalRegion,size_t>::iterator count_finder =
+            finder->second.counts.find(region);
+          if (count_finder == finder->second.counts.end())
+            finder->second.counts.insert(
+                std::pair<LogicalRegion,size_t>(region,1));
+          else
+            count_finder->second++;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= 1);
+#endif
+        finder->second.remaining_points--;
+        if (finder->second.remaining_points == 0)
+        {
+          perform_count = true;
+          perform_counts.swap(finder->second.counts);
+        }
+      }
+      if (perform_count)
+        perform_count_collective_region_occurrences(index, perform_counts);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      AutoLock o_lock(this->op_lock);
+      typename std::map<unsigned,PendingCounts>::iterator finder =
+          pending_counts.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_counts.end());
+      assert(finder->second.remaining_points >= 1);
+#endif
+      std::map<LogicalRegion,size_t>::const_iterator count_finder =
+          finder->second.counts.find(region);
+#ifdef DEBUG_LEGION
+      assert(count_finder != finder->second.counts.end());
+#endif
+      const size_t result = count_finder->second;
+      finder->second.remaining_points--;
+      if (finder->second.remaining_points == 0)
+        pending_counts.erase(finder);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::count_collective_region_occurrences(
+          unsigned index, std::map<LogicalRegion,size_t> &counts, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      bool perform_count = false;
+      // Keep track of the original regions that we used for the output
+      std::vector<LogicalRegion> original_regions;
+      original_regions.reserve(counts.size());
+      for (std::map<LogicalRegion,size_t>::const_iterator it =
+            counts.begin(); it != counts.end(); it++)
+        original_regions.push_back(it->first);
+      {
+        AutoLock o_lock(this->op_lock);
+        typename std::map<unsigned,PendingCounts>::iterator finder =
+          pending_counts.find(index);
+        if (finder == pending_counts.end())
+        {
+          const size_t total_points = get_total_collective_instance_points();
+#ifdef DEBUG_LEGION
+          assert(total_points > 0);
+#endif
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          finder = pending_counts.insert(
+            std::pair<unsigned,PendingCounts>(index,
+              PendingCounts(total_points, done))).first;
+          finder->second.counts.swap(counts);
+          ready_event = done;
+        }
+        else
+        {
+          ready_event = finder->second.ready_event;
+          for (std::map<LogicalRegion,size_t>::iterator it =
+                counts.begin(); it != counts.end(); /*nothing*/)
+          {
+            std::map<LogicalRegion,size_t>::iterator count_finder =
+              finder->second.counts.find(it->first);
+            if (count_finder == finder->second.counts.end())
+              finder->second.counts.insert(*it);
+            else
+              count_finder->second += it->second;
+            std::map<LogicalRegion,size_t>::iterator to_delete = it++;
+            counts.erase(to_delete);
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_points >= points);
+#endif
+        finder->second.remaining_points -= points;
+        if (finder->second.remaining_points == 0)
+        {
+          perform_count = true;
+          counts.swap(finder->second.counts);
+        }
+      }
+      if (perform_count)
+        perform_count_collective_region_occurrences(index, counts);
+      counts.clear();
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      AutoLock o_lock(this->op_lock);
+      typename std::map<unsigned,PendingCounts>::iterator finder =
+          pending_counts.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_counts.end());
+      assert(finder->second.remaining_points >= points);
+#endif
+      for (std::vector<LogicalRegion>::const_iterator it =
+            original_regions.begin(); it != original_regions.end(); it++)
+      {
+        std::map<LogicalRegion,size_t>::const_iterator count_finder =
+          finder->second.counts.find(*it);
+#ifdef DEBUG_LEGION
+        assert(count_finder != finder->second.counts.end());
+#endif
+        counts[*it] = count_finder->second;
+      }
+      finder->second.remaining_points -= points;
+      if (finder->second.remaining_points == 0)
+        pending_counts.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void
+     CollectiveInstanceCreator<OP>::return_count_collective_region_occurrences(
+                         unsigned index, std::map<LogicalRegion,size_t> &counts)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(this->op_lock);
+      typename std::map<unsigned,PendingCounts>::iterator finder =
+          pending_counts.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_counts.end());
+      assert(finder->second.remaining_points == 0);
+      assert(finder->second.ready_event.exists());
+      assert(!finder->second.ready_event.has_triggered());
+#endif
+      finder->second.counts.swap(counts);
+      finder->second.remaining_points = get_total_collective_instance_points();
+      Runtime::trigger_event(finder->second.ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void
+     CollectiveInstanceCreator<OP>::perform_create_pending_collective_instance(
+              MappingCallKind mapper_call, unsigned index,
+              std::map<size_t,PendingCollective> &instances
+              LayoutConstraintKind bad_kind, size_t bad_index, bool bad_regions)
+    //--------------------------------------------------------------------------
+    {
+
+
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
     void CollectiveInstanceCreator<OP>::perform_match_collective_instances(
                      MappingCallKind mapper_call, unsigned index,
                      std::map<size_t, std::vector<DistributedID> > &instances)
@@ -3047,6 +3296,17 @@ namespace Legion {
     {
       // A straight pass-through since we did all the work before
       return_verify_total_collective_instance_calls(mapper_call, total_calls);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void
+     CollectiveInstanceCreator<OP>::perform_count_collective_region_occurrences(
+                         unsigned index, std::map<LogicalRegion,size_t> &counts)
+    //--------------------------------------------------------------------------
+    {
+      // A straight pass-through since we did all the work before
+      return_count_collective_region_occurrences(index, counts);
     }
 
     // Explicit instantiations for classes in other translation units
@@ -7442,7 +7702,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<CopyOp::ReqType REQ_TYPE>
-    int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
+    int CopyOp::perform_conversion(unsigned ridx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
                                    InstanceSet &targets, bool is_reduce)
     //--------------------------------------------------------------------------
@@ -7462,7 +7722,7 @@ namespace Legion {
                       "for explicit region-to_region copy in task %s (ID %lld) "
                       "but the logical region for this requirement is from "
                       "region tree %d.", mapper->get_mapper_name(), 
-                      bad_tree, get_req_type_name<REQ_TYPE>(), idx,
+                      bad_tree, get_req_type_name<REQ_TYPE>(), ridx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                       req.region.get_tree_id())
       if (!missing_fields.empty())
@@ -7485,7 +7745,7 @@ namespace Legion {
                       "of explicit region-to-region copy in task %s (ID %lld). "
                       "The missing fields are listed below.",
                       mapper->get_mapper_name(), missing_fields.size(), 
-                      get_req_type_name<REQ_TYPE>(), idx,
+                      get_req_type_name<REQ_TYPE>(), ridx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       }
       if (!unacquired.empty())
@@ -7504,7 +7764,7 @@ namespace Legion {
                           "have detected this. Please update the mapper to "
                           "abide by proper mapping conventions.",
                           mapper->get_mapper_name(), 
-                          get_req_type_name<REQ_TYPE>(), idx,
+                          get_req_type_name<REQ_TYPE>(), ridx,
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
         }
@@ -7515,7 +7775,7 @@ namespace Legion {
                         "region copy in task %s (ID %lld) in 'map_copy' call. "
                         "You may experience undefined behavior as a "
                         "consequence.", mapper->get_mapper_name(),
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
       }
@@ -7529,7 +7789,7 @@ namespace Legion {
                       "be virtual instances for explicit region-to-region "
                       "copy operations. Operation was issued in task %s "
                       "(ID %lld).", mapper->get_mapper_name(), 
-                      get_req_type_name<REQ_TYPE>(), idx,
+                      get_req_type_name<REQ_TYPE>(), ridx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if ((REQ_TYPE != DST_REQ) && (composite_idx >= 0) && is_reduce)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -7540,10 +7800,11 @@ namespace Legion {
                       "physical instances are permitted to be sources of "
                       "explicit region-to-region reductions. Operation was "
                       "issued in task %s (ID %lld).", mapper->get_mapper_name(),
-                      get_req_type_name<REQ_TYPE>(), idx, 
+                      get_req_type_name<REQ_TYPE>(), ridx, 
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->unsafe_mapper)
         return composite_idx;
+      size_t region_occurrences = SIZE_MAX;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -7560,14 +7821,14 @@ namespace Legion {
                         "the logical region requirement. The copy operation "
                         "was issued in task %s (ID %lld).",
                         mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx, 
+                        get_req_type_name<REQ_TYPE>(), ridx, 
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
         if (manager->is_collective_manager())
         {
           CollectiveManager *collective_manager = 
             manager->as_collective_manager();
-          if (!collective_manager->point_space->contains_point(index_point))
+          if (!collective_manager->contains_point(index_point))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper selected a collective instance "
@@ -7575,9 +7836,25 @@ namespace Legion {
                         "(ID %lld) launched in task %s (ID %lld) is not "
                         "contained within the point space for the collective "
                         "instace.", mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+          if (region_occurrences == SIZE_MAX)
+            region_occurrences =
+              count_collective_region_occurrences(ridx, req.region); 
+          if (collective_manager->total_points != region_occurrences)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper selected a collective instance "
+                        "for %s region requirement at index %d of point copy "
+                        "(ID %lld) launched in task %s (ID %lld) but the "
+                        "collective instance has %zd points which differs "
+                        "from the %zd points that mapped to the same region.", 
+                        mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), ridx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        collective_manager->total_points, region_occurrences)
         }
       }
       // Make sure all the destinations are real instances, this has
@@ -7593,7 +7870,7 @@ namespace Legion {
                         "specialized instance as the target for %s "
                         "region requirement %d of an explicit copy operation "
                         "in task %s (ID %lld).", mapper->get_mapper_name(),
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
       }
@@ -8941,6 +9218,14 @@ namespace Legion {
     {
       return owner->verify_total_collective_instance_calls(mapper_call,
                                                   total_calls, points);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointCopyOp::count_collective_region_occurrences(
+                                           unsigned index, LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      return owner->count_collective_region_occurrences(index, region);
     }
 
     //--------------------------------------------------------------------------
@@ -17381,6 +17666,7 @@ namespace Legion {
         return output.track_valid_region;
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
+      size_t region_occurrences = SIZE_MAX;
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
@@ -17407,7 +17693,7 @@ namespace Legion {
         {
           CollectiveManager *collective_manager = 
             manager->as_collective_manager();
-          if (!collective_manager->point_space->contains_point(index_point))
+          if (!collective_manager->contains_point(index_point))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected a "
@@ -17418,6 +17704,21 @@ namespace Legion {
                         mapper->get_mapper_name(), idx, 
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+          if (region_occurrences == SIZE_MAX)
+            region_occurrences =
+             count_collective_region_occurrences(0/*index*/,requirement.region);
+          if (collective_manager->total_points != region_occurrences)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper selected a "
+                        "collective instance for the region requirement of "
+                        "point partition (ID %lld) launched in task %s "
+                        "(ID %lld) but the collective instance has %zd points "
+                        "which differs from the %zd points that mapped to the "
+                        "same region.", mapper->get_mapper_name(),
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        collective_manager->total_points, region_occurrences)
         }
         // This is a temporary check to guarantee that instances for 
         // dependent partitioning operations are in memories that 
@@ -17997,6 +18298,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t DependentPartitionOp::count_collective_region_occurrences(
+                                           unsigned index, LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      if (this->points.empty())
+        return Operation::count_collective_region_occurrences(index, region);
+      else
+        return CollectiveInstanceCreator<Operation>::
+                          count_collective_region_occurrences(index, region);
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::check_privilege(void)
     //--------------------------------------------------------------------------
     {
@@ -18368,6 +18681,14 @@ namespace Legion {
     {
       return owner->verify_total_collective_instance_calls(mapper_call,
                                                   total_calls, points);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointDepPartOp::count_collective_region_occurrences(
+                                           unsigned index, LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      return owner->count_collective_region_occurrences(index, region);
     }
 
     //--------------------------------------------------------------------------
@@ -19821,6 +20142,14 @@ namespace Legion {
     {
       return owner->verify_total_collective_instance_calls(mapper_call,
                                                   total_calls, points);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointFillOp::count_collective_region_occurrences(
+                                           unsigned index, LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      return owner->count_collective_region_occurrences(index, region);
     }
 
     //--------------------------------------------------------------------------

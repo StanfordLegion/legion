@@ -156,7 +156,8 @@ namespace Legion {
       InstanceManager(RegionTreeForest *forest, AddressSpaceID owner, 
                       DistributedID did, LayoutDescription *layout,
                       FieldSpaceNode *node, IndexSpaceExpression *domain,
-                      RegionTreeID tree_id, bool register_now);
+                      RegionTreeID tree_id, bool register_now,
+                      CollectiveMapping *mapping = NULL);
       virtual ~InstanceManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -276,7 +277,8 @@ namespace Legion {
                       const void *piece_list, size_t piece_list_size,
                       RegionTreeID tree_id, ApEvent unique, 
                       bool register_now, bool shadow_instance = false,
-                      bool output_instance = false);
+                      bool output_instance = false,
+                      CollectiveMapping *mapping = NULL);
       virtual ~PhysicalManager(void);
     public:
       virtual ApEvent get_unique_event(void) const { return unique_event; }
@@ -627,7 +629,8 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MANAGER_TASK_ID;
       public:
         DeferCollectiveManagerArgs(DistributedID d, AddressSpaceID own, 
-            IndexSpace p, size_t f, bool local, IndexSpaceExpression *lx, 
+            IndexSpace p, size_t tp, CollectiveMapping *map, size_t f,
+            bool local, IndexSpaceExpression *lx,
             bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use, 
             ReductionOpID redop, const void *piece_list,size_t piece_list_size);
@@ -635,6 +638,8 @@ namespace Legion {
         const DistributedID did;
         const AddressSpaceID owner;
         IndexSpace point_space;
+        const size_t total_points;
+        CollectiveMapping *const mapping;
         const size_t footprint;
         const bool local_is;
         const bool domain_is;
@@ -652,6 +657,7 @@ namespace Legion {
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
                         AddressSpaceID owner_space, IndexSpaceNode *point_space,
+                        size_t total_pts, CollectiveMapping *mapping,
                         IndexSpaceExpression *instance_domain,
                         const void *piece_list, size_t piece_list_size,
                         FieldSpaceNode *node, RegionTreeID tree_id,
@@ -663,16 +669,19 @@ namespace Legion {
     public:
       CollectiveManager& operator=(const CollectiveManager &rh);
     public:
+      // These methods can be slow in the case where there is not a point
+      // space and the set of points are implicit so only use them for 
+      // error checking code
+      bool contains_point(const DomainPoint &point) const;
+      bool contains_isomorphic_points(IndexSpaceNode *points) const;
+    public:
       void record_point_instance(const DomainPoint &point,
                                  PhysicalInstance instance, ApEvent inst_ready);
       // Single version called from a single node
-      void finalize_collective_instance(CollectiveMapping *mapping,
-                                        ApUserEvent to_trigger);
+      void finalize_collective_instance(ApUserEvent to_trigger);
       // Collective version called once per point in the space
-      void finalize_collective_instance(CollectiveMapping *mapping,
-                                        ApBarrier to_arrive,
+      void finalize_collective_instance(ApBarrier to_arrive,
                                         const DomainPoint &point);
-      CollectiveMapping* get_collective_mapping(void) const;
     public:
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
@@ -762,14 +771,18 @@ namespace Legion {
                                             Runtime *runtime);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, IndexSpaceNode *point_space,
-          size_t inst_footprint, IndexSpaceExpression *inst_domain, 
+          size_t points, CollectiveMapping *collective_mapping,
+          size_t inst_footprint, IndexSpaceExpression *inst_domain,
           const void *piece_list, size_t piece_list_size, 
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
           LayoutConstraints *constraints,ApEvent use_event,ReductionOpID redop);
     public:
+      const size_t total_points;
+      // This can be NULL if the point set is implicit
       IndexSpaceNode *const point_space;
     protected:
-      CollectiveMapping *collective_mapping;
+      // Note that there is a collective mapping from DistributedCollectable
+      //CollectiveMapping *collective_mapping;
       std::vector<MemoryManager*> memories; // local memories
       std::vector<PhysicalInstance> instances; // local instances
       std::vector<AddressSpaceID> right_spaces;

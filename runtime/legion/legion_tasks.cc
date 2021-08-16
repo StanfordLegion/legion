@@ -3128,6 +3128,7 @@ namespace Legion {
         // the instances align with the privileges
         if (!virtual_mapped[idx])
         {
+          size_t region_occurrences = SIZE_MAX;
           std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
@@ -3146,7 +3147,7 @@ namespace Legion {
             {
               CollectiveManager *collective_manager = 
                 manager->as_collective_manager();
-              if (!collective_manager->point_space->contains_point(index_point))
+              if (!collective_manager->contains_point(index_point))
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "
                             "mapper %s. Mapper selected a collective instance "
@@ -3154,6 +3155,20 @@ namespace Legion {
                             "the point for task %s (ID %lld).", "map_task",
                             mapper->get_mapper_name(), idx, get_task_name(),
                             get_unique_id())
+              if (region_occurrences == SIZE_MAX)
+                region_occurrences = 
+                  count_collective_region_occurrences(idx, regions[idx].region);
+              if (collective_manager->total_points != region_occurrences)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of "
+                            "'%s' on mapper %s. Mapper selected a collective "
+                            "instance for region requirement at index %d "
+                            "of point task %s (ID %lld) but the collective "
+                            "instance has %zd points which differs from the "
+                            "%zd points that mapped to the same region.",
+                            "map_task", mapper->get_mapper_name(), idx,
+                            get_task_name(), get_unique_id(),
+                            collective_manager->total_points,region_occurrences)
             }
           }
           if (!regions[idx].is_no_access() &&
@@ -7475,6 +7490,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t PointTask::count_collective_region_occurrences(
+                                           unsigned index, LogicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->count_collective_region_occurrences(index, region);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
@@ -9350,17 +9373,15 @@ namespace Legion {
             {
               CollectiveManager *collective_manager = 
                 manager->as_collective_manager();
-              if (collective_manager->point_space->handle != 
-                  launch_space->handle)
+              if (collective_manager->contains_isomorphic_points(launch_space))
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, 
                                 "Invalid mapper output from invocation of "
                                 "'premap_task' on mapper %s. Mapper selected "
-                                "a collective instance with domain of index "
-                                "space %d for region requirement %d that does "
-                                "not match the launch index space %d for index "
-                                "task %s (UID %lld).",mapper->get_mapper_name(),
-                                collective_manager->point_space->handle.id,
-                                *it, launch_space->handle.id, get_task_name(),
+                                "a collective instance for region requirement "
+                                "%d that does not match the launch index space "
+                                "%d for index task %s (UID %lld).",
+                                mapper->get_mapper_name(), *it, 
+                                launch_space->handle.id, get_task_name(),
                                 get_unique_id())
             }
           }
@@ -12327,6 +12348,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::perform_count_collective_region_occurrences(
+                         unsigned index, std::map<LogicalRegion,size_t> &counts)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          // Put in a dummy mapper call here to keep the deserialize happy
+          rez.serialize<MappingCallKind>(GET_MAPPER_NAME_CALL);
+          rez.serialize(SLICE_COLLECTIVE_COUNT_REGIONS);
+          rez.serialize(index);
+          rez.serialize<size_t>(counts.size());
+          for (std::map<LogicalRegion,size_t>::const_iterator it =
+                counts.begin(); it != counts.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          rez.serialize<size_t>(points.size());
+          rez.serialize(this);
+        }
+        runtime->send_slice_collective_instance_request(orig_proc, rez);
+      }
+      else
+      {
+        index_owner->count_collective_region_occurrences(index, counts,
+                                                         points.size());
+        return_count_collective_region_occurrences(index, counts);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void SliceTask::handle_collective_instance_request(
                    Deserializer &derez, AddressSpaceID source, Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -12533,6 +12589,45 @@ namespace Legion {
             runtime->send_slice_collective_instance_response(source, rez);
             break;
           }
+        case SLICE_COLLECTIVE_COUNT_REGIONS:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            size_t num_counts;
+            derez.deserialize(num_counts);
+            std::map<LogicalRegion,size_t> counts;
+            for (unsigned idx = 0; idx < num_counts; idx++)
+            {
+              LogicalRegion region;
+              derez.deserialize(region);
+              derez.deserialize(counts[region]);
+            }
+            size_t points;
+            derez.deserialize(points);
+            SliceTask *target;
+            derez.deserialize(target);
+
+            index_owner->count_collective_region_occurrences(index, counts,
+                                                             points);
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(message);
+              // Put in a dummy mapper call here to keep the deserialize happy
+              rez.serialize<MappingCallKind>(GET_MAPPER_NAME_CALL);
+              rez.serialize(index);
+              rez.serialize<size_t>(counts.size());
+              for (std::map<LogicalRegion,size_t>::const_iterator it =
+                    counts.begin(); it != counts.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+              rez.serialize(target);
+            }
+            runtime->send_slice_collective_instance_response(source, rez);
+            break;
+          }
         default:
           assert(false);
       }
@@ -12637,6 +12732,24 @@ namespace Legion {
             derez.deserialize(target);
             target->return_verify_total_collective_instance_calls(mapper_call,
                                                                   total_calls);
+            break;
+          }
+        case SLICE_COLLECTIVE_COUNT_REGIONS:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            size_t num_counts;
+            derez.deserialize(num_counts);
+            std::map<LogicalRegion,size_t> counts;
+            for (unsigned idx = 0; idx < num_counts; idx++)
+            {
+              LogicalRegion region;
+              derez.deserialize(region);
+              derez.deserialize(counts[region]);
+            }
+            SliceTask *target;
+            derez.deserialize(target);
+            target->return_count_collective_region_occurrences(index, counts);
             break;
           }
         default:

@@ -509,6 +509,8 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
     public:
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
@@ -866,6 +868,11 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call, unsigned total_calls,
                                   size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
+      virtual void count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts,
+                                  size_t points);
     public:
       // invoked when all the points have been seen
       virtual void perform_acquire_collective_allocation_privileges(
@@ -891,6 +898,8 @@ namespace Legion {
       virtual void perform_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call,
                                   unsigned total_calls);
+      virtual void perform_count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts);
     public:
       // Called to return the result of the actions
       virtual void return_create_pending_collective_instance(
@@ -908,10 +917,14 @@ namespace Legion {
                                   bool success);
       virtual void return_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call, unsigned count); 
+      virtual void return_count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts);
     private:
       typedef std::pair<MappingCallKind,unsigned> InstanceKey;
       struct PendingPrivilege {
       public:
+        PendingPrivilege(size_t points, RtUserEvent trigger)
+          : remaining_points(points), to_trigger(trigger) { }
         PendingPrivilege(const std::set<Memory> &memories, size_t points,
                          RtUserEvent trigger)
           : targets(memories), remaining_points(points), to_trigger(trigger) { }
@@ -970,6 +983,17 @@ namespace Legion {
         RtUserEvent ready_event;
       };
       std::map<MappingCallKind,PendingVerification> pending_verifications;
+    private:
+      struct PendingCounts {
+      public:
+        PendingCounts(size_t points, RtUserEvent ready)
+          : remaining_points(points), ready_event(ready) { }
+      public:
+        std::map<LogicalRegion,size_t> counts;
+        size_t remaining_points;
+        RtUserEvent ready_event;
+      };
+      std::map<unsigned,PendingCounts> pending_counts;
     private:
       // Use this for tracking the upper bound on the number of collective
       // instance calls we've seen. We can use this to detect when there
@@ -1725,6 +1749,8 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3569,6 +3595,8 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -3671,6 +3699,8 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3880,6 +3910,8 @@ namespace Legion {
       virtual unsigned verify_total_collective_instance_calls(
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
+      virtual size_t count_collective_region_occurrences(
+                                  unsigned index, LogicalRegion region);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
