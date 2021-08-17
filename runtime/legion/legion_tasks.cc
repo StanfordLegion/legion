@@ -7439,18 +7439,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointTask::create_pending_collective_instance(
+    PendingCollectiveManager* PointTask::create_pending_collective_manager(
                                       MappingCallKind mapper_call,
                                       unsigned index, size_t collective_tag,
                                       const LayoutConstraintSet &constraints,
                                       const std::vector<LogicalRegion> &regions,
+                                      AddressSpaceID memory_space,
                                       LayoutConstraintKind &bad_constraint,
                                       size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->create_pending_collective_instance(mapper_call, index,
-                                        collective_tag, constraints, regions,
-                                        bad_constraint, bad_index, bad_regions);
+      return slice_owner->create_pending_collective_manager(mapper_call, index,
+                            collective_tag, constraints, regions, memory_space,
+                            bad_constraint, bad_index, bad_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -12207,7 +12208,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void SliceTask::perform_create_pending_collective_instance(
+    void SliceTask::perform_create_pending_collective_managers(
                             MappingCallKind mapper_call, unsigned index,
                             const std::map<size_t,PendingCollective> &instances,
                             LayoutConstraintKind bad_constraint,
@@ -12234,6 +12235,12 @@ namespace Legion {
                   pit->second.regions.begin(); it !=
                   pit->second.regions.end(); it++)
               rez.serialize(*it);
+            rez.serialize<size_t>(pit->second.memory_spaces.size());
+            for (std::set<AddressSpaceID>::const_iterator it =
+                  pit->second.memory_spaces.begin(); it !=
+                  pit->second.memory_spaces.end(); it++)
+              rez.serialize(*it);
+            rez.serialize(pit->second.total_points);
           }
           rez.serialize<size_t>(points.size());
           rez.serialize(bad_constraint);
@@ -12245,12 +12252,16 @@ namespace Legion {
       }
       else
       {
-        std::map<size_t,CollectiveManager*> collectives;
-        index_owner->create_pending_collective_instances(mapper_call, index,
+        std::map<size_t,PendingCollectiveManager*> collectives;
+        index_owner->create_pending_collective_managers(mapper_call, index,
             instances, collectives, points.size(), bad_constraint,
             bad_index, bad_regions);
-        return_create_pending_collective_instance(mapper_call, index, 
+        return_create_pending_collective_managers(mapper_call, index, 
                 collectives, bad_constraint, bad_index, bad_regions);
+        for (std::map<size_t,PendingCollectiveManager*>::const_iterator it =
+              collectives.begin(); it != collectives.end(); it++)
+          if ((it->second != NULL) && it->second->remove_reference())
+            delete it->second;
       }
     }
 
@@ -12447,9 +12458,23 @@ namespace Legion {
               std::vector<LogicalRegion> regions(num_regions);
               for (unsigned idx2 = 0; idx2 < num_regions; idx2++)
                 derez.deserialize(regions[idx2]);
-              instances.insert(
-                  std::pair<size_t,PendingCollective>(collective_tag,
-                    PendingCollective(constraints[idx], regions)));
+              size_t num_spaces;
+              derez.deserialize(num_spaces);
+              std::set<AddressSpaceID> memory_spaces;
+              for (unsigned idx2 = 0; idx2 < num_spaces; idx2++)
+              {
+                AddressSpaceID space;
+                derez.deserialize(space);
+                memory_spaces.insert(space);
+              }
+              size_t total_points;
+              derez.deserialize(total_points);
+
+              std::map<size_t,PendingCollective>::iterator it =
+                instances.insert(std::pair<size_t,PendingCollective>(
+                      collective_tag, PendingCollective(constraints[idx],
+                                            regions, total_points))).first;
+              memory_spaces.swap(it->second.memory_spaces);
             }
             size_t points;
             derez.deserialize(points);
@@ -12462,8 +12487,8 @@ namespace Legion {
             SliceTask *target;
             derez.deserialize(target);
 
-            std::map<size_t,CollectiveManager*> collectives;
-            index_owner->create_pending_collective_instances(mapper_call,
+            std::map<size_t,PendingCollectiveManager*> collectives;
+            index_owner->create_pending_collective_managers(mapper_call,
                 index, instances, collectives, points, bad_constraint,
                 bad_index, bad_regions);
             // Send the response back
@@ -12474,12 +12499,16 @@ namespace Legion {
               rez.serialize(mapper_call);
               rez.serialize(index);
               rez.serialize<size_t>(collectives.size());
-              for (std::map<size_t,CollectiveManager*>::const_iterator it =
-                    collectives.begin(); it != collectives.end(); it++)
+              for (std::map<size_t,PendingCollectiveManager*>::const_iterator
+                    it = collectives.begin(); it != collectives.end(); it++)
               {
                 rez.serialize(it->first);
                 if (it->second != NULL)
-                  rez.serialize(it->second->did);
+                {
+                  it->second->pack(rez);
+                  if (it->second->remove_reference())
+                    delete it->second;
+                }
                 else
                   rez.serialize<DistributedID>(0);
               }
@@ -12651,24 +12680,16 @@ namespace Legion {
             derez.deserialize(index);
             size_t num_collectives;
             derez.deserialize(num_collectives);
-            std::map<size_t,CollectiveManager*> collectives;
-            std::vector<RtEvent> ready_events;
+            std::map<size_t,PendingCollectiveManager*> collectives;
             for (unsigned idx = 0; idx < num_collectives; idx++)
             {
               size_t collective_tag;
               derez.deserialize(collective_tag);
-              DistributedID did;
-              derez.deserialize(did);
-              if (did > 0)
-              {
-                RtEvent ready_event;
-                collectives[collective_tag] = static_cast<CollectiveManager*>(
-                   runtime->find_or_request_instance_manager(did, ready_event));
-                if (ready_event.exists())
-                  ready_events.push_back(ready_event);
-              }
-              else
-                collectives[collective_tag] = NULL;
+              PendingCollectiveManager *manager =
+                PendingCollectiveManager::unpack(derez);
+              if (manager != NULL)
+                manager->add_reference();
+              collectives[collective_tag] = manager;
             }
             LayoutConstraintKind bad_constraint;
             derez.deserialize(bad_constraint);
@@ -12678,14 +12699,12 @@ namespace Legion {
             derez.deserialize<bool>(bad_regions);
             SliceTask *target;
             derez.deserialize(target);
-            if (!ready_events.empty())
-            {
-              const RtEvent wait_on = Runtime::merge_events(ready_events);
-              if (wait_on.exists() && !wait_on.has_triggered())
-                wait_on.wait();
-            }
-            target->return_create_pending_collective_instance(mapper_call, 
+            target->return_create_pending_collective_managers(mapper_call, 
               index, collectives, bad_constraint, bad_index, bad_regions);
+            for (std::map<size_t,PendingCollectiveManager*>::const_iterator
+                  it = collectives.begin(); it != collectives.end(); it++)
+              if ((it->second != NULL) && it->second->remove_reference())
+                delete it->second;
             break;
           }
         case SLICE_COLLECTIVE_MATCH_INSTANCES:

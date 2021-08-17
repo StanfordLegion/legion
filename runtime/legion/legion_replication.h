@@ -1261,7 +1261,7 @@ namespace Legion {
       virtual void perform_release_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   const std::set<Memory> &targets);
-      virtual void perform_create_pending_collective_instance(
+      virtual void perform_create_pending_collective_managers(
                                   MappingCallKind mapper_call, unsigned index, 
                                   const std::map<size_t,
                                     typename OP::PendingCollective> &instances,
@@ -1281,10 +1281,10 @@ namespace Legion {
                                   std::map<LogicalRegion,size_t> &counts);
     public:
       // Called to return the result of the actions
-      virtual void return_create_pending_collective_instance(
+      virtual void return_create_pending_collective_managers(
                                   MappingCallKind mapper_call, unsigned index,
                                   std::map<size_t,
-                                           CollectiveManager*> &managers,
+                                           PendingCollectiveManager*> &managers,
                                   LayoutConstraintKind bad_kind,
                                   size_t bad_index, bool bad_regions);
       virtual void return_match_collective_instances(

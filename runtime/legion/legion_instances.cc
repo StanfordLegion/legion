@@ -2039,7 +2039,7 @@ namespace Legion {
       }
 #ifdef LEGION_MALLOC_INSTANCES
       if (!is_external_instance())
-        memory_manager->free_legion_instance(this, deferred_event);
+        memory_manager->free_legion_instance(instance, deferred_event);
 #endif
 #ifdef LEGION_GPU_REDUCTIONS
       for (std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>::
@@ -2110,7 +2110,7 @@ namespace Legion {
       }
 #ifdef LEGION_MALLOC_INSTANCES
       if (!is_external_instance())
-        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
+        memory_manager->free_legion_instance(instance, RtEvent::NO_RT_EVENT);
 #endif
 #ifdef LEGION_GPU_REDUCTIONS
       for (std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>::
@@ -2440,14 +2440,15 @@ namespace Legion {
                                 FieldSpaceNode *node, RegionTreeID tree_id,
                                 LayoutDescription *desc, ReductionOpID redop_id,
                                 bool register_now, size_t footprint,
-                                ApEvent u_event, bool external_instance)
+                                ApBarrier u_barrier, bool external_instance)
       : PhysicalManager(ctx, desc, encode_instance_did(did, external_instance,
             (redop_id != 0), true/*collective*/),
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
             ctx->runtime->get_reduction(redop_id),
-          node, instance_domain, pl, pl_size, tree_id, u_event, register_now,
+          node, instance_domain, pl, pl_size, tree_id, u_barrier, register_now,
           false/*shadow*/, false/*output*/, mapping),  total_points(total),
-        point_space(points), finalize_messages(0), deleted_or_detached(false)
+        point_space(points), collective_barrier(u_barrier),
+        finalize_messages(0), deleted_or_detached(false)
     //--------------------------------------------------------------------------
     {
       if (point_space != NULL)
@@ -2487,6 +2488,8 @@ namespace Legion {
       if ((collective_mapping != NULL) && 
           collective_mapping->remove_reference()) 
         delete collective_mapping;
+      if (is_owner())
+        collective_barrier.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -2497,14 +2500,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::finalize_collective_instance(ApUserEvent inst_event)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: implement this
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -3377,7 +3372,7 @@ namespace Legion {
         rez.serialize(field_space_node->handle);
         rez.serialize(tree_id);
         rez.serialize(redop);
-        rez.serialize(unique_event);
+        rez.serialize(unique_event.id);
         layout->pack_layout_description(rez, target);
       }
       context->runtime->send_collective_instance_manager(target, rez);
@@ -3427,8 +3422,9 @@ namespace Legion {
       derez.deserialize(tree_id);
       ReductionOpID redop;
       derez.deserialize(redop);
-      ApEvent unique_event;
-      derez.deserialize(unique_event);
+      // Little cheat here on the barrier
+      ApBarrier unique_barrier;
+      derez.deserialize(unique_barrier.id);
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       RtEvent layout_ready;
@@ -3454,7 +3450,7 @@ namespace Legion {
           DeferCollectiveManagerArgs args(did, owner_space, points_handle, 
               total_points, mapping, inst_footprint, local_is, inst_domain,
               domain_is, domain_handle, domain_expr_id, handle, tree_id,
-              layout_id, unique_event, redop, piece_list, piece_list_size);
+              layout_id, unique_barrier, redop, piece_list, piece_list_size);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -3475,7 +3471,7 @@ namespace Legion {
       // If we fall through here we can create the manager now
       create_collective_manager(runtime, did, owner_space, point_space,
           total_points, mapping, inst_footprint, inst_domain, piece_list,
-          piece_list_size, space_node, tree_id, constraints,unique_event,redop);
+          piece_list_size,space_node,tree_id,constraints,unique_barrier,redop);
     }
 
     //--------------------------------------------------------------------------
@@ -3484,13 +3480,13 @@ namespace Legion {
             CollectiveMapping *map, size_t f, bool local, 
             IndexSpaceExpression *lx, bool is, IndexSpace dh,
             IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, ApEvent use, ReductionOpID r,
+            LayoutConstraintID l, ApBarrier use, ReductionOpID r,
             const void *pl, size_t pl_size)
       : LgTaskArgs<DeferCollectiveManagerArgs>(implicit_provenance),
         did(d), owner(own), point_space(points), total_points(tot),
         mapping(map), footprint(f), local_is(local), domain_is(is),
         local_expr(lx), domain_handle(dh), domain_expr(dx), handle(h),
-        tree_id(tid), layout_id(l), use_event(use), redop(r), piece_list(pl),
+        tree_id(tid), layout_id(l), use_barrier(use), redop(r), piece_list(pl),
         piece_list_size(pl_size)
     //--------------------------------------------------------------------------
     {
@@ -3517,7 +3513,7 @@ namespace Legion {
       create_collective_manager(runtime, dargs->did, dargs->owner, point_space,
           dargs->total_points, dargs->mapping, dargs->footprint, inst_domain,
           dargs->piece_list, dargs->piece_list_size, space_node, dargs->tree_id,
-          constraints, dargs->use_event, dargs->redop);
+          constraints, dargs->use_barrier, dargs->redop);
       // Remove the local expression reference if necessary
       if (dargs->local_is && dargs->local_expr->remove_expression_reference())
         delete dargs->local_expr;
@@ -3533,7 +3529,7 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id,LayoutConstraints *constraints,
-          ApEvent use_event, ReductionOpID redop)
+          ApBarrier use_barrier, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -3548,14 +3544,14 @@ namespace Legion {
                                             mapping, inst_domain, piece_list, 
                                             piece_list_size, space_node,tree_id,
                                             layout, redop, false/*reg now*/, 
-                                            inst_footprint, use_event, 
+                                            inst_footprint, use_barrier, 
                                             external_instance); 
       else
         man = new CollectiveManager(runtime->forest, did, owner_space, 
                                   point_space, points, mapping, inst_domain, 
                                   piece_list, piece_list_size, space_node, 
                                   tree_id, layout, redop, false/*reg now*/,
-                                  inst_footprint, use_event, external_instance);
+                                  inst_footprint,use_barrier,external_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -3826,6 +3822,86 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Pending Collective Instance 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingCollectiveManager::PendingCollectiveManager(DistributedID id,
+                                    size_t total, IndexSpace points,
+                                    ApBarrier ready, CollectiveMapping *mapping)
+      : did(id), total_points(total), point_space(points), ready_barrier(ready),
+        collective_mapping(mapping)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(did > 0);
+      assert(collective_mapping != NULL);
+#endif
+      collective_mapping->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    PendingCollectiveManager::PendingCollectiveManager(
+                                            const PendingCollectiveManager &rhs)
+      : did(rhs.did), total_points(rhs.total_points),
+        point_space(rhs.point_space), ready_barrier(rhs.ready_barrier),
+        collective_mapping(rhs.collective_mapping)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingCollectiveManager::~PendingCollectiveManager(void)
+    //--------------------------------------------------------------------------
+    {
+      if (collective_mapping->remove_reference())
+        delete collective_mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    PendingCollectiveManager& PendingCollectiveManager::operator=(
+                                            const PendingCollectiveManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingCollectiveManager::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did);
+      rez.serialize(total_points);
+      rez.serialize(point_space);
+      rez.serialize(ready_barrier);
+      collective_mapping->pack(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PendingCollectiveManager* PendingCollectiveManager::unpack(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      if (did == 0)
+        return NULL;
+      size_t total_points;
+      derez.deserialize(total_points);
+      IndexSpace point_space;
+      derez.deserialize(point_space);
+      ApBarrier ready_barrier;
+      derez.deserialize(ready_barrier);
+      CollectiveMapping *mapping = new CollectiveMapping(derez);
+      return new PendingCollectiveManager(did, total_points, point_space,
+                                          ready_barrier, mapping);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Instance Builder
     /////////////////////////////////////////////////////////////
 
@@ -3863,9 +3939,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
-                RegionTreeForest *forest, CollectiveManager *collective_manager,
-                DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
-                unsigned *unsat_index, size_t *footprint)
+        RegionTreeForest *forest, PendingCollectiveManager *pending_collective,
+        DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
+        unsigned *unsat_index, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -3883,6 +3959,10 @@ namespace Legion {
           *unsat_kind = LEGION_FIELD_CONSTRAINT;
         if (unsat_index != NULL)
           *unsat_index = 0;
+        // If we didn't make a collective instance we still need to arrive
+        // on its ready barrier so the barrier completes
+        if (pending_collective != NULL)
+          Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
         return NULL;
       }
       if (realm_layout == NULL)
@@ -3907,7 +3987,13 @@ namespace Legion {
              &piece_list, &piece_list_size);
         // If constraints were unsatisfied then return now
         if (realm_layout == NULL)
+        {
+          // If we didn't make a collective instance we still need to arrive
+          // on its ready barrier so the barrier completes
+          if (pending_collective != NULL)
+            Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
           return NULL;
+        }
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
@@ -3969,6 +4055,10 @@ namespace Legion {
             *unsat_kind = LEGION_MEMORY_CONSTRAINT;
           if (unsat_index != NULL)
             *unsat_index = 0;
+          // If we didn't make a collective instance we still need to arrive
+          // on its ready barrier so the barrier completes
+          if (pending_collective != NULL)
+            Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
           return NULL;
         }
       }
@@ -3988,35 +4078,18 @@ namespace Legion {
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
           *unsat_index = 0;
+        // If we didn't make a collective instance we still need to arrive
+        // on its ready barrier so the barrier completes
+        if (pending_collective != NULL)
+          Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
         return NULL;
       }
-      // If we're making a collective instance then record the 
-      // instance for the specific point in the collective manager
-      if (collective_manager != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(collective_point != NULL);
-#endif
-        collective_manager->record_point_instance(*collective_point, 
-                                                  instance, ready);
-        return collective_manager;
-      }
-      // For Legion Spy we need a unique ready event if it doesn't already
-      // exist so we can uniquely identify the instance
-      if (!ready.exists() && runtime->legion_spy_enabled)
-      {
-        ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename_ready);
-        ready = rename_ready;
-      }
-      // If we successfully made the instance then Realm 
-      // took over ownership of the layout
-      PhysicalManager *result = NULL;
-      DistributedID did = forest->runtime->get_available_distributed_id();
-      AddressSpaceID local_space = forest->runtime->address_space;
 #ifdef LEGION_DEBUG
       assert(!constraints.pointer_constraint.is_valid);
 #endif
+      // If we successfully made the instance then Realm 
+      // took over ownership of the layout
+      PhysicalManager *result = NULL;
       // If we successfully made it then we can 
       // switch over the polarity of our constraints, this
       // shouldn't be necessary once Realm gets its act together
@@ -4044,54 +4117,129 @@ namespace Legion {
                                   constraints.field_constraint.get_field_set(),
                                   field_sizes, serdez);
       }
-      // Figure out what kind of instance we just made
-      switch (constraints.specialized_constraint.get_kind())
+      const AddressSpaceID local_space = forest->runtime->address_space;
+      if (pending_collective != NULL)
       {
-        case LEGION_NO_SPECIALIZE:
-        case LEGION_AFFINE_SPECIALIZE:
-        case LEGION_COMPACT_SPECIALIZE:
-          {
+        // Creating a collective manager
 #ifdef DEBUG_LEGION
-            assert(!shadow_instance);
+        assert(collective_point != NULL);
 #endif
-            // Now we can make the manager
-            result = new IndividualManager(forest, did, local_space,
-                                           memory_manager,
-                                           instance, instance_domain, 
-                                           piece_list, piece_list_size,
-                                           field_space_node, tree_id,
-                                           layout, 0/*redop id*/,
-                                           true/*register now*/, 
-                                           instance_footprint, ready,
-                                       PhysicalManager::INTERNAL_INSTANCE_KIND);
-            // manager takes ownership of the piece list
-            piece_list = NULL;
-            break;
-          }
-        case LEGION_AFFINE_REDUCTION_SPECIALIZE:
-        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
-          {
-            result = new IndividualManager(forest, did, local_space,
-                                           memory_manager, instance, 
-                                           instance_domain, piece_list,
-                                           piece_list_size, field_space_node,
-                                           tree_id, layout, redop_id,
-                                           true/*register now*/,
-                                           instance_footprint, ready,
-                                        PhysicalManager::INTERNAL_INSTANCE_KIND,
-                                           reduction_op, shadow_instance);
-            // manager takes ownership of the piece list
-            piece_list = NULL;
-            break;
-          }
-        default:
-          assert(false); // illegal specialized case
+        // See if we're the first point on this node to try to make it
+        RtEvent manager_ready;
+        // Preallocate a buffer to use assuming we get to use it
+        // If we don't use it then we'll easily free it
+        void *buffer = 
+          legion_alloc_aligned<CollectiveManager,false/*bytes*/>(1/*count*/);
+        DistributedCollectable *collectable = NULL;
+        CollectiveManager *manager = NULL;
+        if (forest->runtime->find_or_create_distributed_collectable(
+              pending_collective->did, collectable, manager_ready, buffer))
+        {
+          const AddressSpaceID owner_space =
+              forest->runtime->determine_owner(pending_collective->did);
+          IndexSpaceNode *point_space = 
+            pending_collective->point_space.exists() ?
+              forest->get_node(pending_collective->point_space) : NULL;
+          // First point so create it
+          manager = new(buffer) CollectiveManager(forest,
+              pending_collective->did, owner_space, point_space,
+              pending_collective->total_points,
+              pending_collective->collective_mapping,
+              instance_domain, piece_list, piece_list_size,
+              field_space_node, tree_id, layout, redop_id,
+              true/*register now*/, instance_footprint,
+              pending_collective->ready_barrier, false/*external*/);
+#ifdef DEBUG_LEGION
+          assert(manager == collectable);
+#endif
+          // Then register it for anyone coming later
+          forest->runtime->register_distributed_collectable(
+              pending_collective->did, manager);
+        }
+        else
+        {
+          // Free the buffer since we didn't use it
+          legion_free(CollectiveManager::alloc_type, buffer, 
+                      sizeof(CollectiveManager));
+          // Not the first point, so wait for it and then can safely cast
+          if (manager_ready.exists() && !manager_ready.has_triggered())
+            manager_ready.wait();
+#ifdef DEBUG_LEGION
+          manager = dynamic_cast<CollectiveManager*>(collectable);
+          assert(manager != NULL);
+#else
+          manager = static_cast<CollectiveManager*>(collectable);
+#endif
+        }
+        manager->record_point_instance(*collective_point, instance);
+        // Signal that the point instance has been updated and that
+        // the manager is ready once it is triggered
+        Runtime::phase_barrier_arrive(pending_collective->ready_barrier,
+            1/*count*/, ready);
+        result = manager;
       }
-#ifdef LEGION_MALLOC_INSTANCES
-      memory_manager->record_legion_instance(result, base_ptr); 
+      else
+      {
+        // Creating an individual manager
+#ifdef DEBUG_LEGION
+        assert(collective_point == NULL);
 #endif
+        // For Legion Spy we need a unique ready event if it doesn't already
+        // exist so we can uniquely identify the instance
+        if (!ready.exists() && runtime->legion_spy_enabled)
+        {
+          ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
+          Runtime::trigger_event(NULL, rename_ready);
+          ready = rename_ready;
+        }
+        DistributedID did = forest->runtime->get_available_distributed_id();
+        // Figure out what kind of instance we just made
+        switch (constraints.specialized_constraint.get_kind())
+        {
+          case LEGION_NO_SPECIALIZE:
+          case LEGION_AFFINE_SPECIALIZE:
+          case LEGION_COMPACT_SPECIALIZE:
+            {
+#ifdef DEBUG_LEGION
+              assert(!shadow_instance);
+#endif
+              // Now we can make the manager
+              result = new IndividualManager(forest, did, local_space,
+                                             memory_manager,
+                                             instance, instance_domain, 
+                                             piece_list, piece_list_size,
+                                             field_space_node, tree_id,
+                                             layout, 0/*redop id*/,
+                                             true/*register now*/, 
+                                             instance_footprint, ready,
+                                       PhysicalManager::INTERNAL_INSTANCE_KIND); 
+              break;
+            }
+          case LEGION_AFFINE_REDUCTION_SPECIALIZE:
+          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
+            {
+              result = new IndividualManager(forest, did, local_space,
+                                             memory_manager, instance, 
+                                             instance_domain, piece_list,
+                                             piece_list_size, field_space_node,
+                                             tree_id, layout, redop_id,
+                                             true/*register now*/,
+                                             instance_footprint, ready,
+                                        PhysicalManager::INTERNAL_INSTANCE_KIND,
+                                             reduction_op, shadow_instance);
+              break;
+            }
+          default:
+            assert(false); // illegal specialized case
+        }
+      }
+      // manager takes ownership of the piece list
+      piece_list = NULL;
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+#endif
+#ifdef LEGION_MALLOC_INSTANCES
+      memory_manager->record_legion_instance(instance, base_ptr); 
 #endif
       if (runtime->profiler != NULL)
       {
@@ -4108,113 +4256,6 @@ namespace Legion {
       }
       return result;
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    CollectiveManager* InstanceBuilder::create_collective_instance(
-        RegionTreeForest *forest, Memory::Kind mem_kind, 
-        IndexSpaceNode *point_space, LayoutConstraintKind *unsat_kind, 
-        unsigned *unsat_index, ApEvent ready_event, size_t *footprint)
-    //--------------------------------------------------------------------------
-    {
-      if (!valid)
-        initialize(forest);
-      // If there are no fields then we are done
-      if (field_sizes.empty())
-      {
-        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORE_MEMORY_REQUEST,
-                        "Ignoring request to create instance in "
-                        "memory " IDFMT " with no fields.",
-                        memory_manager->memory.id);
-        if (footprint != NULL)
-          *footprint = 0;
-        if (unsat_kind != NULL)
-          *unsat_kind = LEGION_FIELD_CONSTRAINT;
-        if (unsat_index != NULL)
-          *unsat_index = 0;
-        return NULL;
-      }
-      if (realm_layout == NULL)
-      {
-        const std::vector<FieldID> &field_set = 
-          constraints.field_constraint.get_field_set();
-        bool compact = false;
-        switch (constraints.specialized_constraint.get_kind())
-        {
-          case LEGION_COMPACT_SPECIALIZE:
-          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
-            {
-              compact = true;
-              break;
-            }
-          default:
-            break;
-        }
-        realm_layout =
-          instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, unsat_kind, unsat_index, 
-             &piece_list, &piece_list_size);
-        // If constraints were unsatisfied then return now
-        if (realm_layout == NULL)
-          return NULL;
-      }
-      const size_t instance_footprint = realm_layout->bytes_used;
-      // Save the footprint size if we need to
-      if (footprint != NULL)
-        *footprint = instance_footprint;
-      // If we successfully made the layout then tighten the constraints
-      constraints.field_constraint.contiguous = true;
-      constraints.field_constraint.inorder = true;
-      constraints.ordering_constraint.contiguous = true;
-      constraints.memory_constraint = MemoryConstraint(mem_kind);
-      constraints.specialized_constraint.collective = Domain();
-      const unsigned num_dims = instance_domain->get_num_dims();
-      // Now let's find the layout constraints to use for this instance
-      LayoutDescription *layout = field_space_node->find_layout_description(
-                                        instance_mask, num_dims, constraints);
-      // If we couldn't find one then we make one
-      if (layout == NULL)
-      {
-        // First make a new layout constraint
-        LayoutConstraints *layout_constraints = 
-          forest->runtime->register_layout(field_space_node->handle,
-                                           constraints, true/*internal*/);
-        // Then make our description
-        layout = field_space_node->create_layout_description(instance_mask, 
-                                  num_dims, layout_constraints, mask_index_map,
-                                  constraints.field_constraint.get_field_set(),
-                                  field_sizes, serdez);
-      }
-      CollectiveManager *result = NULL;
-      DistributedID did = forest->runtime->get_available_distributed_id();
-      AddressSpaceID local_space = forest->runtime->address_space;
-      switch (constraints.specialized_constraint.get_kind())
-      {
-        case LEGION_NO_SPECIALIZE:
-        case LEGION_AFFINE_SPECIALIZE:
-        case LEGION_COMPACT_SPECIALIZE:
-          {
-            result = new CollectiveManager(forest, did, local_space,
-                point_space, instance_domain, piece_list, piece_list_size,
-                field_space_node, tree_id, layout, 0/*redop*/, true/*register*/,
-                instance_footprint, ready_event, false/*external*/); 
-            break;
-          }
-        case LEGION_AFFINE_REDUCTION_SPECIALIZE:
-        case LEGION_COMPACT_REDUCTION_SPECIALIZE:
-          {
-            result = new CollectiveManager(forest, did, local_space,
-                point_space, instance_domain, piece_list, piece_list_size,
-                field_space_node, tree_id, layout, redop_id, true/*register*/,
-                instance_footprint, ready_event, false/*external*/); 
-            break;
-          }
-        default:
-          assert(false);
-      }
-      return result;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(

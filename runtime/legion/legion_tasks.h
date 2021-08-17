@@ -931,11 +931,12 @@ namespace Legion {
       virtual void release_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   size_t points = 1);
-      virtual CollectiveManager* create_pending_collective_instance(
+      virtual PendingCollectiveManager* create_pending_collective_manager(
                                   MappingCallKind mapper_call,
                                   unsigned index, size_t collective_tag,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
+                                  AddressSpaceID memory_space,
                                   LayoutConstraintKind &bad_constraint,
                                   size_t &bad_constraint_index,
                                   bool &bad_regions);
@@ -1413,7 +1414,7 @@ namespace Legion {
       virtual void perform_release_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   const std::set<Memory> &targets);
-      virtual void perform_create_pending_collective_instance(
+      virtual void perform_create_pending_collective_managers(
                                   MappingCallKind mapper_call, unsigned index, 
                                   const std::map<size_t,
                                                  PendingCollective> &instances,

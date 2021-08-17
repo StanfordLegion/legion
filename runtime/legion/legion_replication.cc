@@ -6753,8 +6753,7 @@ namespace Legion {
         if (!deduplicate_across_shards)
         {
           const DomainPoint point(repl_ctx->owner_shard->shard_id);
-          manager->record_point_instance(point, instance, ready_event);
-          manager->finalize_collective_instance(attach_barrier, point);
+          manager->record_point_instance(point, instance);
         }
         else if (is_first_local_shard)
         {
@@ -6770,8 +6769,7 @@ namespace Legion {
             if (space != runtime->address_space)
               continue;
             const DomainPoint point(idx);
-            manager->record_point_instance(point, instance, ready_event);
-            manager->finalize_collective_instance(attach_barrier, point);
+            manager->record_point_instance(point, instance);
 #if defined(DEBUG_LEGION) && !defined(NDEBUG)
             found = true;
 #endif

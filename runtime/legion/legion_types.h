@@ -927,6 +927,8 @@ namespace Legion {
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
+      SEND_ACQUIRE_COLLECTIVE_ALLOCATION_PRIVILEGES,
+      SEND_RELEASE_COLLECTIVE_ALLOCATION_PRIVILEGES,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1148,6 +1150,8 @@ namespace Legion {
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
+        "Send Acquire Collective Instance Privileges",                \
+        "Send Release Collective Instance Privileges",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1858,6 +1862,7 @@ namespace Legion {
     class IndividualManager;
     class CollectiveManager;
     class ReductionView;
+    class PendingCollectiveManager;
     class InstanceBuilder;
 
     class RegionAnalyzer;

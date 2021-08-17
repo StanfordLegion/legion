@@ -1140,11 +1140,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* Operation::create_pending_collective_instance(
+    PendingCollectiveManager* Operation::create_pending_collective_manager(
                                       MappingCallKind call_kind,
                                       unsigned index, size_t collective_tag,
                                       const LayoutConstraintSet &constraints,
                                       const std::vector<LogicalRegion> &regions,
+                                      AddressSpaceID memory_space,
                                       LayoutConstraintKind &bad_constraint,
                                       size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
@@ -2323,11 +2324,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    CollectiveManager* 
-        CollectiveInstanceCreator<OP>::create_pending_collective_instance(
+    PendingCollectiveManager* 
+        CollectiveInstanceCreator<OP>::create_pending_collective_manager(
                  MappingCallKind mapper_call, unsigned index,
                  size_t collective_tag, const LayoutConstraintSet &constraints,
                  const std::vector<LogicalRegion> &regions,
+                 AddressSpaceID memory_space,
                  LayoutConstraintKind &bad_constraint,
                  size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
@@ -2352,9 +2354,11 @@ namespace Legion {
           finder = pending_collectives.insert(
             std::pair<InstanceKey,PendingCollectives>(key,
               PendingCollectives(total_points, done))).first;
-          finder->second.collectives.insert(
+          typename std::map<size_t,PendingCollective>::iterator
+            collective_finder = finder->second.collectives.insert(
               std::pair<size_t,PendingCollective>(collective_tag,
-                PendingCollective(constraints, regions)));
+                PendingCollective(constraints, regions, 1/*point*/))).first;
+          collective_finder->second.memory_spaces.insert(memory_space);
           ready_event = done;
         }
         else
@@ -2365,6 +2369,8 @@ namespace Legion {
             collective_finder = finder->second.collectives.find(collective_tag);
           if (collective_finder != finder->second.collectives.end())
           {
+            collective_finder->second.total_points++; // record our point
+            collective_finder->second.memory_spaces.insert(memory_space);
             if (!this->runtime->unsafe_mapper)
             {
               // Check to see if the constraints and regions are equivalent
@@ -2402,9 +2408,12 @@ namespace Legion {
             }
           }
           else
-            finder->second.collectives.insert(
+          {
+            collective_finder = finder->second.collectives.insert(
                 std::pair<size_t,PendingCollective>(collective_tag,
-                  PendingCollective(constraints, regions)));
+                  PendingCollective(constraints, regions, 1/*point*/))).first;
+            collective_finder->second.memory_spaces.insert(memory_space);
+          }
         }
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining_points >= 1);
@@ -2420,7 +2429,7 @@ namespace Legion {
         }
       }
       if (perform_create)
-        perform_create_pending_collective_instance(mapper_call, index,
+        perform_create_pending_collective_managers(mapper_call, index,
             create_collectives, bad_constraint, bad_index, bad_regions);
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
@@ -2431,7 +2440,7 @@ namespace Legion {
       assert(finder != pending_collectives.end());
       assert(finder->second.remaining_points >= 1);
 #endif
-      CollectiveManager *result = NULL;
+      PendingCollectiveManager *result = NULL;
       if ((finder->second.bad_index < SIZE_MAX) || finder->second.bad_regions)
       {
         bad_constraint = finder->second.bad_kind;
@@ -2446,20 +2455,34 @@ namespace Legion {
         assert(collective_finder != finder->second.collectives.end());
 #endif
         result = collective_finder->second.collective;
+        if (result != NULL)
+          result->add_reference();
       }
       finder->second.remaining_points--;
       if (finder->second.remaining_points == 0)
+      {
+        for (typename std::map<size_t,PendingCollective>::iterator it =
+              finder->second.collectives.begin(); it !=
+              finder->second.collectives.end(); /*nothing*/)
+        {
+          if ((it->second.collective != NULL) &&
+              it->second.collective->remove_reference())
+            delete it->second.collective;
+          typename std::map<size_t,PendingCollective>::iterator deleteit = it++;
+          finder->second.collectives.erase(deleteit);
+        }
         pending_collectives.erase(finder);
+      }
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void CollectiveInstanceCreator<OP>::create_pending_collective_instances(
-           MappingCallKind mapper_call, unsigned index,
-           const std::map<size_t,PendingCollective> &instances,
-           std::map<size_t,CollectiveManager*> &collectives, size_t points,
-           LayoutConstraintKind &bad_kind, size_t &bad_index, bool &bad_regions)
+    void CollectiveInstanceCreator<OP>::create_pending_collective_managers(
+         MappingCallKind mapper_call, unsigned index,
+         const std::map<size_t,PendingCollective> &instances,
+         std::map<size_t,PendingCollectiveManager*> &collectives, size_t points,
+         LayoutConstraintKind &bad_kind, size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
       RtEvent ready_event;
@@ -2496,6 +2519,11 @@ namespace Legion {
               collective_finder = finder->second.collectives.find(pit->first);
             if (collective_finder != finder->second.collectives.end())
             {
+              collective_finder->second.total_points += 
+                pit->second.total_points;
+              collective_finder->second.memory_spaces.insert(
+                  pit->second.memory_spaces.begin(),
+                  pit->second.memory_spaces.end());
               if (!this->runtime->unsafe_mapper)
               {
                 // Check to see if the constraints and regions are equivalent
@@ -2558,7 +2586,7 @@ namespace Legion {
         }
       }
       if (perform_create)
-        perform_create_pending_collective_instance(mapper_call, index,
+        perform_create_pending_collective_managers(mapper_call, index,
             create_collectives, bad_kind, bad_index, bad_regions);
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
@@ -2590,19 +2618,34 @@ namespace Legion {
           assert(collective_finder != finder->second.collectives.end());
 #endif
           collectives[it->first] = collective_finder->second.collective;
+          if (collective_finder->second.collective != NULL)
+            collective_finder->second.collective->add_reference();
         }
       }
       finder->second.remaining_points -= points;
       if (finder->second.remaining_points == 0)
+      {
+        for (typename std::map<size_t,PendingCollective>::iterator it =
+              finder->second.collectives.begin(); it !=
+              finder->second.collectives.end(); /*nothing*/)
+        {
+          if ((it->second.collective != NULL) &&
+              it->second.collective->remove_reference())
+            delete it->second.collective;
+          typename std::map<size_t,PendingCollective>::iterator deleteit = it++;
+          finder->second.collectives.erase(deleteit);
+        }
         pending_collectives.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
     template<typename OP>
     void 
-      CollectiveInstanceCreator<OP>::return_create_pending_collective_instance(
+      CollectiveInstanceCreator<OP>::return_create_pending_collective_managers(
                               MappingCallKind mapper_call, unsigned index,
-                              std::map<size_t,CollectiveManager*> &managers,
+                              std::map<size_t,
+                                       PendingCollectiveManager*> &managers,
                               LayoutConstraintKind bad_kind,
                               size_t bad_index, bool bad_regions)
     //--------------------------------------------------------------------------
@@ -2617,7 +2660,7 @@ namespace Legion {
       assert(finder->second.ready_event.exists());
       assert(!finder->second.ready_event.has_triggered());
 #endif
-      for (std::map<size_t,CollectiveManager*>::const_iterator it =
+      for (std::map<size_t,PendingCollectiveManager*>::const_iterator it =
             managers.begin(); it != managers.end(); it++)
       {
         typename std::map<size_t,PendingCollective>::iterator 
@@ -2627,6 +2670,7 @@ namespace Legion {
         assert(collective_finder->second.collective == NULL);
 #endif
         collective_finder->second.collective = it->second;
+        it->second->add_reference();
       }
       finder->second.bad_kind = bad_kind;
       finder->second.bad_index = bad_index;
@@ -3253,15 +3297,86 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
+    void CollectiveInstanceCreator<OP>::
+                perform_acquire_collective_allocation_privileges(
+                        MappingCallKind mapper_call, unsigned index,
+                        const std::set<Memory> &targets, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Memory> to_acquire(targets.begin(), targets.end());
+      this->runtime->acquire_collective_allocation_privileges(
+                            to_acquire, 0/*index*/, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveInstanceCreator<OP>::
+                  perform_release_collective_allocation_privileges(
+                      MappingCallKind mapper_call, unsigned index,
+                      const std::set<Memory> &targets)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<Memory>::const_iterator it =
+            targets.begin(); it != targets.end(); it++)
+        this->runtime->release_collective_allocation_privileges(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
     void
-     CollectiveInstanceCreator<OP>::perform_create_pending_collective_instance(
+     CollectiveInstanceCreator<OP>::perform_create_pending_collective_managers(
               MappingCallKind mapper_call, unsigned index,
-              std::map<size_t,PendingCollective> &instances
+              const std::map<size_t,PendingCollective> &instances,
               LayoutConstraintKind bad_kind, size_t bad_index, bool bad_regions)
     //--------------------------------------------------------------------------
     {
-
-
+      std::map<size_t,PendingCollectiveManager*> managers;
+      if (bad_regions || (bad_index < SIZE_MAX))
+      {
+        // We need to be have as a collective so everything must indicate
+        // that it failed, therefore we don't make any pending collectives
+        for (typename std::map<size_t,PendingCollective>::const_iterator it =
+              instances.begin(); it != instances.end(); it++)
+          managers[it->first] = NULL;
+      }
+      else
+      {
+        IndexSpace total_point_space = IndexSpace::NO_SPACE;
+        const size_t total_points = get_total_collective_instance_points();
+        for (typename std::map<size_t,PendingCollective>::const_iterator it =
+              instances.begin(); it != instances.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          // If we cleared our regions then that means that something
+          // bad happending in the sanity checking and we should have
+          // ended up in the other branch
+          assert(!it->second.regions.empty());
+#endif
+          const DistributedID did = 
+            this->runtime->get_available_distributed_id();
+          // We can only use the collective space as the point space if
+          // we know that it containes all the points
+          IndexSpace point_space = IndexSpace::NO_SPACE;
+          if (it->second.total_points == total_points)
+          {
+            if (!total_point_space.exists())
+              total_point_space = get_collective_space()->handle;
+            point_space = total_point_space;
+          }
+          const ApBarrier instance_barrier(
+              Realm::Barrier::create_barrier(it->second.total_points));
+          const std::vector<AddressSpaceID> unique_spaces(
+              it->second.memory_spaces.begin(), it->second.memory_spaces.end());
+          // the PendingCollectiveManager takes ownership of this allocation
+          CollectiveMapping *collective_manager = new CollectiveMapping(
+            unique_spaces, this->runtime->legion_collective_radix);
+          managers[it->first] = new PendingCollectiveManager(did,
+              it->second.total_points, point_space, instance_barrier,
+              collective_manager);
+        }
+      }
+      return_create_pending_collective_managers(mapper_call, index, managers,
+                                            bad_kind, bad_index, bad_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -9170,18 +9285,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointCopyOp::create_pending_collective_instance(
+    PendingCollectiveManager* PointCopyOp::create_pending_collective_manager(
                                   MappingCallKind mapper_call,
                                   unsigned index, size_t collective_tag,
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
+                                  AddressSpaceID memory_space,
                                   LayoutConstraintKind &bad_constraint,
                                   size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
-      return owner->create_pending_collective_instance(mapper_call, index,
-                                      collective_tag, constraints, regions,
-                                      bad_constraint, bad_index, bad_regions);
+      return owner->create_pending_collective_manager(mapper_call, index,
+                      collective_tag, constraints, regions, memory_space,
+                      bad_constraint, bad_index, bad_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -18234,25 +18350,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* DependentPartitionOp::create_pending_collective_instance(
+    PendingCollectiveManager* 
+            DependentPartitionOp::create_pending_collective_manager(
                                       MappingCallKind call_kind,
                                       unsigned index, size_t collective_tag,
                                       const LayoutConstraintSet &constraints,
                                       const std::vector<LogicalRegion> &regions,
+                                      AddressSpaceID memory_space,
                                       LayoutConstraintKind &bad_constraint,
                                       size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
       if (this->points.empty())
-        return Operation::create_pending_collective_instance(call_kind, index,
-                                      collective_tag, constraints, regions,
-                                      bad_constraint, bad_index, bad_regions);
+        return Operation::create_pending_collective_manager(call_kind, index,
+                          collective_tag, constraints, regions, memory_space,
+                          bad_constraint, bad_index, bad_regions);
       else
         return 
           CollectiveInstanceCreator<Operation>::
-                create_pending_collective_instance(call_kind, index,
-                                      collective_tag, constraints, regions,
-                                      bad_constraint, bad_index, bad_regions);
+                create_pending_collective_manager(call_kind, index,
+                          collective_tag, constraints, regions, memory_space,
+                          bad_constraint, bad_index, bad_regions);
     } 
 
     //--------------------------------------------------------------------------
@@ -18633,18 +18751,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointDepPartOp::create_pending_collective_instance(
+    PendingCollectiveManager* PointDepPartOp::create_pending_collective_manager(
                                       MappingCallKind mapper_call,
                                       unsigned index, size_t collective_tag,
                                       const LayoutConstraintSet &constraints,
                                       const std::vector<LogicalRegion> &regions,
+                                      AddressSpaceID memory_space,
                                       LayoutConstraintKind &bad_constraint,
                                       size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
-      return owner->create_pending_collective_instance(mapper_call, index,
-                                    collective_tag, constraints, regions,
-                                    bad_constraint, bad_index, bad_regions); 
+      return owner->create_pending_collective_manager(mapper_call, index,
+                      collective_tag, constraints, regions, memory_space,
+                      bad_constraint, bad_index, bad_regions); 
     }
 
     //--------------------------------------------------------------------------
@@ -20094,18 +20213,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointFillOp::create_pending_collective_instance(
+    PendingCollectiveManager* PointFillOp::create_pending_collective_manager(
                                       MappingCallKind mapper_call,
                                       unsigned index, size_t collective_tag,
                                       const LayoutConstraintSet &constraints,
                                       const std::vector<LogicalRegion> &regions,
+                                      AddressSpaceID memory_space,
                                       LayoutConstraintKind &bad_constraint,
                                       size_t &bad_index, bool &bad_regions)
     //--------------------------------------------------------------------------
     {
-      return owner->create_pending_collective_instance(mapper_call, index,
-                                    collective_tag, constraints, regions,
-                                    bad_constraint, bad_index, bad_regions);
+      return owner->create_pending_collective_manager(mapper_call, index,
+                      collective_tag, constraints, regions, memory_space,
+                      bad_constraint, bad_index, bad_regions);
     }
 
     //--------------------------------------------------------------------------

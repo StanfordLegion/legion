@@ -1378,6 +1378,16 @@ namespace Legion {
         const RtUserEvent ready;
         volatile bool success;
       };
+    public:
+      struct PendingCollectiveAllocation {
+      public:
+        PendingCollectiveAllocation(unsigned idx, RtUserEvent trigger)
+          : index(idx), to_trigger(trigger) { }
+      public:
+        std::vector<Memory> targets;
+        unsigned index;
+        RtUserEvent to_trigger;
+      };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       struct MallocInstanceArgs : public LgTaskArgs<MallocInstanceArgs> {
@@ -1436,8 +1446,9 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
-                                    CollectiveManager *target, DomainPoint *p,
-                                    UniqueID creator_id, bool remote = false);
+                                    PendingCollectiveManager *target,
+                                    DomainPoint *p, UniqueID creator_id,
+                                    bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
@@ -1445,8 +1456,9 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
-                                    CollectiveManager *target, DomainPoint *p,
-                                    UniqueID creator_id, bool remote = false);
+                                    PendingCollectiveManager *target,
+                                    DomainPoint *p, UniqueID creator_id,
+                                    bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1552,8 +1564,13 @@ namespace Legion {
                                           size_t *footprint,
                                           LayoutConstraintKind *unsat_kind,
                                           unsigned *unsat_index,
-                                          CollectiveManager *collective = NULL,
+                                          PendingCollectiveManager*
+                                                             collective = NULL,
                                           DomainPoint *collective_point = NULL); 
+    public:
+      bool acquire_collective_allocation_privileges(
+          std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
+      void release_collective_allocation_privileges(void);
     public:
       bool delete_by_size_and_state(const size_t needed_size,
                                     const InstanceState state,
@@ -1574,8 +1591,8 @@ namespace Legion {
     public:
       uintptr_t allocate_legion_instance(size_t footprint, 
                                          bool needs_defer = true);
-      void record_legion_instance(InstanceManager *manager, uintptr_t ptr);
-      void free_legion_instance(InstanceManager *manager, RtEvent deferred);
+      void record_legion_instance(PhysicalInstance instance, uintptr_t ptr);
+      void free_legion_instance(PhysicalInstance instance, RtEvent deferred);
       void free_legion_instance(RtEvent deferred, uintptr_t ptr, 
                                 bool needs_defer = true);
       static void handle_malloc_instance(const void *args);
@@ -1619,11 +1636,17 @@ namespace Legion {
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
+      // Collective instances also need a different set of allocation
+      // privileges for find and create collective instances so that
+      // we know that collective instance allocations are globally ordered
+      std::deque<PendingCollectiveAllocation> pending_collective_allocations;
+      // Whether we have an outstanding collective allocation on this memory
+      bool outstanding_collective_allocation;
     protected:
       std::set<Memory> visible_memories;
     protected:
 #ifdef LEGION_MALLOC_INSTANCES
-      std::map<InstanceManager*,uintptr_t> legion_instances;
+      std::map<PhysicalInstance,uintptr_t> legion_instances;
       std::map<uintptr_t,size_t> allocations;
       std::map<RtEvent,uintptr_t> pending_collectables;
 #endif
@@ -2936,6 +2959,9 @@ namespace Legion {
       AddressSpaceID find_address_space(Memory handle) const;
       void free_external_allocation(Processor proc, void *data, size_t size,
                                     void (*freefunc)(void*,size_t));
+      void acquire_collective_allocation_privileges(
+          std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
+      void release_collective_allocation_privileges(Memory target);
 #ifdef LEGION_MALLOC_INSTANCES
       uintptr_t allocate_deferred_instance(Memory memory,size_t size,bool free);
       void free_deferred_instance(Memory memory, uintptr_t ptr);
@@ -3285,6 +3311,10 @@ namespace Legion {
       void send_create_future_instance_response(AddressSpaceID target,
                                                 Serializer &rez);
       void send_free_future_instance(AddressSpaceID target, Serializer &rez);
+      void send_acquire_collective_allocation_privileges(AddressSpaceID target,
+                                                         Serializer &rez);
+      void send_release_collective_allocation_privileges(AddressSpaceID target,
+                                                         Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3599,6 +3629,8 @@ namespace Legion {
                                                  AddressSpaceID source);
       void handle_create_future_instance_response(Deserializer &derez);
       void handle_free_future_instance(Deserializer &derez);
+      void handle_acquire_collective_allocation_privileges(Deserializer &derez);
+      void handle_release_collective_allocation_privileges(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -3611,7 +3643,8 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
-                                    CollectiveManager *target, DomainPoint *p);
+                                    PendingCollectiveManager *target,
+                                    DomainPoint *p);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3620,7 +3653,8 @@ namespace Legion {
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
-                                    CollectiveManager *target, DomainPoint *p);
+                                    PendingCollectiveManager *target,
+                                    DomainPoint *p);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3700,6 +3734,8 @@ namespace Legion {
       bool find_pending_collectable_location(DistributedID did,void *&location);
       void record_pending_distributed_collectable(DistributedID did);
       void revoke_pending_distributed_collectable(DistributedID did);
+      bool find_or_create_distributed_collectable(DistributedID did,
+          DistributedCollectable *&collectable, RtEvent &ready, void *buffer);
     public:
       LogicalView* find_or_request_logical_view(DistributedID did,
                                                 RtEvent &ready);

@@ -2074,7 +2074,7 @@ namespace Legion {
         acquire = false;
       }
       pause_mapper_call(ctx);
-      CollectiveManager *collective = NULL;
+      PendingCollectiveManager *collective = NULL;
       DomainPoint point;
       if (constraints.specialized_constraint.is_collective())
       {
@@ -2115,9 +2115,10 @@ namespace Legion {
           LayoutConstraintKind bad_constraint = LEGION_SPECIALIZED_CONSTRAINT;
           size_t bad_index = SIZE_MAX;
           bool bad_regions = false;
-          collective = ctx->operation->create_pending_collective_instance(
+          collective = ctx->operation->create_pending_collective_manager(
               ctx->kind, ctx->collective_count++, collective_tag,
-              constraints, regions, bad_constraint, bad_index, bad_regions);
+              constraints, regions, target_memory.address_space(),
+              bad_constraint, bad_index, bad_regions);
           if (collective == NULL)
           {
 #ifdef DEBUG_LEGION
@@ -2173,6 +2174,8 @@ namespace Legion {
           ctx->kind, ctx->collective_count - 1, success);
         if (!success)
           result = MappingInstance();
+        if (collective->remove_reference())
+          delete collective;
       }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
@@ -2208,7 +2211,7 @@ namespace Legion {
       }
       pause_mapper_call(ctx);
       DomainPoint point;
-      CollectiveManager *collective = NULL;
+      PendingCollectiveManager *collective = NULL;
       LayoutConstraints *cons = runtime->find_layout_constraints(layout_id);
       if (cons->specialized_constraint.is_collective())
       {
@@ -2249,9 +2252,10 @@ namespace Legion {
           LayoutConstraintKind bad_constraint = LEGION_SPECIALIZED_CONSTRAINT;
           size_t bad_index = SIZE_MAX;
           bool bad_regions = false;
-          collective = ctx->operation->create_pending_collective_instance(
+          collective = ctx->operation->create_pending_collective_manager(
               ctx->kind, ctx->collective_count++, collective_tag,
-              *cons, regions, bad_constraint, bad_index, bad_regions);
+              *cons, regions, target_memory.address_space(),
+              bad_constraint, bad_index, bad_regions);
           if (collective == NULL)
           {
 #ifdef DEBUG_LEGION
@@ -2308,6 +2312,8 @@ namespace Legion {
           ctx->kind, ctx->collective_count - 1, success);
         if (!success)
           result = MappingInstance();
+        if (collective->remove_reference())
+          delete collective;
       }
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
@@ -2414,10 +2420,11 @@ namespace Legion {
           LayoutConstraintKind bad_constraint = LEGION_SPECIALIZED_CONSTRAINT;
           size_t bad_index = SIZE_MAX;
           bool bad_regions = false;
-          CollectiveManager *collective =
-            ctx->operation->create_pending_collective_instance(
+          PendingCollectiveManager *collective =
+            ctx->operation->create_pending_collective_manager(
                 ctx->kind, collective_index, collective_tag,
-                constraints, regions, bad_constraint, bad_index, bad_regions);
+                constraints, regions, target_memory.address_space(),
+                bad_constraint, bad_index, bad_regions);
           DomainPoint point;
           if (collective == NULL)
           {
@@ -2459,8 +2466,12 @@ namespace Legion {
             (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id(),
             collective, (collective == NULL) ? NULL : &point);
           if (collective != NULL)
+          {
             success = ctx->operation->finalize_pending_collective_instance(
                       ctx->kind, collective_index, success);
+            if (collective->remove_reference())
+              delete collective;
+          }
           if (!success)
             result = MappingInstance();  
         }
@@ -2609,10 +2620,11 @@ namespace Legion {
           LayoutConstraintKind bad_constraint = LEGION_SPECIALIZED_CONSTRAINT;
           size_t bad_index = SIZE_MAX;
           bool bad_regions = false;
-          CollectiveManager *collective =
-            ctx->operation->create_pending_collective_instance(
+          PendingCollectiveManager *collective =
+            ctx->operation->create_pending_collective_manager(
                 ctx->kind, collective_index, collective_tag,
-                *cons, regions, bad_constraint, bad_index, bad_regions);
+                *cons, regions, target_memory.address_space(),
+                bad_constraint, bad_index, bad_regions);
           DomainPoint point;
           if (collective == NULL)
           {
@@ -2655,8 +2667,12 @@ namespace Legion {
                           ctx->operation->get_unique_op_id(), collective,
                           (collective == NULL) ? NULL : &point);
           if (collective != NULL)
+          {
             success = ctx->operation->finalize_pending_collective_instance(
                       ctx->kind, collective_index, success);
+            if (collective->remove_reference())
+              delete collective;
+          }
           if (!success)
             result = MappingInstance();
         }

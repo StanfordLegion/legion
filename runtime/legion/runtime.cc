@@ -7443,7 +7443,8 @@ namespace Legion {
         is_owner(m.address_space() == rt->address_space),
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
         eager_pool_instance(PhysicalInstance::NO_INST), eager_pool(0),
-        eager_allocator(NULL), eager_remaining_capacity(0),next_allocation_id(0)
+        eager_allocator(NULL), eager_remaining_capacity(0),
+        next_allocation_id(0), outstanding_collective_allocation(false)
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
@@ -7895,8 +7896,9 @@ namespace Legion {
                                 GCPriority priority, bool tight_bounds,
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
-                                CollectiveManager *target, DomainPoint *point,
-                                UniqueID creator_id, bool remote)
+                                PendingCollectiveManager *target,
+                                DomainPoint *point, UniqueID creator_id,
+                                bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -7916,7 +7918,10 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           if (target != NULL)
           {
-            rez.serialize(target->did);
+#ifdef DEBUG_LEGION
+            assert(point != NULL);
+#endif
+            target->pack(rez);
             rez.serialize(*point);
           }
           else
@@ -7973,8 +7978,9 @@ namespace Legion {
                                      GCPriority priority, bool tight_bounds,
                                      LayoutConstraintKind *unsat_kind,
                                      unsigned *unsat_index, size_t *footprint, 
-                                     CollectiveManager *target, DomainPoint *p,
-                                     UniqueID creator_id, bool remote)
+                                     PendingCollectiveManager *target,
+                                     DomainPoint *point, UniqueID creator_id,
+                                     bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -7994,8 +8000,11 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           if (target != NULL)
           {
-            rez.serialize(target->did);
-            rez.serialize(*p);
+#ifdef DEBUG_LEGION
+            assert(point != NULL);
+#endif
+            target->pack(rez);
+            rez.serialize(*point);
           }
           else
             rez.serialize<DistributedID>(0);
@@ -8027,7 +8036,7 @@ namespace Legion {
           wait_on.wait();
         // Try to make the instance
         PhysicalManager *manager = allocate_physical_instance(builder, 
-            footprint, unsat_kind, unsat_index, target, p);
+            footprint, unsat_kind, unsat_index, target, point);
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
@@ -8727,14 +8736,12 @@ namespace Legion {
           {
             DistributedID collective_did;
             derez.deserialize(collective_did);
-            RtEvent collective_ready;
             DomainPoint point;
-            CollectiveManager *collective = NULL;
-            if (collective_did > 0)
+            PendingCollectiveManager *collective = 
+              PendingCollectiveManager::unpack(derez);
+            if (collective != NULL)
             {
-              collective = static_cast<CollectiveManager*>(
-                  runtime->find_or_request_instance_manager(collective_did, 
-                                                            collective_ready));
+              collective->add_reference();
               derez.deserialize(point);
             }
             LayoutConstraintSet constraints;
@@ -8763,8 +8770,6 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
-            if (collective_ready.exists() && !collective_ready.has_triggered())
-              collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
                                  result, mapper_id, processor, acquire, 
                                  priority, tight_region_bounds,
@@ -8809,20 +8814,20 @@ namespace Legion {
             }
             else // we can just trigger the done event since we failed
               Runtime::trigger_event(to_trigger);
+            if ((collective != NULL) && collective->remove_reference())
+              delete collective;
             break;
           }
         case CREATE_INSTANCE_LAYOUT:
           {
             DistributedID collective_did;
             derez.deserialize(collective_did);
-            RtEvent collective_ready;
-            CollectiveManager *collective = NULL;
+            PendingCollectiveManager *collective =
+              PendingCollectiveManager::unpack(derez);
             DomainPoint point;
-            if (collective_did > 0)
+            if (collective != NULL)
             {
-              collective = static_cast<CollectiveManager*>(
-                  runtime->find_or_request_instance_manager(collective_did, 
-                                                            collective_ready));
+              collective->add_reference();
               derez.deserialize(point);
             }
             LayoutConstraintID layout_id;
@@ -8853,8 +8858,6 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
-            if (collective_ready.exists() && !collective_ready.has_triggered())
-              collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
                                  result, mapper_id, processor, acquire, 
                                  priority, tight_region_bounds,
@@ -8898,6 +8901,8 @@ namespace Legion {
             }
             else // if we failed, we can just trigger the response
               Runtime::trigger_event(to_trigger);
+            if ((collective != NULL) && collective->remove_reference())
+              delete collective;
             break;
           }
         case FIND_OR_CREATE_CONSTRAINTS:
@@ -10195,9 +10200,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::allocate_physical_instance(
-                        InstanceBuilder &builder, size_t *footprint,
-                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
-                        CollectiveManager *collective, DomainPoint *point)
+                       InstanceBuilder &builder, size_t *footprint,
+                       LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
+                       PendingCollectiveManager *collective, DomainPoint *point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10260,6 +10265,61 @@ namespace Legion {
       }
       // If we made it here well then we failed 
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::acquire_collective_allocation_privileges(
+           std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      AutoLock m_lock(manager_lock);
+      if (outstanding_collective_allocation)
+      {
+        // someone else already has it so buffer up the request
+        pending_collective_allocations.emplace_back(
+            PendingCollectiveAllocation(index, to_trigger));
+        pending_collective_allocations.back().targets.swap(targets);
+        return false;
+      }
+      else
+      {
+        outstanding_collective_allocation = true;
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::release_collective_allocation_privileges(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      std::vector<Memory> targets;
+      unsigned index = 0;
+      RtUserEvent to_trigger;
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        assert(outstanding_collective_allocation);
+#endif
+        if (pending_collective_allocations.empty())
+        {
+          outstanding_collective_allocation = false;
+          return;
+        }
+        PendingCollectiveAllocation &next = 
+          pending_collective_allocations.front();
+        targets.swap(next.targets);
+        index = next.index;
+        to_trigger = next.to_trigger;
+        pending_collective_allocations.pop_front();
+      }
+      runtime->acquire_collective_allocation_privileges(targets, index,
+                                                        to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -10471,12 +10531,12 @@ namespace Legion {
           }
 #else
           uintptr_t base_ptr = allocate_legion_instance(size);
-          if (base_ptr != NULL)
+          if (base_ptr != 0)
           {
             const Realm::ExternalMemoryResource resource(base_ptr, 
                                         size, false/*read only*/);
-            use_event = RtEvent(PhysicalInstance::create_external(instance,
-                                memory, ilg->clone(), resource, requests));
+            use_event = RtEvent(PhysicalInstance::create_external_instance(
+                  instance, memory, ilg->clone(), resource, requests));
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
             assert(remaining_capacity >= size);
@@ -11151,7 +11211,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::record_legion_instance(InstanceManager *man,uintptr_t p)
+    void MemoryManager::record_legion_instance(PhysicalInstance instance,
+                                               uintptr_t pointer)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11159,13 +11220,14 @@ namespace Legion {
 #endif
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-      assert(legion_instances.find(man) == legion_instances.end());
+      assert(legion_instances.find(instance) == legion_instances.end());
 #endif
-      legion_instances[man] = p;
+      legion_instances[instance] = pointer;
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::free_legion_instance(InstanceManager *man,RtEvent defer)
+    void MemoryManager::free_legion_instance(PhysicalInstance instance,
+                                             RtEvent defer)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11174,8 +11236,8 @@ namespace Legion {
       uintptr_t ptr;
       {
         AutoLock m_lock(manager_lock);
-        std::map<InstanceManager*,uintptr_t>::iterator finder = 
-          legion_instances.find(man);
+        std::map<PhysicalInstance,uintptr_t>::iterator finder = 
+          legion_instances.find(instance);
 #ifdef DEBUG_LEGION
         assert(finder != legion_instances.end());
 #endif
@@ -12971,6 +13033,16 @@ namespace Legion {
               runtime->handle_free_future_instance(derez);
               break;
             }
+          case SEND_ACQUIRE_COLLECTIVE_ALLOCATION_PRIVILEGES:
+            {
+              runtime->handle_acquire_collective_allocation_privileges(derez);
+              break;
+            }
+          case SEND_RELEASE_COLLECTIVE_ALLOCATION_PRIVILEGES:
+            {
+              runtime->handle_release_collective_allocation_privileges(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
 #ifdef DEBUG_LEGION
@@ -13405,6 +13477,33 @@ namespace Legion {
       derez.deserialize<bool>(eager);
       MemoryManager *manager = find_memory_manager(memory);
       manager->free_future_instance(instance, size, free_event, eager);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_acquire_collective_allocation_privileges(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t num_memories;
+      derez.deserialize(num_memories);
+      std::vector<Memory> memories(num_memories);
+      for (unsigned idx = 0; idx < num_memories; idx++)
+        derez.deserialize(memories[idx]);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      acquire_collective_allocation_privileges(memories, 0/*index*/,to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_release_collective_allocation_privileges(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target;
+      derez.deserialize(target);
+      release_collective_allocation_privileges(target);
     }
 
     //--------------------------------------------------------------------------
@@ -20762,6 +20861,62 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::acquire_collective_allocation_privileges(
+           std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = index; idx < targets.size(); idx++)
+      {
+        const Memory target = targets[idx];
+        const AddressSpace next_space = target.address_space();
+        if (next_space != address_space)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            const size_t remaining = targets.size() - idx;
+            rez.serialize(remaining);
+            while (idx < targets.size())
+              rez.serialize(targets[idx++]);
+            rez.serialize(to_trigger);
+          }
+          send_acquire_collective_allocation_privileges(next_space, rez);  
+          return;
+        }
+        else
+        {
+          MemoryManager *manager = find_memory_manager(target);
+          if (!manager->acquire_collective_allocation_privileges(targets, 
+                                                     index+1, to_trigger))
+            return;
+        }
+      }
+      // If we get here we've got all the allocations
+      Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_collective_allocation_privileges(Memory target)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID memory_space = target.address_space();
+      if (memory_space != address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+        }
+        send_release_collective_allocation_privileges(memory_space, rez);
+      }
+      else
+      {
+        MemoryManager *manager = find_memory_manager(target);
+        manager->release_collective_allocation_privileges();
+      }
+    }
+
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     uintptr_t Runtime::allocate_deferred_instance(Memory memory, size_t size,
@@ -23144,6 +23299,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_acquire_collective_allocation_privileges(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_ACQUIRE_COLLECTIVE_ALLOCATION_PRIVILEGES,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_release_collective_allocation_privileges(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_RELEASE_COLLECTIVE_ALLOCATION_PRIVILEGES,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25389,7 +25564,8 @@ namespace Legion {
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
                                      size_t *footprint, UniqueID creator_id,
-                                     CollectiveManager *target, DomainPoint *p)
+                                     PendingCollectiveManager *target, 
+                                     DomainPoint *point)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -25399,7 +25575,7 @@ namespace Legion {
         unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, target, p,
+                         &unsat_kind, &unsat_index, footprint, target, point,
                          creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
@@ -25411,7 +25587,7 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, target, p, creator_id);
+                         NULL, NULL, footprint, target, point, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -25424,7 +25600,8 @@ namespace Legion {
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
                                      size_t *footprint, UniqueID creator_id,
-                                     CollectiveManager *target, DomainPoint *p)
+                                     PendingCollectiveManager *target,
+                                     DomainPoint *point)
     //--------------------------------------------------------------------------
     { 
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -25434,7 +25611,7 @@ namespace Legion {
         unsigned unsat_index = 0;
         if (!manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, target, p,
+                         &unsat_kind, &unsat_index, footprint, target, point,
                          creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
@@ -25446,7 +25623,7 @@ namespace Legion {
       else
         return manager->create_physical_instance(constraints, regions, result,
                          mapper_id, processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, target, p, creator_id);
+                         NULL, NULL, footprint, target, point, creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -25958,6 +26135,7 @@ namespace Legion {
     void Runtime::record_pending_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       const RtUserEvent registered = Runtime::create_rt_user_event();
       AutoLock d_lock(distributed_collectable_lock);
 #ifdef DEBUG_LEGION
@@ -25986,6 +26164,43 @@ namespace Legion {
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::find_or_create_distributed_collectable(DistributedID to_find,
+             DistributedCollectable *&collectable, RtEvent &ready, void *buffer)
+    //--------------------------------------------------------------------------
+    {
+      const DistributedID did = LEGION_DISTRIBUTED_ID_FILTER(to_find);
+      AutoLock d_lock(distributed_collectable_lock);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+        dist_collectables.find(did);
+      // If we've already got it, then we are done
+      if (finder != dist_collectables.end())
+      {
+        collectable = finder->second;
+        ready = RtEvent::NO_RT_EVENT;
+        return false; // did not use the buffer
+      }
+      // If it is already pending, we can just return the ready event
+      std::map<DistributedID,std::pair<DistributedCollectable*,RtUserEvent> 
+        >::const_iterator pending_finder = pending_collectables.find(did);
+      if (pending_finder != pending_collectables.end())
+      {
+        collectable = pending_finder->second.first;
+        ready = pending_finder->second.second;
+        return false; // did not use the buffer
+      }
+      // This is the first request we've seen for this did, make it now
+      // Allocate space for the result
+      RtUserEvent to_trigger = Runtime::create_rt_user_event();
+      pending_collectables.insert(
+          std::pair<DistributedID,
+            std::pair<DistributedCollectable*,RtUserEvent> >(did,
+              std::pair<DistributedCollectable*,RtUserEvent>(
+                (DistributedCollectable*)buffer, to_trigger)));
+      ready = to_trigger;
+      return true; // did use the buffer for this one
     }
 
     //--------------------------------------------------------------------------

@@ -632,7 +632,7 @@ namespace Legion {
             IndexSpace p, size_t tp, CollectiveMapping *map, size_t f,
             bool local, IndexSpaceExpression *lx,
             bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
-            RegionTreeID tid, LayoutConstraintID l, ApEvent use, 
+            RegionTreeID tid, LayoutConstraintID l, ApBarrier use, 
             ReductionOpID redop, const void *piece_list,size_t piece_list_size);
       public:
         const DistributedID did;
@@ -649,7 +649,7 @@ namespace Legion {
         const FieldSpace handle;
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
-        const ApEvent use_event;
+        const ApBarrier use_barrier;
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
@@ -663,7 +663,7 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApEvent unique_event, bool external_instance);
+                        ApBarrier unique_barrier, bool external_instance);
       CollectiveManager(const CollectiveManager &rhs);
       virtual ~CollectiveManager(void);
     public:
@@ -676,12 +676,7 @@ namespace Legion {
       bool contains_isomorphic_points(IndexSpaceNode *points) const;
     public:
       void record_point_instance(const DomainPoint &point,
-                                 PhysicalInstance instance, ApEvent inst_ready);
-      // Single version called from a single node
-      void finalize_collective_instance(ApUserEvent to_trigger);
-      // Collective version called once per point in the space
-      void finalize_collective_instance(ApBarrier to_arrive,
-                                        const DomainPoint &point);
+                                 PhysicalInstance instance);
     public:
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
@@ -775,7 +770,8 @@ namespace Legion {
           size_t inst_footprint, IndexSpaceExpression *inst_domain,
           const void *piece_list, size_t piece_list_size, 
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
-          LayoutConstraints *constraints,ApEvent use_event,ReductionOpID redop);
+          LayoutConstraints *constraints, ApBarrier use_barrier,
+          ReductionOpID redop);
     public:
       const size_t total_points;
       // This can be NULL if the point set is implicit
@@ -788,6 +784,7 @@ namespace Legion {
       std::vector<AddressSpaceID> right_spaces;
       AddressSpaceID left_space;
     protected:
+      ApBarrier collective_barrier;
       RtEvent detached;
       unsigned finalize_messages;
       bool deleted_or_detached;
@@ -834,6 +831,32 @@ namespace Legion {
     };
 
     /**
+     * \class PendingCollectiveManager
+     * This data structure stores the necessary meta-data required
+     * for constructing a CollectiveManager by an InstanceBuilder
+     * when creating a physical instance for a collective instance
+     */
+    class PendingCollectiveManager : public Collectable {
+    public:
+      PendingCollectiveManager(DistributedID did, size_t total_points,
+                               IndexSpace point_space, ApBarrier ready_barrier,
+                               CollectiveMapping *mapping);
+      PendingCollectiveManager(const PendingCollectiveManager &rhs);
+      ~PendingCollectiveManager(void);
+    public:
+      PendingCollectiveManager& operator=(const PendingCollectiveManager &rhs);
+    public:
+      const DistributedID did;
+      const size_t total_points;
+      const IndexSpace point_space;
+      const ApBarrier ready_barrier;
+      CollectiveMapping *const collective_mapping;
+    public:
+      void pack(Serializer &rez) const;
+      static PendingCollectiveManager* unpack(Deserializer &derez);
+    };
+
+    /**
      * \class InstanceBuilder 
      * A helper for building physical instances of logical regions
      */
@@ -857,13 +880,9 @@ namespace Legion {
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
-                        CollectiveManager *collective, DomainPoint *point,
-                        LayoutConstraintKind *unsat_kind,
+                        PendingCollectiveManager *collective,
+                        DomainPoint *point, LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL);
-      CollectiveManager* create_collective_instance(RegionTreeForest *forest,
-                        Memory::Kind mem_kind, IndexSpaceNode *point_space,
-                        LayoutConstraintKind *unsat_kind, unsigned *unsat_index,
-                        ApEvent ready_event, size_t *footprint = NULL);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
                                       const Realm::ProfilingResponse &response,
