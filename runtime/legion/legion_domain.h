@@ -419,6 +419,10 @@ namespace Legion {
   public:
     __CUDA_HD__
     DomainPoint operator*(const DomainPoint &p) const;
+    __CUDA_HD__
+    Domain operator*(const Domain &domain) const;
+    __CUDA_HD__
+    DomainTransform operator*(const DomainTransform &transform) const;
   public:
     __CUDA_HD__
     bool is_identity(void) const;
