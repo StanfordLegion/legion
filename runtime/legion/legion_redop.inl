@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include <array>
+
 #ifndef __MAX__
 #define __MAX__(x,y) (((x) > (y)) ? (x) : (y))
 #endif

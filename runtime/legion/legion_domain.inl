@@ -1349,6 +1349,39 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline Domain DomainTransform::operator*(const Domain &domain) const
+  //----------------------------------------------------------------------------
+  {
+    assert(domain.dense());
+    assert(n == domain.get_dim());
+    DomainPoint lo = this->operator*(domain.lo());
+    DomainPoint hi = this->operator*(domain.hi());
+    return Domain(lo, hi);
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainTransform DomainTransform::operator*(
+                                               const DomainTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(n == rhs.m);
+    DomainTransform result;
+    result.m = m;
+    result.n = rhs.n;
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < rhs.n; j++)
+      {
+        coord_t product = 0;
+        for (int k = 0; k < n; k++)
+          product += (matrix[i*n + k] * rhs.matrix[k*rhs.n + j]);
+        result.matrix[i*rhs.n + j] = product;
+      }
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
   __CUDA_HD__ inline bool DomainTransform::is_identity(void) const
   //----------------------------------------------------------------------------
   {
