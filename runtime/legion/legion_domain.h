@@ -149,6 +149,51 @@ namespace Legion {
     bool operator<(const DomainPoint &rhs) const;
 
     __CUDA_HD__
+    DomainPoint operator+(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator+(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator+=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator+=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator-(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator-(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator-=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator-=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator*(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator*(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator*=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator*=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator/(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator/(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator/=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator/=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator%(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator%(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator%=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator%=(const DomainPoint &rhs);
+
+    __CUDA_HD__
     coord_t& operator[](unsigned index);
     __CUDA_HD__
     const coord_t& operator[](unsigned index) const;
@@ -228,6 +273,16 @@ namespace Legion {
     bool operator!=(const Domain &rhs) const;
     __CUDA_HD__
     bool operator<(const Domain &rhs) const;
+
+    __CUDA_HD__
+    Domain operator+(const DomainPoint &point) const;
+    __CUDA_HD__
+    Domain& operator+=(const DomainPoint &point);
+
+    __CUDA_HD__
+    Domain operator-(const DomainPoint &point) const;
+    __CUDA_HD__
+    Domain& operator-=(const DomainPoint &point);
 
     static const Domain NO_DOMAIN;
 
