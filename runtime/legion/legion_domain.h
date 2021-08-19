@@ -468,6 +468,10 @@ namespace Legion {
     DomainTransform& operator=(const DomainTransform &rhs);
     template<int M, int N, typename T> __CUDA_HD__
     DomainTransform& operator=(const Transform<M,N,T> &rhs);
+    __CUDA_HD__
+    bool operator==(const DomainTransform &rhs) const;
+    __CUDA_HD__
+    bool operator!=(const DomainTransform &rhs) const;
   public:
     template<int M, int N, typename T> __CUDA_HD__
     operator Transform<M,N,T>(void) const;
@@ -506,6 +510,10 @@ namespace Legion {
     DomainAffineTransform& operator=(const DomainAffineTransform &rhs);
     template<int M, int N, typename T> __CUDA_HD__
     DomainAffineTransform& operator=(const AffineTransform<M,N,T> &rhs);
+    __CUDA_HD__
+    bool operator==(const DomainAffineTransform &rhs) const; 
+    __CUDA_HD__
+    bool operator!=(const DomainAffineTransform &rhs) const;
   public:
     template<int M, int N, typename T> __CUDA_HD__
     operator AffineTransform<M,N,T>(void) const;
@@ -542,6 +550,10 @@ namespace Legion {
     DomainScaleTransform& operator=(const DomainScaleTransform &rhs);
     template<int M, int N, typename T> __CUDA_HD__
     DomainScaleTransform& operator=(const ScaleTransform<M,N,T> &rhs);
+    __CUDA_HD__
+    bool operator==(const DomainScaleTransform &rhs) const;
+    __CUDA_HD__
+    bool operator!=(const DomainScaleTransform &rhs) const;
   public:
     template<int M, int N, typename T> __CUDA_HD__
     operator ScaleTransform<M,N,T>(void) const;

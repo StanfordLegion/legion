@@ -1586,6 +1586,30 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainTransform::operator==(const DomainTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    if (m != rhs.m)
+      return false;
+    if (n != rhs.n)
+      return false;
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < n; j++)
+        if (matrix[i * n + j] != rhs.matrix[i * n + j])
+          return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainTransform::operator!=(const DomainTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    return !(*this == rhs);
+  }
+
+  //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
   inline DomainTransform::operator Transform<M,N,T>(void) const
   //----------------------------------------------------------------------------
@@ -1725,6 +1749,28 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainAffineTransform::operator==(
+                                         const DomainAffineTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    if (transform != rhs.transform)
+      return false;
+    if (offset != rhs.offset)
+      return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainAffineTransform::operator!=(
+                                         const DomainAffineTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    return !(*this == rhs);
+  }
+
+  //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
   inline DomainAffineTransform::operator AffineTransform<M,N,T>(void) const
   //----------------------------------------------------------------------------
@@ -1816,6 +1862,30 @@ namespace Legion {
     extent = rhs.extent;
     divisor = rhs.divisor;
     return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainScaleTransform::operator==(
+                                          const DomainScaleTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    if (transform != rhs.transform)
+      return false;
+    if (extent != rhs.extent)
+      return false;
+    if (divisor != rhs.divisor)
+      return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainScaleTransform::operator!=(
+                                          const DomainScaleTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    return !(*this == rhs);
   }
 
   //----------------------------------------------------------------------------
