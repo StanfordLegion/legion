@@ -246,15 +246,14 @@ endif
 INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
 # support libraries are OS specific unfortunately
 ifeq ($(shell uname -s),Linux)
-LEGION_LD_FLAGS	+= -lrt -lpthread
+LEGION_LD_FLAGS	+= -lrt -lpthread -latomic
 endif
 ifeq ($(strip $(DARWIN)),1)
 LEGION_LD_FLAGS	+= -lpthread
 endif
 ifeq ($(shell uname -s),FreeBSD)
-LEGION_LD_FLAGS	+= -lexecinfo -lpthread
+LEGION_LD_FLAGS	+= -lexecinfo -lpthread -latomic
 endif
-LEGION_LD_FLAGS += -latomic
 
 USE_HALF ?= 0
 ifeq ($(strip $(USE_HALF)),1)
