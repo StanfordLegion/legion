@@ -1650,11 +1650,12 @@ namespace Realm {
     assert(start_inst != 0);
 
     // special case: if the first instruction is an AffinePiece and there's
-    //  no next instruction, we cache the answer and forget the program
+    //  either no next instruction or the piece we've got covers the entire
+    //  'subrect', we cache the answer and forget the program
     if(start_inst->opcode() == PieceLookup::Opcodes::OP_AFFINE_PIECE) {
       const PieceLookup::AffinePiece<N,T> *ap_inst =
 	static_cast<const PieceLookup::AffinePiece<N,T> *>(start_inst);
-      if(ap_inst->delta() == 0) {
+      if((ap_inst->delta() == 0) || ap_inst->bounds.contains(subrect)) {
 	piece_valid = true;
 	piece_bounds = ap_inst->bounds;
 	piece_base = ap_inst->base + field_offset + subfield_offset;
@@ -1674,8 +1675,9 @@ namespace Realm {
   REALM_CUDA_HD
   FT *MultiAffineAccessor<FT,N,T>::ptr(const Point<N,T>& p) const
   {
-    // have we cached the right piece?
-    if(piece_valid && piece_bounds.contains(p)) {
+    // have we cached the right piece?  (skip bounds check if we're not
+    //  able to do dynamic lookups anyway)
+    if((start_inst == 0) || (piece_valid && piece_bounds.contains(p))) {
       uintptr_t rawptr = piece_base;
       for(int i = 0; i < N; i++) rawptr += p[i] * piece_strides[i];
       return reinterpret_cast<FT *>(rawptr);
@@ -1707,8 +1709,9 @@ namespace Realm {
   REALM_CUDA_HD
   FT *MultiAffineAccessor<FT,N,T>::ptr(const Rect<N,T>& r, size_t strides[N]) const
   {
-    // have we cached the right piece?
-    if(piece_valid && piece_bounds.contains(r)) {
+    // have we cached the right piece?  (skip bounds check if we're not
+    //  able to do dynamic lookups anyway)
+    if((start_inst == 0) || (piece_valid && piece_bounds.contains(r))) {
       uintptr_t rawptr = piece_base;
       for(int i = 0; i < N; i++) rawptr += r.lo[i] * piece_strides[i];
       for(int i = 0; i < N; i++) strides[i] = piece_strides[i];
@@ -1767,8 +1770,8 @@ namespace Realm {
   REALM_CUDA_HD
   FT *MultiAffineAccessor<FT,N,T>::ptr(const Point<N,T>& p)
   {
-    // do we need to do (and cache) a lookup?
-    if(!piece_valid || !piece_bounds.contains(p)) {
+    // do we need to do (and cache) a lookup? (and can we?)
+    if((start_inst != 0) && (!piece_valid || !piece_bounds.contains(p))) {
       const PieceLookup::Instruction *i = start_inst;
       while(true) {
 #ifdef DEBUG_REALM
@@ -1802,8 +1805,8 @@ namespace Realm {
   REALM_CUDA_HD
   FT *MultiAffineAccessor<FT,N,T>::ptr(const Rect<N,T>& r, size_t strides[N])
   {
-    // do we need to do (and cache) a lookup?
-    if(!piece_valid || !piece_bounds.contains(r)) {
+    // do we need to do (and cache) a lookup? (and can we?)
+    if((start_inst != 0) && (!piece_valid || !piece_bounds.contains(r))) {
       const PieceLookup::Instruction *i = start_inst;
       while(true) {
 #ifdef DEBUG_REALM
