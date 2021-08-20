@@ -1,3 +1,19 @@
+These are instructions for reproducing results from the paper *Index
+Launches: Scalable, Flexible Representation of Parallel Task Groups*,
+published in SC'21. The experiments were performed on the [Piz
+Daint](https://www.cscs.ch/computers/piz-daint/) supercomputer at
+[CSCS](https://www.cscs.ch/). For reproduction, accounts can be
+requested via their various [allocation
+schemes](https://www.cscs.ch/user-lab/allocation-schemes/). The steps
+below assume an account has been obtained.
+
+These files are permanently archived at
+[10.5281/zenodo.5164404](https://doi.org/10.5281/zenodo.5164404), and
+are also archived under the tag
+[papers/index-launch-sc21](https://github.com/StanfordLegion/legion/tree/papers/index-launch-sc21)
+in the main Legion repository. The latter is assumed in the
+instructions below, but either method may be used to obtain the files.
+
 # Setup Instructions for Piz Daint
 
 Put the following in `~/.bashrc`:
