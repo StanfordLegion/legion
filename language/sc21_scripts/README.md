@@ -41,7 +41,7 @@ Legion and prepare new runs while the old ones are in the queue. Note
 that if you do rebuild Legion (and want those changes to propagate to
 the runs), you will need to rebuild the run directories as well.
 
-### Analyzing Results
+## Analyzing Results
 
 The runs above will produce output files in directories for each
 app/configuration/node count. These files can be processed
@@ -74,7 +74,7 @@ disable totals), and values to throughput (summarize by AVERAGE). Also
 add a filter on throughput with "Cell is not empty" to hide empty rows
 and columns.
 
-#### Circuit Weak Scaling
+### Circuit Weak Scaling
 
 | system | nodes | procs_per_node | rep | elapsed_time | wires  | time_steps | throughput               |
 |--------|-------|----------------|-----|--------------|--------|------------|--------------------------|
@@ -83,26 +83,26 @@ and columns.
 (This same problem size, and therefore the same formulas, were used
 for the overdecomposed experiment.)
 
-#### Circuit Strong Scaling
+### Circuit Strong Scaling
 
 | system | nodes | procs_per_node | rep | elapsed_time | wires   | time_steps | throughput               |
 |--------|-------|----------------|-----|--------------|---------|------------|--------------------------|
 |    ... |   ... |            ... | ... |          ... | 5120000 |         50 | = F2 * G2 / E2 / 1000000 |
 
 
-#### Stencil Weak Scaling
+### Stencil Weak Scaling
 
 | system | nodes | procs_per_node | rep | elapsed_time | points    | time_steps | throughput                  |
 |--------|-------|----------------|-----|--------------|-----------|------------|-----------------------------|
 |    ... |   ... |            ... | ... |          ... | 900000000 |         50 | = F2 * G2 / E2 / 1000000000 |
 
-#### Stencil Strong Scaling
+### Stencil Strong Scaling
 
 | system | nodes | procs_per_node | rep | elapsed_time | points    | time_steps | throughput                  |
 |--------|-------|----------------|-----|--------------|-----------|------------|-----------------------------|
 |    ... |   ... |            ... | ... |          ... | 900000000 |         50 | = F2 * G2 / E2 / 1000000000 |
 
-### Soleil-X Full Instructions
+## Soleil-X Full Instructions
 
 Building:
 
@@ -149,7 +149,7 @@ for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.idx-dyn-ch
 for n in 1 2; do for r in 0 1 2 3 4; do REP=$r EXECUTABLE=soleil.exec.noidx SCRATCH=$PWD/runs ./run.sh -i ../testcases/ws-pizdaint/hit_dom/weak/$n.json; done; done
 ```
 
-### Soleil-X DOM Instructions
+## Soleil-X DOM Instructions
 
 Building:
 
@@ -180,7 +180,7 @@ for n in 1 2; do EXECUTABLE=dom_host.exec.noidx ./run.sh -i ../testcases/ws-pizd
 
 # Miscellaneous Notes
 
-### Pennant
+## Pennant
 
 Pennant was not used in the final paper due to triggered bugs in the
 Legion runtime. However, if desired, you can follow the instructions
