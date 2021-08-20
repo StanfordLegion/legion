@@ -1,4 +1,4 @@
-# Setup instructions for Piz Daint
+# Setup Instructions for Piz Daint
 
 Put the following in `~/.bashrc`:
 
@@ -25,16 +25,12 @@ cd legion/language
 ./sc21_scripts/setup.sh
 ./sc21_scripts/build_stencil.sh stencil.run1
 ./sc21_scripts/build_circuit.sh circuit.run1
-./sc21_scripts/build_pennant.sh pennant.run1
 cp -r stencil.run1 stencil.run1_strong
 cp -r circuit.run1 circuit.run1_strong
-cp -r pennant.run1 pennant.run1_strong
 (cd stencil.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_stencil.sh; done)
 (cd circuit.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_circuit.sh; done)
-(cd pennant.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_pennant.sh; done)
 (cd stencil.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_stencil_strong.sh; done)
 (cd circuit.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_circuit_strong.sh; done)
-(cd pennant.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_pennant_strong.sh; done)
 ```
 
 Feel free to run larger node counts after the small node count results
@@ -45,16 +41,66 @@ Legion and prepare new runs while the old ones are in the queue. Note
 that if you do rebuild Legion (and want those changes to propagate to
 the runs), you will need to rebuild the run directories as well.
 
-### Pennant SIGILL Workaround
+### Analyzing Results
 
-Pennant gets miscompiled if you don't build it on a compute node:
+The runs above will produce output files in directories for each
+app/configuration/node count. These files can be processed
+automatically to assist in data collection. For example:
 
 ```bash
-salloc --nodes 1 --constraint=gpu --time=01:00:00 --mail-type=ALL -A d108
-srun --cpu-bind none --pty bash
+cd circuit.run1
+../sc21_scripts/parse_results.py
 ```
 
-And then build as normal.
+This command will print (to stdout) a tsv-formatted file, with columns
+for system (really, configuration), nodes, procs_per_node, rep (i.e.,
+repetition number), and elapsed time (in seconds). In most cases this
+file can be directly copied-and-pasted from a terminal emulator into a
+spreadsheet program. For our analysis, we used Google Docs.
+
+The paper reports numbers in units of throughput (cells per second or
+similar). This is straightforward to compute in a spreedsheet based on
+the elapsed time (reported by the script) and problem sizes, numbers
+of timesteps (determined by the run scripts in this directory). The
+relevant spreadsheet formulas are included below for
+convenience. (They assume a spreadsheet program like Google Docs where
+columns are lettered A, B, ... and rows are numbered 1, 2, ....)
+
+Finally a pivot table can be created to average the repetitions with a
+given configuration. In Google Docs this can be done by selecting the
+entire sheet, then going to Data > Pivot Table, and hitting
+Create. Set rows to nodes (disable totals), columns to system (again
+disable totals), and values to throughput (summarize by AVERAGE). Also
+add a filter on throughput with "Cell is not empty" to hide empty rows
+and columns.
+
+#### Circuit Weak Scaling
+
+| system | nodes | procs_per_node | rep | elapsed_time | wires  | time_steps | throughput               |
+|--------|-------|----------------|-----|--------------|--------|------------|--------------------------|
+|    ... |   ... |            ... | ... |          ... | 200000 |         50 | = F2 * G2 / E2 / 1000000 |
+
+(This same problem size, and therefore the same formulas, were used
+for the overdecomposed experiment.)
+
+#### Circuit Strong Scaling
+
+| system | nodes | procs_per_node | rep | elapsed_time | wires   | time_steps | throughput               |
+|--------|-------|----------------|-----|--------------|---------|------------|--------------------------|
+|    ... |   ... |            ... | ... |          ... | 5120000 |         50 | = F2 * G2 / E2 / 1000000 |
+
+
+#### Stencil Weak Scaling
+
+| system | nodes | procs_per_node | rep | elapsed_time | points    | time_steps | throughput                  |
+|--------|-------|----------------|-----|--------------|-----------|------------|-----------------------------|
+|    ... |   ... |            ... | ... |          ... | 900000000 |         50 | = F2 * G2 / E2 / 1000000000 |
+
+#### Stencil Strong Scaling
+
+| system | nodes | procs_per_node | rep | elapsed_time | points    | time_steps | throughput                  |
+|--------|-------|----------------|-----|--------------|-----------|------------|-----------------------------|
+|    ... |   ... |            ... | ... |          ... | 900000000 |         50 | = F2 * G2 / E2 / 1000000000 |
 
 ### Soleil-X Full Instructions
 
@@ -130,4 +176,35 @@ cd soleil-x/src
 for n in 1 2; do EXECUTABLE=dom_host.exec.idx-no-check ./run.sh -i ../testcases/ws-pizdaint/dom/$n.json; done
 for n in 1 2; do EXECUTABLE=dom_host.exec.idx-dyn-check ./run.sh -i ../testcases/ws-pizdaint/dom/$n.json; done
 for n in 1 2; do EXECUTABLE=dom_host.exec.noidx ./run.sh -i ../testcases/ws-pizdaint/dom/$n.json; done
+```
+
+# Miscellaneous Notes
+
+### Pennant
+
+Pennant was not used in the final paper due to triggered bugs in the
+Legion runtime. However, if desired, you can follow the instructions
+below to build/run.
+
+Note: Pennant gets miscompiled if you don't build it on a compute
+node. Use the following commands to get an interactive shell on a
+compute node.
+
+```bash
+salloc --nodes 1 --constraint=gpu --time=01:00:00 --mail-type=ALL -A d108
+srun --cpu-bind none --pty bash
+```
+
+Then build:
+
+```bash
+./sc21_scripts/build_pennant.sh pennant.run1
+cp -r pennant.run1 pennant.run1_strong
+```
+
+Exit the job. Then from the head node, launch the runs as usual:
+
+```bash
+(cd pennant.run1 && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_pennant.sh; done)
+(cd pennant.run1_strong && for n in 1 2 4 8 16; do sbatch --nodes $n sbatch_pennant_strong.sh; done)
 ```
