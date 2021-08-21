@@ -1241,19 +1241,90 @@ namespace Legion {
     };
 
     /**
+     * \class ShardedCollective
+     * This class mirrors the CollectiveMapping class and provides helper
+     * methods for doing collective-style tree broadcasts and reductions
+     * on a unique set of shards.
+     */
+    class ShardedMapping : public Collectable {
+    public:
+      ShardedMapping(const std::set<ShardID> &shards, size_t radix);
+      ShardedMapping(const std::vector<ShardID> &shards, size_t radix);
+    public:
+      inline ShardID operator[](unsigned idx) const
+        { return unique_sorted_shards[idx]; }
+      inline size_t size(void) const { return unique_sorted_shards.size(); }
+      bool operator==(const ShardedMapping &rhs) const;
+      bool operator!=(const ShardedMapping &rhs) const;
+    public:
+      ShardID get_parent(const ShardID origin, const ShardID local) const;
+      void get_children(const ShardID origin, const ShardID local,
+                        std::vector<ShardID> &children) const;
+      size_t count_children(const ShardID origin, const ShardID local) const;
+      bool contains(const ShardID space) const;
+    protected:
+      unsigned find_index(const ShardID space) const;
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
+    protected:
+      std::vector<ShardID> unique_sorted_shards;
+      size_t radix;
+    };
+
+    /**
+     * \class ReplCollectiveInstanceHandler
+     * This is a pure virtual class that handles incoming messages
+     * for the creation of collective instances with control replication
+     */
+    class ReplCollectiveInstanceHandler {
+    public:
+      virtual void handle_collective_instance_message(Deserializer &derez) = 0;
+    };
+
+    /**
      * \class ReplCollectiveInstanceCreator
      * This provides a special implementation of the 
      * CollectiveInstanceCreator class for operations that are being
      * execute in control replicated contexts
      */
     template<typename OP>
-    class ReplCollectiveInstanceCreator : public OP {
+    class ReplCollectiveInstanceCreator : public OP,
+            public ReplCollectiveInstanceHandler {
+    private:
+      enum ReplCollectiveInstanceMessageKind {
+        REPL_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE,
+        REPL_COLLECTIVE_RELEASE_ALLOCATION_PRIVILEGE,
+        REPL_COLLECTIVE_CREATE_PENDING_MANAGERS,
+        REPL_COLLECTIVE_MATCH_INSTANCES,
+        REPL_COLLECTIVE_FINALIZE_COLLECTIVE_INSTANCE,
+        REPL_COLLECTIVE_VERIFY_TOTAL_CALLS,
+        REPL_COLLECTIVE_COUNT_REGION_OCCURRENCES,
+      };
     public:
       ReplCollectiveInstanceCreator(Runtime *rt);
       ReplCollectiveInstanceCreator(
           const ReplCollectiveInstanceCreator<OP> &rhs);
     public:
-      // invoked when all the points have been seen
+      void activate_repl_collective_instance_creator(void);
+      void deactivate_repl_collective_instance_creator(void);
+    protected:
+      // Shard ownership for each operation based on its context
+      // index in the order of operations which should yield a 
+      // relatively balanced load across the shards (hopefully)
+      inline ShardID get_collective_instance_origin_shard(
+                                    ReplicateContext *ctx) const
+        { return this->get_context_index() % ctx->total_shards; }
+    public:
+      // We use this method as our hook to get ourselves registered
+      // with the replicated context as a handler of messages coming
+      // from other shards in the broadcast and reduction trees of
+      // the sharded mapping
+      virtual size_t get_total_collective_instance_points(void);
+      virtual void handle_collective_instance_message(Deserializer &derez);
+    protected:
+      virtual ShardedMapping* get_collective_instance_sharded_mapping(void) = 0;
+    public:
+      // invoked when all the local points have been seen
       virtual void perform_acquire_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   const std::set<Memory> &targets,
@@ -1279,25 +1350,8 @@ namespace Legion {
                                   unsigned total_calls);
       virtual void perform_count_collective_region_occurrences(unsigned index,
                                   std::map<LogicalRegion,size_t> &counts);
-    public:
-      // Called to return the result of the actions
-      virtual void return_create_pending_collective_managers(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  std::map<size_t,
-                                           PendingCollectiveManager*> &managers,
-                                  LayoutConstraintKind bad_kind,
-                                  size_t bad_index, bool bad_regions);
-      virtual void return_match_collective_instances(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  std::map<size_t,
-                                    std::vector<DistributedID> > &instances);
-      virtual void return_finalize_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  bool success);
-      virtual void return_verify_total_collective_instance_calls(
-                                  MappingCallKind mapper_call, unsigned count);
-      virtual void return_count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts);
+    protected:
+      ShardedMapping *volatile shard_mapping;
     };
 
     /**
@@ -1390,6 +1444,8 @@ namespace Legion {
                                                  RtEvent point_mapped);
     protected:
       virtual void finalize_output_regions(void);
+    protected:
+      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1541,6 +1597,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
+    protected:
+      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -1620,6 +1678,8 @@ namespace Legion {
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
+    protected:
+      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   std::vector<ApBarrier> &indirection_bars,
@@ -1859,6 +1919,8 @@ namespace Legion {
       virtual void finalize_mapping(void);
       virtual void select_partition_projection(void);
     protected:
+      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
+    protected:
       void select_sharding_function(void);
     protected:
       ShardingFunction *sharding_function;
@@ -2071,7 +2133,8 @@ namespace Legion {
       virtual DomainPoint get_collective_instance_point(void) const;
       // From collective instance creator
       virtual IndexSpaceNode* get_collective_space(void) const;
-      virtual size_t get_total_collective_instance_points(void);
+    protected:
+      virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
       CollectiveID collective_check;
       IndexSpace shard_space;
@@ -2599,6 +2662,9 @@ namespace Legion {
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
     public:
+      void send_collective_instance_message(ShardID target, Serializer &rez);
+      void handle_collective_instance_message(Deserializer &derez);
+    public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
     public:
@@ -2644,7 +2710,8 @@ namespace Legion {
       static void handle_trace_event_response(Deserializer &derez);
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
-      static void handle_barrier_refresh(Deserializer &derez, Runtime *rt);
+      static void handle_collective_instance_message(Deserializer &derez,
+                                                     Runtime *runtime);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

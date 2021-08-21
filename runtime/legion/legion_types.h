@@ -834,6 +834,7 @@ namespace Legion {
       SEND_REPL_TRACE_UPDATE,
       SEND_REPL_IMPLICIT_REQUEST,
       SEND_REPL_IMPLICIT_RESPONSE,
+      SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -1057,6 +1058,7 @@ namespace Legion {
         "Send Replicate Trace Update",                                \
         "Send Replicate Implicit Request",                            \
         "Send Replicate Implicit Response",                           \
+        "Send Replicate Collective Instance Message",                 \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1895,6 +1897,8 @@ namespace Legion {
     typedef Mapping::ProfilingMeasurementID ProfilingMeasurementID;
 
     // legion_replication.h
+    class ShardedMapping;
+    class ReplCollectiveInstanceHandler;
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;

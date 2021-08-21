@@ -2456,6 +2456,11 @@ namespace Legion {
       IndexSpaceNode* compute_index_attach_launch_spaces(
                                             std::vector<size_t> &shard_sizes);
     public:
+      void register_collective_instance_handler(size_t context_index,
+                                      ReplCollectiveInstanceHandler *handler);
+      void unregister_collective_instance_handler(size_t context_index);
+      void handle_collective_instance_message(Deserializer &derez);
+    public:
       void hash_future(Murmur3Hasher &hasher, 
                        const unsigned safe_level, const Future &future) const;
       static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
@@ -2596,6 +2601,20 @@ namespace Legion {
       std::map<size_t/*template index*/,
         std::vector<PendingTemplateUpdate> > pending_template_updates;
       size_t next_physical_template_index;
+    protected:
+      struct PendingCollectiveInstanceMessage {
+      public:
+        PendingCollectiveInstanceMessage(void)
+          : ptr(NULL), size(0) { }
+        PendingCollectiveInstanceMessage(void *p, size_t s)
+          : ptr(p), size(s) { }
+      public:
+        void *ptr;
+        size_t size;
+      };
+      std::map<size_t,std::vector<PendingCollectiveInstanceMessage> > 
+                                          pending_collective_instance_messages;
+      std::map<size_t,ReplCollectiveInstanceHandler*> collective_inst_handlers;
     protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;

@@ -201,6 +201,978 @@ namespace Legion {
 #endif // DEBUG_LEGION_COLLECTIVES
 
     /////////////////////////////////////////////////////////////
+    // Sharded Mapping 
+    /////////////////////////////////////////////////////////////
+    
+    //--------------------------------------------------------------------------
+    ShardedMapping::ShardedMapping(const std::set<ShardID> &shards, size_t r)
+      : radix(r)
+    //--------------------------------------------------------------------------
+    {
+      unique_sorted_shards.insert(unique_sorted_shards.end(),
+                                  shards.begin(), shards.end());
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping::ShardedMapping(const std::vector<ShardID> &shards, size_t r)
+      : radix(r)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ShardID> unique_shards(shards.begin(), shards.end());
+      unique_sorted_shards.insert(unique_sorted_shards.end(),
+                                  unique_shards.begin(), unique_shards.end());
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedMapping::operator==(const ShardedMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (radix != rhs.radix)
+        return false;
+      if (size() != rhs.size())
+        return false;
+      for (unsigned idx = 0; idx < unique_sorted_shards.size(); idx++)
+        if (unique_sorted_shards[idx] != rhs[idx])
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedMapping::operator!=(const ShardedMapping &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardedMapping::get_parent(const ShardID origin, 
+                                       const ShardID local) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_shards.size());
+      assert(origin_index < unique_sorted_shards.size());
+#endif
+      const unsigned offset = convert_to_offset(local_index, origin_index);
+      const unsigned index = convert_to_index((offset-1) / radix, origin_index);
+      return unique_sorted_shards[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedMapping::get_children(const ShardID origin,
+                      const ShardID local, std::vector<ShardID> &children) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_shards.size());
+      assert(origin_index < unique_sorted_shards.size());
+#endif
+      const unsigned offset = radix * 
+        convert_to_offset(local_index, origin_index);
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < unique_sorted_shards.size())
+        {
+          const unsigned index = convert_to_index(child_offset, origin_index);
+          children.push_back(unique_sorted_shards[index]); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ShardedMapping::count_children(const ShardID origin,
+                                          const ShardID local) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_shards.size());
+      assert(origin_index < unique_sorted_shards.size());
+#endif
+      const unsigned offset = radix * 
+        convert_to_offset(local_index, origin_index);
+      size_t child_count = 0;
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < unique_sorted_shards.size())
+          child_count++;
+      }
+      return child_count;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedMapping::contains(const ShardID shard) const
+    //--------------------------------------------------------------------------
+    {
+      return (find_index(shard) < unique_sorted_shards.size()); 
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardedMapping::find_index(const ShardID shard) const
+    //--------------------------------------------------------------------------
+    {
+      // Binary search, will be fast
+      unsigned first = 0;
+      unsigned last = unique_sorted_shards.size() - 1;
+      unsigned mid = 0;
+      while (first <= last)
+      {
+        mid = (first + last) / 2;
+        const AddressSpaceID midval = unique_sorted_shards[mid];
+        if (shard == midval)
+          return mid;
+        else if (shard < midval)
+          last = mid - 1;
+        else if (midval < shard)
+          first = mid + 1;
+        else
+          break;
+      }
+      return unique_sorted_shards.size();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardedMapping::convert_to_offset(unsigned index, 
+                                               unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < unique_sorted_shards.size());
+      assert(origin_index < unique_sorted_shards.size());
+#endif
+      if (index < origin_index)
+      {
+        // Modulus arithmetic here
+        return ((index + unique_sorted_shards.size()) - origin_index);
+      }
+      else
+        return (index - origin_index);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardedMapping::convert_to_index(unsigned offset,
+                                              unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(offset < unique_sorted_shards.size());
+      assert(origin_index < unique_sorted_shards.size());
+#endif
+      unsigned result = origin_index + offset;
+      if (result >= unique_sorted_shards.size())
+        result -= unique_sorted_shards.size();
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Collective Instance Creator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    ReplCollectiveInstanceCreator<OP>::ReplCollectiveInstanceCreator(Runtime *r)
+      : OP(r), shard_mapping(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    ReplCollectiveInstanceCreator<OP>::ReplCollectiveInstanceCreator(
+                                   const ReplCollectiveInstanceCreator<OP> &rhs)
+      : OP(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                                 activate_repl_collective_instance_creator(void)
+    //--------------------------------------------------------------------------
+    {
+      shard_mapping = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                               deactivate_repl_collective_instance_creator(void)
+    //--------------------------------------------------------------------------
+    {
+      if (shard_mapping != NULL)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(this->get_context());
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx =
+          static_cast<ReplicateContext*>(this->get_context());
+#endif
+        repl_ctx->unregister_collective_instance_handler(
+                              this->get_context_index());
+        if (shard_mapping->remove_reference())
+          delete shard_mapping;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    size_t ReplCollectiveInstanceCreator<OP>::
+                                      get_total_collective_instance_points(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we've already received got our sharded mapping
+      // If not then we need to get it and register ourselves so that we
+      // can receive any incoming messages
+      bool register_with_manager = false;
+      if (shard_mapping == NULL)
+      {
+        ShardedMapping *mapping = get_collective_instance_sharded_mapping();
+#ifdef DEBUG_LEGION
+        // We should be included in this if we've received this call
+        assert(mapping->contains(repl_ctx->owner_shard->shard_id));
+#endif
+        AutoLock o_lock(this->op_lock);
+        if (shard_mapping == NULL)
+        {
+          // Reference comes with this the mapping
+          shard_mapping = mapping;
+          register_with_manager = true;
+        }
+        else if (mapping->remove_reference())
+          delete mapping;
+      }
+      if (register_with_manager)
+        repl_ctx->register_collective_instance_handler(
+                        this->get_context_index(), this);
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      // Figure out how many local points we have plus how ever
+      // many messages we are expecting from "children" shards
+      return OP::get_total_collective_instance_points() +
+                shard_mapping->count_children(origin_shard,
+                          repl_ctx->owner_shard->shard_id);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                perform_acquire_collective_allocation_privileges(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    const std::set<Memory> &targets,
+                                    RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        // Package this up and send it off to the parent shard
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE);
+        rez.serialize(mapper_call);
+        rez.serialize(index);
+        rez.serialize<size_t>(targets.size());
+        for (std::set<Memory>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
+          rez.serialize(*it);
+        rez.serialize(to_trigger);
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez); 
+      }
+      else // we're the origin shard so we do the base call
+        OP::perform_acquire_collective_allocation_privileges(mapper_call,
+                                              index, targets, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                perform_release_collective_allocation_privileges(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    const std::set<Memory> &targets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_RELEASE_ALLOCATION_PRIVILEGE);
+        rez.serialize(mapper_call);
+        rez.serialize(index);
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez);
+      }
+      else
+        OP::perform_release_collective_allocation_privileges(mapper_call,
+                                                             index, targets);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                perform_create_pending_collective_managers(
+                                  MappingCallKind mapper_call, unsigned index, 
+                                  const std::map<size_t,
+                                    typename OP::PendingCollective> &instances,
+                                  LayoutConstraintKind bad_constraint,
+                                  size_t bad_index, bool bad_regions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_CREATE_PENDING_MANAGERS);
+        rez.serialize(mapper_call);
+        rez.serialize(index);
+        rez.serialize<bool>(true/*request*/);
+        rez.serialize<size_t>(instances.size());
+        for (typename std::map<size_t,typename OP::PendingCollective>::
+              const_iterator pit = instances.begin();
+              pit != instances.end(); pit++)
+        {
+          rez.serialize(pit->first);
+          pit->second.constraints.serialize(rez);
+          rez.serialize<size_t>(pit->second.regions.size());
+          for (std::vector<LogicalRegion>::const_iterator it = 
+                pit->second.regions.begin(); it !=
+                pit->second.regions.end(); it++)
+            rez.serialize(*it);
+          rez.serialize<size_t>(pit->second.memory_spaces.size());
+          for (std::set<AddressSpaceID>::const_iterator it =
+                pit->second.memory_spaces.begin(); it !=
+                pit->second.memory_spaces.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(pit->second.total_points);
+        }
+        rez.serialize(bad_constraint);
+        rez.serialize(bad_index);
+        rez.serialize<bool>(bad_regions);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez);
+      }
+      else
+        OP::perform_create_pending_collective_managers(mapper_call, index,
+                        instances, bad_constraint, bad_index, bad_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                        perform_match_collective_instances(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    std::map<size_t,
+                                      std::vector<DistributedID> > &instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_MATCH_INSTANCES);
+        rez.serialize(mapper_call);
+        rez.serialize(index);
+        rez.serialize<bool>(true/*request*/);
+        rez.serialize<size_t>(instances.size());
+        for (std::map<size_t,std::vector<DistributedID> >::iterator it =
+              instances.begin(); it != instances.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize<size_t>(it->second.size());
+          for (std::vector<DistributedID>::const_iterator dit =
+                it->second.begin(); dit != it->second.end(); dit++)
+            rez.serialize(*dit);
+        }
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez);
+      }
+      else
+        OP::perform_match_collective_instances(mapper_call, index, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                perform_finalize_pending_collective_instance(
+                      MappingCallKind mapper_call, unsigned index, bool success)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_FINALIZE_COLLECTIVE_INSTANCE);
+        rez.serialize(mapper_call);
+        rez.serialize(index);
+        rez.serialize<bool>(true/*request*/);
+        rez.serialize<bool>(success);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez);
+      }
+      else
+        OP::perform_finalize_pending_collective_instance(mapper_call,
+                                                         index, success);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                     perform_verify_total_collective_instance_calls( 
+                              MappingCallKind mapper_call, unsigned total_calls)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_VERIFY_TOTAL_CALLS);
+        rez.serialize(mapper_call);
+        rez.serialize<bool>(true/*request*/);
+        rez.serialize(total_calls);
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez);
+      }
+      else
+        OP::perform_verify_total_collective_instance_calls(mapper_call,
+                                                           total_calls);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+              perform_count_collective_region_occurrences(unsigned index,
+                                         std::map<LogicalRegion,size_t> &counts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      // Check to see if we ware the owner shard or not
+      ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
+      if (origin_shard != repl_ctx->owner_shard->shard_id)
+      {
+        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
+                                            repl_ctx->owner_shard->shard_id);
+        Serializer rez;
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(parent_shard);
+        rez.serialize<size_t>(this->get_context_index());
+        rez.serialize(REPL_COLLECTIVE_COUNT_REGION_OCCURRENCES);
+        rez.serialize(index);
+        rez.serialize<bool>(true); // request
+        rez.serialize<size_t>(counts.size());
+        for (std::map<LogicalRegion,size_t>::const_iterator it =
+              counts.begin(); it != counts.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize(repl_ctx->owner_shard->shard_id);
+
+        repl_ctx->shard_manager->send_collective_instance_message(
+                                                parent_shard, rez);
+      }
+      else
+        OP::perform_count_collective_region_occurrences(index, counts);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveInstanceCreator<OP>::
+                         handle_collective_instance_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(this->get_context());
+      assert(repl_ctx != NULL);
+      assert(shard_mapping != NULL);
+#else
+      ReplicateContext *repl_ctx =
+        static_cast<ReplicateContext*>(this->get_context());
+#endif
+      ReplCollectiveInstanceMessageKind message;
+      derez.deserialize(message);
+      switch (message)
+      {
+        case REPL_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE:
+          {
+            MappingCallKind mapper_call;
+            derez.deserialize(mapper_call);
+            unsigned index;
+            derez.deserialize(index);
+            size_t num_targets;
+            derez.deserialize(num_targets);
+            std::set<Memory> targets;
+            for (unsigned idx = 0; idx < num_targets; idx++)
+            {
+              Memory target;
+              derez.deserialize(target);
+              targets.insert(target);
+            }
+            RtUserEvent to_trigger;
+            derez.deserialize(to_trigger);
+            const RtEvent ready = 
+              this->acquire_collective_allocation_privileges(mapper_call, index,
+                  targets, 1/*only one "point" for all upstream shards*/);
+            Runtime::trigger_event(to_trigger, ready);
+            break;
+          }
+        case REPL_COLLECTIVE_RELEASE_ALLOCATION_PRIVILEGE:
+          {
+            MappingCallKind mapper_call;
+            derez.deserialize(mapper_call);
+            unsigned index;
+            derez.deserialize(index);
+            this->release_collective_allocation_privileges(mapper_call, index);
+            break;
+          }
+        case REPL_COLLECTIVE_CREATE_PENDING_MANAGERS:
+          {
+            MappingCallKind mapper_call;
+            derez.deserialize(mapper_call);
+            unsigned index;
+            derez.deserialize(index);
+            bool request;
+            derez.deserialize<bool>(request);
+            if (request)
+            {
+              size_t num_pending;
+              derez.deserialize(num_pending);
+              std::map<size_t,typename OP::PendingCollective> instances;
+              std::vector<LayoutConstraintSet> constraints(num_pending);
+              for (unsigned idx = 0; idx < num_pending; idx++)
+              {
+                size_t collective_tag;
+                derez.deserialize(collective_tag);
+                constraints[idx].deserialize(derez);
+                size_t num_regions;
+                derez.deserialize(num_regions);
+                std::vector<LogicalRegion> regions(num_regions);
+                for (unsigned idx2 = 0; idx2 < num_regions; idx2++)
+                  derez.deserialize(regions[idx2]);
+                size_t num_spaces;
+                derez.deserialize(num_spaces);
+                std::set<AddressSpaceID> memory_spaces;
+                for (unsigned idx2 = 0; idx2 < num_spaces; idx2++)
+                {
+                  AddressSpaceID space;
+                  derez.deserialize(space);
+                  memory_spaces.insert(space);
+                }
+                size_t total_points;
+                derez.deserialize(total_points);
+
+                typename std::map<size_t,typename OP::PendingCollective>::
+                  iterator it = instances.insert(
+                      std::pair<size_t,typename OP::PendingCollective>(
+                        collective_tag, typename OP::PendingCollective(
+                          constraints[idx], regions, total_points))).first;
+                memory_spaces.swap(it->second.memory_spaces);
+              }
+              LayoutConstraintKind bad_constraint;
+              derez.deserialize(bad_constraint);
+              size_t bad_index;
+              derez.deserialize(bad_index);
+              bool bad_regions;
+              derez.deserialize<bool>(bad_regions);
+              ShardID source_shard;
+              derez.deserialize(source_shard);
+
+              std::map<size_t,PendingCollectiveManager*> collectives;
+              this->create_pending_collective_managers(mapper_call, index,
+                  instances, collectives, 1/*only one point*/,
+                  bad_constraint, bad_index, bad_regions);
+
+              // Send the response back
+              Serializer rez;
+              rez.serialize(repl_ctx->shard_manager->repl_id);
+              rez.serialize(source_shard);
+              rez.serialize<size_t>(this->get_context_index());
+              rez.serialize(message);
+              rez.serialize(mapper_call);
+              rez.serialize(index);
+              rez.serialize<bool>(false); // not a request but a return 
+              rez.serialize<size_t>(collectives.size());
+              for (std::map<size_t,PendingCollectiveManager*>::const_iterator
+                    it = collectives.begin(); it != collectives.end(); it++)
+              {
+                rez.serialize(it->first);
+                if (it->second != NULL)
+                {
+                  it->second->pack(rez);
+                  if (it->second->remove_reference())
+                    delete it->second;
+                }
+                else
+                  rez.serialize<DistributedID>(0);
+              }
+              rez.serialize(bad_constraint);
+              rez.serialize(bad_index);
+              rez.serialize<bool>(bad_regions);
+              repl_ctx->shard_manager->send_collective_instance_message(
+                                                      source_shard, rez); 
+            }
+            else
+            {
+              size_t num_collectives;
+              derez.deserialize(num_collectives);
+              std::map<size_t,PendingCollectiveManager*> collectives;
+              for (unsigned idx = 0; idx < num_collectives; idx++)
+              {
+                size_t collective_tag;
+                derez.deserialize(collective_tag);
+                PendingCollectiveManager *manager =
+                  PendingCollectiveManager::unpack(derez);
+                if (manager != NULL)
+                  manager->add_reference();
+                collectives[collective_tag] = manager;
+              }
+              LayoutConstraintKind bad_constraint;
+              derez.deserialize(bad_constraint);
+              size_t bad_index;
+              derez.deserialize(bad_index);
+              bool bad_regions;
+              derez.deserialize<bool>(bad_regions);
+              this->return_create_pending_collective_managers(mapper_call,
+                  index, collectives, bad_constraint, bad_index, bad_regions);
+            }
+            break;
+          }
+        case REPL_COLLECTIVE_MATCH_INSTANCES:
+          {
+            MappingCallKind mapper_call;
+            derez.deserialize(mapper_call);
+            unsigned index;
+            derez.deserialize(index);
+            bool request;
+            derez.deserialize<bool>(request);
+            if (request)
+            {
+              size_t num_tags;
+              derez.deserialize(num_tags);
+              std::map<size_t,std::vector<DistributedID> > instances;
+              for (unsigned idx1 = 0; idx1 < num_tags; idx1++)
+              {
+                size_t collective_tag;
+                derez.deserialize(collective_tag);
+                size_t num_instances;
+                derez.deserialize(num_instances);
+                std::vector<DistributedID> &insts = instances[collective_tag];
+                insts.resize(num_instances);
+                for (unsigned idx2 = 0; idx2 < num_instances; idx2++)
+                  derez.deserialize(insts[idx2]);
+              }
+              ShardID source_shard;
+              derez.deserialize(source_shard);
+
+              this->match_collective_instances(mapper_call, index,
+                                               instances, 1/*points*/);
+              Serializer rez;
+              rez.serialize(repl_ctx->shard_manager->repl_id);
+              rez.serialize(source_shard);
+              rez.serialize<size_t>(this->get_context_index());
+              rez.serialize(message);
+              rez.serialize(mapper_call);
+              rez.serialize(index);
+              rez.serialize<bool>(false); // not a request but a return
+              rez.serialize(instances.size());
+              for (std::map<size_t,std::vector<DistributedID> >::iterator it =
+                    instances.begin(); it != instances.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize<size_t>(it->second.size());
+                for (std::vector<DistributedID>::const_iterator dit =
+                      it->second.begin(); dit != it->second.end(); dit++)
+                  rez.serialize(*dit);
+              }
+              repl_ctx->shard_manager->send_collective_instance_message(
+                                                      source_shard, rez);
+            }
+            else
+            {
+              size_t num_tags;
+              derez.deserialize(num_tags);
+              std::map<size_t,std::vector<DistributedID> > instances;
+              for (unsigned idx1 = 0; idx1 < num_tags; idx1++)
+              {
+                size_t collective_tag;
+                derez.deserialize(collective_tag);
+                size_t num_instances;
+                derez.deserialize(num_instances);
+                std::vector<DistributedID> &insts = instances[collective_tag];
+                insts.resize(num_instances);
+                for (unsigned idx2 = 0; idx2 < num_instances; idx2++)
+                  derez.deserialize(insts[idx2]);
+              }
+              this->return_match_collective_instances(mapper_call, index,
+                                                      instances);
+            }
+            break;
+          }
+        case REPL_COLLECTIVE_FINALIZE_COLLECTIVE_INSTANCE:
+          {
+            MappingCallKind mapper_call;
+            derez.deserialize(mapper_call);
+            unsigned index;
+            derez.deserialize(index);
+            bool request;
+            derez.deserialize<bool>(request);
+            if (request)
+            {
+              bool success;
+              derez.deserialize<bool>(success);
+              ShardID source_shard;
+              derez.deserialize(source_shard);
+
+              const bool result =
+                this->finalize_pending_collective_instance(mapper_call, index,
+                    success, 1/*only one point is being passed in here*/);
+
+              Serializer rez;
+              rez.serialize(repl_ctx->shard_manager->repl_id);
+              rez.serialize(source_shard);
+              rez.serialize<size_t>(this->get_context_index());
+              rez.serialize(message);
+              rez.serialize(mapper_call);
+              rez.serialize(index);
+              rez.serialize<bool>(false); // not a request but a return
+              rez.serialize<bool>(result);
+
+              repl_ctx->shard_manager->send_collective_instance_message(
+                                                      source_shard, rez);
+            }
+            else
+            {
+              bool success;
+              derez.deserialize<bool>(success);
+              this->return_finalize_pending_collective_instance(mapper_call,
+                                                                index, success);
+            }
+            break;
+          }
+        case REPL_COLLECTIVE_VERIFY_TOTAL_CALLS:
+          {
+            MappingCallKind mapper_call;
+            derez.deserialize(mapper_call);
+            bool request;
+            derez.deserialize<bool>(request);
+            if (request)
+            {
+              unsigned total_calls;
+              derez.deserialize(total_calls);
+              ShardID source_shard;
+              derez.deserialize(source_shard);
+
+              const unsigned result =
+                this->verify_total_collective_instance_calls(mapper_call, total_calls,
+                    1/*only one point is returned in this case*/);
+
+              Serializer rez;
+              rez.serialize(repl_ctx->shard_manager->repl_id);
+              rez.serialize(source_shard);
+              rez.serialize<size_t>(this->get_context_index());
+              rez.serialize(message);
+              rez.serialize(mapper_call);
+              rez.serialize<bool>(false); // not a request but a return
+              rez.serialize(result);
+
+              repl_ctx->shard_manager->send_collective_instance_message(
+                                                      source_shard, rez);
+            }
+            else
+            {
+              unsigned total_calls;
+              derez.deserialize(total_calls);
+              this->return_verify_total_collective_instance_calls(mapper_call,
+                                                                  total_calls);
+            }
+            break;
+          }
+        case REPL_COLLECTIVE_COUNT_REGION_OCCURRENCES:
+          {
+            unsigned index;
+            derez.deserialize(index);
+            bool request;
+            derez.deserialize<bool>(request);
+            if (request)
+            {
+              size_t num_counts;
+              derez.deserialize(num_counts);
+              std::map<LogicalRegion,size_t> counts;
+              for (unsigned idx = 0; idx < num_counts; idx++)
+              {
+                LogicalRegion region;
+                derez.deserialize(region);
+                derez.deserialize(counts[region]);
+              }
+              ShardID source_shard;
+              derez.deserialize(source_shard);
+
+              this->count_collective_region_occurrences(index, counts,
+                  1/*only one point returns in this case*/);
+
+              Serializer rez;
+              rez.serialize(repl_ctx->shard_manager->repl_id);
+              rez.serialize(source_shard);
+              rez.serialize<size_t>(this->get_context_index());
+              rez.serialize(message);
+              rez.serialize(index);
+              rez.serialize<bool>(false); // this is not a request
+              rez.serialize<size_t>(counts.size());
+              for (std::map<LogicalRegion,size_t>::const_iterator it =
+                    counts.begin(); it != counts.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+
+              repl_ctx->shard_manager->send_collective_instance_message(
+                                                      source_shard, rez);
+            }
+            else
+            {
+              size_t num_counts;
+              derez.deserialize(num_counts);
+              std::map<LogicalRegion,size_t> counts;
+              for (unsigned idx = 0; idx < num_counts; idx++)
+              {
+                LogicalRegion region;
+                derez.deserialize(region);
+                derez.deserialize(counts[region]);
+              }
+              this->return_count_collective_region_occurrences(index, counts);
+            }
+            break;
+          }
+        default:
+          assert(false);
+      }
+    } 
+
+    /////////////////////////////////////////////////////////////
     // Repl Individual Task 
     /////////////////////////////////////////////////////////////
 
@@ -593,6 +1565,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_index_task();
+      activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       serdez_redop_collective = NULL;
@@ -607,6 +1580,7 @@ namespace Legion {
     void ReplIndexTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_repl_collective_instance_creator();
       deactivate_index_task();
       if (serdez_redop_collective != NULL)
       {
@@ -1266,6 +2240,21 @@ namespace Legion {
                           runtime->address_space, shard_mapping))
           delete parent;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping* ReplIndexTask::get_collective_instance_sharded_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return sharding_function->find_sharded_mapping(launch_space,
+          sharding_space, repl_ctx->get_shard_collective_radix());
     }
 
     /////////////////////////////////////////////////////////////
@@ -2301,6 +3290,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_index_fill();
+      activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       mapper = NULL;
@@ -2317,6 +3307,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
+      deactivate_repl_collective_instance_creator();
       deactivate_index_fill();
       runtime->free_repl_index_fill_op(this);
     }
@@ -2482,6 +3473,22 @@ namespace Legion {
     void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping* 
+                  ReplIndexFillOp::get_collective_instance_sharded_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return sharding_function->find_sharded_mapping(launch_space,
+          sharding_space, repl_ctx->get_shard_collective_radix());
     }
 
     /////////////////////////////////////////////////////////////
@@ -2745,6 +3752,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_index_copy();
+      activate_repl_collective_instance_creator();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
 #ifdef DEBUG_LEGION
@@ -2775,6 +3783,7 @@ namespace Legion {
           delete dst_collectives[idx];
         dst_collectives.clear();
       }
+      deactivate_repl_collective_instance_creator();
       deactivate_index_copy();
       runtime->free_repl_index_copy_op(this);
     }
@@ -3185,6 +4194,22 @@ namespace Legion {
         records = dst_records[index];
       return std::pair<ApEvent,ApEvent>(
           pre_indirection_barriers[index], post_indirection_barriers[index]);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping*
+                  ReplIndexCopyOp::get_collective_instance_sharded_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return sharding_function->find_sharded_mapping(launch_space,
+          sharding_space, repl_ctx->get_shard_collective_radix());
     }
 
     //--------------------------------------------------------------------------
@@ -4110,6 +5135,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_dependent_op();
+      activate_repl_collective_instance_creator();
       sharding_function = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -4126,6 +5152,23 @@ namespace Legion {
         delete sharding_collective;
 #endif
       runtime->free_repl_dependent_partition_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping* 
+         ReplDependentPartitionOp::get_collective_instance_sharded_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // No special sharding domain here
+      return sharding_function->find_sharded_mapping(launch_space,
+          launch_space->handle, repl_ctx->get_shard_collective_radix());
     }
 
     //--------------------------------------------------------------------------
@@ -6262,9 +7305,30 @@ namespace Legion {
     void ReplMapOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_map_op();
       deactivate_collective_instance_creator();
+      deactivate_map_op();
       runtime->free_repl_map_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping* ReplMapOp::get_collective_instance_sharded_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // We know that there is exactly one point for each shard so therefore
+      // all the shards have at least one point
+      std::vector<ShardID> all_shards(repl_ctx->total_shards);
+      for (ShardID sid = 0; sid < all_shards.size(); sid++)
+        all_shards[sid] = sid;
+      ShardedMapping *mapping = new ShardedMapping(all_shards, 
+                      repl_ctx->get_shard_collective_radix());
+      mapping->add_reference();
+      return mapping;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9751,6 +10815,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_collective_instance_message(ShardID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        ReplicationID local_repl;
+        derez.deserialize(local_repl);     
+        handle_collective_instance_message(derez);
+      }
+      else
+        runtime->send_control_replicate_collective_instance_message(
+                                                  target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_collective_instance_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_collective_instance_message(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::broadcast_resource_update(ShardTask *source, 
                              Serializer &rez, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -10252,6 +11359,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_trace_update(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_collective_instance_message(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_collective_instance_message(derez);
     }
 
     //--------------------------------------------------------------------------

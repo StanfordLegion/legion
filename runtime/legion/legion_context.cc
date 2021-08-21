@@ -11867,6 +11867,80 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::register_collective_instance_handler(
+                   size_t context_index, ReplCollectiveInstanceHandler *handler)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<PendingCollectiveInstanceMessage> to_handle;
+      {
+        AutoLock r_lock(replication_lock);
+#ifdef DEBUG_LEGION
+        assert(collective_inst_handlers.find(context_index) == 
+                collective_inst_handlers.end());
+#endif
+        collective_inst_handlers[context_index] = handler;
+        std::map<size_t,
+          std::vector<PendingCollectiveInstanceMessage> >::iterator finder =
+            pending_collective_instance_messages.find(context_index);
+        if (finder != pending_collective_instance_messages.end())
+        {
+          to_handle.swap(finder->second);
+          pending_collective_instance_messages.erase(finder);
+        }
+        else
+          return;
+      }
+      for (std::vector<PendingCollectiveInstanceMessage>::const_iterator it =
+            to_handle.begin(); it != to_handle.end(); it++)
+      {
+        Deserializer derez(it->ptr, it->size);
+        handler->handle_collective_instance_message(derez);
+        free(it->ptr);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::unregister_collective_instance_handler(
+                                                           size_t context_index)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(replication_lock);
+      std::map<size_t,ReplCollectiveInstanceHandler*>::iterator finder =
+        collective_inst_handlers.find(context_index);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_inst_handlers.end());
+#endif
+      collective_inst_handlers.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_collective_instance_message(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t context_index;
+      derez.deserialize(context_index);
+      ReplCollectiveInstanceHandler *handler = NULL;
+      {
+        std::map<size_t,ReplCollectiveInstanceHandler*>::const_iterator finder =
+          collective_inst_handlers.find(context_index);
+        if (finder == collective_inst_handlers.end())
+        {
+          const size_t remaining_bytes = derez.get_remaining_bytes();
+          void *buffer = malloc(remaining_bytes);
+          memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+          derez.advance_pointer(remaining_bytes);
+          pending_collective_instance_messages[context_index].emplace_back(
+              PendingCollectiveInstanceMessage(buffer, remaining_bytes));
+          return;
+        }
+        else
+          handler = finder->second;
+      }
+      handler->handle_collective_instance_message(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::hash_future(Murmur3Hasher &hasher,
                           const unsigned safe_level, const Future &future) const
     //--------------------------------------------------------------------------

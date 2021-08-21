@@ -18337,6 +18337,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent DependentPartitionOp::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!this->points.empty());
+#endif
+      return CollectiveInstanceCreator<Operation>::
+        acquire_collective_allocation_privileges(mapper_call, index,
+                                                 targets, this->points.size());
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::release_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, size_t points)
     //--------------------------------------------------------------------------
@@ -18389,6 +18403,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::match_collective_instances(
+                                    MappingCallKind mapper_call, unsigned index,
+                                    std::map<size_t,
+                                       std::vector<DistributedID> > &instances,
+                                    size_t points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!this->points.empty());
+#endif
+      return CollectiveInstanceCreator<Operation>::match_collective_instances(
+                                        mapper_call, index, instances, points);
+    }
+
+    //--------------------------------------------------------------------------
     bool DependentPartitionOp::finalize_pending_collective_instance(
                                       MappingCallKind call_kind, unsigned index,
                                       bool success, size_t points)
@@ -18425,6 +18454,18 @@ namespace Legion {
       else
         return CollectiveInstanceCreator<Operation>::
                           count_collective_region_occurrences(index, region);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::count_collective_region_occurrences(
+          unsigned index, std::map<LogicalRegion,size_t> &counts, size_t points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!this->points.empty());
+#endif
+      return CollectiveInstanceCreator<Operation>::
+                count_collective_region_occurrences(index, counts, points);
     }
 
     //--------------------------------------------------------------------------

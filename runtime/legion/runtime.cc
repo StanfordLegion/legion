@@ -12531,6 +12531,12 @@ namespace Legion {
               runtime->handle_control_replicate_implicit_response(derez);
               break;
             }
+          case SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE:
+            {
+              runtime->handle_control_replicate_collective_instance_message(
+                                                                      derez);
+              break;
+            }
           case SEND_MAPPER_MESSAGE:
             {
               runtime->handle_mapper_message(derez);
@@ -16243,6 +16249,41 @@ namespace Legion {
       AutoLock s_lock(sharding_lock);
       shard_index_spaces[key] = result;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedMapping* ShardingFunction::find_sharded_mapping(
+               IndexSpaceNode *full_space, IndexSpace shard_space, size_t radix)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<IndexSpace,IndexSpace> key(full_space->handle, shard_space); 
+      {
+        AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
+        std::map<std::pair<IndexSpace,IndexSpace>,ShardedMapping*>::
+          const_iterator finder = shard_mappings.find(key);
+        if (finder != shard_mappings.end())
+        {
+          finder->second->add_reference();
+          return finder->second;
+        }
+      }
+      std::set<ShardID> range_shards;
+      full_space->compute_range_shards(this, shard_space, range_shards);
+      AutoLock s_lock(sharding_lock);
+      std::map<std::pair<IndexSpace,IndexSpace>,ShardedMapping*>::
+        const_iterator finder = shard_mappings.find(key);
+      if (finder != shard_mappings.end())
+      {
+        finder->second->add_reference();
+        return finder->second;
+      }
+      else
+      {
+        ShardedMapping *mapping = new ShardedMapping(range_shards, radix);
+        mapping->add_reference(2/*two references*/);
+        shard_mappings[key] = mapping;
+        return mapping;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -22456,6 +22497,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_collective_instance_message(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REPL_COLLECTIVE_INSTANCE_MESSAGE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24436,6 +24487,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ImplicitShardManager::handle_remote_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_collective_instance_message(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_collective_instance_message(derez, this);
     }
 
     //--------------------------------------------------------------------------

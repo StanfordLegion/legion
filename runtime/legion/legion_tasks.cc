@@ -8091,6 +8091,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::handle_collective_instance_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->handle_collective_instance_message(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardTask::handle_resource_update(Deserializer &derez,
                                            std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
@@ -12524,8 +12540,6 @@ namespace Legion {
           {
             unsigned index;
             derez.deserialize(index);
-            size_t collective_tag;
-            derez.deserialize(collective_tag);
             size_t num_tags;
             derez.deserialize(num_tags);
             std::map<size_t,std::vector<DistributedID> > instances;

@@ -2345,6 +2345,9 @@ namespace Legion {
       ShardID find_owner(const DomainPoint &point,const Domain &sharding_space);
       IndexSpace find_shard_space(ShardID shard, IndexSpaceNode *full_space,
                                   IndexSpace sharding_space);
+      ShardedMapping* find_sharded_mapping(IndexSpaceNode *full_space,
+                                           IndexSpace sharding_space,
+                                           size_t radix);
     public:
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
@@ -2353,6 +2356,7 @@ namespace Legion {
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;
+      std::map<std::pair<IndexSpace,IndexSpace>,ShardedMapping*> shard_mappings;
     };
 
     /**
@@ -3172,6 +3176,8 @@ namespace Legion {
                                                    Serializer &rez);
       void send_control_replicate_implicit_response(AddressSpaceID target,
                                                     Serializer &rez);
+      void send_control_replicate_collective_instance_message(
+                                  AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -3598,6 +3604,8 @@ namespace Legion {
       void handle_control_replicate_implicit_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
+      void handle_control_replicate_collective_instance_message(
+                                                      Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);

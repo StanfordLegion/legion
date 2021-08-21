@@ -830,7 +830,13 @@ namespace Legion {
       void deactivate_collective_instance_creator(void);
     public:
       virtual IndexSpaceNode* get_collective_space(void) const = 0;
-      virtual size_t get_total_collective_instance_points(void) = 0;
+      // In theory this should be a pure virtual method that is overridden by
+      // all derived classes, but there is the special case of ReplMapOp where
+      // the base MapOp class does not inherit from this class so we provide
+      // the default implementation to return a single point, which is the
+      // case for ReplMapOp. All other classes override this method and 
+      // therefore will never actually hit this implementation
+      virtual size_t get_total_collective_instance_points(void) { return 1; }
     public:
       // For collective instances
       virtual RtEvent acquire_collective_allocation_privileges(
@@ -908,22 +914,22 @@ namespace Legion {
                                   std::map<LogicalRegion,size_t> &counts);
     public:
       // Called to return the result of the actions
-      virtual void return_create_pending_collective_managers(
+      void return_create_pending_collective_managers(
                                   MappingCallKind mapper_call, unsigned index,
                                   std::map<size_t,
                                            PendingCollectiveManager*> &managers,
                                   LayoutConstraintKind bad_kind,
                                   size_t bad_index, bool bad_regions);
-      virtual void return_match_collective_instances(
+      void return_match_collective_instances(
                                   MappingCallKind mapper_call, unsigned index,
                                   std::map<size_t,
                                     std::vector<DistributedID> > &instances);
-      virtual void return_finalize_pending_collective_instance(
+      void return_finalize_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   bool success);
-      virtual void return_verify_total_collective_instance_calls(
+      void return_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call, unsigned count); 
-      virtual void return_count_collective_region_occurrences(unsigned index,
+      void return_count_collective_region_occurrences(unsigned index,
                                   std::map<LogicalRegion,size_t> &counts);
     private:
       typedef std::pair<MappingCallKind,unsigned> InstanceKey;
@@ -3582,6 +3588,10 @@ namespace Legion {
       virtual RtEvent acquire_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   Memory target);
+      virtual RtEvent acquire_collective_allocation_privileges(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  const std::set<Memory> &targets,
+                                  size_t points = 1);
       virtual void release_collective_allocation_privileges(
                                   MappingCallKind mapper_call, unsigned index,
                                   size_t points = 1);
@@ -3597,6 +3607,11 @@ namespace Legion {
                                   MappingCallKind mapper_call,
                                   unsigned index, size_t collective_tag,
                                   std::vector<MappingInstance> &instances);
+      virtual void match_collective_instances(
+                                  MappingCallKind mapper_call, unsigned index,
+                                  std::map<size_t,
+                                     std::vector<DistributedID> > &instances,
+                                  size_t points);
       virtual bool finalize_pending_collective_instance(
                                   MappingCallKind mapper_call, unsigned index,
                                   bool success, size_t points = 1);
@@ -3605,6 +3620,9 @@ namespace Legion {
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
                                   unsigned index, LogicalRegion region);
+      virtual void count_collective_region_occurrences(unsigned index,
+                                  std::map<LogicalRegion,size_t> &counts,
+                                  size_t points);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
