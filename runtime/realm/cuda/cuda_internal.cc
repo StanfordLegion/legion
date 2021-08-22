@@ -641,6 +641,10 @@ namespace Realm {
 
     void GPUTransferCompletion::request_completed(void)
     {
+      log_gpudma.info() << "gpu memcpy complete: xd=" << std::hex << xd->guid << std::dec
+                        << " read=" << read_port_idx << "/" << read_offset
+                        << " write=" << write_port_idx << "/" << write_offset
+                        << " bytes=" << write_size;
       if(read_port_idx >= 0)
         xd->update_bytes_read(read_port_idx, read_offset, read_size);
       if(write_port_idx >= 0)
