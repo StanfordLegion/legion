@@ -3073,6 +3073,8 @@ namespace Realm {
 
   uintptr_t GASNetEXInternal::attach(size_t size)
   {
+    log_gex.info() << "gasnet versions: release=" << REALM_GEX_RELEASE << " api=" << REALM_GEX_API;
+
     // the primordial segment consists of:
     // 1) storage for any NetworkSegments we're allowed to allocate
     // 2) outbufs

@@ -407,7 +407,13 @@ namespace Realm {
     , cfg_outbuf_count(64)
     , cfg_outbuf_size(256 << 10 /* 256 KB*/)
     , cfg_force_rma(false)
-    , cfg_use_rma_put(false) // TODO: detect fixes for bugs 4148/4150 and default on
+      // in GASNet releases before 2021.8.3, bugs 4148 and 4150 made RMA puts
+      // unsafe to use for ibv + CUDA_UVA memory, so disable them by default
+#if REALM_GEX_RELEASE < 20210803
+    , cfg_use_rma_put(false)
+#else
+    , cfg_use_rma_put(true)
+#endif
     , internal(nullptr)
   {}
 
