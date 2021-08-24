@@ -92,6 +92,16 @@ namespace Realm {
 			  gex_Event_t *lc_opt, gex_Flags_t flags,
 			  uintptr_t dest_addr);
 
+    // send the header of a long after the payload has been delivered via
+    //  an RMA put: header is sent as a medium
+    int send_request_put_header(gex_EP_t src_ep,
+                                gex_Rank_t tgt_rank,
+                                gex_EP_Index_t tgt_ep_index,
+                                gex_AM_Arg_t arg0,
+                                const void *hdr, size_t hdr_bytes,
+                                uintptr_t dest_addr, size_t payload_bytes,
+                                gex_Event_t *lc_opt, gex_Flags_t flags);
+
     gex_AM_SrcDesc_t prepare_request_batch(gex_EP_t src_ep,
 					   gex_Rank_t tgt_rank,
 					   gex_EP_Index_t tgt_ep_index,

@@ -117,6 +117,7 @@ namespace Realm {
       PKTTYPE_INLINE_SHORT,
       PKTTYPE_LONG,
       PKTTYPE_RGET,
+      PKTTYPE_PUT,
       PKTTYPE_CANCELLED,
       PKTTYPE_COPY_IN_PROGRESS,
     };
@@ -313,6 +314,8 @@ namespace Realm {
     size_t cur_capacity, max_alloc;
   };
 
+  struct PendingPutHeader;
+
   struct PreparedMessage {
   protected:
     // should not be directly allocated
@@ -334,6 +337,8 @@ namespace Realm {
       STRAT_LONG_PBUF,
       STRAT_RGET_IMMEDIATE,
       STRAT_RGET_PBUF,
+      STRAT_PUT_IMMEDIATE,
+      STRAT_PUT_PBUF,
     };
     Strategy strategy;
     gex_Rank_t target;
@@ -345,6 +350,7 @@ namespace Realm {
     OutbufMetadata *pktbuf;
     int pktidx;
     gex_AM_SrcDesc_t srcdesc;
+    PendingPutHeader *put;
   };
 
   // we'll keep separate transmit queues for each src/dst pair
@@ -377,6 +383,8 @@ namespace Realm {
 				bool overflow_ok,
 				OutbufMetadata *&pktbuf, int& pktidx,
 				void *&hdr_base);
+    bool reserve_pbuf_put(bool overflow_ok,
+                          OutbufMetadata *&pktbuf, int& pktidx);
     void commit_pbuf_inline(OutbufMetadata *pktbuf, int pktidx,
 			    const void *hdr_base,
 			    gex_AM_Arg_t arg0, size_t act_payload_bytes);
@@ -393,9 +401,15 @@ namespace Realm {
 			  uintptr_t dest_addr,
 			  gex_EP_Index_t src_ep_index,
 			  gex_EP_Index_t tgt_ep_index);
+    void commit_pbuf_put(OutbufMetadata *pktbuf, int pktidx,
+                         PendingPutHeader *put,
+                         const void *payload_base, size_t payload_bytes,
+                         uintptr_t dest_addr);
     void cancel_pbuf(OutbufMetadata *pktbuf, int pktidx);
 
     void enqueue_completion_reply(gex_AM_Arg_t comp_info);
+
+    void enqueue_put_header(PendingPutHeader *put);
 
     void push_packets(bool immediate_mode, TimeLimit work_until);
 
@@ -420,6 +434,13 @@ namespace Realm {
       };
     };
 
+    struct PutMetadata {
+      const void *src_addr;
+      uintptr_t dest_addr;
+      size_t payload_bytes;
+      PendingPutHeader *put;
+    };
+
   protected:
     friend class GASNetEXInternal;
 
@@ -440,6 +461,8 @@ namespace Realm {
     atomic<unsigned> imm_fail_count;
     bool has_ready_packets;
     long long first_fail_time;
+    atomic<PendingPutHeader *> put_head;  // read without mutex
+    atomic<PendingPutHeader *> *put_tailp;
     // circular queue of pending completion replys
     gex_AM_Arg_t *comp_reply_data;
     unsigned comp_reply_wrptr, comp_reply_rdptr;
@@ -487,6 +510,7 @@ namespace Realm {
     GASNetEXEvent& set_pktbuf(OutbufMetadata *_pktbuf);
     GASNetEXEvent& set_databuf(OutbufMetadata *_databuf);
     GASNetEXEvent& set_rget(PendingReverseGet *_rget);
+    GASNetEXEvent& set_put(PendingPutHeader *_put);
 
     void trigger(GASNetEXInternal *internal);
 
@@ -500,6 +524,7 @@ namespace Realm {
     OutbufMetadata *pktbuf;
     OutbufMetadata *databuf;
     PendingReverseGet *rget;
+    PendingPutHeader *put;
   };
 
   // an injector tries to send packets, but is not allowed to stall -
@@ -549,6 +574,28 @@ namespace Realm {
     CondVar pollwait_cond;
     XmitSrcDestPair::XmitPairList critical_xpairs;
     GASNetEXEvent::EventList pending_events;
+  };
+
+  struct PendingPutHeader {
+  protected:
+    // should not be directly allocated
+    template <typename T, unsigned CHUNK_SIZE>
+    friend class ChunkedRecycler;
+    PendingPutHeader() {}
+    ~PendingPutHeader() {}
+
+  public:
+    gex_Rank_t target;
+    gex_EP_Index_t src_ep_index, tgt_ep_index;
+    gex_AM_Arg_t arg0;
+    static const size_t MAX_HDR_SIZE = 128;
+    size_t hdr_size;
+    unsigned char hdr_data[MAX_HDR_SIZE];
+    uintptr_t src_ptr, tgt_ptr;
+    size_t payload_bytes;
+    PendingCompletion *local_comp;
+    XmitSrcDestPair *xpair;
+    atomic<PendingPutHeader *> next_put;
   };
 
   // NOTE: ReverseGetter exists for now because we have to use RMAs instead
@@ -736,6 +783,7 @@ namespace Realm {
     // allocator/managers for various objects we want to reuse
     ChunkedRecycler<GASNetEXEvent, 64> event_alloc;
     ChunkedRecycler<PreparedMessage, 32> prep_alloc;
+    ChunkedRecycler<PendingPutHeader, 32> put_alloc;
 
     uintptr_t databuf_reserve(size_t bytes_needed, OutbufMetadata **mdptr);
   };

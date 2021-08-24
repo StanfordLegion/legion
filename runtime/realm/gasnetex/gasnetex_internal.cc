@@ -1062,6 +1062,8 @@ namespace Realm {
     , imm_fail_count(0)
     , has_ready_packets(false)
     , first_fail_time(-1)
+    , put_head(nullptr)
+    , put_tailp(&put_head)
     , comp_reply_wrptr(0)
     , comp_reply_rdptr(0)
     , comp_reply_count(0)
@@ -1243,6 +1245,23 @@ namespace Realm {
     return true;
   }
 
+  bool XmitSrcDestPair::reserve_pbuf_put(bool overflow_ok,
+                                         OutbufMetadata *&pktbuf,
+                                         int& pktidx)
+  {
+    // a put just needs the PutMetadata in the queue
+    size_t total_bytes = sizeof(PutMetadata);
+
+    // reservation uses a mutex to cover our first/cur_pbuf and, by extension,
+    //  the pbuf(s) as well
+    uintptr_t baseptr = 0;
+    if(!reserve_pbuf_helper(total_bytes, overflow_ok, pktbuf, pktidx, baseptr))
+      return false;
+
+    packets_reserved.fetch_add(1);
+    return true;
+  }
+
   // looks up the baseptr of the packet in the pktbuf, dealing with copies
   //  (or not) from overflow to a realbuf
   bool XmitSrcDestPair::commit_pbuf_helper(OutbufMetadata *pktbuf, int pktidx,
@@ -1324,7 +1343,8 @@ namespace Realm {
       //  a pusher that's already running
       if((pktbuf == first_pbuf.load()) && !has_ready_packets) {
 	has_ready_packets = true;
-	enqueue_pair = (comp_reply_count.load() == 0);
+	enqueue_pair = (!put_head.load() &&
+                        (comp_reply_count.load() == 0));
       }
     }
 
@@ -1382,7 +1402,8 @@ namespace Realm {
       //  a pusher that's already running
       if((pktbuf == first_pbuf.load()) && !has_ready_packets) {
 	has_ready_packets = true;
-	enqueue_pair = (comp_reply_count.load() == 0);
+	enqueue_pair = (!put_head.load() &&
+                        (comp_reply_count.load() == 0));
       }
     }
 
@@ -1441,7 +1462,53 @@ namespace Realm {
       //  a pusher that's already running
       if((pktbuf == first_pbuf.load()) && !has_ready_packets) {
 	has_ready_packets = true;
-	enqueue_pair = (comp_reply_count.load() == 0);
+	enqueue_pair = (!put_head.load() &&
+                        (comp_reply_count.load() == 0));
+      }
+    }
+
+    if(enqueue_pair) {
+      // we were idle, so use the injector if we're allowed to
+      if(internal->module->cfg_crit_timeout >= 0)
+	internal->injector.add_ready_xpair(this);
+      else
+	internal->poller.add_critical_xpair(this);
+    }
+  }
+
+  void XmitSrcDestPair::commit_pbuf_put(OutbufMetadata *pktbuf, int pktidx,
+                                        PendingPutHeader *put,
+                                        const void *payload_base,
+                                        size_t payload_size,
+                                        uintptr_t dest_addr)
+  {
+    uintptr_t baseptr;
+    bool update_realbuf = commit_pbuf_helper(pktbuf, pktidx,
+                                             nullptr /*hdr_base*/,
+					     baseptr);
+
+    PutMetadata *meta = reinterpret_cast<PutMetadata *>(baseptr);
+    meta->src_addr = payload_base;
+    meta->dest_addr = dest_addr;
+    meta->payload_bytes = payload_size;
+    meta->put = put;
+
+    bool new_work = pktbuf->pktbuf_commit(pktidx,
+					  OutbufMetadata::PKTTYPE_PUT,
+					  update_realbuf);
+    // if this commit exposed work in that pbuf and it looks like this is our
+    //  oldest pbuf, try to enqueue ourselves
+    bool enqueue_pair = false;
+    if(new_work && (pktbuf == first_pbuf.load())) {
+      AutoLock<> al(mutex);
+
+      // only actually enqueue if we aren't already and if this is still the
+      //  current packet (avoids a race with the packet getting consumed by
+      //  a pusher that's already running
+      if((pktbuf == first_pbuf.load()) && !has_ready_packets) {
+	has_ready_packets = true;
+	enqueue_pair = (!put_head.load() &&
+                        (comp_reply_count.load() == 0));
       }
     }
 
@@ -1496,7 +1563,8 @@ namespace Realm {
       AutoLock<> al(mutex);
 
       unsigned cur_count = comp_reply_count.load();
-      enqueue_pair = (!has_ready_packets && (cur_count == 0));
+      enqueue_pair = (!has_ready_packets && !put_head.load() &&
+                      (cur_count == 0));
 
       // do we need to resize the queue?
       if(cur_count == comp_reply_capacity) {
@@ -1515,6 +1583,59 @@ namespace Realm {
       comp_reply_data[comp_reply_wrptr] = comp_info;
       comp_reply_wrptr = (comp_reply_wrptr + 1) % comp_reply_capacity;
       comp_reply_count.store(cur_count + 1);
+    }
+    if(enqueue_pair) {
+      // we were idle, so use the injector if we're allowed to
+      if(internal->module->cfg_crit_timeout >= 0)
+	internal->injector.add_ready_xpair(this);
+      else
+	internal->poller.add_critical_xpair(this);
+    }
+  }
+
+  void XmitSrcDestPair::enqueue_put_header(PendingPutHeader *put)
+  {
+    log_gex.info() << "completed put: "
+                   << put->src_ep_index << "/"
+                   << std::hex << put->src_ptr << std::dec
+                   << " -> " << put->target << "/" << put->tgt_ep_index << "/"
+                   << std::hex << put->tgt_ptr << std::dec
+                   << " size=" << put->payload_bytes << " arg0=" << put->arg0;
+
+    // attempt an immediate injection if it is permitted (this is always older
+    //  than any queued messages, so gets to jump ahead of them)
+    if(internal->module->cfg_use_immediate) {
+      gex_Event_t *lc_opt = GEX_EVENT_NOW;  // insist on local copy of header
+      gex_Flags_t flags = GEX_FLAG_IMMEDIATE;
+
+      int ret = GASNetEXHandlers::send_request_put_header(internal->eps[src_ep_index],
+                                                          tgt_rank,
+                                                          tgt_ep_index,
+                                                          put->arg0,
+                                                          put->hdr_data,
+                                                          put->hdr_size,
+                                                          put->tgt_ptr,
+                                                          put->payload_bytes,
+                                                          lc_opt,
+                                                          flags);
+      if(ret == GASNET_OK) {
+        log_gex.debug() << "put header immediate";
+        internal->put_alloc.free_obj(put);
+        return;
+      }
+    }
+
+    // otherwise have to enqueue
+    bool enqueue_pair = false;
+    {
+      AutoLock<> al(mutex);
+
+      enqueue_pair = (!has_ready_packets && !put_head.load() &&
+                      (comp_reply_count.load() == 0));
+
+      put->next_put.store(nullptr);
+      (*put_tailp).store_release(put);
+      put_tailp = &put->next_put;
     }
     if(enqueue_pair) {
       // we were idle, so use the injector if we're allowed to
@@ -1616,6 +1737,98 @@ namespace Realm {
 	return;
     }
 
+    // next up, the headers of any completed puts - only we can dequeue, so grab
+    //  a copy of the head and walk the list without a lock
+    PendingPutHeader *orig_put = put_head.load_acquire();
+    if(orig_put) {
+      PendingPutHeader *cur_put = orig_put;
+      PendingPutHeader *prev_put = orig_put; // used if we fall off end
+      while(cur_put) {
+        gex_Event_t *lc_opt = GEX_EVENT_NOW;  // insist on local copy of header
+        gex_Flags_t flags = 0;
+        if(immediate_mode) flags |= GEX_FLAG_IMMEDIATE;
+
+        int ret = GASNetEXHandlers::send_request_put_header(internal->eps[src_ep_index],
+                                                            tgt_rank,
+                                                            tgt_ep_index,
+                                                            cur_put->arg0,
+                                                            cur_put->hdr_data,
+                                                            cur_put->hdr_size,
+                                                            cur_put->tgt_ptr,
+                                                            cur_put->payload_bytes,
+                                                            lc_opt,
+                                                            flags);
+        if(ret == GASNET_OK) {
+          // move on to the next packet (we'll free things once we've actually
+          //  removed them from the list)
+          prev_put = cur_put;
+          cur_put = cur_put->next_put.load_acquire();
+
+          // also stop if we're out of time
+          if(work_until.is_expired()) break;
+        } else {
+          // failed, stop trying
+          assert(immediate_mode);
+          log_gex.debug() << "failed to send put header";
+          if(first_fail_time < 0)
+            first_fail_time = Clock::current_time_in_nanoseconds();
+          break;
+        }
+      }
+
+      // if we sent anything, we need to remove it from the list, which
+      //  requires the lock
+      if(cur_put != orig_put) {
+        bool now_empty;
+        {
+          AutoLock<> al(mutex);
+
+          if(cur_put) {
+            // didn't consume all, so we just need to update the head (tail is
+            //  still valid)
+            put_head.store_release(cur_put);
+            now_empty = false;
+          } else {
+            if(put_tailp == &prev_put->next_put) {
+              // tail is the end of our list, so we're now empty
+              put_head.store(nullptr);
+              put_tailp = &put_head;
+
+              now_empty = (!has_ready_packets && (comp_reply_count.load() == 0));
+            } else {
+              // list has grown, but head is whatever was hooked onto the end
+              //  of the last put we did
+              PendingPutHeader *new_head = prev_put->next_put.load();
+              assert(new_head);
+              put_head.store(new_head);
+
+              now_empty = false;
+            }
+          }
+        }
+
+        // now it's safe to free the put headers we sent
+        PendingPutHeader *del_put = orig_put;
+        while(del_put && (del_put != cur_put)) {
+          PendingPutHeader *next_del = del_put->next_put.load();
+          internal->put_alloc.free_obj(del_put);
+          del_put = next_del;
+        }
+
+        // if removing the entries made us empty, somebody else is going to
+        //  requeue us for work and we can't do any more here
+        if(now_empty)
+          return;
+      }
+
+      // finally, if we didn't send all the put headers we knew about, we need
+      //  to requeue for later
+      if(cur_put) {
+        internal->poller.add_critical_xpair(this);
+        return;
+      }
+    }
+
     // get the head of our pbuf list - if it's empty, that means we have no
     //  work
     OutbufMetadata *head = first_pbuf.load_acquire();
@@ -1673,7 +1886,8 @@ namespace Realm {
 	      batch_size++;
 	      break;
 	    }
-	    if(pkttype2 == OutbufMetadata::PKTTYPE_LONG) {
+	    if((pkttype2 == OutbufMetadata::PKTTYPE_LONG) ||
+               (pkttype2 == OutbufMetadata::PKTTYPE_PUT)) {
 	      // can't be part of a batch
 	      break;
 	    }
@@ -2138,6 +2352,65 @@ namespace Realm {
 	      break;
 	    }
 
+          case OutbufMetadata::PKTTYPE_PUT:
+            {
+              const PutMetadata *meta =
+                reinterpret_cast<const PutMetadata *>(realbuf->baseptr +
+                                                      head->pktbuf_sent_offset);
+
+              gex_Flags_t flags = 0;
+              if(immediate_mode) flags |= GEX_FLAG_IMMEDIATE;
+
+              // local completion just requires local completion of the payload,
+              //  as we've already made a copy of the header, but only ask for
+              //  it if the message needs it
+              gex_Event_t lc_event = GEX_EVENT_INVALID;
+              gex_Event_t *lc_opt = (meta->put->local_comp ?
+                                       &lc_event :
+                                       GEX_EVENT_DEFER);
+
+              gex_TM_t pair = gex_TM_Pair(internal->eps[src_ep_index],
+                                          tgt_ep_index);
+              gex_Event_t rc_event = gex_RMA_PutNB(pair,
+                                                   tgt_rank,
+                                                   reinterpret_cast<void *>(meta->dest_addr),
+                                                   const_cast<void *>(meta->src_addr),
+                                                   meta->payload_bytes,
+                                                   lc_opt,
+                                                   flags);
+
+              if(rc_event != GEX_EVENT_NO_OP) {
+                // successful injection
+                pkt_sent = true;
+
+                // local completion (if needed)
+                if(meta->put->local_comp) {
+                  GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
+                  ev->set_event(lc_event);
+                  ev->set_local_comp(meta->put->local_comp);
+                  internal->poller.add_pending_event(ev);
+                }
+
+                // remote completion (always needed)
+                {
+                  GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
+                  ev->set_event(rc_event);
+                  ev->set_put(meta->put);
+                  internal->poller.add_pending_event(ev);
+                }
+
+		realbuf->pktbuf_pkt_types[head->pktbuf_sent_packets].store(OutbufMetadata::PKTTYPE_INVALID);
+		head->pktbuf_sent_offset = head->pktbuf_pkt_ends[head->pktbuf_sent_packets];
+		head->pktbuf_sent_packets++;
+		// no need to increment use count for a put (done with metadata)
+		packets_sent.fetch_add(1);
+              } else {
+		assert(immediate_mode);  // should not happen without immediate
+		log_gex_xpair.info() << "xpair retry: xpair=" << this;
+	      }
+	      break;
+	    }
+
 	  default: assert(0);
 	  }
 	}
@@ -2186,7 +2459,7 @@ namespace Realm {
 	  if(head == cur_pbuf) {
 	    // still writing to this one, so we're done for now - no requeue
 	    has_ready_packets = false;
-	    requeue = (comp_reply_count.load() != 0);
+	    requeue = put_head.load() || (comp_reply_count.load() != 0);
 	  } else {
 	    // we can remove the head and work on the next one
 	    new_head = head->nextbuf;
@@ -2199,7 +2472,7 @@ namespace Realm {
 	    requeue = true;
 	  } else {
 	    has_ready_packets = false;
-	    requeue = (comp_reply_count.load() != 0);
+	    requeue = put_head.load() || (comp_reply_count.load() != 0);
 	  }
 	}
       }
@@ -2298,6 +2571,7 @@ namespace Realm {
     , pktbuf(nullptr)
     , databuf(nullptr)
     , rget(nullptr)
+    , put(nullptr)
   {}
 
   gex_Event_t GASNetEXEvent::get_event() const
@@ -2335,6 +2609,12 @@ namespace Realm {
     return *this;
   }
 
+  GASNetEXEvent& GASNetEXEvent::set_put(PendingPutHeader *_put)
+  {
+    put = _put;
+    return *this;
+  }
+
   void GASNetEXEvent::trigger(GASNetEXInternal *internal)
   {
     event = GEX_EVENT_INVALID;
@@ -2347,6 +2627,8 @@ namespace Realm {
       databuf->dec_usecount();
     if(rget)
       rget->rgetter->reverse_get_complete(rget);
+    if(put)
+      put->xpair->enqueue_put_header(put);
   }
 
 
@@ -3299,6 +3581,7 @@ namespace Realm {
     msg->pktbuf = nullptr;
     msg->pktidx = -1;
 #endif
+    msg->put = nullptr;
 
     // even if immediates are allowed via configuration, we can't inject
     //  messages if we're inside an AM request/reply handler
@@ -3446,12 +3729,16 @@ namespace Realm {
 
 	// we can use long if both endpoints are AM-capable (currently only
 	//  prim endpoint is), otherwise rget
-	bool use_long = ((!srcseg || (srcseg->ep_index == 0)) &&
+	bool use_long = (!module->cfg_force_rma &&
+                         (!srcseg || (srcseg->ep_index == 0)) &&
 			 (target_ep_index == 0));
+        // TODO: will we never need to make a put vs. get decision on a
+        //  per-endpoint basis?
+        bool use_rmaput = (!use_long && module->cfg_use_rma_put);
 
 	// an rget is actually sent to the prim endpoint on the other side
 	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(target,
-							  (use_long ?
+							  ((use_long || use_rmaput) ?
 							     target_ep_index :
 							     0));
 	if(imm_ok && xpair->has_packets_queued()) {
@@ -3459,17 +3746,41 @@ namespace Realm {
 	  imm_ok = false;
 	}
 
+        // rma puts, whether the put itself is queued, always need the header
+        //  information in an object that outlives the put injection
+        if(use_rmaput) {
+          msg->put = put_alloc.alloc_obj();
+
+          // header will eventually be sent between primordial endpoints
+          msg->put->xpair = xmitsrcs[0]->lookup_pair(target, 0);
+
+          // have message header go directly into the PendingPutHeader
+          assert(header_size <= PendingPutHeader::MAX_HDR_SIZE);
+          msg->put->hdr_size = header_size;
+          header_base = msg->put->hdr_data;
+
+          msg->put->target = target;
+          msg->put->tgt_ptr = dest_payload_addr;
+
+          msg->put->local_comp = nullptr;
+
+          // src/tgt ep index and src_ptr only really needed for logging/debug
+          msg->put->src_ep_index = (srcseg ? srcseg->ep_index : 0);
+          msg->put->tgt_ep_index = target_ep_index;
+          msg->put->src_ptr = reinterpret_cast<uintptr_t>(payload_base);
+        }
+
 	do {
 	  // choice 1: negotiated payload
-	  if(imm_ok && module->cfg_use_negotiated) {
+	  if(imm_ok && use_long && module->cfg_use_negotiated) {
 	    // TODO: NPAM (only if native!)
 	  }
 
 	  // choice 2: wait and try an immediate FPAM at commit time
 	  if(imm_ok) {
-	    msg->strategy = (use_long ?
-			       PreparedMessage::STRAT_LONG_IMMEDIATE :
-			       PreparedMessage::STRAT_RGET_IMMEDIATE);
+	    msg->strategy = (use_long   ? PreparedMessage::STRAT_LONG_IMMEDIATE :
+                             use_rmaput ? PreparedMessage::STRAT_PUT_IMMEDIATE :
+                                          PreparedMessage::STRAT_RGET_IMMEDIATE);
 	    break;
 	  }
 
@@ -3479,15 +3790,19 @@ namespace Realm {
 	    // allow spill of header into overflow for now (TODO: allow
 	    //  backpressure to caller)
 	    bool overflow_ok = true;
-	    bool rsrv_ok = xpair->reserve_pbuf_long_rget(header_size,
-							 overflow_ok,
-							 msg->pktbuf,
-							 msg->pktidx,
-							 header_base);
+	    bool rsrv_ok =
+              (use_rmaput ?
+                 xpair->reserve_pbuf_put(overflow_ok,
+                                         msg->pktbuf, msg->pktidx) :
+                 xpair->reserve_pbuf_long_rget(header_size,
+                                               overflow_ok,
+                                               msg->pktbuf,
+                                               msg->pktidx,
+                                               header_base));
 	    if(rsrv_ok) {
-	      msg->strategy = (use_long ?
-			         PreparedMessage::STRAT_LONG_PBUF :
-			         PreparedMessage::STRAT_RGET_PBUF);
+	      msg->strategy = (use_long   ? PreparedMessage::STRAT_LONG_PBUF :
+                               use_rmaput ? PreparedMessage::STRAT_PUT_PBUF :
+                                            PreparedMessage::STRAT_RGET_PBUF);
 	      break;
 	    }
 	  }
@@ -3533,7 +3848,7 @@ namespace Realm {
 		       << " strat=" << int(msg->strategy)
 		       << " header=" << header_size
 		       << " payload=" << payload_size
-		       << " dest=" << msg->dest_payload_addr;
+		       << " dest=" << std::hex << msg->dest_payload_addr << std::dec;
 
     bool do_local_comp = false;
 
@@ -4174,6 +4489,128 @@ namespace Realm {
 	break;
       }
 
+    case PreparedMessage::STRAT_PUT_IMMEDIATE:
+      {
+	// rma put, header already in a PendingPutHeader, attempt to inject
+        //  without using a pbuf
+
+	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(msg->target,
+							  msg->target_ep_index);
+
+	gex_AM_Arg_t arg0 = msg->msgid;
+	if(comp) {
+          // local completion can be signalled once the put is completed
+          if(comp->has_local_completions())
+            msg->put->local_comp = comp;
+
+          // remote goes with the header's AM
+          if(comp->has_remote_completions()) {
+            unsigned comp_info = ((comp->index << 2) +
+                                  PendingCompletion::REMOTE_PENDING_BIT);
+            arg0 |= (comp_info << MSGID_BITS);
+          }
+	}
+        msg->put->arg0 = arg0;
+        msg->put->payload_bytes = payload_size;
+
+	// don't include the actual payload in crc for longs
+	if(module->cfg_do_checksums) {
+	  insert_packet_crc(arg0, header_base, header_size,
+			    nullptr, payload_size);
+	}
+
+        gex_Flags_t flags = GEX_FLAG_IMMEDIATE;
+
+        // local completion just requires local completion of the payload,
+        //  as we've already made a copy of the header, but only ask for
+        //  it if the message needs it
+        gex_Event_t lc_event = GEX_EVENT_INVALID;
+        gex_Event_t *lc_opt = (msg->put->local_comp ?
+                                 &lc_event :
+                                 GEX_EVENT_DEFER);
+
+	const SegmentInfo *srcseg = find_segment(payload_base);
+        assert(srcseg);
+        gex_TM_t pair = gex_TM_Pair(eps[srcseg->ep_index],
+                                    msg->target_ep_index);
+        gex_Event_t rc_event = gex_RMA_PutNB(pair,
+                                             msg->target,
+                                             reinterpret_cast<void *>(msg->dest_payload_addr),
+                                             const_cast<void *>(payload_base),
+                                             payload_size,
+                                             lc_opt,
+                                             flags);
+
+        if(rc_event != GEX_EVENT_NO_OP) {
+	  xpair->record_immediate_packet();
+
+          // local completion (if needed)
+          if(msg->put->local_comp) {
+            GASNetEXEvent *ev = event_alloc.alloc_obj();
+            ev->set_event(lc_event);
+            ev->set_local_comp(msg->put->local_comp);
+            poller.add_pending_event(ev);
+          }
+
+          // remote completion (always needed)
+          {
+            GASNetEXEvent *ev = event_alloc.alloc_obj();
+            ev->set_event(rc_event);
+            ev->set_put(msg->put);
+            poller.add_pending_event(ev);
+          }
+        } else {
+	  log_gex_msg.info() << "immediate failed - queueing message";
+	  // could not immediately inject it, so enqueue now
+	  OutbufMetadata *pktbuf;
+	  int pktidx;
+          bool ok = xpair->reserve_pbuf_put(true /*overflow_ok*/,
+                                            pktbuf, pktidx);
+	  assert(ok); // can't handle backpressure at this point
+
+          xpair->commit_pbuf_put(pktbuf, pktidx,
+                                 msg->put,
+                                 payload_base, payload_size,
+                                 msg->dest_payload_addr);
+        }
+        break;
+      }
+
+    case PreparedMessage::STRAT_PUT_PBUF:
+      {
+	// rma put, header already in a PendingPutHeader, put in pbuf
+
+	gex_AM_Arg_t arg0 = msg->msgid;
+	if(comp) {
+          // local completion can be signalled once the put is completed
+          if(comp->has_local_completions())
+            msg->put->local_comp = comp;
+
+          // remote goes with the header's AM
+          if(comp->has_remote_completions()) {
+            unsigned comp_info = ((comp->index << 2) +
+                                  PendingCompletion::REMOTE_PENDING_BIT);
+            arg0 |= (comp_info << MSGID_BITS);
+          }
+	}
+        msg->put->arg0 = arg0;
+        msg->put->payload_bytes = payload_size;
+
+	// don't include the actual payload in crc for longs
+	if(module->cfg_do_checksums) {
+	  insert_packet_crc(arg0, header_base, header_size,
+			    nullptr, payload_size);
+	}
+
+	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(msg->target,
+							  msg->target_ep_index);
+	xpair->commit_pbuf_put(msg->pktbuf, msg->pktidx,
+                               msg->put,
+                               payload_base, payload_size,
+                               msg->dest_payload_addr);
+	break;
+      }
+
 #if 0
     case PreparedMessage::STRAT_RGET_DBUF_IMMEDIATE:
       {
@@ -4556,7 +4993,8 @@ namespace Realm {
 					     const void *data, size_t data_bytes)
   {
     log_gex_msg.info() << "got long: " << srcrank << " "
-		       << arg0 << " " << hdr_bytes << " " << data_bytes;
+		       << arg0 << " " << hdr_bytes << " " << data_bytes
+                       << " " << data;
     total_packets_received.fetch_add(1);
 
     if(module->cfg_do_checksums) {
