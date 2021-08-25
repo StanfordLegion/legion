@@ -3458,6 +3458,10 @@ namespace Realm {
 
       return limit;
     } else {
+      // TODO: these should go through pktbufs - see issue 1138
+      //  disabled for now
+      return 0;
+#if 0
       // long message
       size_t limit = GASNetEXHandlers::max_request_long(eps[0],
 							target,
@@ -3474,6 +3478,7 @@ namespace Realm {
 	limit = std::min(limit, module->cfg_max_long);
 
       return limit;
+#endif
     }
   }
 
@@ -3520,17 +3525,18 @@ namespace Realm {
       if(src_seg) {
 	// can use as source of AM or as remote of get, but both require
 	//  contiguous data, so limit to a single line worth of data
-	// exception: if the line size is less than an outbuf, we're
-	//  willing to assemble into one of those (if assembly is possible)
-	bool can_assemble = (src_seg->memtype == NetworkSegmentInfo::HostMem);
-	if(can_assemble)
-	  limit = std::min(limit, std::max(bytes_per_line,
-					   size_t(16384 /*TODO*/)));
-	else
-	  limit = std::min(limit, bytes_per_line);
+        //
+        // don't offer a path that will require a copy - the dma system
+        //  should use an intermediate buffer in that case
+        limit = std::min(limit, bytes_per_line);
       } else {
+        // TODO: these should go through pktbufs - see issue 1138
+        //  disabled for now
+        limit = 0;
+#if 0
 	// data will have to be copied into an outbuf, so don't exceed that
 	limit = std::min(limit, size_t(16384 /*TODO*/));
+#endif
       }
       // generally we'll want to avoid enormous packets clogging up the
       //  tubes
@@ -3719,14 +3725,8 @@ namespace Realm {
 	if(!srcseg) {
 	  // TODO: attempt a medium-sized NPAM long, once that's a thing
 
-	  // reserve databuf space for the source data
-	  uintptr_t db_base = databuf_reserve(payload_size, &msg->databuf);
-	  if(db_base != 0) {
-	    payload_base = reinterpret_cast<void *>(db_base);
-	  } else {
-	    // what to do?
-	    assert(0);
-	  }
+          // TODO: fallback should be inline data in the pktbuf (issue #1138)
+          assert(0);
 	}
 
 	// we can use long if both endpoints are AM-capable (currently only
