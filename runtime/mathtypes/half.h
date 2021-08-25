@@ -362,7 +362,7 @@ __CUDA_HD__
 inline __half fabs(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530 && (__CUDACC_VER_MAJOR__ >= 11 || __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MAJOR__ >= 2)
+#if __CUDA_ARCH__ >= 530 && (__CUDACC_VER_MAJOR__ >= 11 || __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2)
   return __habs(a);
 #else
   return __float2half(fabs(__half2float(a)));
