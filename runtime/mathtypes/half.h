@@ -132,7 +132,7 @@ inline float __convert_halfint_to_float(uint16_t __x)
 }
 
 #ifdef __CUDACC__
-// This brings in __half from 
+// This brings in __half from
 #define __CUDA_NO_HALF_OPERATORS__
 #if defined(LEGION_USE_CUDA)
 #include <cuda_fp16.h>
@@ -144,7 +144,7 @@ __CUDA_HD__
 inline __half operator-(const __half &one)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hneg(one);
 #else
   return __float2half(-__half2float(one));
@@ -158,7 +158,7 @@ __CUDA_HD__
 inline __half operator+(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hadd(one, two);
 #else
   return __float2half(__half2float(one) + __half2float(two));
@@ -172,7 +172,7 @@ __CUDA_HD__
 inline __half operator-(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hsub(one, two);
 #else
   return __float2half(__half2float(one) - __half2float(two));
@@ -186,7 +186,7 @@ __CUDA_HD__
 inline __half operator*(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hmul(one, two);
 #else
   return __float2half(__half2float(one) * __half2float(two));
@@ -200,7 +200,9 @@ __CUDA_HD__
 inline __half operator/(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ == 8
+  return hdiv(one, two);
+#elif __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 9
   return __hdiv(one, two);
 #else
   return __float2half(__half2float(one) / __half2float(two));
@@ -214,7 +216,7 @@ __CUDA_HD__
 inline bool operator==(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __heq(one, two);
 #else
   return (__half2float(one) == __half2float(two));
@@ -228,7 +230,7 @@ __CUDA_HD__
 inline bool operator!=(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hne(one, two);
 #else
   return (__half2float(one) != __half2float(two));
@@ -242,7 +244,7 @@ __CUDA_HD__
 inline bool operator<(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hlt(one, two);
 #else
   return (__half2float(one) < __half2float(two));
@@ -256,7 +258,7 @@ __CUDA_HD__
 inline bool operator<=(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hle(one, two);
 #else
   return (__half2float(one) <= __half2float(two));
@@ -270,7 +272,7 @@ __CUDA_HD__
 inline bool operator>(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hgt(one, two);
 #else
   return (__half2float(one) > __half2float(two));
@@ -284,7 +286,7 @@ __CUDA_HD__
 inline bool operator>=(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hge(one, two);
 #else
   return (__half2float(one) >= __half2float(two));
@@ -318,7 +320,7 @@ __CUDA_HD__
 inline __half ceil(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hceil(a);
 #else
   return __float2half(ceilf(__half2float(a)));
@@ -332,7 +334,7 @@ __CUDA_HD__
 inline __half cos(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hcos(a);
 #else
   return __float2half(cosf(__half2float(a)));
@@ -346,7 +348,7 @@ __CUDA_HD__
 inline __half exp(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hexp(a);
 #else
   return __float2half(expf(__half2float(a)));
@@ -360,7 +362,7 @@ __CUDA_HD__
 inline __half fabs(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && (__CUDACC_VER_MAJOR__ >= 11 || __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2)
   return __habs(a);
 #else
   return __float2half(fabs(__half2float(a)));
@@ -374,7 +376,7 @@ __CUDA_HD__
 inline __half floor(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hfloor(a);
 #else
   return __float2half(floorf(__half2float(a)));
@@ -398,7 +400,7 @@ __CUDA_HD__
 inline bool isnan(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return __hisnan(a);
 #else
   return ::isnan(__half2float(a));
@@ -412,7 +414,7 @@ __CUDA_HD__
 inline __half log(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hlog(a);
 #else
   return __float2half(logf(__half2float(a)));
@@ -426,7 +428,7 @@ __CUDA_HD__
 inline __half sin(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hsin(a);
 #else
   return __float2half(sinf(__half2float(a)));
@@ -440,7 +442,7 @@ __CUDA_HD__
 inline __half sqrt(__half a)
 {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 && __CUDACC_VER_MAJOR__ >= 8
   return hsqrt(a);
 #else
   return __float2half(sqrtf(__half2float(a)));
@@ -536,7 +538,7 @@ struct __half
 
   inline void set_raw(uint16_t raw)
   {
-    this->__x = raw; 
+    this->__x = raw;
   }
 
   /// Increment
@@ -545,7 +547,7 @@ struct __half
     *this = __half(float(*this) + float(rhs));
     return *this;
   }
-  
+
   /// Decrement
   inline __half& operator -=(const __half&rhs)
   {
