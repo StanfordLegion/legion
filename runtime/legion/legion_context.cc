@@ -4116,7 +4116,6 @@ namespace Legion {
           case DIM: \
             { \
               type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
-              assert(handle1.get_type_tag() == type_tag); \
               break; \
             }
           LEGION_FOREACH_N(DIMFUNC)

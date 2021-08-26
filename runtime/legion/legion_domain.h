@@ -149,6 +149,51 @@ namespace Legion {
     bool operator<(const DomainPoint &rhs) const;
 
     __CUDA_HD__
+    DomainPoint operator+(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator+(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator+=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator+=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator-(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator-(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator-=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator-=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator*(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator*(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator*=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator*=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator/(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator/(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator/=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator/=(const DomainPoint &rhs);
+
+    __CUDA_HD__
+    DomainPoint operator%(coord_t scalar) const;
+    __CUDA_HD__
+    DomainPoint operator%(const DomainPoint &rhs) const;
+    __CUDA_HD__
+    DomainPoint& operator%=(coord_t scalar);
+    __CUDA_HD__
+    DomainPoint& operator%=(const DomainPoint &rhs);
+
+    __CUDA_HD__
     coord_t& operator[](unsigned index);
     __CUDA_HD__
     const coord_t& operator[](unsigned index) const;
@@ -228,6 +273,16 @@ namespace Legion {
     bool operator!=(const Domain &rhs) const;
     __CUDA_HD__
     bool operator<(const Domain &rhs) const;
+
+    __CUDA_HD__
+    Domain operator+(const DomainPoint &point) const;
+    __CUDA_HD__
+    Domain& operator+=(const DomainPoint &point);
+
+    __CUDA_HD__
+    Domain operator-(const DomainPoint &point) const;
+    __CUDA_HD__
+    Domain& operator-=(const DomainPoint &point);
 
     static const Domain NO_DOMAIN;
 
@@ -413,12 +468,20 @@ namespace Legion {
     DomainTransform& operator=(const DomainTransform &rhs);
     template<int M, int N, typename T> __CUDA_HD__
     DomainTransform& operator=(const Transform<M,N,T> &rhs);
+    __CUDA_HD__
+    bool operator==(const DomainTransform &rhs) const;
+    __CUDA_HD__
+    bool operator!=(const DomainTransform &rhs) const;
   public:
     template<int M, int N, typename T> __CUDA_HD__
     operator Transform<M,N,T>(void) const;
   public:
     __CUDA_HD__
     DomainPoint operator*(const DomainPoint &p) const;
+    __CUDA_HD__
+    Domain operator*(const Domain &domain) const;
+    __CUDA_HD__
+    DomainTransform operator*(const DomainTransform &transform) const;
   public:
     __CUDA_HD__
     bool is_identity(void) const;
@@ -447,6 +510,10 @@ namespace Legion {
     DomainAffineTransform& operator=(const DomainAffineTransform &rhs);
     template<int M, int N, typename T> __CUDA_HD__
     DomainAffineTransform& operator=(const AffineTransform<M,N,T> &rhs);
+    __CUDA_HD__
+    bool operator==(const DomainAffineTransform &rhs) const; 
+    __CUDA_HD__
+    bool operator!=(const DomainAffineTransform &rhs) const;
   public:
     template<int M, int N, typename T> __CUDA_HD__
     operator AffineTransform<M,N,T>(void) const;
@@ -483,6 +550,10 @@ namespace Legion {
     DomainScaleTransform& operator=(const DomainScaleTransform &rhs);
     template<int M, int N, typename T> __CUDA_HD__
     DomainScaleTransform& operator=(const ScaleTransform<M,N,T> &rhs);
+    __CUDA_HD__
+    bool operator==(const DomainScaleTransform &rhs) const;
+    __CUDA_HD__
+    bool operator!=(const DomainScaleTransform &rhs) const;
   public:
     template<int M, int N, typename T> __CUDA_HD__
     operator ScaleTransform<M,N,T>(void) const;

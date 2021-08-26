@@ -298,6 +298,226 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint DomainPoint::operator+(coord_t scalar) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] + scalar;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ 
+  inline DomainPoint DomainPoint::operator+(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] + rhs.point_data[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint& DomainPoint::operator+=(coord_t scalar)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < dim; i++)
+      point_data[i] += scalar;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainPoint& DomainPoint::operator+=(const DomainPoint &rhs) 
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+      point_data[i] += rhs.point_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint DomainPoint::operator-(coord_t scalar) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] - scalar;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ 
+  inline DomainPoint DomainPoint::operator-(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] - rhs.point_data[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint& DomainPoint::operator-=(coord_t scalar)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < dim; i++)
+      point_data[i] -= scalar;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainPoint& DomainPoint::operator-=(const DomainPoint &rhs) 
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+      point_data[i] -= rhs.point_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint DomainPoint::operator*(coord_t scalar) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] * scalar;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ 
+  inline DomainPoint DomainPoint::operator*(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] * rhs.point_data[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint& DomainPoint::operator*=(coord_t scalar)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < dim; i++)
+      point_data[i] *= scalar;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainPoint& DomainPoint::operator*=(const DomainPoint &rhs) 
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+      point_data[i] *= rhs.point_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint DomainPoint::operator/(coord_t scalar) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] / scalar;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ 
+  inline DomainPoint DomainPoint::operator/(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] / rhs.point_data[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint& DomainPoint::operator/=(coord_t scalar)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < dim; i++)
+      point_data[i] /= scalar;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainPoint& DomainPoint::operator/=(const DomainPoint &rhs) 
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+      point_data[i] /= rhs.point_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint DomainPoint::operator%(coord_t scalar) const
+  //----------------------------------------------------------------------------
+  {
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] % scalar;
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ 
+  inline DomainPoint DomainPoint::operator%(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    DomainPoint result;
+    result.dim = dim;
+    for (int i = 0; i < dim; i++)
+      result[i] = point_data[i] % rhs.point_data[i];
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline DomainPoint& DomainPoint::operator%=(coord_t scalar)
+  //----------------------------------------------------------------------------
+  {
+    for (int i = 0; i < dim; i++)
+      point_data[i] %= scalar;
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainPoint& DomainPoint::operator%=(const DomainPoint &rhs) 
+  //----------------------------------------------------------------------------
+  {
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+      point_data[i] %= rhs.point_data[i];
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
   __CUDA_HD__ inline coord_t& DomainPoint::operator[](unsigned index)
   //----------------------------------------------------------------------------
   {
@@ -545,6 +765,54 @@ namespace Legion {
       if(rect_data[i] > rhs.rect_data[i]) return false;
     }
     return false; // otherwise they are equal
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain Domain::operator+(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(dense());
+    DomainPoint lo = this->lo() + rhs;
+    DomainPoint hi = this->hi() + rhs;
+    return Domain(lo, hi);
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain& Domain::operator+=(const DomainPoint &rhs)
+  //----------------------------------------------------------------------------
+  {
+    assert(dense());
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+    {
+      rect_data[i] += rhs[i];
+      rect_data[dim+i] += rhs[i];
+    }
+    return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain Domain::operator-(const DomainPoint &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(dense());
+    DomainPoint lo = this->lo() - rhs;
+    DomainPoint hi = this->hi() - rhs;
+    return Domain(lo, hi);
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__ inline Domain& Domain::operator-=(const DomainPoint &rhs)
+  //----------------------------------------------------------------------------
+  {
+    assert(dense());
+    assert(get_dim() == rhs.get_dim());
+    for (int i = 0; i < dim; i++)
+    {
+      rect_data[i] -= rhs[i];
+      rect_data[dim+i] -= rhs[i];
+    }
+    return *this;
   }
 
   //----------------------------------------------------------------------------
@@ -1318,6 +1586,30 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainTransform::operator==(const DomainTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    if (m != rhs.m)
+      return false;
+    if (n != rhs.n)
+      return false;
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < n; j++)
+        if (matrix[i * n + j] != rhs.matrix[i * n + j])
+          return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainTransform::operator!=(const DomainTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    return !(*this == rhs);
+  }
+
+  //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
   inline DomainTransform::operator Transform<M,N,T>(void) const
   //----------------------------------------------------------------------------
@@ -1345,6 +1637,39 @@ namespace Legion {
       for (int j = 0; j < n; j++)
         result.point_data[i] += matrix[i * n + j] * p.point_data[j];
     }
+    return result;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline Domain DomainTransform::operator*(const Domain &domain) const
+  //----------------------------------------------------------------------------
+  {
+    assert(domain.dense());
+    assert(n == domain.get_dim());
+    DomainPoint lo = this->operator*(domain.lo());
+    DomainPoint hi = this->operator*(domain.hi());
+    return Domain(lo, hi);
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline DomainTransform DomainTransform::operator*(
+                                               const DomainTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    assert(n == rhs.m);
+    DomainTransform result;
+    result.m = m;
+    result.n = rhs.n;
+    for (int i = 0; i < m; i++)
+      for (int j = 0; j < rhs.n; j++)
+      {
+        coord_t product = 0;
+        for (int k = 0; k < n; k++)
+          product += (matrix[i*n + k] * rhs.matrix[k*rhs.n + j]);
+        result.matrix[i*rhs.n + j] = product;
+      }
     return result;
   }
 
@@ -1421,6 +1746,28 @@ namespace Legion {
     transform = rhs.transform;
     offset = rhs.offset;
     return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainAffineTransform::operator==(
+                                         const DomainAffineTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    if (transform != rhs.transform)
+      return false;
+    if (offset != rhs.offset)
+      return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainAffineTransform::operator!=(
+                                         const DomainAffineTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    return !(*this == rhs);
   }
 
   //----------------------------------------------------------------------------
@@ -1515,6 +1862,30 @@ namespace Legion {
     extent = rhs.extent;
     divisor = rhs.divisor;
     return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainScaleTransform::operator==(
+                                          const DomainScaleTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    if (transform != rhs.transform)
+      return false;
+    if (extent != rhs.extent)
+      return false;
+    if (divisor != rhs.divisor)
+      return false;
+    return true;
+  }
+
+  //----------------------------------------------------------------------------
+  __CUDA_HD__
+  inline bool DomainScaleTransform::operator!=(
+                                          const DomainScaleTransform &rhs) const
+  //----------------------------------------------------------------------------
+  {
+    return !(*this == rhs);
   }
 
   //----------------------------------------------------------------------------
