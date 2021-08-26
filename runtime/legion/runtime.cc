@@ -7711,7 +7711,7 @@ namespace Legion {
                ((header != FULL_MESSAGE) && !first_partial)) ?
                 (send_precondition.exists() ? 
                   Runtime::merge_events(send_precondition, last_message_event) :
-                  last_message_event) : RtEvent::NO_RT_EVENT, 
+                  last_message_event) : send_precondition, 
               response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
@@ -7733,7 +7733,7 @@ namespace Legion {
                  ((header != FULL_MESSAGE) && !first_partial)) ?
                   (send_precondition.exists() ? 
                    Runtime::merge_events(send_precondition,last_message_event) :
-                   last_message_event) : RtEvent::NO_RT_EVENT, 
+                   last_message_event) : send_precondition, 
                 response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
