@@ -15908,7 +15908,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(finder != to_filter.end());
 #endif
-                  to_filter.erase(finder);
+                  finder.filter(it->second);
+                  if (!finder->second)
+                    to_filter.erase(finder);
                   if (!diff->is_empty())
                     to_filter.insert(diff, it->second);
                   else
