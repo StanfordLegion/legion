@@ -194,6 +194,16 @@ for n in 1 2; do EXECUTABLE=dom_host.exec.idx-dyn-check ./run.sh -i ../testcases
 for n in 1 2; do EXECUTABLE=dom_host.exec.noidx ./run.sh -i ../testcases/ws-pizdaint/dom/$n.json; done
 ```
 
+## Dynamic Projection Functor Checks
+
+All files for these measurements are in `bitmask-tests/`.
+
+`self.sh` will benchmark the dynamic self-check. Results for different projections functors and launch domain sizes can be obtained by changing the two marked lines in `self.rg`. Examples of all four projection functors that appear in the paper are also provided.
+
+Similarly, `cross.sh` will benchmark the dynamic cross-check. The test is setup to simulate `N` arguments on the same partition, with the first argument being read-write and all others being read-only. Results for different number of arguments and launch domain sizes can be obtained by changing the two marked lines in `cross.rg`.
+
+Note that the paper reports the average of the five executions done by each script.
+
 # Miscellaneous Notes
 
 ## Pennant
