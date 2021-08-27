@@ -1745,11 +1745,6 @@ namespace Legion {
         SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
        const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
-    protected:
-      // Must be called while holding the node lock
-      void add_pending_send(AutoLock &n_lock, AddressSpaceID target);
-      void wait_for_pending_send(AutoLock &n_lock, AddressSpaceID target);
-      void remove_pending_send(AutoLock &n_lock, AddressSpaceID target);
     public:
       RegionTreeForest *const context;
       const unsigned depth;
@@ -1765,10 +1760,6 @@ namespace Legion {
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     protected:
       std::map<std::pair<LegionColor,LegionColor>,RtEvent> pending_tests;
-    protected:
-      // Recording that there are pending sends to be done for this
-      // node to remove nodes (only valid on the owner node)
-      std::map<AddressSpaceID,RtUserEvent> pending_sends;
     protected:
       // Map tracking send events for creating this tree node on remote nodes
       std::map<AddressSpaceID,RtEvent> send_effects;
