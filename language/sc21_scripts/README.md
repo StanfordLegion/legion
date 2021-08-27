@@ -36,7 +36,7 @@ fi
 Then run the following:
 
 ```bash
-git clone -b regent-index-launch-sc21 https://gitlab.com/StanfordLegion/legion.git
+git clone -b papers/index-launch-sc21 https://github.com/StanfordLegion/legion.git
 cd legion/language
 ./sc21_scripts/setup.sh
 ./sc21_scripts/build_stencil.sh stencil.run1
