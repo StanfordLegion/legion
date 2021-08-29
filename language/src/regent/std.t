@@ -2863,7 +2863,7 @@ function std.cross_product(...)
            "Cross product type requires argument " .. tostring(i) .. " to be a symbol")
     if terralib.types.istype(partition_symbol:gettype()) then
       assert(std.is_partition(partition_symbol:gettype()),
-             "Cross prodcut type requires argument " .. tostring(i) .. " to be a partition")
+             "Cross product type requires argument " .. tostring(i) .. " to be a partition")
     end
   end
 
