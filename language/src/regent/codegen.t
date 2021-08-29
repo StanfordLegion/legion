@@ -9096,6 +9096,13 @@ function codegen.stat_block(cx, node)
   end
 end
 
+local function get_base_cross_product(node)
+  if node:is(ast.typed.expr.IndexAccess) then
+    return get_base_cross_product(node.value)
+  end
+  return node
+end
+
 local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
@@ -9121,8 +9128,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       else
         region_arg = arg
       end
-      local partition_expr = region_arg.value
-      local partition_type = std.as_read(region_arg.value.expr_type)
+      local partition_expr = get_base_cross_product(region_arg.value)
+      local partition_type = std.as_read(partition_expr.expr_type):partition()
       partition = codegen.expr(cx, partition_expr):read(cx)
 
       -- Now run codegen the rest of the way to get the region.
