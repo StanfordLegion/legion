@@ -291,6 +291,13 @@ namespace Legion {
       for (int i = 0; i < 3; i++)
         random_number_generator[i] = (unsigned short)((local_proc.id &
                             (short_mask << (i*short_bits))) >> (i*short_bits));
+
+      // See whether there are multiple NUMA memories available.
+      {
+        Machine::MemoryQuery socketMems(this->machine);
+        socketMems.local_address_space().only_kind(Memory::SOCKET_MEM);
+        this->multipleNumaDomainsPresent = socketMems.count() > 1;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1671,15 +1678,23 @@ namespace Legion {
             }
           case Processor::LOC_PROC:
             {
-              // Put any of our local cpus on here
-              // TODO: NUMA-ness needs to go here
-              // If we're part of a must epoch launch, our
-              // target proc will be sufficient
-              if (!task.must_epoch_task)
-                target_procs.insert(target_procs.end(),
-                    local_cpus.begin(), local_cpus.end());
-              else
+              // Put any of our local CPUs on here. Except if
+              // we're part of an epoch launch, or there are multiple
+              // NUMA memories available. In the first case, this is
+              // sufficient. In the latter case, we want the target_proc
+              // to be at the front of the returned vector so that map_task
+              // chooses a numa memory closest to the chosen processor. If
+              // there aren't any NUMA domains or only one, then it doesn't
+              // matter which OMP is returned.
+              if (task.must_epoch_task || this->multipleNumaDomainsPresent) {
                 target_procs.push_back(task.target_proc);
+              } else {
+                target_procs.insert(
+                    target_procs.end(),
+                    this->local_cpus.begin(),
+                    this->local_cpus.end()
+                );
+              }
               break;
             }
           case Processor::IO_PROC:
@@ -1713,15 +1728,23 @@ namespace Legion {
             }
           case Processor::OMP_PROC:
             {
-              // Put any of our local omps on here
-              // TODO: NUMA-ness needs to go here
-              // If we're part of a must epoch launch, our
-              // target proc will be sufficient
-              if (!task.must_epoch_task)
-                target_procs.insert(target_procs.end(),
-                    local_omps.begin(), local_omps.end());
-              else
+              // Put any of our local OMPs on here. Except if
+              // we're part of an epoch launch, or there are multiple
+              // NUMA memories available. In the first case, this is
+              // sufficient. In the latter case, we want the target_proc
+              // to be at the front of the returned vector so that map_task
+              // chooses a numa memory closest to the chosen processor. If
+              // there aren't any NUMA domains or only one, then it doesn't
+              // matter which OMP is returned.
+              if (task.must_epoch_task || this->multipleNumaDomainsPresent) {
                 target_procs.push_back(task.target_proc);
+              } else {
+                target_procs.insert(
+                    target_procs.end(),
+                    local_omps.begin(),
+                    local_omps.end()
+                );
+              }
               break;
             }
           default:
