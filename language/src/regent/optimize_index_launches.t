@@ -34,11 +34,15 @@ local function get_source_location(node)
   return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
 end
 
-local function get_partition_symbol(expr)
-  if expr:is(ast.typed.expr.Projection) then
-    return expr.region.value.value
+local function get_base_partition_symbol(node)
+  if node:is(ast.typed.expr.Projection) then
+    return node.region.value.value
   end
-  return expr.value.value
+  node = ast.get_base_indexed_node(node)
+  if std.is_cross_product(std.as_read(node.expr_type)) then
+    return std.as_read(node.expr_type).partition_symbols[1]
+  end
+  return node.value
 end
 
 local function get_partition_dim(expr)
@@ -492,11 +496,16 @@ end
 
 local function analyze_noninterference_self(
     cx, task, arg, partition_type, mapping, loop_vars)
-  local region_type = std.as_read(arg.expr_type)
   local is_disjoint = partition_type and partition_type:is_disjoint()
   if is_disjoint then
-    local index =
-      (arg:is(ast.typed.expr.Projection) and arg.region.index) or arg.index
+    local index
+    if arg:is(ast.typed.expr.Projection) then
+      index = arg.region.index
+    else
+      local _
+      _, index = ast.get_base_indexed_node(arg)
+    end
+
     if analyze_index_noninterference_self(index, cx, loop_vars)
     then
       return true, false
@@ -1117,6 +1126,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
     local free_vars_base = terralib.newlist()
     free_vars_base:insertall(loop_cx.free_variables)
+
     for i, arg in ipairs(args) do
       if not analyze_is_side_effect_free(loop_cx, arg) then
         report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
@@ -1145,8 +1155,9 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           if arg:is(ast.typed.expr.Projection) then
             partition_type = std.as_read(arg.region.value.expr_type)
           else
-            partition_type = std.as_read(arg.value.expr_type)
+            partition_type = std.as_read(ast.get_base_indexed_node(arg).expr_type):partition()
           end
+          assert(std.is_partition(partition_type))
           arg_projectable = true
         end
 
@@ -1180,14 +1191,13 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       -- Tests for non-interference.
       if std.is_region(arg_type) and (not is_demand or not skip_interference_check) then
-        print 'Hmm'
         do
           local passed, failures_i = analyze_noninterference_previous(
             loop_cx, task, arg, regions_previously_used, mapping)
           if not passed then
             if emit_dynamic_check then
               for _, failure in pairs(failures_i) do
-                if get_partition_symbol(arg) == get_partition_symbol(args[failure]) then
+                if get_base_partition_symbol(arg) == get_base_partition_symbol(args[failure]) then
                   table.insert(args_need_dynamic_check, { i, failure })
                 end
               end
@@ -1299,16 +1309,16 @@ local function collapse_projection_functor(pf, dim, bounds)
 end
 
 local function collect_and_sort_args(args, call_args, task, param_region_types)
-  -- Collect all args of the same partition together
+  -- Collect all args of the same partition or cross product together
   local collected = {}
   for _, arg in pairs(args) do
     if type(arg) == "number" then
-      local psym = get_partition_symbol(call_args[arg])
+      local psym = get_base_partition_symbol(call_args[arg])
       collected[psym] = collected[psym] or {}
       collected[psym][arg] = true
     else
       -- Cross-check args are pairs
-      local psym = get_partition_symbol(call_args[arg[1]])
+      local psym = get_base_partition_symbol(call_args[arg[1]])
       collected[psym] = collected[psym] or {}
       collected[psym][arg[1]] = true
       collected[psym][arg[2]] = true
@@ -1385,7 +1395,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
-      util.mk_expr_id(get_partition_symbol(call_args[args[1]])), "colors", std.ispace(index_types[dim]))
+      util.mk_expr_id(get_base_partition_symbol(call_args[args[1]])), "colors", std.ispace(index_types[dim]))
     local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
     local volume = std.newsymbol(int64, "volume")
     stats:insert(
@@ -1414,14 +1424,14 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       local duplicates_check = terralib.newlist()
       index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
 
-      local index_expr
+      local _, index_expr
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        index_expr = call_args[arg].index.arg
+        _, index_expr = ast.get_base_indexed_node(call_args[arg]).arg
       else
         if call_args[arg]:is(ast.typed.expr.Projection) then
-          index_expr = call_args[arg].region.index
+          _, index_expr = ast.get_base_indexed_node(call_args[arg].region)
         else
-          index_expr = call_args[arg].index
+          _, index_expr = ast.get_base_indexed_node(call_args[arg])
         end
       end
 
