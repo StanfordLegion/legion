@@ -225,7 +225,8 @@ namespace Legion {
       track_parent = true;
       context_index = index;
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_unordered_operation(
+        LegionSpy::log_unordered_operation(parent_ctx->get_unique_id(),
+                                           unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
