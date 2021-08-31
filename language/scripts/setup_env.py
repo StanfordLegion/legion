@@ -19,10 +19,10 @@ from __future__ import print_function
 import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys, tempfile, traceback
 
 def discover_llvm_version():
-    if platform.node().startswith('titan'):
-        return '38'
-    elif os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
+    if os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
         return '60'
+    elif os.environ.get('NERSC_HOST') == 'perlmutter':
+        return '110'
     else:
         return '60'
 
@@ -43,10 +43,10 @@ def discover_conduit():
         return 'aries'
     elif platform.node().startswith('quartz'):
         return 'psm'
-    elif platform.node().startswith('titan'):
-        return 'gemini'
     elif os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
         return 'ibv'
+    elif os.environ.get('NERSC_HOST') == 'perlmutter':
+        return 'ucx'
     else:
         raise Exception('Please set CONDUIT in your environment')
 

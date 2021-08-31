@@ -15879,6 +15879,80 @@ namespace Legion {
               restricted_instances.begin(); it != 
               restricted_instances.end(); it++)
           restricted_fields |= it->second.get_valid_mask();
+        // If the data was restricted then we just removed the only
+        // valid copy so we need to filter the initialized data
+        filter_initialized_data(expr, expr_covers, filter_mask);
+      }
+      else
+      {
+        // Check to see if we still have initialized data for what we filtered
+        if (!total_valid_instances.empty() || !partial_valid_instances.empty())
+        {
+          FieldMask to_check =
+            filter_mask - total_valid_instances.get_valid_mask();
+          if (!!to_check)
+          {
+            const FieldMask no_partial = to_check - partial_valid_fields;
+            if (!!no_partial)
+            {
+              filter_initialized_data(expr, expr_covers, no_partial);
+              to_check -= no_partial;
+            }
+            if (!!to_check)
+            {
+              FieldMaskSet<IndexSpaceExpression> to_filter;
+              to_filter.insert(expr, to_check);
+              for (LegionMap<LogicalView*,
+                   FieldMaskSet<IndexSpaceExpression> >::aligned::const_iterator
+                    pit = partial_valid_instances.begin();
+                    pit != partial_valid_instances.end(); pit++)
+              {
+                if (to_check * pit->second.get_valid_mask())
+                  continue;
+                LegionMap<std::pair<IndexSpaceExpression*,
+                  IndexSpaceExpression*>,FieldMask>::aligned filter_sets;
+                unique_join_on_field_mask_sets(to_filter, 
+                                pit->second, filter_sets);
+                for (LegionMap<std::pair<IndexSpaceExpression*,
+                      IndexSpaceExpression*>,FieldMask>::aligned::const_iterator
+                      it = filter_sets.begin(); it != filter_sets.end(); it++)
+                {
+                  IndexSpaceExpression *diff = 
+                    runtime->forest->subtract_index_spaces(
+                        it->first.first, it->first.second);
+                  if (diff->get_volume() == it->first.first->get_volume())
+                    continue;
+                  FieldMaskSet<IndexSpaceExpression>::iterator finder =
+                    to_filter.find(it->first.first);
+#ifdef DEBUG_LEGION
+                  assert(finder != to_filter.end());
+#endif
+                  finder.filter(it->second);
+                  if (!finder->second)
+                    to_filter.erase(finder);
+                  if (!diff->is_empty())
+                    to_filter.insert(diff, it->second);
+                  else
+                    to_check -= it->second;
+                }
+                if (to_filter.empty())
+                  break;
+              }
+              if (!to_filter.empty())
+              {
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                      to_filter.begin(); it != to_filter.end(); it++)
+                {
+                  const bool covers =
+                    (it->first->get_volume() == set_expr->get_volume());
+                  filter_initialized_data(it->first, covers, it->second);
+                }
+              }
+            }
+          }
+        }
+        else // everything empty so filter the whole set
+          filter_initialized_data(set_expr, true/*covers*/, filter_mask);
       }
       check_for_migration(analysis, applied_events);
     }

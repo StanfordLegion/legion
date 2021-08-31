@@ -5716,7 +5716,7 @@ class Operation(object):
                  'fully_logged', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'copy_kind', 'collective_src', 'collective_dst', 'collective_copies', 
-                 'eq_incoming', 'eq_outgoing', 'eq_privileges',
+                 'context_index', 'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'internal_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'owner_shard', 'index_owner', 'points', 'launch_rect', 
@@ -5731,6 +5731,7 @@ class Operation(object):
         self.uid = uid
         self.kind = NO_OP_KIND 
         self.context = None
+        self.context_index = None
         self.name = None
         self.reqs = None
         self.mappings = None
@@ -5821,25 +5822,25 @@ class Operation(object):
 
     __repr__ = __str__
 
-    def set_context(self, context, add=True):
+    def set_context(self, context, index=None):
         self.context = context
         # Recurse for any inter close operations
         if self.internal_ops:
             for internal in self.internal_ops:
-                internal.set_context(context, False)
+                internal.set_context(context)
         # Also recurse for any points we have
         if self.points is not None:
             if self.kind == INDEX_TASK_KIND:
                 for point in itervalues(self.points):
-                    point.op.set_context(context, False)
+                    point.op.set_context(context)
             else:
                 for point in itervalues(self.points):
-                    point.set_context(context, False)
+                    point.set_context(context)
         # Finaly recurse for any summary operations
         if self.summary_op is not None and self.summary_op != self:
-            self.summary_op.set_context(context, False)
-        if add:
-            self.context.add_operation(self)
+            self.summary_op.set_context(context)
+        if index is not None:
+            self.context.add_operation(self, index)
 
     def get_context(self):
         assert self.context is not None
@@ -5987,7 +5988,7 @@ class Operation(object):
         else:
             self.points[index_point] = point
         if self.context is not None:
-            self.points[index_point].op.set_context(self.context, False)
+            self.points[index_point].op.set_context(self.context)
 
     def add_point_op(self, op, point):
         op.kind = self.kind
@@ -5998,7 +5999,7 @@ class Operation(object):
         assert point not in self.points
         self.points[point] = op
         if self.context is not None:
-            op.set_context(self.context, False)
+            op.set_context(self.context)
 
     def add_requirement(self, requirement):
         if self.reqs is None:
@@ -8208,8 +8209,19 @@ class Task(object):
     def html_safe_name(self):
         return str(self).replace('<','&lt;').replace('>','&gt;').replace('&','&amp;')
 
-    def add_operation(self, operation):
-        self.operations.append(operation)
+    def add_operation(self, operation, index):
+        assert operation.context_index is None
+        operation.context_index = index
+        # In general operations will always be appended here
+        # because they are logged in order, but because of 
+        # unordered operations we may need to insert somewhere earlier 
+        for idx in xrange(len(self.operations)-1, -1, -1):
+            op = self.operations[idx]
+            # Equal case can happen for must epoch operations...
+            if index >= op.context_index:
+                self.operations.insert(idx+1, operation)
+                return
+        self.operations.insert(0, operation)
 
     def set_point(self, point):
         self.point = point
@@ -8299,7 +8311,7 @@ class Task(object):
             self.operations = other.operations
             # Update the contexts
             for op in self.operations:
-                op.set_context(self, False)
+                op.set_context(self)
         else:
             assert not other.operations
         if not self.processor:
@@ -10878,49 +10890,55 @@ top_task_pat             = re.compile(
     prefix+"Top Task (?P<tid>[0-9]+) (?P<ctxuid>[0-9]+) (?P<uid>[0-9]+) (?P<name>.+)")
 single_task_pat          = re.compile(
     prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-            "(?P<name>.+)")
+            "(?P<index>[0-9]+) (?P<name>.+)")
 index_task_pat           = re.compile(
     prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
-            "(?P<name>.+)")
+            "(?P<index>[0-9]+) (?P<name>.+)")
 inline_task_pat          = re.compile(
     prefix+"Inline Task (?P<uid>[0-9]+)")
 mapping_pat              = re.compile(
-    prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 close_pat                = re.compile(
-    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
+    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
+           "(?P<is_inter>[0-1])")
 refinement_pat           = re.compile(
     prefix+"Refinement Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(
-    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 trace_pat                = re.compile(
     prefix+"Trace Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(
     prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<kind>[0-9]+) "+ 
-           "(?P<src>[0-1]) (?P<dst>[0-1])")
+           "(?P<index>[0-9]+) (?P<src>[0-1]) (?P<dst>[0-1])")
 fill_op_pat              = re.compile(
-    prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 acquire_op_pat           = re.compile(
-    prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 release_op_pat           = re.compile(
-    prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 creation_pat             = re.compile(
-    prefix+"Creation Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Creation Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 deletion_pat             = re.compile(
-    prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
+           "(?P<unordered>[0-1])")
 attach_pat               = re.compile(
-    prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<restriction>[0-1])")
+    prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
+           "(?P<restriction>[0-1])")
 detach_pat               = re.compile(
-    prefix+"Detach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Detach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
+           "(?P<unordered>[0-9]+)")
+unordered_pat            = re.compile(
+    prefix+"Unordered Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 dynamic_collective_pat   = re.compile(
-    prefix+"Dynamic Collective (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Dynamic Collective (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 timing_op_pat            = re.compile(
-    prefix+"Timing Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Timing Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 tunable_op_pat           = re.compile(
-    prefix+"Tunable Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Tunable Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 all_reduce_op_pat        = re.compile(
-    prefix+"All Reduce Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"All Reduce Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 predicate_op_pat         = re.compile(
     prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 must_epoch_op_pat        = re.compile(
@@ -10931,9 +10949,9 @@ summary_op_creator_pat        = re.compile(
     prefix+"Summary Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+)")
 dep_partition_op_pat     = re.compile(
     prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
-           "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
+           "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+) (?P<index>[0-9]+)")
 pending_partition_op_pat = re.compile(
-    prefix+"Pending Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Pending Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 target_partition_pat     = re.compile(
     prefix+"Pending Partition Target (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
 index_slice_pat          = re.compile(
@@ -11501,7 +11519,7 @@ def parse_legion_spy_line(line, state):
         op.set_name(m.group('name'))
         op.set_task_id(int(m.group('tid')))
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = index_task_pat.match(line)
     if m is not None:
@@ -11510,7 +11528,7 @@ def parse_legion_spy_line(line, state):
         op.set_name(m.group('name'))
         op.set_task_id(int(m.group('tid')))
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = inline_task_pat.match(line)
     if m is not None:
@@ -11523,7 +11541,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(MAP_OP_KIND)
         op.set_name("Mapping Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = close_pat.match(line)
     if m is not None:
@@ -11540,7 +11558,7 @@ def parse_legion_spy_line(line, state):
         # Only add this to the context if it not an intermediate
         # close operation, otherwise add it to the context like normal
         # because it as an actual operation
-        op.set_context(context, not inter)
+        op.set_context(context, None if inter else int(m.group('index')))
         return True
     m = refinement_pat.match(line)
     if m is not None:
@@ -11548,7 +11566,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(REFINEMENT_OP_KIND)
         op.set_name("Refinement Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
+        op.set_context(context)
         return True
     m = internal_creator_pat.match(line)
     if m is not None:
@@ -11562,7 +11580,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(FENCE_OP_KIND)
         op.set_name("Fence Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = trace_pat.match(line)
     if m is not None:
@@ -11575,7 +11593,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(COPY_OP_KIND)
         op.set_name("Copy Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         op.copy_kind = int(m.group('kind'))
         collective_src = int(m.group('src'))
         op.collective_src = True if collective_src == 1 and \
@@ -11590,7 +11608,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(FILL_OP_KIND)
         op.set_name("Fill Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = acquire_op_pat.match(line)
     if m is not None:
@@ -11598,7 +11616,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(ACQUIRE_OP_KIND)
         op.set_name("Acquire Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = release_op_pat.match(line)
     if m is not None:
@@ -11606,7 +11624,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(RELEASE_OP_KIND)
         op.set_name("Release Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = creation_pat.match(line)
     if m is not None:
@@ -11614,15 +11632,16 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(CREATION_OP_KIND)
         op.set_name("Creation Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = deletion_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DELETION_OP_KIND)
         op.set_name("Deletion Op")
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        if int(m.group('unordered')) == 0:
+            context = state.get_task(int(m.group('ctx')))
+            op.set_context(context, int(m.group('index')))
         return True
     m = attach_pat.match(line)
     if m is not None:
@@ -11630,7 +11649,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(ATTACH_OP_KIND)
         op.set_name("Attach Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         op.restricted = True if int(m.group('restriction')) == 1 else False
         return True
     m = detach_pat.match(line)
@@ -11638,8 +11657,15 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DETACH_OP_KIND)
         op.set_name("Detach Op")
+        if int(m.group('unordered')) == 0:
+            context = state.get_task(int(m.group('ctx')))
+            op.set_context(context, int(m.group('index')))
+        return True
+    m = unordered_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = dynamic_collective_pat.match(line)
     if m is not None:
@@ -11647,7 +11673,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(DYNAMIC_COLLECTIVE_OP_KIND)
         op.set_name("Dynamic Collective Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = timing_op_pat.match(line)
     if m is not None:
@@ -11655,7 +11681,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(TIMING_OP_KIND)
         op.set_name("Timing Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = tunable_op_pat.match(line)
     if m is not None:
@@ -11663,7 +11689,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(TUNABLE_OP_KIND)
         op.set_name("Tunable Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = all_reduce_op_pat.match(line)
     if m is not None:
@@ -11671,15 +11697,15 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(ALL_REDUCE_OP_KIND)
         op.set_name("Reduce Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = predicate_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PREDICATE_OP_KIND)
         op.set_name("Predicate Op")
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        # Predicate ops are not recorded in the context for now
+        # because they have to outlive when they complete
         return True
     m = must_epoch_op_pat.match(line)
     if m is not None:
@@ -11700,7 +11726,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(DEP_PART_OP_KIND)
         op.set_name("Dependent Partition Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = pending_partition_op_pat.match(line)
     if m is not None:
@@ -11708,7 +11734,7 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(PENDING_PART_OP_KIND)
         op.set_name("Pending Partition Op")
         context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
+        op.set_context(context, int(m.group('index')))
         return True
     m = target_partition_pat.match(line)
     if m is not None:
