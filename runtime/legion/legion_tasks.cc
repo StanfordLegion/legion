@@ -392,6 +392,18 @@ namespace Legion {
       Operation::set_must_epoch(epoch, do_registration);
       must_epoch_index = index;
       must_epoch_task = true;
+      if (runtime->legion_spy_enabled)
+      {
+        const TaskKind kind = get_task_kind();
+        if (kind == INDEX_TASK_KIND)
+          LegionSpy::log_index_task(parent_ctx->get_unique_id(),
+                                    unique_op_id, task_id,
+                                    epoch->get_ctx_index(), get_task_name());
+        else if (kind == INDIVIDUAL_TASK_KIND)
+          LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
+                                    unique_op_id, task_id,
+                                    epoch->get_ctx_index(), get_task_name());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5830,9 +5842,11 @@ namespace Legion {
         if (top_level)
           LegionSpy::log_top_level_task(task_id, parent_ctx->get_unique_id(),
                                         unique_op_id, get_task_name());
-        LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
-                                       unique_op_id,
-                                       task_id, get_task_name());
+        // Tracking as long as we are not part of a must epoch operation
+        if (track || top_level)
+          LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
+                                         unique_op_id, task_id,
+                                         context_index, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -8412,12 +8426,14 @@ namespace Legion {
       else
         elide_future_return = true;
       check_empty_field_requirements(); 
-
+ 
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
-                                  unique_op_id, task_id,
-                                  get_task_name());
+        // Don't log this yet if we're part of a must epoch operation
+        if (track)
+          LegionSpy::log_index_task(parent_ctx->get_unique_id(),
+                                    unique_op_id, task_id,
+                                    context_index, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -8531,11 +8547,11 @@ namespace Legion {
           runtime->address_space, get_completion_event(),
           (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && track)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  get_task_name());
+                                  context_index, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)

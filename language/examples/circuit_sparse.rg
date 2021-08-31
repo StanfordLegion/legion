@@ -395,6 +395,7 @@ do
   end
 end
 
+__demand(__cuda)
 task calculate_new_currents(print_ts : bool,
                             steps : uint,
                             rpn : region(node),
@@ -494,6 +495,7 @@ do
   end
 end
 
+__demand(__cuda)
 task distribute_charge(rpn : region(node),
                        rsn : region(node),
                        rgn : region(node),
@@ -511,6 +513,7 @@ do
   end
 end
 
+__demand(__cuda)
 task update_voltages(print_ts : bool,
                      rpn : region(node),
                      rsn : region(node),

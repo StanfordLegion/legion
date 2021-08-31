@@ -537,6 +537,10 @@ namespace Legion {
       std::vector<Processor> remote_procsets;
       std::vector<Processor> remote_omps;
       std::vector<Processor> remote_pys;
+      // multipleNumaDomainsPresent is set to true when the target machine
+      // has multiple separate NUMA memories (SOCKET_MEM). This controls how
+      // processor selection for NUMA aware allocations is performed.
+      bool multipleNumaDomainsPresent = false;
     protected:
       // For doing round-robining of tasks onto processors
       unsigned next_local_gpu, next_local_cpu, next_local_io,

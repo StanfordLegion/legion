@@ -777,6 +777,9 @@ namespace Legion {
 #endif
       track_parent = true;
       context_index = index;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_unordered_operation(parent_ctx->get_unique_id(),
+                                           unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -3253,7 +3256,7 @@ namespace Legion {
       
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id);
+                                         unique_op_id, context_index);
       return region;
     }
 
@@ -3277,7 +3280,7 @@ namespace Legion {
       // them from the first time that we made this physical region
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id);
+                                         unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -4557,8 +4560,8 @@ namespace Legion {
       {
         const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
           (dst_indirect_requirements.empty() ? 0 : 2);
-        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                      unique_op_id, copy_kind, false, false);
+        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(), unique_op_id,
+            copy_kind, context_index, false, false);
       }
     }
 
@@ -6970,7 +6973,7 @@ namespace Legion {
         const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
           (dst_indirect_requirements.empty() ? 0 : 2);
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                      unique_op_id, copy_kind,
+                                      unique_op_id, copy_kind, context_index,
                                       collective_src_indirect_points,
                                       collective_dst_indirect_points);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
@@ -8072,7 +8075,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id);
+                                       unique_op_id, context_index);
       return result;
     }
 
@@ -8421,7 +8424,7 @@ namespace Legion {
       mapping_precondition = precondition;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                                          unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -8441,7 +8444,7 @@ namespace Legion {
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                                          unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -8464,7 +8467,7 @@ namespace Legion {
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                                          unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -8490,7 +8493,7 @@ namespace Legion {
       owner = own;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                                          unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -8510,7 +8513,7 @@ namespace Legion {
         futures[index] = it->second;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_creation_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                                          unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -8769,7 +8772,7 @@ namespace Legion {
       sub_partitions.swap(subs);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                              unique_op_id, context_index, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -8784,7 +8787,7 @@ namespace Legion {
       sub_partitions.swap(subs);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                              unique_op_id, context_index, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -8797,7 +8800,7 @@ namespace Legion {
       field_space = handle;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                              unique_op_id, context_index, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -8832,7 +8835,7 @@ namespace Legion {
           Runtime::protect_event(completion_event), non_owner_shard);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                              unique_op_id, context_index, unordered);
     }
 
     //--------------------------------------------------------------------------
@@ -8874,7 +8877,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                              unique_op_id, context_index, unordered);
         if (skip_dependence_analysis)
           log_deletion_requirements();
       }
@@ -8897,7 +8900,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
+                              unique_op_id, context_index, unordered);
         if (skip_dependence_analysis)
           log_deletion_requirements();
       }
@@ -9624,7 +9627,7 @@ namespace Legion {
     {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
-                                       true/*inter close*/);
+                                       context_index, true/*inter close*/);
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
@@ -9849,7 +9852,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
-                                       false/*inter*/);
+                                       context_index, false/*inter*/);
         perform_logging();
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_id(),
@@ -10248,7 +10251,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
-                                       false/*inter*/);
+                                       context_index, false/*inter*/);
         perform_logging();
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_id(),
@@ -11406,7 +11409,7 @@ namespace Legion {
       tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id);
+                                         unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -12290,7 +12293,7 @@ namespace Legion {
       tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id);
+                                         unique_op_id, context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -13103,7 +13106,8 @@ namespace Legion {
       collective = dc;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_dynamic_collective(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_dynamic_collective(ctx->get_unique_id(),
+                                          unique_op_id, context_index);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, 
                                  future.impl->get_ready_event(), empty_point);
@@ -15403,8 +15407,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_pending_partition_operation(
-          parent_ctx->get_unique_id(),
-          unique_op_id);
+          parent_ctx->get_unique_id(), unique_op_id, context_index);
       thunk->perform_logging(this);
     }
 
@@ -15928,7 +15931,7 @@ namespace Legion {
     {
       LegionSpy::log_dependent_partition_operation(
           parent_ctx->get_unique_id(), unique_op_id, 
-          thunk->get_partition().get_id(), thunk->get_kind());
+          thunk->get_partition().get_id(), thunk->get_kind(), context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -17466,7 +17469,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id);
+                                      unique_op_id, context_index);
         if ((value_size == 0) && (future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
@@ -18227,7 +18230,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id);
+                                      unique_op_id, context_index);
         if ((value_size == 0) && (future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
@@ -18946,7 +18949,7 @@ namespace Legion {
               false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id, restricted);
+                            unique_op_id, context_index, restricted);
       return region;
     }
 
@@ -19679,7 +19682,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id, false/*restricted*/);
+                  unique_op_id, context_index, false/*restricted*/);
         if (launch_space != NULL)
           runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
@@ -20294,7 +20297,7 @@ namespace Legion {
                   &future_size, this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
+                            unique_op_id, context_index, unordered);
       return result;
     }
 
@@ -20740,7 +20743,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
+                            unique_op_id, context_index, unordered);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       return result;
@@ -21097,7 +21100,8 @@ namespace Legion {
                   &future_size, this));
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_timing_operation(ctx->get_unique_id(),
+                                        unique_op_id, context_index);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, 
             result.impl->get_ready_event(), empty_point);
@@ -21316,7 +21320,8 @@ namespace Legion {
               &launcher.return_type_size : NULL/*no size*/, this));
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_tunable_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_tunable_operation(ctx->get_unique_id(),
+                                         unique_op_id, context_index);
         const DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id,
             result.impl->get_ready_event(), empty_point);
@@ -21422,8 +21427,14 @@ namespace Legion {
                                           &input, &output);
       process_result(mapper, output.value, output.size);
       if (runtime->legion_spy_enabled)
+      {
         LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
                         tunable_index, output.value, output.size);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        completion_event); 
+#endif
+      }
       if (instance != NULL)
       {
         if (output.size > return_type_size)
@@ -21509,7 +21520,8 @@ namespace Legion {
       deterministic = is_deterministic;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_all_reduce_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_all_reduce_operation(ctx->get_unique_id(),
+                                            unique_op_id, context_index);
         const DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id,
             result.impl->get_ready_event(), empty_point);

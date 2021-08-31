@@ -267,6 +267,48 @@ namespace Realm {
   {
 #ifdef REALM_ON_LINUX
     static std::map<int, std::vector<int> > saved_distances;
+    static std::map<int, int> saved_node2index;
+
+    // distance files just have the distances for each node in order, but
+    //  discontiguous numa node numbering can mean we need to convert node
+    //  id into its index when in sorted order
+    if(saved_node2index.empty()) {
+      DIR *dh = opendir("/sys/devices/system/node");
+      if(dh) {
+        struct dirent *de;
+        while((de = readdir(dh)) != nullptr)
+          if(!strncmp(de->d_name, "node", 4)) {
+            int id = atoi(de->d_name + 4);
+            // just insert into map for now - we'll assign indices once we have
+            //  them all (and the map will have conveniently sorted them for us)
+            saved_node2index[id] = 0;
+          }
+        closedir(dh);
+
+        // now go through all the node ids in sorted order and store indices
+        int index = 0;
+        for(std::map<int, int>::iterator it = saved_node2index.begin();
+            it != saved_node2index.end();
+            ++it)
+          it->second = index++;
+      } else {
+	fprintf(stderr, "can't read directory '/sys/devices/system/node': %s\n", strerror(errno));
+        // add a dummy entry so we're not empty any more
+        saved_node2index[-1] = -1;
+        // and now give up because we don't know what index 'node2' maps to
+	return -1;
+      }
+    }
+    int node2_index;
+    {
+      std::map<int, int>::const_iterator it = saved_node2index.find(node2);
+      if(it == saved_node2index.end()) {
+        // we don't know the index, so we can't find the distance
+        return -1;
+      }
+
+      node2_index = it->second;
+    }
 
     std::map<int, std::vector<int> >::iterator it = saved_distances.find(node1);
     if(it == saved_distances.end()) {
@@ -296,14 +338,14 @@ namespace Realm {
 	}
       }
       fclose(f);
-      if((node2 >= 0) && (node2 < (int)v.size()))
-	return v[node2];
+      if((node2_index >= 0) && (node2_index < (int)v.size()))
+	return v[node2_index];
       else
 	return -1;
     } else {
       const std::vector<int>& v = it->second;
-      if((node2 >= 0) && (node2 < (int)v.size()))
-	return v[node2];
+      if((node2_index >= 0) && (node2_index < (int)v.size()))
+	return v[node2_index];
       else
 	return -1;
     }
