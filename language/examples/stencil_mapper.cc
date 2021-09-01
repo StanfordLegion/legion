@@ -22,6 +22,115 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
+///
+/// Sharding Functor
+///
+
+enum ShardingFunctorIDs {
+  SID_LINEAR = 1,
+};
+
+class LinearShardingFunctor : public ShardingFunctor {
+public:
+  LinearShardingFunctor();
+  LinearShardingFunctor(const LinearShardingFunctor &rhs);
+  virtual ~LinearShardingFunctor(void);
+public:
+  LinearShardingFunctor& operator=(const LinearShardingFunctor &rhs);
+public:
+  template<int DIM>
+  size_t linearize_point(const Realm::IndexSpace<DIM,coord_t> &is,
+                         const Realm::Point<DIM,coord_t> &point) const;
+public:
+  virtual ShardID shard(const DomainPoint &point,
+                        const Domain &full_space,
+                        const size_t total_shards);
+};
+
+//--------------------------------------------------------------------------
+LinearShardingFunctor::LinearShardingFunctor()
+  : ShardingFunctor()
+//--------------------------------------------------------------------------
+{
+}
+
+//--------------------------------------------------------------------------
+LinearShardingFunctor::LinearShardingFunctor(
+                                           const LinearShardingFunctor &rhs)
+  : ShardingFunctor()
+//--------------------------------------------------------------------------
+{
+  // should never be called
+  assert(false);
+}
+
+//--------------------------------------------------------------------------
+LinearShardingFunctor::~LinearShardingFunctor(void)
+//--------------------------------------------------------------------------
+{
+}
+
+//--------------------------------------------------------------------------
+LinearShardingFunctor& LinearShardingFunctor::operator=(
+                                           const LinearShardingFunctor &rhs)
+//--------------------------------------------------------------------------
+{
+  // should never be called
+  assert(false);
+  return *this;
+}
+
+//--------------------------------------------------------------------------
+template<int DIM>
+size_t LinearShardingFunctor::linearize_point(
+                               const Realm::IndexSpace<DIM,coord_t> &is,
+                               const Realm::Point<DIM,coord_t> &point) const
+//--------------------------------------------------------------------------
+{
+  Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
+  return linearizer.linearize(point);
+}
+
+//--------------------------------------------------------------------------
+ShardID LinearShardingFunctor::shard(const DomainPoint &point,
+                                     const Domain &full_space,
+                                     const size_t total_shards)
+//--------------------------------------------------------------------------
+{
+#ifdef DEBUG_LEGION
+  assert(point.get_dim() == full_space.get_dim());
+#endif
+  size_t domain_size = full_space.get_volume();
+  switch (point.get_dim())
+  {
+    case 1:
+      {
+        const DomainT<1,coord_t> is = full_space;
+        const Point<1,coord_t> p1 = point;
+        return linearize_point<1>(is, p1)  * total_shards / domain_size;
+      }
+    case 2:
+      {
+        const DomainT<2,coord_t> is = full_space;
+        const Point<2,coord_t> p2 = point;
+        return linearize_point<2>(is, p2)  * total_shards / domain_size;
+      }
+    case 3:
+      {
+        const DomainT<3,coord_t> is = full_space;
+        const Point<3,coord_t> p3 = point;
+        return linearize_point<3>(is, p3)  * total_shards / domain_size;
+      }
+    default:
+      assert(false);
+  }
+  return 0;
+}
+
+///
+/// Mapper
+///
+
 static LegionRuntime::Logger::Category log_stencil("stencil");
 
 class StencilMapper : public DefaultMapper
@@ -30,12 +139,21 @@ public:
   StencilMapper(MapperRuntime *rt, Machine machine, Processor local,
                 const char *mapper_name,
                 std::vector<Processor>* procs_list);
-  virtual void select_task_options(const MapperContext    ctx,
-                                   const Task&            task,
-                                         TaskOptions&     output);
-  virtual void default_policy_rank_processor_kinds(
-                                    MapperContext ctx, const Task &task,
-                                    std::vector<Processor::Kind> &ranking);
+  virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
+  virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
+  virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
   virtual Processor default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
@@ -48,10 +166,6 @@ public:
                                 const LayoutConstraintSet &constraints,
                                 bool force_new_instances,
                                 bool meets_constraints);
-  virtual void map_task(const MapperContext ctx,
-                        const Task &task,
-                        const MapTaskInput &input,
-                        MapTaskOutput &output);
   virtual void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
@@ -72,51 +186,63 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
 {
 }
 
-void StencilMapper::select_task_options(const MapperContext    ctx,
-                                        const Task&            task,
-                                              TaskOptions&     output)
+void StencilMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
 {
-  output.initial_proc = default_policy_select_initial_processor(ctx, task);
-  output.inline_task = false;
-  output.stealable = stealing_enabled;
-#ifdef MAP_LOCALLY
-  output.map_locally = true;
-#else
-  output.map_locally = false;
-#endif
+  output.chosen_functor = SID_LINEAR;
 }
 
-void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
-                        const Task &task, std::vector<Processor::Kind> &ranking)
+void StencilMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
 {
-#if SPMD_SHARD_USE_IO_PROC
-  const char* task_name = task.get_task_name();
-  const char* prefix = "shard_";
-  if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
-    // Put shard tasks on IO processors.
-    ranking.resize(5);
-    ranking[0] = Processor::TOC_PROC;
-    ranking[1] = Processor::PROC_SET;
-    ranking[2] = Processor::IO_PROC;
-    ranking[3] = Processor::LOC_PROC;
-    ranking[4] = Processor::PY_PROC;
-  } else {
-#endif
-    ranking.resize(5);
-    ranking[0] = Processor::TOC_PROC;
-    ranking[1] = Processor::PROC_SET;
-    ranking[2] = Processor::LOC_PROC;
-    ranking[3] = Processor::IO_PROC;
-    ranking[4] = Processor::PY_PROC;
-#if SPMD_SHARD_USE_IO_PROC
-  }
-#endif
+  output.chosen_functor = SID_LINEAR;
+}
+
+void StencilMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+{
+  output.chosen_functor = SID_LINEAR;
 }
 
 Processor StencilMapper::default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task)
+                                            MapperContext ctx, const Task &task)
 {
-  return DefaultMapper::default_policy_select_initial_processor(ctx, task);
+  if (same_address_space || task.is_index_space || task.index_point.is_null() || !task.sharding_space.exists()) {
+    return DefaultMapper::default_policy_select_initial_processor(ctx, task);
+  }
+
+  assert(task.index_point.dim == 1);
+  coord_t index = task.index_point[0];
+  size_t bounds = runtime->get_index_space_domain(ctx, task.sharding_space).get_volume();
+
+  VariantInfo info =
+    default_find_preferred_variant(task, ctx, false/*needs tight*/);
+  switch (info.proc_kind)
+  {
+    case Processor::LOC_PROC:
+      return remote_cpus[index * remote_cpus.size() / bounds];
+    case Processor::TOC_PROC:
+      return remote_gpus[index * remote_gpus.size() / bounds];
+    case Processor::IO_PROC:
+      return remote_ios[index * remote_ios.size() / bounds];
+    case Processor::OMP_PROC:
+      return remote_omps[index * remote_omps.size() / bounds];
+    case Processor::PY_PROC:
+      return remote_pys[index * remote_pys.size() / bounds];
+    default: // make warnings go away
+      break;
+  }
+
+  assert(false);
 }
 
 void StencilMapper::default_policy_select_target_processors(
@@ -135,60 +261,6 @@ LogicalRegion StencilMapper::default_policy_select_instance_region(
                               bool meets_constraints)
 {
   return req.region;
-}
-
-void StencilMapper::map_task(const MapperContext      ctx,
-                             const Task&              task,
-                             const MapTaskInput&      input,
-                                   MapTaskOutput&     output)
-{
-  if (task.parent_task != NULL && task.parent_task->must_epoch_task) {
-    Processor::Kind target_kind = task.target_proc.kind();
-    // Get the variant that we are going to use to map this task
-    VariantInfo chosen = default_find_preferred_variant(task, ctx,
-                                                        true/*needs tight bound*/, true/*cache*/, target_kind);
-    output.chosen_variant = chosen.variant;
-    // TODO: some criticality analysis to assign priorities
-    output.task_priority = 0;
-    output.postmap_task = false;
-    // Figure out our target processors
-    output.target_procs.push_back(task.target_proc);
-
-    for (unsigned idx = 0; idx < task.regions.size(); idx++) {
-      const RegionRequirement &req = task.regions[idx];
-
-      // Skip any empty regions
-      if ((req.privilege == NO_ACCESS) || (req.privilege_fields.empty()))
-        continue;
-
-      if (input.valid_instances[idx].empty()) {
-        // happens when the region is empty
-        output.chosen_instances[idx].resize(1);
-        const LayoutConstraintSet empty_constraints;
-        const std::vector<LogicalRegion> empty_regions(1, req.region);
-        bool created = false;
-        bool ok = runtime->find_or_create_physical_instance(ctx, 
-            default_policy_select_target_memory(ctx, task.target_proc, req),
-            empty_constraints, empty_regions, output.chosen_instances[idx].back(), 
-            created, true/*acquire*/);
-        if (!ok) {
-          log_stencil.error("failed to find or create empty instance");
-          assert(false);
-        }
-        continue;
-      }
-      assert(input.valid_instances[idx].size() == 1);
-      output.chosen_instances[idx] = input.valid_instances[idx];
-      bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
-      if (!ok) {
-        log_stencil.error("failed to acquire instances");
-        assert(false);
-      }
-    }
-    return;
-  }
-
-  DefaultMapper::map_task(ctx, task, input, output);
 }
 
 void StencilMapper::map_copy(const MapperContext ctx,
@@ -296,7 +368,7 @@ static void create_mappers(Machine machine, Runtime *runtime, const std::set<Pro
   std::vector<Processor>* procs_list = new std::vector<Processor>();
 
   Machine::ProcessorQuery procs_query(machine);
-  procs_query.only_kind(Processor::LOC_PROC);
+  procs_query.only_kind(Processor::TOC_PROC);
   for (Machine::ProcessorQuery::iterator it = procs_query.begin();
         it != procs_query.end(); it++)
     procs_list->push_back(*it);
@@ -313,5 +385,8 @@ static void create_mappers(Machine machine, Runtime *runtime, const std::set<Pro
 
 void register_mappers()
 {
+  LinearShardingFunctor *sharding_functor = new LinearShardingFunctor();
+  Runtime::preregister_sharding_functor(SID_LINEAR, sharding_functor);
+
   Runtime::add_registration_callback(create_mappers);
 }

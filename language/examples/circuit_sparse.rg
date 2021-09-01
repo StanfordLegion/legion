@@ -360,7 +360,7 @@ do
   c.free(alread_picked)
 end
 
-task init_piece(spiece_id   : int,
+task init_piece(-- spiece_id   : int,
                 conf        : Config,
                 rgr         : region(ghost_range),
                 rpn         : region(node),
@@ -370,6 +370,7 @@ task init_piece(spiece_id   : int,
 where
   reads writes(rgr, rpn, rsn, rw)
 do
+  var spiece_id = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rpn))
   init_nodes(rpn)
   init_nodes(rsn)
   init_wires(spiece_id, conf, rgr, rpn, rsn, all_shared, rw)
@@ -492,7 +493,8 @@ task distribute_charge(rpn : region(node),
                        rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rw.{in_ptr, out_ptr, current._0, current._9}),
-  reduces +(rpn.charge, rsn.charge, rgn.charge)
+  reads writes(rpn.charge),
+  reduces +(rsn.charge, rgn.charge)
 do
   var dt = DELTAT
   for w in rw do
@@ -663,6 +665,10 @@ task toplevel()
     format.println("  Total                             {12} bytes", total)
   end
 
+  fill(all_nodes.{node_cap, leakage, charge, node_voltage}, 0.0)
+  fill(all_wires.{inductance, resistance, wire_cap, current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9}, voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8}}, 0.0)
+  fill(all_times.{start, stop}, 0)
+
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
   var all_private = rp_all_nodes[0]
@@ -676,10 +682,14 @@ task toplevel()
   var ghost_ranges = region(ispace(ptr, num_superpieces), ghost_range)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
 
+  fill(ghost_ranges.rect, rect1d { 0, 0 })
+
+  var rp_times = partition(equal, all_times, launch_domain)
+
   for j = 0, 1 do
     __demand(__index_launch)
     for i = 0, num_superpieces do
-      init_piece(i, conf, rp_ghost_ranges[i],
+      init_piece(conf, rp_ghost_ranges[i],
                  rp_private[i], rp_shared[i], all_shared, rp_wires[i])
     end
   end
@@ -703,14 +713,14 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   __demand(__spmd, __trace)
   for j = 0, num_loops do
-    for i = 0, num_superpieces do
-      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+    for i in launch_domain do
+      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i], rp_times[i])
     end
-    for i = 0, num_superpieces do
+    for i in launch_domain do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
-    for i = 0, num_superpieces do
-      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i])
+    for i in launch_domain do
+      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i], rp_times[i])
     end
   end
   __fence(__execution, __block)

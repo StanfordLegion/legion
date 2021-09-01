@@ -1192,7 +1192,7 @@ task toplevel()
     for _ = 0, par_init do
       -- __demand(__index_launch)
       for i = 0, npieces do
-        initialize_topology(conf, i, rz_all_p[i],
+        initialize_topology(conf, rz_all_p[i],
                             rp_all_private_p[i],
                             rp_all_shared_p[i],
                             rp_all_ghost_p[i],
