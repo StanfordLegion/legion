@@ -12,8 +12,8 @@ ulimit -S -c 0 # disable core dumps
 
 export GASNET_PHYSMEM_MAX=16G # hack for some reason this seems to be necessary on Piz Daint now
 
-if [[ ! -d dcr_idx ]]; then mkdir dcr_idx; fi
-pushd dcr_idx
+if [[ ! -d oldeqcr ]]; then mkdir oldeqcr; fi
+pushd oldeqcr
 
 for n in $SLURM_JOB_NUM_NODES; do
   for r in 0 1 2 3 4; do
