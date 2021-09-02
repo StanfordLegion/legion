@@ -15,8 +15,8 @@ export GASNET_PHYSMEM_MAX=16G # hack for some reason this seems to be necessary 
 nodes=$SLURM_JOB_NUM_NODES
 power=$(echo "l($nodes)/l(2)" | bc -l | xargs printf '%.0f\n')
 
-if [[ ! -d dcr_idx ]]; then mkdir dcr_idx; fi
-pushd dcr_idx
+if [[ ! -d neweqcr ]]; then mkdir neweqcr; fi
+pushd neweqcr
 
 for i in $power; do
   n=$(( 2 ** i))
