@@ -4366,7 +4366,7 @@ namespace Legion {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
-#if !defined(LEGION_DISABLE_EVENT_PRUNING) && defined(LEGION_DEBUG)
+#if !defined(LEGION_DISABLE_EVENT_PRUNING) && defined(DEBUG_LEGION)
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
