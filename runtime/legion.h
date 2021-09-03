@@ -2528,7 +2528,7 @@ namespace Legion {
                     size_t subfield_offset = 0) { }
     public:
       // Create a field accessor for an UntypedDeferredValue
-      // (only with READ-WRITE privileges and AffineAccessors)
+      // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredValue &value,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
@@ -2542,7 +2542,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
       // Create a field accessor for an UntypedDeferredValue
-      // (only with READ-WRITE and AffineAccessors)
+      // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredValue &value,
                     const Rect<N,COORD_T> bounds,
                     // The actual field size in case it is different from the 
@@ -2558,7 +2558,7 @@ namespace Legion {
                     size_t subfield_offset = 0) { }
     public:
       // Create a field accessor for UntypedDeferredBuffer
-      // (only with READ-WRITE and AffineAccessors)
+      // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
@@ -2572,7 +2572,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
       // Create a field accessor for UntypedDeferredBuffer
-      // (only with READ-WRITE and AffineAccessors)
+      // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
                     const Rect<N,COORD_T> bounds,
                     // The actual field size in case it is different from the 
@@ -2587,7 +2587,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
       // Create a field accessor for UntypedDeferredBuffer
-      // (only with READ-WRITE and AffineAccessors)
+      // (only with AffineAccessors)
       template<int M>
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
                     const AffineTransform<M,N,COORD_T> transform,
@@ -2603,7 +2603,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
       // Create a field accessor for UntypedDeferredBuffer
-      // (only with READ-WRITE and AffineAccessors)
+      // (only with AffineAccessors)
       template<int M>
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
                     const AffineTransform<M,N,COORD_T> transform,

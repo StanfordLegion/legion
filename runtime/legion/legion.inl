@@ -2348,6 +2348,325 @@ namespace Legion {
     }
 
     ////////////////////////////////////////////////////////////
+    // Macros UntypedDeferredValue/UntypedDeferredBuffer 
+    // Constructors with Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+#define DEFERRED_VALUE_BUFFER_CONSTRUCTORS(DIM, FIELD_CHECK)                  \
+      FieldAccessor(const UntypedDeferredValue &value,                        \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        const Realm::RegionInstance instance = value.instance;                \
+        /* This mapping ignores the input points and sends */                 \
+        /* everything to the 1-D origin */                                    \
+        Realm::Matrix<1,DIM,T> transform;                                     \
+        for (int i = 0; i < DIM; i++)                                         \
+          transform[0][i] = 0;                                                \
+        Realm::Point<1,T> origin(0);                                          \
+        Realm::Rect<DIM,T> source_bounds;                                     \
+        /* Anything in range works for these bounds since we're */            \
+        /* going to remap them to the origin */                               \
+        for (int i = 0; i < DIM; i++)                                         \
+        {                                                                     \
+          source_bounds.lo[i] = std::numeric_limits<T>::min();                \
+          source_bounds.hi[i] = std::numeric_limits<T>::max();                \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform, origin, 0/*field id*/, source_bounds))               \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredValue\n");      \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance, transform,       \
+                          origin, 0/*field id*/, source_bounds, offset);      \
+      }                                                                       \
+      FieldAccessor(const UntypedDeferredValue &value,                        \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        const Realm::RegionInstance instance = value.instance;                \
+        /* This mapping ignores the input points and sends */                 \
+        /* everything to the 1-D origin */                                    \
+        Realm::Matrix<1,DIM,T> transform;                                     \
+        for (int i = 0; i < DIM; i++)                                         \
+          transform[0][i] = 0;                                                \
+        Realm::Point<1,T> origin(0);                                          \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform, origin, 0/*field id*/, source_bounds))               \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredValue\n");      \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance, transform,       \
+                          origin, 0/*field id*/, source_bounds, offset);      \
+      }                                                                       \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+                                            0/*field id*/, is.bounds))        \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, 0/*field id*/,            \
+                                          is.bounds, offset);                 \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+                                        0/*field id*/, source_bounds))        \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, 0/*field id*/,            \
+                                          source_bounds, offset);             \
+      }                                                                       \
+      /* With explicit transform */                                           \
+      template<int M>                                                         \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, 0/*field id*/))          \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, 0/*field id*/, offset);    \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<int M>                                                         \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, 0/*fid*/, source_bounds))\
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, transform.transform,      \
+                      transform.offset, 0/*fid*/, source_bounds, offset);     \
+      }
+
+#define DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(DIM, FIELD_CHECK)      \
+      FieldAccessor(const UntypedDeferredValue &value,                        \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        const Realm::RegionInstance instance = value.instance;                \
+        /* This mapping ignores the input points and sends */                 \
+        /* everything to the 1-D origin */                                    \
+        Realm::Matrix<1,DIM,T> transform;                                     \
+        for (int i = 0; i < DIM; i++)                                         \
+          transform[0][i] = 0;                                                \
+        Realm::Point<1,T> origin(0);                                          \
+        Realm::Rect<DIM,T> source_bounds;                                     \
+        /* Anything in range works for these bounds since we're */            \
+        /* going to remap them to the origin */                               \
+        for (int i = 0; i < DIM; i++)                                         \
+        {                                                                     \
+          source_bounds.lo[i] = std::numeric_limits<T>::min();                \
+          source_bounds.hi[i] = std::numeric_limits<T>::max();                \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform, origin, 0/*field id*/, source_bounds))               \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredValue\n");      \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance, transform,       \
+                          origin, 0/*field id*/, source_bounds, offset);      \
+        DomainT<1,T> is;                                                      \
+        is.bounds.lo[0] = 0;                                                  \
+        is.bounds.hi[0] = 0;                                                  \
+        is.sparsity.id = 0;                                                   \
+        AffineTransform<1,DIM,T> affine(transform, origin);                   \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, affine);      \
+      }                                                                       \
+      FieldAccessor(const UntypedDeferredValue &value,                        \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        const Realm::RegionInstance instance = value.instance;                \
+        /* This mapping ignores the input points and sends */                 \
+        /* everything to the 1-D origin */                                    \
+        Realm::Matrix<1,DIM,T> transform;                                     \
+        for (int i = 0; i < DIM; i++)                                         \
+          transform[0][i] = 0;                                                \
+        Realm::Point<1,T> origin(0);                                          \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform, origin, 0/*field id*/, source_bounds))               \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredValue\n");      \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance, transform,       \
+                          origin, 0/*field id*/, source_bounds, offset);      \
+        DomainT<1,T> is;                                                      \
+        is.bounds.lo[0] = 0;                                                  \
+        is.bounds.hi[0] = 0;                                                  \
+        is.sparsity.id = 0;                                                   \
+        AffineTransform<1,DIM,T> affine(transform, origin);                   \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, affine);      \
+      }                                                                       \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+                                            0/*field id*/, is.bounds))        \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, 0/*field id*/,            \
+                                          is.bounds, offset);                 \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<DIM,T> is = instance.get_indexspace<DIM,T>();           \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+                                        0/*field id*/, source_bounds))        \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, 0/*field id*/,            \
+                                          source_bounds, offset);             \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* With explicit transform */                                           \
+      template<int M>                                                         \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, 0/*field id*/))          \
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, 0/*field id*/, offset);    \
+        bounds = AffineBounds::Tester<DIM,T>(is, transform);                  \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<int M>                                                         \
+      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,                   \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        const Realm::RegionInstance instance = buffer.instance;               \
+        const DomainT<M,T> is = instance.get_indexspace<M,T>();               \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, 0/*fid*/, source_bounds))\
+        {                                                                     \
+          fprintf(stderr,                                                     \
+              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");     \
+          assert(false);                                                      \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, transform.transform,      \
+                      transform.offset, 0/*fid*/, source_bounds, offset);     \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
+      }
+
+    ////////////////////////////////////////////////////////////
     // Specializations for Affine Accessors
     ////////////////////////////////////////////////////////////
 
@@ -2455,6 +2774,12 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds, offset);
       }
+    public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true) 
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
+#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -2632,6 +2957,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
+    public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
+#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -2836,6 +3167,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
+#endif
+    public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
         { 
@@ -3000,6 +3337,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
+    public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
+#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
@@ -3191,175 +3534,11 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
-      FieldAccessor(const UntypedDeferredValue &value,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true) 
 #else
-                    bool check_field_size = false,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance;
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,N,T> transform;
-        for (int i = 0; i < N; i++)
-          transform[0][i] = 0;
-        Realm::Point<1,T> origin(0);
-        Realm::Rect<N,T> source_bounds;
-        // Anything in range works for these bounds since we're
-        // going to remap them to the origin
-        for (int i = 0; i < N; i++)
-        {
-          source_bounds.lo[i] = std::numeric_limits<T>::min();
-          source_bounds.hi[i] = std::numeric_limits<T>::max();
-        }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-      }
-      FieldAccessor(const UntypedDeferredValue &value,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance; 
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,N,T> transform;
-        for (int i = 0; i < N; i++)
-          transform[0][i] = 0;
-        Realm::Point<1,T> origin(0);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-      }
-    public:
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<N,T> is = instance.get_indexspace<N,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/, 
-                                                          is.bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor =
-          Realm::AffineAccessor<FT,N,T>(instance, 0/*fid*/, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<N,T> is = instance.get_indexspace<N,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/, 
-                                                          source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance,0/*fid*/,source_bounds,offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*field id*/))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*fid*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -3548,191 +3727,11 @@ namespace Legion {
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
     public:
-      FieldAccessor(const UntypedDeferredValue &value,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
 #else
-                    bool check_field_size = false,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance;
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,N,T> transform;
-        for (int i = 0; i < N; i++)
-          transform[0][i] = 0;
-        Realm::Point<1,T> origin(0);
-        Realm::Rect<N,T> source_bounds;
-        // Anything in range works for these bounds since we're
-        // going to remap them to the origin
-        for (int i = 0; i < N; i++)
-        {
-          source_bounds.lo[i] = std::numeric_limits<T>::min();
-          source_bounds.hi[i] = std::numeric_limits<T>::max();
-        }
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-        DomainT<1,T> is;
-        is.bounds.lo[0] = 0;
-        is.bounds.hi[0] = 0;
-        is.sparsity.id = 0;
-        AffineTransform<1,N,T> affine(transform, origin);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, affine);
-      }
-      FieldAccessor(const UntypedDeferredValue &value,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance; 
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,N,T> transform;
-        for (int i = 0; i < N; i++)
-          transform[0][i] = 0;
-        Realm::Point<1,T> origin(0);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-        DomainT<1,T> is;
-        is.bounds.lo[0] = 0;
-        is.bounds.hi[0] = 0;
-        is.sparsity.id = 0;
-        AffineTransform<1,N,T> affine(transform, origin);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, affine);
-      }
-    public:
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<N,T> is = instance.get_indexspace<N,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/, 
-                                                          is.bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor =
-          Realm::AffineAccessor<FT,N,T>(instance, 0/*fid*/, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<N,T> is = instance.get_indexspace<N,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/, 
-                                                          source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance,0/*fid*/,source_bounds,offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*field id*/))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, offset);
-        bounds = AffineBounds::Tester<N,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*fid*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -3961,170 +3960,11 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
-      FieldAccessor(const UntypedDeferredValue &value,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
 #else
-                    bool check_field_size = false,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance;
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,1,T> transform;
-        transform[0][0] = 0;
-        Realm::Point<1,T> origin(0);
-        Realm::Rect<1,T> source_bounds;
-        // Anything in range works for these bounds since we're
-        // going to remap them to the origin
-        source_bounds.lo[0] = std::numeric_limits<T>::min();
-        source_bounds.hi[0] = std::numeric_limits<T>::max();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-      }
-      FieldAccessor(const UntypedDeferredValue &value,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance; 
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,1,T> transform;
-        transform[0][0] = 0;
-        Realm::Point<1,T> origin(0);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-      }
-    public:
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<1,T> is = instance.get_indexspace<1,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 0/*fid*/, 
-                                                          is.bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor =
-          Realm::AffineAccessor<FT,1,T>(instance, 0/*fid*/, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<1,T> is = instance.get_indexspace<1,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 0/*fid*/, 
-                                                          source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance,0/*fid*/,source_bounds,offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*field id*/))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*fid*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -4301,186 +4141,11 @@ namespace Legion {
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
-      FieldAccessor(const UntypedDeferredValue &value,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
 #else
-                    bool check_field_size = false,
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance;
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,1,T> transform;
-        transform[0][0] = 0;
-        Realm::Point<1,T> origin(0);
-        Realm::Rect<1,T> source_bounds;
-        // Anything in range works for these bounds since we're
-        // going to remap them to the origin
-        source_bounds.lo[0] = std::numeric_limits<T>::min();
-        source_bounds.hi[0] = std::numeric_limits<T>::max();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-        DomainT<1,T> is;
-        is.bounds.lo[0] = 0;
-        is.bounds.hi[0] = 0;
-        is.sparsity.id = 0;
-        AffineTransform<1,1,T> affine(transform, origin);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, affine);
-      }
-      FieldAccessor(const UntypedDeferredValue &value,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        assert(!check_field_size || (actual_field_size == value.field_size));
-        const Realm::RegionInstance instance = value.instance; 
-        // This mapping ignores the input points and sends 
-        // everything to the 1-D origin
-        Realm::Matrix<1,1,T> transform;
-        transform[0][0] = 0;
-        Realm::Point<1,T> origin(0);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance,
-              transform, origin, 0/*field id*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredValue\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
-                                        0/*field id*/, source_bounds, offset);
-        DomainT<1,T> is;
-        is.bounds.lo[0] = 0;
-        is.bounds.hi[0] = 0;
-        is.sparsity.id = 0;
-        AffineTransform<1,1,T> affine(transform, origin);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, affine);
-      }
-    public:
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<1,T> is = instance.get_indexspace<1,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 0/*fid*/, 
-                                                          is.bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor =
-          Realm::AffineAccessor<FT,1,T>(instance, 0/*fid*/, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<1,T> is = instance.get_indexspace<1,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 0/*fid*/, 
-                                                          source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance,0/*fid*/,source_bounds,offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*field id*/))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, offset);
-        bounds = AffineBounds::Tester<1,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const UntypedDeferredBuffer<T> &buffer,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        const Realm::RegionInstance instance = buffer.instance;
-        const DomainT<M,T> is = instance.get_indexspace<M,T>();
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, 0/*fid*/, source_bounds))
-        {
-          fprintf(stderr,
-              "Incompatible AffineAccessor for UntypedDeferredBuffer\n");
-          assert(false);
-        }
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, 0/*field id*/, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -4696,6 +4361,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
+#endif
+    public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
         { 
@@ -4876,6 +4547,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
+    public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
+#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -5091,6 +4768,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
+#endif
+    public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
         { 
@@ -5259,6 +4942,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
+    public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
+#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -5461,6 +5150,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
+#endif
+    public:
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
@@ -5633,6 +5328,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
       }
+    public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTROS_WITH_BOUNDS(N, false)
+#endif
     public:
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
@@ -5836,6 +5537,12 @@ namespace Legion {
             transform.offset, fid, source_bounds, offset);
       }
     public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
+#endif
+    public:
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
@@ -6000,6 +5707,12 @@ namespace Legion {
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
       }
     public:
+#ifdef DEBUG_LEGION
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
+#else
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
+#endif
+    public:
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
@@ -6083,6 +5796,9 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = 1;
     };
+
+#undef DEFERRED_VALUE_BUFFER_CONSTRUCTORS
+#undef DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS
 
     // Reduce FieldAccessor specialization
     template<typename REDOP, bool EXCLUSIVE, int N, typename T, bool CB>
