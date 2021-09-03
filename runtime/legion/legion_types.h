@@ -140,6 +140,15 @@ namespace Legion {
   class Predicate;
   class PhysicalRegion;
   class ExternalResources;
+  class UntypedDeferredValue;
+  template<typename>
+    class DeferredValue;
+  template<typename, bool>
+    class DeferredReduction;
+  template<typename, int, typename, bool>
+    class DeferredBuffer;
+  template<typename COORD_T>
+    class UntypedDeferredBuffer;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
