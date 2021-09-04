@@ -2527,7 +2527,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
     public:
-      // Create a field accessor for an UntypedDeferredValue
+      // Create a FieldAccessor for an UntypedDeferredValue
       // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredValue &value,
                     // The actual field size in case it is different from the 
@@ -2541,10 +2541,11 @@ namespace Legion {
                     bool silence_warnings = false,
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
-      // Create a field accessor for an UntypedDeferredValue
+      // Create a FieldAccessor for an UntypedDeferredValue
+      // Specify a specific bounds rectangle to use for the accessor
       // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredValue &value,
-                    const Rect<N,COORD_T> bounds,
+                    const Rect<N,COORD_T> &bounds,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -2557,7 +2558,7 @@ namespace Legion {
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
     public:
-      // Create a field accessor for UntypedDeferredBuffer
+      // Create a FieldAccessor for UntypedDeferredBuffer
       // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
                     // The actual field size in case it is different from the 
@@ -2571,10 +2572,11 @@ namespace Legion {
                     bool silence_warnings = false,
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
-      // Create a field accessor for UntypedDeferredBuffer
+      // Create a FieldAccessor for UntypedDeferredBuffer
+      // Specify a specific bounds rectangle to use for the accessor
       // (only with AffineAccessors)
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
-                    const Rect<N,COORD_T> bounds,
+                    const Rect<N,COORD_T> &bounds,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -2586,11 +2588,12 @@ namespace Legion {
                     bool silence_warnings = false,
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
-      // Create a field accessor for UntypedDeferredBuffer
+      // Create a FieldAccessor for UntypedDeferredBuffer
+      // Specify a specific Affine transform to use for interpreting points
       // (only with AffineAccessors)
       template<int M>
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
-                    const AffineTransform<M,N,COORD_T> transform,
+                    const AffineTransform<M,N,COORD_T> &transform,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -2602,12 +2605,13 @@ namespace Legion {
                     bool silence_warnings = false,
                     const char *warning_string = NULL,
                     size_t subfield_offset = 0) { }
-      // Create a field accessor for UntypedDeferredBuffer
+      // Create a FieldAccessor for UntypedDeferredBuffer
+      // Specify both a transform and a bounds to use
       // (only with AffineAccessors)
       template<int M>
       FieldAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
-                    const AffineTransform<M,N,COORD_T> transform,
-                    const Rect<N,COORD_T> bounds,
+                    const AffineTransform<M,N,COORD_T> &transform,
+                    const Rect<N,COORD_T> &bounds,
                     // The actual field size in case it is different from the 
                     // one being used in FT and we still want to check it
                     size_t actual_field_size = sizeof(FT),
@@ -2652,7 +2656,7 @@ namespace Legion {
                         ReductionOpID redop, bool silence_warnings = false,
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
                         bool check_field_size = false) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
@@ -2664,7 +2668,7 @@ namespace Legion {
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
                         bool check_field_size = false) { }
       // Specify a specific Affine transform to use for interpreting points
       // Not available for Realm::MultiAffineAccessor specializations
@@ -2675,7 +2679,7 @@ namespace Legion {
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
                         bool check_field_size = false) { }
       // Specify both a transform and a bounds to use
       // Not available for Realm::MultiAffineAccessor specializations
@@ -2687,7 +2691,68 @@ namespace Legion {
                         bool silence_warnings = false,
                         const char *warning_string = NULL,
                         size_t subfield_offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::LHS),
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+                        bool check_field_size = false) { }
+    public:
+      // Create a ReductionAccessor for an UntypedDeferredValue
+      // (only with AffineAccessors)
+      ReductionAccessor(const UntypedDeferredValue &value,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+                        bool check_field_size = false) { }
+      // Create a ReductionAccessor for an UntypedDeferredValue
+      // Specify a specific bounds rectangle to use for the accessor
+      // (only with AffineAccessors)
+      ReductionAccessor(const UntypedDeferredValue &value,
+                        const Rect<N,COORD_T> &bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+                        bool check_field_size = false) { }
+    public:
+      // Create a ReductionAccessor for an UntypedDeferredBuffer
+      // (only with AffineAccessors)
+      ReductionAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+                        bool check_field_size = false) { }
+      // Create a ReductionAccessor for an UntypedDeferredBuffer
+      // Specify a specific bounds rectangle to use for the accessor
+      // (only with AffineAccessors)
+      ReductionAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
+                        const Rect<N,COORD_T> &bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+                        bool check_field_size = false) { }
+      // Create a ReductionAccessor for an UntypedDeferredBuffer
+      // Specify a specific Affine transform to use for interpreting points
+      // (only with AffineAccessors)
+      template<int M>
+      ReductionAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
+                        const AffineTransform<M,N,COORD_T> &transform, 
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+                        bool check_field_size = false) { }
+      // Create a ReductionAccessor for an UntypedDeferredBuffer
+      // Specify both a transform and a bounds to use
+      // (only with AffineAccessors)
+      template<int M>
+      ReductionAccessor(const UntypedDeferredBuffer<COORD_T> &buffer,
+                        const AffineTransform<M,N,COORD_T> &transform, 
+                        const Rect<N,COORD_T> &bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
                         bool check_field_size = false) { }
     public:
       typedef typename REDOP::RHS value_type;
@@ -3087,6 +3152,8 @@ namespace Legion {
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;
+      template<typename,bool,int,typename,typename,bool>
+      friend class ReductionAccessor;
       Realm::RegionInstance instance;
       size_t field_size;
     };
@@ -3229,6 +3296,8 @@ namespace Legion {
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;
+      template<typename,bool,int,typename,typename,bool>
+      friend class ReductionAccessor;
       Realm::RegionInstance instance;
       size_t field_size;
       int dims; 
