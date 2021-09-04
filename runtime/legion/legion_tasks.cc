@@ -5333,18 +5333,22 @@ namespace Legion {
         if (top_level)
           LegionSpy::log_top_level_task(task_id, parent_ctx->get_unique_id(),
                                         unique_op_id, get_task_name());
-        LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
-                                       unique_op_id,
-                                       task_id, get_task_name());
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              launcher.wait_barriers.begin(); it !=
-              launcher.wait_barriers.end(); it++)
+        // Tracking as long as we are not part of a must epoch operation
+        if (track || top_level)
         {
-          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
-          LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+          LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
+                                         unique_op_id, task_id,
+                                         context_index, get_task_name());
+          for (std::vector<PhaseBarrier>::const_iterator it = 
+                launcher.wait_barriers.begin(); it !=
+                launcher.wait_barriers.end(); it++)
+          {
+            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+          }
+          LegionSpy::log_future_creation(unique_op_id, 
+                result.impl->get_ready_event(), index_point);
         }
-        LegionSpy::log_future_creation(unique_op_id, 
-              result.impl->get_ready_event(), index_point);
       }
       return result;
     }
@@ -5354,6 +5358,20 @@ namespace Legion {
                                            unsigned index, bool do_registration)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
+                                       unique_op_id, task_id,
+                                       epoch->get_ctx_index(), get_task_name());
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+        LegionSpy::log_future_creation(unique_op_id, 
+              result.impl->get_ready_event(), index_point);
+      }
       set_must_epoch(epoch, index, do_registration);
       FutureMap map = epoch->get_future_map();
 #ifdef DEBUG_LEGION
@@ -7042,11 +7060,11 @@ namespace Legion {
 #endif
       check_empty_field_requirements(); 
  
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && track)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  get_task_name());
+                                  context_index, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -7134,11 +7152,11 @@ namespace Legion {
             true/*register*/, runtime->get_available_distributed_id(), 
             runtime->address_space, get_completion_event(), this));
       check_empty_field_requirements();
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled && track)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  get_task_name());
+                                  context_index, get_task_name());
         for (std::vector<PhaseBarrier>::const_iterator it = 
               launcher.wait_barriers.begin(); it !=
               launcher.wait_barriers.end(); it++)
@@ -7180,13 +7198,25 @@ namespace Legion {
                                           unsigned index, bool do_registration)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
+                                  unique_op_id, task_id,
+                                  epoch->get_ctx_index(), get_task_name());
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
       set_must_epoch(epoch, index, do_registration);
       future_map = epoch->get_future_map();
 #ifdef DEBUG_LEGION
       Domain launch_domain;
       launch_space->get_launch_space_domain(launch_domain);
       future_map.impl->add_valid_domain(launch_domain);
-#endif
+#endif 
       // Enumerate the futures in the future map
       enumerate_futures(index_domain);
     }
