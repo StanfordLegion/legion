@@ -11415,10 +11415,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
-                         bool flush, Runtime *runtime, Processor target, 
+                         bool flush, RtEvent flush_precondition,
+                         Runtime *runtime, Processor target, 
                          bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!flush_precondition.exists() || flush);
+#endif
       // First check to see if the message fits in the current buffer    
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
@@ -11432,7 +11436,8 @@ namespace Legion {
         // Make sure we can at least get the meta-data into the buffer
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= header_size)
-          send_message(true/*complete*/, runtime, target, k, response,shutdown);
+          send_message(true/*complete*/, runtime, target, k,
+                       response, shutdown, flush_precondition);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -11445,8 +11450,8 @@ namespace Legion {
         {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
-            send_message(false/*complete*/, runtime, 
-                         target, k, response, shutdown);
+            send_message(false/*complete*/, runtime, target, k,
+                         response, shutdown, flush_precondition);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -11475,12 +11480,15 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target, k, response, shutdown);
+        send_message(true/*complete*/, runtime, target, k, 
+                     response, shutdown, flush_precondition);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-               Processor target, MessageKind kind, bool response, bool shutdown)
+                                      Processor target, MessageKind kind,
+                                      bool response, bool shutdown,
+                                      RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -11537,7 +11545,9 @@ namespace Legion {
               sending_buffer, sending_index, requests, 
               (ordered_channel || 
                ((header != FULL_MESSAGE) && !first_partial)) ?
-               last_message_event : RtEvent::NO_RT_EVENT, 
+                (send_precondition.exists() ? 
+                  Runtime::merge_events(send_precondition, last_message_event) :
+                  last_message_event) : send_precondition, 
               response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
@@ -11557,7 +11567,9 @@ namespace Legion {
                 sending_buffer, sending_index, 
                 (ordered_channel || 
                  ((header != FULL_MESSAGE) && !first_partial)) ?
-                  last_message_event : RtEvent::NO_RT_EVENT, 
+                  (send_precondition.exists() ? 
+                   Runtime::merge_events(send_precondition,last_message_event) :
+                   last_message_event) : send_precondition, 
                 response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
@@ -11922,11 +11934,6 @@ namespace Legion {
               runtime->handle_shared_ownership(derez);
               break;
             }
-          case SEND_INDEX_SPACE_NODE:
-            {
-              runtime->handle_index_space_node(derez, remote_address_space);
-              break;
-            }
           case SEND_INDEX_SPACE_REQUEST:
             {
               runtime->handle_index_space_request(derez, remote_address_space);
@@ -11934,7 +11941,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_RETURN:
             {
-              runtime->handle_index_space_return(derez);
+              runtime->handle_index_space_return(derez, remote_address_space);
               break;
             }
           case SEND_INDEX_SPACE_SET:
@@ -12002,11 +12009,6 @@ namespace Legion {
               runtime->handle_index_partition_notification(derez);
               break;
             }
-          case SEND_INDEX_PARTITION_NODE:
-            {
-              runtime->handle_index_partition_node(derez, remote_address_space);
-              break;
-            }
           case SEND_INDEX_PARTITION_REQUEST:
             {
               runtime->handle_index_partition_request(derez, 
@@ -12015,7 +12017,8 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_RETURN:
             {
-              runtime->handle_index_partition_return(derez);
+              runtime->handle_index_partition_return(derez,
+                                                     remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_CHILD_REQUEST:
@@ -12164,12 +12167,8 @@ namespace Legion {
             }
           case SEND_TOP_LEVEL_REGION_RETURN:
             {
-              runtime->handle_top_level_region_return(derez);
-              break;
-            }
-          case SEND_LOGICAL_REGION_NODE:
-            {
-              runtime->handle_logical_region_node(derez, remote_address_space);
+              runtime->handle_top_level_region_return(derez,
+                                                      remote_address_space);
               break;
             }
           case INDEX_SPACE_DESTRUCTION_MESSAGE:
@@ -13174,14 +13173,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
-           VirtualChannelKind channel, bool flush, bool response, bool shutdown)
+           VirtualChannelKind channel, bool flush, bool response, 
+           bool shutdown, RtEvent flush_precondition)
     //--------------------------------------------------------------------------
     {
       // Always flush for the profiler if we're doing that
       if (!flush && always_flush)
         flush = true;
-      channels[channel].package_message(rez, kind, flush, runtime, 
-                                        target, response, shutdown);
+      channels[channel].package_message(rez, kind, flush, flush_precondition,
+                                        runtime, target, response, shutdown);
     }
 
     //--------------------------------------------------------------------------
@@ -21404,15 +21404,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_node(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // Will be flushed by index space return
-      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_space_request(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21422,11 +21413,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_return(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_index_space_return(AddressSpaceID target,
+                                     Serializer &rez, RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
-            INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/,
+            false/*shutdown*/, send_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -21545,16 +21538,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_partition_node(AddressSpaceID target, 
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // Will be flushed by the return
-      find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_NODE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21565,11 +21548,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_return(AddressSpaceID target,
-                                              Serializer &rez)
+                                     Serializer &rez, RtEvent send_precondition)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_RETURN,
-              INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/,
+              false/*shutdown*/, send_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -21598,11 +21582,9 @@ namespace Legion {
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This has to go on the index space virtual channel so that it is
-      // ordered with respect to the index_partition_node messages
       find_messenger(target)->send_message(rez, 
                                 SEND_INDEX_PARTITION_DISJOINT_UPDATE, 
-                                INDEX_SPACE_VIRTUAL_CHANNEL,
+                                DEFAULT_VIRTUAL_CHANNEL,
                                 true/*flush*/, true/*response*/); 
     }
 
@@ -21837,17 +21819,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_RETURN,
-                LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_logical_region_node(AddressSpaceID target, 
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // flushed by return
-      find_messenger(target)->send_message(rez, SEND_LOGICAL_REGION_NODE,
-                                  LOGICAL_TREE_VIRTUAL_CHANNEL, false/*flush*/);
+                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -23603,14 +23575,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_node(Deserializer &derez, 
-                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode::handle_node_creation(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_index_space_request(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -23619,10 +23583,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_return(Deserializer &derez)
+    void Runtime::handle_index_space_return(Deserializer &derez,
+                                            AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_return(derez); 
+      IndexSpaceNode::handle_node_return(forest, derez, source); 
     }
 
     //--------------------------------------------------------------------------
@@ -23718,14 +23683,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_node(Deserializer &derez,
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartNode::handle_node_creation(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_index_partition_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -23734,10 +23691,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_return(Deserializer &derez)
+    void Runtime::handle_index_partition_return(Deserializer &derez,
+                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_return(derez);
+      IndexPartNode::handle_node_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -23943,18 +23901,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_region_return(Deserializer &derez)
+    void Runtime::handle_top_level_region_return(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RegionNode::handle_top_level_return(derez);   
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_logical_region_node(Deserializer &derez, 
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode::handle_node_creation(forest, derez, source);
+      RegionNode::handle_top_level_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

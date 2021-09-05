@@ -1691,6 +1691,7 @@ namespace Legion {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
+                           RtEvent flush_precondition,
                            Runtime *runtime, Processor target, 
                            bool response, bool shutdown);
       void process_message(const void *args, size_t arglen, 
@@ -1698,7 +1699,8 @@ namespace Legion {
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
       void send_message(bool complete, Runtime *runtime, Processor target, 
-                        MessageKind kind, bool response, bool shutdown);
+                        MessageKind kind, bool response, bool shutdown,
+                        RtEvent send_precondition);
       bool handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen) const;
@@ -1776,7 +1778,8 @@ namespace Legion {
     public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush, 
-                        bool response = false, bool shutdown = false);
+                        bool response = false, bool shutdown = false,
+                        RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
@@ -2993,9 +2996,9 @@ namespace Legion {
       void send_remote_task_replay(AddressSpaceID target, Serializer &rez);
       void send_remote_task_profiling_response(Processor tar, Serializer &rez);
       void send_shared_ownership(AddressSpaceID target, Serializer &rez);
-      void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
-      void send_index_space_return(AddressSpaceID target, Serializer &rez);
+      void send_index_space_return(AddressSpaceID target, Serializer &rez,
+                                   RtEvent precondition);
       void send_index_space_set(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
@@ -3019,9 +3022,9 @@ namespace Legion {
                                           Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
-      void send_index_partition_node(AddressSpaceID target, Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
-      void send_index_partition_return(AddressSpaceID target, Serializer &rez);
+      void send_index_partition_return(AddressSpaceID target, Serializer &rez,
+                                       RtEvent precondition);
       void send_index_partition_child_request(AddressSpaceID target,
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
@@ -3065,7 +3068,6 @@ namespace Legion {
       void send_local_field_update(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
       void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
-      void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target,
                                         std::set<RtEvent> &applied);
@@ -3334,10 +3336,10 @@ namespace Legion {
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
       void handle_shared_ownership(Deserializer &derez);
-      void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_index_space_return(Deserializer &derez); 
+      void handle_index_space_return(Deserializer &derez,
+                                     AddressSpaceID source); 
       void handle_index_space_set(Deserializer &derez, AddressSpaceID source);
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
@@ -3356,11 +3358,10 @@ namespace Legion {
       void handle_index_space_generate_color_response(Deserializer &derez);
       void handle_index_space_release_color(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
-      void handle_index_partition_node(Deserializer &derez,
-                                       AddressSpaceID source);
       void handle_index_partition_request(Deserializer &derez,
                                           AddressSpaceID source);
-      void handle_index_partition_return(Deserializer &derez);
+      void handle_index_partition_return(Deserializer &derez,
+                                         AddressSpaceID source);
       void handle_index_partition_child_request(Deserializer &derez,
                                                 AddressSpaceID source);
       void handle_index_partition_child_response(Deserializer &derez);
@@ -3398,9 +3399,8 @@ namespace Legion {
       void handle_local_field_update(Deserializer &derez);
       void handle_top_level_region_request(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_top_level_region_return(Deserializer &derez);
-      void handle_logical_region_node(Deserializer &derez, 
-                                      AddressSpaceID source);
+      void handle_top_level_region_return(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_index_space_destruction(Deserializer &derez);
       void handle_index_partition_destruction(Deserializer &derez);
       void handle_field_space_destruction(Deserializer &derez);
