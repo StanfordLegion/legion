@@ -698,9 +698,7 @@ namespace Legion {
       // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1, 
       TASK_VIRTUAL_CHANNEL = 2,
-      INDEX_SPACE_VIRTUAL_CHANNEL = 3,
       FIELD_SPACE_VIRTUAL_CHANNEL = 4,
-      LOGICAL_TREE_VIRTUAL_CHANNEL = 5,
       REFERENCE_VIRTUAL_CHANNEL = 6,
       UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority
       SUBSET_VIRTUAL_CHANNEL = 8,
@@ -720,7 +718,6 @@ namespace Legion {
       SEND_REMOTE_TASK_REPLAY,
       SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_SHARED_OWNERSHIP,
-      SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_SET,
@@ -735,7 +732,6 @@ namespace Legion {
       SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE,
       SEND_INDEX_SPACE_RELEASE_COLOR,
       SEND_INDEX_PARTITION_NOTIFICATION,
-      SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
@@ -766,7 +762,6 @@ namespace Legion {
       SEND_LOCAL_FIELD_UPDATE,
       SEND_TOP_LEVEL_REGION_REQUEST,
       SEND_TOP_LEVEL_REGION_RETURN,
-      SEND_LOGICAL_REGION_NODE,
       INDEX_SPACE_DESTRUCTION_MESSAGE,
       INDEX_PARTITION_DESTRUCTION_MESSAGE,
       FIELD_SPACE_DESTRUCTION_MESSAGE,
@@ -941,7 +936,6 @@ namespace Legion {
         "Send Remote Task Replay",                                    \
         "Send Remote Task Profiling Response",                        \
         "Send Shared Ownership",                                      \
-        "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
         "Send Index Space Set",                                       \
@@ -956,7 +950,6 @@ namespace Legion {
         "Send Index Space Generate Color Response",                   \
         "Send Index Space Release Color",                             \
         "Send Index Partition Notification",                          \
-        "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
@@ -987,7 +980,6 @@ namespace Legion {
         "Send Local Field Update",                                    \
         "Send Top Level Region Request",                              \
         "Send Top Level Region Return",                               \
-        "Send Logical Region Node",                                   \
         "Index Space Destruction",                                    \
         "Index Partition Destruction",                                \
         "Field Space Destruction",                                    \

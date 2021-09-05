@@ -2591,8 +2591,8 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init)
-      : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init), 
+        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready,expr_id,init,dep),
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {

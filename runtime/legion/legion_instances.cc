@@ -4056,9 +4056,8 @@ namespace Legion {
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
-        RegionNode *node = forest->get_node(*it);
         if (field_space_node == NULL)
-          field_space_node = node->column_source;
+          field_space_node = forest->get_node(it->get_field_space());
         if (tree_id == 0)
           tree_id = it->get_tree_id();
 #ifdef DEBUG_LEGION
@@ -4066,7 +4065,7 @@ namespace Legion {
         assert(field_space_node->handle == it->get_field_space());
         assert(tree_id == it->get_tree_id());
 #endif
-        region_exprs.insert(node->row_source);
+        region_exprs.insert(forest->get_node(it->get_index_space()));
       }
       instance_domain = (region_exprs.size() == 1) ? 
         *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
