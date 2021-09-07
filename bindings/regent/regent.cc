@@ -161,6 +161,10 @@ DECLARE_REDUCTION(register_reduction_plus_double,
                   safe_reduce_plus_double, safe_reduce_plus_double_point,
                   reduce_plus_double, reduce_plus_double_point,
                   PlusOpDouble, double, size_t, ADD, ADD, 0.0)
+DECLARE_REDUCTION(register_reduction_plus_int16,
+                  safe_reduce_plus_int16, safe_reduce_plus_int16_point,
+                  reduce_plus_int16, reduce_plus_int16_point,
+                  PlusOpShort, short int, short int, ADD, ADD, 0)
 DECLARE_REDUCTION(register_reduction_plus_int32,
                   safe_reduce_plus_int32, safe_reduce_plus_int32_point,
                   reduce_plus_int32, reduce_plus_int32_point,
@@ -169,15 +173,18 @@ DECLARE_REDUCTION(register_reduction_plus_int64,
                   safe_reduce_plus_int64, safe_reduce_plus_int64_point,
                   reduce_plus_int64, reduce_plus_int64_point,
                   PlusOpLongLong, long long int, long long int, ADD, ADD, 0)
+DECLARE_REDUCTION(register_reduction_plus_uint16,
+                  safe_reduce_plus_uint16, safe_reduce_plus_uint16_point,
+                  reduce_plus_uint16, reduce_plus_uint16_point,
+                  PlusOpUShort, unsigned short int, unsigned short int, ADD, ADD, 0)
 DECLARE_REDUCTION(register_reduction_plus_uint32,
                   safe_reduce_plus_uint32, safe_reduce_plus_uint32_point,
                   reduce_plus_uint32, reduce_plus_uint32_point,
-                  PlusOpUInt, unsigned, unsigned, ADD, ADD, 0U)
+                  PlusOpUInt, unsigned int, unsigned int, ADD, ADD, 0)
 DECLARE_REDUCTION(register_reduction_plus_uint64,
                   safe_reduce_plus_uint64, safe_reduce_plus_uint64_point,
                   reduce_plus_uint64, reduce_plus_uint64_point,
-                  PlusOpULongLong, unsigned long long, unsigned long long,
-                  ADD, ADD, 0ULL)
+                  PlusOpULongLong, unsigned long long int, unsigned long long int, ADD, ADD, 0)
 
 DECLARE_REDUCTION(register_reduction_minus_float,
                   safe_reduce_minus_float, safe_reduce_minus_float_point,
@@ -187,6 +194,10 @@ DECLARE_REDUCTION(register_reduction_minus_double,
                   safe_reduce_minus_double, safe_reduce_minus_double_point,
                   reduce_minus_double, reduce_minus_double_point,
                   MinusOpDouble, double, size_t, ADD, SUB, 0.0)
+DECLARE_REDUCTION(register_reduction_minus_int16,
+                  safe_reduce_minus_int16, safe_reduce_minus_int16_point,
+                  reduce_minus_int16, reduce_minus_int16_point,
+                  MinusOpShort, short int, short int, ADD, SUB, 0)
 DECLARE_REDUCTION(register_reduction_minus_int32,
                   safe_reduce_minus_int32, safe_reduce_minus_int32_point,
                   reduce_minus_int32, reduce_minus_int32_point,
@@ -195,15 +206,18 @@ DECLARE_REDUCTION(register_reduction_minus_int64,
                   safe_reduce_minus_int64, safe_reduce_minus_int64_point,
                   reduce_minus_int64, reduce_minus_int64_point,
                   MinusOpLongLong, long long int, long long int, ADD, SUB, 0)
+DECLARE_REDUCTION(register_reduction_minus_uint16,
+                  safe_reduce_minus_uint16, safe_reduce_minus_uint16_point,
+                  reduce_minus_uint16, reduce_minus_uint16_point,
+                  MinusOpUShort, unsigned short int, unsigned short int, ADD, SUB, 0)
 DECLARE_REDUCTION(register_reduction_minus_uint32,
                   safe_reduce_minus_uint32, safe_reduce_minus_uint32_point,
                   reduce_minus_uint32, reduce_minus_uint32_point,
-                  MinusOpUInt, unsigned, unsigned, ADD, SUB, 0U)
+                  MinusOpUInt, unsigned int, unsigned int, ADD, SUB, 0)
 DECLARE_REDUCTION(register_reduction_minus_uint64,
                   safe_reduce_minus_uint64, safe_reduce_minus_uint64_point,
                   reduce_minus_uint64, reduce_minus_uint64_point,
-                  MinusOpULongLong, unsigned long long, unsigned long long,
-                  ADD, SUB, 0ULL)
+                  MinusOpULongLong, unsigned long long int, unsigned long long int, ADD, SUB, 0)
 
 DECLARE_REDUCTION(register_reduction_times_float,
                   safe_reduce_times_float, safe_reduce_times_float_point,
@@ -213,6 +227,10 @@ DECLARE_REDUCTION(register_reduction_times_double,
                   safe_reduce_times_double, safe_reduce_times_double_point,
                   reduce_times_double, reduce_times_double_point,
                   TimesOpDouble, double, size_t, MUL, MUL, 1.0)
+DECLARE_REDUCTION(register_reduction_times_int16,
+                  safe_reduce_times_int16, safe_reduce_times_int16_point,
+                  reduce_times_int16, reduce_times_int16_point,
+                  TimesOpShort, short int, short int, MUL, MUL, 1)
 DECLARE_REDUCTION(register_reduction_times_int32,
                   safe_reduce_times_int32, safe_reduce_times_int32_point,
                   reduce_times_int32, reduce_times_int32_point,
@@ -221,15 +239,18 @@ DECLARE_REDUCTION(register_reduction_times_int64,
                   safe_reduce_times_int64, safe_reduce_times_int64_point,
                   reduce_times_int64, reduce_times_int64_point,
                   TimesOpLongLong, long long int, long long int, MUL, MUL, 1)
+DECLARE_REDUCTION(register_reduction_times_uint16,
+                  safe_reduce_times_uint16, safe_reduce_times_uint16_point,
+                  reduce_times_uint16, reduce_times_uint16_point,
+                  TimesOpUShort, unsigned short int, unsigned short int, MUL, MUL, 1)
 DECLARE_REDUCTION(register_reduction_times_uint32,
                   safe_reduce_times_uint32, safe_reduce_times_uint32_point,
                   reduce_times_uint32, reduce_times_uint32_point,
-                  TimesOpUInt, unsigned, unsigned, MUL, MUL, 1U)
+                  TimesOpUInt, unsigned int, unsigned int, MUL, MUL, 1)
 DECLARE_REDUCTION(register_reduction_times_uint64,
                   safe_reduce_times_uint64, safe_reduce_times_uint64_point,
                   reduce_times_uint64, reduce_times_uint64_point,
-                  TimesOpULongLong, unsigned long long, unsigned long long,
-                  MUL, MUL, 1ULL)
+                  TimesOpULongLong, unsigned long long int, unsigned long long int, MUL, MUL, 1)
 
 DECLARE_REDUCTION(register_reduction_divide_float,
                   safe_reduce_divide_float, safe_reduce_divide_float_point,
@@ -239,6 +260,10 @@ DECLARE_REDUCTION(register_reduction_divide_double,
                   safe_reduce_divide_double, safe_reduce_divide_double_point,
                   reduce_divide_double, reduce_divide_double_point,
                   DivideOpDouble, double, size_t, DIV, MUL, 1.0)
+DECLARE_REDUCTION(register_reduction_divide_int16,
+                  safe_reduce_divide_int16, safe_reduce_divide_int16_point,
+                  reduce_divide_int16, reduce_divide_int16_point,
+                  DivideOpShort, short int, short int, DIV, MUL, 1)
 DECLARE_REDUCTION(register_reduction_divide_int32,
                   safe_reduce_divide_int32, safe_reduce_divide_int32_point,
                   reduce_divide_int32, reduce_divide_int32_point,
@@ -247,15 +272,18 @@ DECLARE_REDUCTION(register_reduction_divide_int64,
                   safe_reduce_divide_int64, safe_reduce_divide_int64_point,
                   reduce_divide_int64, reduce_divide_int64_point,
                   DivideOpLongLong, long long int, long long int, DIV, MUL, 1)
+DECLARE_REDUCTION(register_reduction_divide_uint16,
+                  safe_reduce_divide_uint16, safe_reduce_divide_uint16_point,
+                  reduce_divide_uint16, reduce_divide_uint16_point,
+                  DivideOpUShort, unsigned short int, unsigned short int, DIV, MUL, 1)
 DECLARE_REDUCTION(register_reduction_divide_uint32,
                   safe_reduce_divide_uint32, safe_reduce_divide_uint32_point,
                   reduce_divide_uint32, reduce_divide_uint32_point,
-                  DivideOpUInt, unsigned, unsigned, DIV, MUL, 1U)
+                  DivideOpUInt, unsigned int, unsigned int, DIV, MUL, 1)
 DECLARE_REDUCTION(register_reduction_divide_uint64,
                   safe_reduce_divide_uint64, safe_reduce_divide_uint64_point,
                   reduce_divide_uint64, reduce_divide_uint64_point,
-                  DivideOpULongLong, unsigned long long, unsigned long long,
-                  DIV, MUL, 1ULL)
+                  DivideOpULongLong, unsigned long long int, unsigned long long int, DIV, MUL, 1)
 
 DECLARE_REDUCTION(register_reduction_max_float,
                   safe_reduce_max_float, safe_reduce_max_float_point,
@@ -265,6 +293,10 @@ DECLARE_REDUCTION(register_reduction_max_double,
                   safe_reduce_max_double, safe_reduce_max_double_point,
                   reduce_max_double, reduce_max_double_point,
                   MaxOpDouble, double, size_t, std::max, std::max, -std::numeric_limits<double>::infinity())
+DECLARE_REDUCTION(register_reduction_max_int16,
+                  safe_reduce_max_int16, safe_reduce_max_int16_point,
+                  reduce_max_int16, reduce_max_int16_point,
+                  MaxOpShort, short int, short int, std::max, std::max, SHRT_MIN)
 DECLARE_REDUCTION(register_reduction_max_int32,
                   safe_reduce_max_int32, safe_reduce_max_int32_point,
                   reduce_max_int32, reduce_max_int32_point,
@@ -273,16 +305,18 @@ DECLARE_REDUCTION(register_reduction_max_int64,
                   safe_reduce_max_int64, safe_reduce_max_int64_point,
                   reduce_max_int64, reduce_max_int64_point,
                   MaxOpLongLong, long long int, long long int, std::max, std::max, LLONG_MIN)
+DECLARE_REDUCTION(register_reduction_max_uint16,
+                  safe_reduce_max_uint16, safe_reduce_max_uint16_point,
+                  reduce_max_uint16, reduce_max_uint16_point,
+                  MaxOpUShort, unsigned short int, unsigned short int, std::max, std::max, 0)
 DECLARE_REDUCTION(register_reduction_max_uint32,
                   safe_reduce_max_uint32, safe_reduce_max_uint32_point,
                   reduce_max_uint32, reduce_max_uint32_point,
-                  MaxOpUInt, unsigned, unsigned, std::max, std::max,
-                  std::numeric_limits<unsigned>::min())
+                  MaxOpUInt, unsigned int, unsigned int, std::max, std::max, 0)
 DECLARE_REDUCTION(register_reduction_max_uint64,
                   safe_reduce_max_uint64, safe_reduce_max_uint64_point,
                   reduce_max_uint64, reduce_max_uint64_point,
-                  MaxOpULongLong, unsigned long long, unsigned long long,
-                  std::max, std::max, std::numeric_limits<unsigned long long>::min())
+                  MaxOpULongLong, unsigned long long int, unsigned long long int, std::max, std::max, 0)
 
 DECLARE_REDUCTION(register_reduction_min_float,
                   safe_reduce_min_float, safe_reduce_min_float_point,
@@ -292,6 +326,10 @@ DECLARE_REDUCTION(register_reduction_min_double,
                   safe_reduce_min_double, safe_reduce_min_double_point,
                   reduce_min_double, reduce_min_double_point,
                   MinOpDouble, double, size_t, std::min, std::min, std::numeric_limits<double>::infinity())
+DECLARE_REDUCTION(register_reduction_min_int16,
+                  safe_reduce_min_int16, safe_reduce_min_int16_point,
+                  reduce_min_int16, reduce_min_int16_point,
+                  MinOpShort, short int, short int, std::min, std::min, SHRT_MAX)
 DECLARE_REDUCTION(register_reduction_min_int32,
                   safe_reduce_min_int32, safe_reduce_min_int32_point,
                   reduce_min_int32, reduce_min_int32_point,
@@ -300,225 +338,22 @@ DECLARE_REDUCTION(register_reduction_min_int64,
                   safe_reduce_min_int64, safe_reduce_min_int64_point,
                   reduce_min_int64, reduce_min_int64_point,
                   MinOpLongLong, long long int, long long int, std::min, std::min, LLONG_MAX)
+DECLARE_REDUCTION(register_reduction_min_uint16,
+                  safe_reduce_min_uint16, safe_reduce_min_uint16_point,
+                  reduce_min_uint16, reduce_min_uint16_point,
+                  MinOpUShort, unsigned short int, unsigned short int, std::min, std::min, USHRT_MAX)
 DECLARE_REDUCTION(register_reduction_min_uint32,
                   safe_reduce_min_uint32, safe_reduce_min_uint32_point,
                   reduce_min_uint32, reduce_min_uint32_point,
-                  MinOpUInt, unsigned, unsigned,
-                  std::min, std::min, std::numeric_limits<unsigned>::max())
+                  MinOpUInt, unsigned int, unsigned int, std::min, std::min, UINT_MAX)
 DECLARE_REDUCTION(register_reduction_min_uint64,
                   safe_reduce_min_uint64, safe_reduce_min_uint64_point,
                   reduce_min_uint64, reduce_min_uint64_point,
-                  MinOpULongLong, unsigned long long, unsigned long long,
-                  std::min, std::min, std::numeric_limits<unsigned long long>::max())
-#undef DECLARE_REDUCTION
+                  MinOpULongLong, unsigned long long int, unsigned long long int, std::min, std::min, ULLONG_MAX)
 
-
-template <class ELEM_REDOP>
-class ArrayReductionOp : public Realm::ReductionOpUntyped {
-public:
-  ArrayReductionOp(unsigned n)
-    : Realm::ReductionOpUntyped(sizeof(typename ELEM_REDOP::LHS) * n,
-                                sizeof(typename ELEM_REDOP::RHS) * n,
-// TODO: This will break if we change how a reduction list entry is laid out
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-                                sizeof(ptr_t) +
-                                sizeof(typename ELEM_REDOP::RHS) * n,
-#else
-                                0,
-#endif
-                                true, true),
-    N(n) {}
-
-  virtual Realm::ReductionOpUntyped *clone(void) const
-  {
-    return new ArrayReductionOp<ELEM_REDOP>(N);
-  }
-
-  virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
-                     bool exclusive = false) const
-  {
-    typename ELEM_REDOP::LHS *lhs =
-      static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-    const typename ELEM_REDOP::RHS *rhs =
-      static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-    size_t total_count = count * N;
-    if (exclusive)
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template apply<true>(lhs[i], rhs[i]);
-    else
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template apply<false>(lhs[i], rhs[i]);
-  }
-
-  virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
-                             off_t lhs_stride, off_t rhs_stride, size_t count,
-                             bool exclusive = false) const
-  {
-    if (exclusive) {
-      for (size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template apply<true>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    } else {
-      for (size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template apply<false>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    }
-  }
-
-  virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
-                    bool exclusive = false) const
-  {
-    typename ELEM_REDOP::RHS *rhs1 =
-      static_cast<typename ELEM_REDOP::RHS *>(rhs1_ptr);
-    const typename ELEM_REDOP::RHS *rhs2 =
-      static_cast<const typename ELEM_REDOP::RHS *>(rhs2_ptr);
-    size_t total_count = count * N;
-    if (exclusive)
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template fold<true>(rhs1[i], rhs2[i]);
-    else
-      for (size_t i = 0; i < total_count; i++)
-        ELEM_REDOP::template fold<false>(rhs1[i], rhs2[i]);
-  }
-
-  virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
-                            off_t lhs_stride, off_t rhs_stride, size_t count,
-                            bool exclusive = false) const
-  {
-    if(exclusive) {
-      for(size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template fold<true>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    } else {
-      for(size_t i = 0; i < count; i++) {
-        typename ELEM_REDOP::LHS *lhs =
-          static_cast<typename ELEM_REDOP::LHS *>(lhs_ptr);
-        const typename ELEM_REDOP::RHS *rhs =
-          static_cast<const typename ELEM_REDOP::RHS *>(rhs_ptr);
-        for (unsigned n = 0; n < N; ++n)
-          ELEM_REDOP::template fold<false>(lhs[n], rhs[n]);
-        lhs_ptr = static_cast<char *>(lhs_ptr) + lhs_stride;
-        rhs_ptr = static_cast<const char *>(rhs_ptr) + rhs_stride;
-      }
-    }
-  }
-
-  virtual void init(void *ptr, size_t count) const
-  {
-    typename ELEM_REDOP::RHS *rhs_ptr =
-      static_cast<typename ELEM_REDOP::RHS *>(ptr);
-    size_t total_count = count * N;
-    for (size_t i = 0; i < total_count; i++)
-      *rhs_ptr++ = ELEM_REDOP::identity;
-  }
-
-#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
-  virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
-                                off_t ptr_offset, bool exclusive = false) const
-  {
-    // TODO: Implement this function
-    assert(false);
-  }
-
-  virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
-                                off_t ptr_offset, bool exclusive = false) const
-  {
-    // TODO: Implement this function
-    assert(false);
-  }
-
-  virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const
-  {
-    // TODO: Implement this function
-    assert(false);
-  }
-#endif
-
-private:
-  unsigned N;
-
-public:
-  static Realm::ReductionOpUntyped *create_array_reduction_op(unsigned array_size)
-  {
-    ArrayReductionOp<ELEM_REDOP> *redop =
-      new ArrayReductionOp<ELEM_REDOP>(array_size);
-    return redop;
-  }
-};
-
-#define DECLARE_ARRAY_REDUCTION(REG, CLASS)                                  \
-  extern "C"                                                                 \
-  {                                                                          \
-    void REG(legion_reduction_op_id_t redop_id, unsigned array_size,         \
-             bool permit_duplicates)                                         \
-    {                                                                        \
-      ArrayReductionOp<CLASS> *op = new ArrayReductionOp<CLASS>(array_size); \
-      Runtime::register_reduction_op(redop_id, op, NULL, NULL,               \
-                                     permit_duplicates);                     \
-    }                                                                        \
-  }
-
-DECLARE_ARRAY_REDUCTION(register_array_reduction_plus_float, PlusOpFloat)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_plus_double, PlusOpDouble)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_plus_int32, PlusOpInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_plus_int64, PlusOpLongLong)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_plus_uint32, PlusOpUInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_plus_uint64, PlusOpULongLong)
-
-DECLARE_ARRAY_REDUCTION(register_array_reduction_minus_float, MinusOpFloat)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_minus_double, MinusOpDouble)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_minus_int32, MinusOpInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_minus_int64, MinusOpLongLong)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_minus_uint32, MinusOpUInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_minus_uint64, MinusOpULongLong)
-
-DECLARE_ARRAY_REDUCTION(register_array_reduction_times_float, TImesOPFloat)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_times_double, TimesOpDouble)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_times_int32, TimesOpInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_times_int64, TimesOpLongLong)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_times_uint32, TimesOpUInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_times_uint64, TimesOpULongLong)
-
-DECLARE_ARRAY_REDUCTION(register_array_reduction_divide_float, DivideOPFloat)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_divide_double, DivideOpDouble)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_divide_int32, DivideOpInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_divide_int64, DivideOpLongLong)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_divide_uint32, DivideOpUInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_divide_uint64, DivideOpULongLong)
-
-DECLARE_ARRAY_REDUCTION(register_array_reduction_max_float, MaxOPFloat)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_max_double, MaxOpDouble)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_max_int32, MaxOpInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_max_int64, MaxOpLongLong)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_max_uint32, MaxOpUInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_max_uint64, MaxOpULongLong)
-
-DECLARE_ARRAY_REDUCTION(register_array_reduction_min_float, MinOPFloat)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_min_double, MinOpDouble)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_min_int32, MinOpInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_min_int64, MinOpLongLong)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_min_uint32, MinOpUInt)
-DECLARE_ARRAY_REDUCTION(register_array_reduction_min_uint64, MinOpULongLong)
-
-#undef DECLARE_ARRAY_REDUCTION
+int64_t regent_generate_dynamic_kernel_id()
+{
+  static int64_t next_kernel_id = 12345;
+  int64_t kernel_id = next_kernel_id++;
+  return kernel_id;
+}
