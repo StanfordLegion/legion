@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -22,9 +22,6 @@ local default_options = {
   ["standalone"] = false,
   ["taskid-map"] = "",
   ["dump-dfa"] = "",
-
-  -- Legion runtime compile options:
-  ["legion-dim"] = tonumber(os.getenv("MAX_DIM")) or 3, -- Set this to the value of LEGION_MAX_DIM.
 }
 
 local function make_default_options(prefix, options)

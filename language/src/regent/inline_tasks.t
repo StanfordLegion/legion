@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -50,6 +50,37 @@ local function check_valid_inline_task(node, task)
   if has_self_recursion then
     report.error(task, "inline tasks cannot be recursive")
   end
+  -- Reject any access to a field id or a physical region of a region argument
+  -- if it uses a field path that is not locally fully qualified. This is to
+  -- prevent the access from changing its meaning in a caller context.
+  local check_field_paths_qualified
+  local function check_field_path_qualified(name, field, type)
+    check_field_paths_qualified(name, field, field.fields, std.get_field(type, field.field_name))
+  end
+  function check_field_paths_qualified(name, node, fields, type)
+    if not fields then
+      if not (type:isprimitive() or type:ispointer() or type.__no_field_slicing or std.is_bounded_type(type)) then
+        report.error(node, "ambiguous field access in " .. name ..
+            ": every field path in an inline task must be fully specified.")
+      end
+    else
+      fields:map(function(field) check_field_path_qualified(name, field, type) end)
+    end
+  end
+  local function check_region_qualified(node)
+    if node:is(ast.specialized.expr.RawFields) or node:is(ast.specialized.expr.RawPhysical) then
+      local region_node = node.region
+      local region_symbol = region_node.region.value
+      -- If the region symbol does not have a type, that means the region is created
+      -- within this inline task, so the access will has the same semantics in any context.
+      if not region_symbol:hastype() then return false end
+      local name = (node:is(ast.specialized.expr.RawFields) and "__fields") or
+                   (node:is(ast.specialized.expr.RawPhysical) and "__physcal")
+      check_field_paths_qualified(name, region_node, region_node.fields,
+                                  region_symbol:hastype():fspace())
+    end
+  end
+  ast.traverse_node_postorder(check_region_qualified, body)
 end
 
 local function is_singleton_type(type)
@@ -96,18 +127,12 @@ local substitute_expr_table = {
   [ast.specialized.expr.Cast]        = substitute_expr_cast,
   [ast.specialized.expr.Null]        = substitute_expr_null,
   [ast.specialized.expr.Region]      = substitute_expr_region,
-  [ast.specialized.expr]             = pass_through,
-  [ast.specialized.region]           = pass_through,
-  [ast.condition_kind]               = pass_through,
-  [ast.disjointness_kind]            = pass_through,
-  [ast.fence_kind]                   = pass_through,
-  [ast.location]                     = pass_through,
-  [ast.annotation]                   = pass_through,
 }
 
 local substitute_expr = ast.make_single_dispatch(
   substitute_expr_table,
-  {})
+  {},
+  pass_through)
 
 function substitute.expr(cx, node)
   return ast.map_node_postorder(substitute_expr(cx), node)
@@ -257,12 +282,12 @@ local substitute_stat_table = {
   -- TODO: Symbols in the constraints should be handled here
   [ast.specialized.stat.ParallelizeWith] = substitute_stat_block,
   [ast.specialized.stat.ParallelPrefix]  = substitute_stat_parallel_prefix,
-  [ast.specialized.stat]                 = pass_through,
 }
 
 local substitute_stat = ast.make_single_dispatch(
   substitute_stat_table,
-  {})
+  {},
+  pass_through)
 
 function substitute.stat(cx, node)
   return substitute_stat(cx)(node)
@@ -277,24 +302,19 @@ end
 local find_lvalues = {}
 
 local function find_lvalues_expr_address_of(cx, node)
-  assert(node.value:is(ast.specialized.expr.ID))
-  cx.lvalues[node.value.value] = true
+  if node.value:is(ast.specialized.expr.ID) then
+    cx.lvalues[node.value.value] = true
+  end
 end
 
 local find_lvalues_expr_table = {
   [ast.specialized.expr.AddressOf] = find_lvalues_expr_address_of,
-  [ast.specialized.expr]           = pass_through,
-  [ast.specialized.region]         = pass_through,
-  [ast.condition_kind]             = pass_through,
-  [ast.disjointness_kind]          = pass_through,
-  [ast.fence_kind]                 = pass_through,
-  [ast.location]                   = pass_through,
-  [ast.annotation]                 = pass_through,
 }
 
 local find_lvalues_expr = ast.make_single_dispatch(
   find_lvalues_expr_table,
-  {})
+  {},
+  pass_through)
 
 function find_lvalues.expr(cx, node)
   return ast.map_node_postorder(find_lvalues_expr(cx), node)
@@ -318,6 +338,8 @@ local function find_lvalues_lhs(cx, expr)
     cx.lvalues[expr.value] = true
   elseif expr:is(ast.specialized.expr.FieldAccess) then
     find_lvalues_lhs(cx, expr.value)
+  elseif expr:is(ast.specialized.expr.IndexAccess) then
+    find_lvalues_lhs(cx, expr.value)
   end
 end
 
@@ -338,12 +360,12 @@ local find_lvalues_stat_table = {
   [ast.specialized.stat.Var]             = find_lvalues_stat_var,
   [ast.specialized.stat.Assignment]      = find_lvalues_stat_assignment_or_reduce,
   [ast.specialized.stat.Reduce]          = find_lvalues_stat_assignment_or_reduce,
-  [ast.specialized.stat]                 = pass_through,
 }
 
 local find_lvalues_stat = ast.make_single_dispatch(
   find_lvalues_stat_table,
-  {})
+  {},
+  pass_through)
 
 function find_lvalues.stat(cx, node)
   find_lvalues_stat(cx)(node)
@@ -424,11 +446,14 @@ function inline_tasks.expr_call(stats, call)
   local expr_mapping = {}
   data.zip(params, param_types, args):map(function(tuple)
     local param, param_type, arg = unpack(tuple)
-    if not lvalues[param] and not param_type:ispointer() and
-       arg:is(ast.specialized.expr.ID)
+    if arg:is(ast.specialized.expr.ID) and
+       ((not lvalues[param] and not param_type:ispointer()) or
+        is_singleton_type(param_type))
     then
       symbol_mapping[param] = arg.value
-      if not is_singleton_type(param_type) then
+      if not (is_singleton_type(param_type) or
+              std.is_fspace_instance(param_type))
+      then
         arg = ast.specialized.expr.Cast {
           fn = ast.specialized.expr.Function {
             value = std.type_sub(param_type, symbol_mapping),
@@ -443,7 +468,9 @@ function inline_tasks.expr_call(stats, call)
       expr_mapping[param] = arg
     else
       local symbol_type = nil
-      if not is_singleton_type(param_type) then
+      if not (is_singleton_type(param_type) or
+              std.is_fspace_instance(param_type))
+      then
         symbol_type = param_type
       end
       local new_symbol = std.newsymbol(symbol_type, param:hasname())
@@ -550,12 +577,12 @@ local inline_tasks_stat_table = {
 
   [ast.specialized.stat.Return]          = pass_through_stat,
   [ast.specialized.stat.VarUnpack]       = pass_through_stat,
-  [ast.specialized.stat]                 = pass_through_stat,
 }
 
 local inline_tasks_stat = ast.make_single_dispatch(
   inline_tasks_stat_table,
-  {})
+  {},
+  pass_through_stat)
 
 function inline_tasks.stat(stats, node)
   inline_tasks_stat(stats)(node)

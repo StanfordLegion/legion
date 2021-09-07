@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 local ast = require("regent/ast")
 local data = require("common/data")
 local std = require("regent/std")
+local task_helper = require("regent/task_helper")
 
 local context = {}
 
@@ -36,11 +37,40 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
+function context:new_stat_scope()
+  local cx = {
+    local_symbols = self.local_symbols,
+    var_flows = self.var_flows,
+    var_futures = self.var_futures,
+    var_symbols = self.var_symbols,
+    conds = self.conds,
+    spills = terralib.newlist(),
+  }
+  return setmetatable(cx, context)
+end
+
+function context:new_local_scope(cond)
+  local conds = terralib.newlist()
+  conds:insertall(self.conds)
+  conds:insert(cond)
+  local cx = {
+    local_symbols = self.local_symbols:copy(),
+    var_flows = self.var_flows,
+    var_futures = self.var_futures,
+    var_symbols = self.var_symbols,
+    conds = conds,
+    spills = terralib.newlist(),
+  }
+  return setmetatable(cx, context)
+end
+
 function context:new_task_scope()
   local cx = {
+    local_symbols = data.newmap(),
     var_flows = {},
     var_futures = {},
     var_symbols = {},
+    conds = terralib.newlist(),
   }
   return setmetatable(cx, context)
 end
@@ -63,6 +93,15 @@ end
 
 function context:symbol(v)
   return self.var_symbols[v]
+end
+
+function context:add_spill(stat)
+  self.spills:insert(stat)
+  return self
+end
+
+function context:get_spills()
+  return self.spills
 end
 
 local analyze_var_flow = {}
@@ -118,6 +157,7 @@ end
 
 function analyze_var_flow.expr_call(cx, node)
   if std.is_task(node.fn.value) and
+    not node.fn.value.is_local and
     node.expr_type ~= terralib.types.unit
   then
     return flow_future()
@@ -139,11 +179,16 @@ function analyze_var_flow.expr_binary(cx, node)
     analyze_var_flow.expr(cx, node.rhs))
 end
 
+function analyze_var_flow.expr_raw_future(cx, noe)
+  return flow_future()
+end
+
 function analyze_var_flow.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return analyze_var_flow.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) or
+    node:is(ast.typed.expr.Global) or
     node:is(ast.typed.expr.Function) or
     node:is(ast.typed.expr.FieldAccess) or
     node:is(ast.typed.expr.IndexAccess) or
@@ -209,7 +254,8 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.WithScratchFields) or
     node:is(ast.typed.expr.ImportIspace) or
     node:is(ast.typed.expr.ImportRegion) or
-    node:is(ast.typed.expr.ImportPartition)
+    node:is(ast.typed.expr.ImportPartition) or
+    node:is(ast.typed.expr.Projection)
   then
     return flow_empty()
 
@@ -225,6 +271,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.AddressOf) then
     return flow_empty()
 
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return analyze_var_flow.expr_raw_future(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -236,6 +285,8 @@ function analyze_var_flow.block(cx, node)
 end
 
 function analyze_var_flow.stat_if(cx, node)
+  local cond = analyze_var_flow.expr(cx, node.cond)
+  local cx = cx:new_local_scope(cond)
   analyze_var_flow.block(cx, node.then_block)
   node.elseif_blocks:map(
     function(block) return analyze_var_flow.stat_elseif(cx, block) end)
@@ -247,6 +298,8 @@ function analyze_var_flow.stat_elseif(cx, node)
 end
 
 function analyze_var_flow.stat_while(cx, node)
+  local cond = analyze_var_flow.expr(cx, node.cond)
+  local cx = cx:new_local_scope(cond)
   analyze_var_flow.block(cx, node.block)
 end
 
@@ -288,6 +341,7 @@ end
 
 function analyze_var_flow.stat_var(cx, node)
   local value = node.value and analyze_var_flow.expr(cx, node.value) or flow_empty()
+  cx.local_symbols[node.symbol] = #cx.conds
   flow_value_into_var(cx, node.symbol, value)
 end
 
@@ -295,12 +349,38 @@ function analyze_var_flow.stat_assignment(cx, node)
   local lhs = analyze_var_flow.expr(cx, node.lhs)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
+
+  -- Hack: SCR breaks if certain values are futures, for now just make
+  -- sure we don't do this for certain types.
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
+    -- Make sure any dominating conditions flow into this assignment.
+    local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
+    for i, cond in pairs(cx.conds) do
+      if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
+        flow_value_into(cx, lhs, cond)
+      end
+    end
+  end
 end
 
 function analyze_var_flow.stat_reduce(cx, node)
   local lhs = analyze_var_flow.expr(cx, node.lhs)
   local rhs = analyze_var_flow.expr(cx, node.rhs)
   flow_value_into(cx, lhs, rhs)
+
+  -- Hack: SCR breaks if certain values are futures, for now just make
+  -- sure we don't do this for certain types.
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  if not (std.is_list(lhs_type) or std.is_phase_barrier(lhs_type) or std.is_dynamic_collective(lhs_type)) then
+    -- Make sure any dominating conditions flow into this assignment.
+    local lhs_symbol = node.lhs:is(ast.typed.expr.ID) and node.lhs.value
+    for i, cond in pairs(cx.conds) do
+      if not cx.local_symbols[lhs_symbol] or i > cx.local_symbols[lhs_symbol] then
+        flow_value_into(cx, lhs, cond)
+      end
+    end
+  end
 end
 
 function analyze_var_flow.stat(cx, node)
@@ -405,9 +485,64 @@ end
 
 local optimize_futures = {}
 
-local function concretize(node)
+-- Normalize all sub-expressions that could be lifted to tasks.
+-- This will help us track futures from those lifted tasks accurately.
+local function normalize_compound_expr(cx, expr)
+  if expr:is(ast.typed.expr.Cast) or
+     expr:is(ast.typed.expr.Unary) or
+     expr:is(ast.typed.expr.Binary) or
+     expr:is(ast.typed.expr.Call) or
+     expr:is(ast.typed.expr.Future) or
+     expr:is(ast.typed.expr.DynamicCollectiveGetResult)
+  then
+    local temp_var = std.newsymbol(expr.expr_type, "__normalized_in_future_opt")
+    cx:add_spill(ast.typed.stat.Var {
+      symbol = temp_var,
+      type = expr.expr_type,
+      value = expr,
+      span = expr.span,
+      annotations = ast.default_annotations(),
+    })
+    return ast.typed.expr.ID {
+      value = temp_var,
+      expr_type = expr.expr_type,
+      span = expr.span,
+      annotations = ast.default_annotations(),
+    }
+  else
+    return expr
+  end
+end
+
+local function normalize(cx, node)
+  if node:is(ast.typed.expr.Binary) then
+    local lhs = normalize_compound_expr(cx, normalize(cx, node.lhs))
+    local rhs = normalize_compound_expr(cx, normalize(cx, node.rhs))
+    return node {
+      lhs = lhs,
+      rhs = rhs,
+    }
+  elseif node:is(ast.typed.expr.Unary) then
+    local rhs = normalize_compound_expr(cx, normalize(cx, node.rhs))
+    return node {
+      rhs = rhs,
+    }
+  elseif node:is(ast.typed.expr.Cast) then
+    local arg = normalize_compound_expr(cx, normalize(cx, node.arg))
+    return node {
+      arg = arg,
+    }
+  else
+    return node
+  end
+end
+
+local function concretize(cx, node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
+    if not node:is(ast.typed.expr.ID) then
+      node = normalize_compound_expr(cx, normalize(cx, node))
+    end
     return ast.typed.expr.FutureGetResult {
       value = node,
       expr_type = expr_type.result_type,
@@ -418,33 +553,34 @@ local function concretize(node)
   return node
 end
 
-local function promote(node, expected_type)
+local function promote(cx, node, expected_type)
   assert(std.is_future(expected_type))
 
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
-    return ast.typed.expr.Future {
-      value = node,
-      expr_type = expected_type,
-      annotations = node.annotations,
-      span = node.span,
-    }
+    return normalize_compound_expr(cx,
+      ast.typed.expr.Future {
+        value = node,
+        expr_type = expected_type,
+        annotations = node.annotations,
+        span = node.span,
+      })
   elseif not std.type_eq(expr_type, expected_type) then
     -- FIXME: This requires a cast. For now, just concretize and re-promote.
-    return promote(concretize(node), expected_type)
+    return promote(cx, concretize(cx, node), expected_type)
   end
-  return node
+  return normalize(cx, node)
 end
 
 function optimize_futures.expr_region_root(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr(cx, node.region))
   return node {
     region = region,
   }
 end
 
 function optimize_futures.expr_condition(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     value = value,
   }
@@ -467,13 +603,13 @@ function optimize_futures.expr_id(cx, node)
 end
 
 function optimize_futures.expr_field_access(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_index_access(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
-  local index = concretize(optimize_futures.expr(cx, node.index))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
+  local index = concretize(cx, optimize_futures.expr(cx, node.index))
   return node {
     value = value,
     index = index,
@@ -481,9 +617,9 @@ function optimize_futures.expr_index_access(cx, node)
 end
 
 function optimize_futures.expr_method_call(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   local args = node.args:map(
-    function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
+    function(arg) return concretize(cx, optimize_futures.expr(cx, arg)) end)
   return node {
     value = value,
     args = args,
@@ -491,15 +627,26 @@ function optimize_futures.expr_method_call(cx, node)
 end
 
 function optimize_futures.expr_call(cx, node)
-  local fn = concretize(optimize_futures.expr(cx, node.fn))
+  local fn = concretize(cx, optimize_futures.expr(cx, node.fn))
   local args = node.args:map(
     function(arg) return optimize_futures.expr(cx, arg) end)
   if not std.is_task(node.fn.value) then
     args = args:map(
-      function(arg) return concretize(arg) end)
+      function(arg) return concretize(cx, arg) end)
+  else
+    args = args:map(function(arg)
+      if std.is_future(arg.expr_type) then
+          return normalize_compound_expr(cx, arg)
+      else
+        return arg
+      end
+    end)
   end
   local expr_type = node.expr_type
-  if std.is_task(node.fn.value) and expr_type ~= terralib.types.unit then
+  if std.is_task(node.fn.value) and
+    not node.fn.value.is_local and
+    expr_type ~= terralib.types.unit
+  then
     expr_type = std.future(expr_type)
   end
 
@@ -510,8 +657,34 @@ function optimize_futures.expr_call(cx, node)
   }
 end
 
+local function lift_cast_to_futures(node)
+  local arg_type = std.as_read(node.arg.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local task = task_helper.make_cast_task(arg_type, expr_type)
+
+  return ast.typed.expr.Call {
+    fn = ast.typed.expr.Function {
+      value = task,
+      expr_type = task:get_type(),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    args = terralib.newlist({
+      node.arg,
+    }),
+    conditions = terralib.newlist(),
+    predicate = false,
+    predicate_else_value = false,
+    replicable = false,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function optimize_futures.expr_cast(cx, node)
-  local fn = concretize(optimize_futures.expr(cx, node.fn))
+  local fn = concretize(cx, optimize_futures.expr(cx, node.fn))
   local arg = optimize_futures.expr(cx, node.arg)
   local arg_type = std.as_read(arg.expr_type)
 
@@ -520,20 +693,25 @@ function optimize_futures.expr_cast(cx, node)
     expr_type = std.future(expr_type)
   end
 
-  return node {
+  node = node {
     fn = fn,
     arg = arg,
     expr_type = expr_type,
   }
+
+  if std.is_future(arg_type) then
+    return lift_cast_to_futures(node)
+  end
+  return node
 end
 
 function optimize_futures.expr_ctor_list_field(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_ctor_rec_field(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
@@ -554,22 +732,30 @@ function optimize_futures.expr_ctor(cx, node)
 end
 
 function optimize_futures.expr_raw_fields(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
 end
 
+function optimize_futures.expr_raw_future(cx, node)
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
+  return node {
+    value = node.value,
+    expr_type = std.future(node.expr_type),
+  }
+end
+
 function optimize_futures.expr_raw_physical(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
 end
 
 function optimize_futures.expr_raw_value(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_isnull(cx, node)
-  local pointer = concretize(optimize_futures.expr(cx, node.pointer))
+  local pointer = concretize(cx, optimize_futures.expr(cx, node.pointer))
   return node { pointer = pointer }
 end
 
@@ -578,24 +764,24 @@ function optimize_futures.expr_null(cx, node)
 end
 
 function optimize_futures.expr_dynamic_cast(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_static_cast(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_unsafe_cast(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_ispace(cx, node)
-  local extent = concretize(optimize_futures.expr(cx, node.extent))
+  local extent = concretize(cx, optimize_futures.expr(cx, node.extent))
   local start = node.start and
-    concretize(optimize_futures.expr(cx, node.start))
+    concretize(cx, optimize_futures.expr(cx, node.start))
   return node {
     extent = extent,
     start = start,
@@ -603,13 +789,13 @@ function optimize_futures.expr_ispace(cx, node)
 end
 
 function optimize_futures.expr_region(cx, node)
-  local ispace = concretize(optimize_futures.expr(cx, node.ispace))
+  local ispace = concretize(cx, optimize_futures.expr(cx, node.ispace))
   return node { ispace = ispace }
 end
 
 function optimize_futures.expr_partition(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
-  local coloring = concretize(optimize_futures.expr(cx, node.coloring))
+  local region = concretize(cx, optimize_futures.expr(cx, node.region))
+  local coloring = concretize(cx, optimize_futures.expr(cx, node.coloring))
   return node {
     region = region,
     coloring = coloring,
@@ -617,8 +803,8 @@ function optimize_futures.expr_partition(cx, node)
 end
 
 function optimize_futures.expr_partition_equal(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
-  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  local region = concretize(cx, optimize_futures.expr(cx, node.region))
+  local colors = concretize(cx, optimize_futures.expr(cx, node.colors))
   return node {
     region = region,
     colors = colors,
@@ -626,8 +812,8 @@ function optimize_futures.expr_partition_equal(cx, node)
 end
 
 function optimize_futures.expr_partition_by_field(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
-  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
+  local colors = concretize(cx, optimize_futures.expr(cx, node.colors))
   return node {
     region = region,
     colors = colors,
@@ -635,10 +821,10 @@ function optimize_futures.expr_partition_by_field(cx, node)
 end
 
 function optimize_futures.expr_partition_by_restriction(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
-  local transform = concretize(optimize_futures.expr(cx, node.transform))
-  local extent = concretize(optimize_futures.expr(cx, node.extent))
-  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  local region = concretize(cx, optimize_futures.expr(cx, node.region))
+  local transform = concretize(cx, optimize_futures.expr(cx, node.transform))
+  local extent = concretize(cx, optimize_futures.expr(cx, node.extent))
+  local colors = concretize(cx, optimize_futures.expr(cx, node.colors))
   return node {
     region = region,
     transform = transform,
@@ -648,9 +834,9 @@ function optimize_futures.expr_partition_by_restriction(cx, node)
 end
 
 function optimize_futures.expr_image(cx, node)
-  local parent = concretize(optimize_futures.expr(cx, node.parent))
-  local partition = concretize(optimize_futures.expr(cx, node.partition))
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local parent = concretize(cx, optimize_futures.expr(cx, node.parent))
+  local partition = concretize(cx, optimize_futures.expr(cx, node.partition))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node {
     parent = parent,
     partition = partition,
@@ -659,9 +845,9 @@ function optimize_futures.expr_image(cx, node)
 end
 
 function optimize_futures.expr_preimage(cx, node)
-  local parent = concretize(optimize_futures.expr(cx, node.parent))
-  local partition = concretize(optimize_futures.expr(cx, node.partition))
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local parent = concretize(cx, optimize_futures.expr(cx, node.parent))
+  local partition = concretize(cx, optimize_futures.expr(cx, node.partition))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node {
     parent = parent,
     partition = partition,
@@ -671,7 +857,7 @@ end
 
 function optimize_futures.expr_cross_product(cx, node)
   local args = node.args:map(
-    function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
+    function(arg) return concretize(cx, optimize_futures.expr(cx, arg)) end)
   return node {
     args = args,
   }
@@ -679,15 +865,15 @@ end
 
 function optimize_futures.expr_cross_product_array(cx, node)
   return node {
-    lhs = concretize(optimize_futures.expr(cx, node.lhs)),
+    lhs = concretize(cx, optimize_futures.expr(cx, node.lhs)),
     disjointness = node.disjointness,
-    colorings = concretize(optimize_futures.expr(cx, node.colorings)),
+    colorings = concretize(cx, optimize_futures.expr(cx, node.colorings)),
   }
 end
 
 function optimize_futures.expr_list_slice_partition(cx, node)
-  local partition = concretize(optimize_futures.expr(cx, node.partition))
-  local indices = concretize(optimize_futures.expr(cx, node.indices))
+  local partition = concretize(cx, optimize_futures.expr(cx, node.partition))
+  local indices = concretize(cx, optimize_futures.expr(cx, node.indices))
   return node {
     partition = partition,
     indices = indices,
@@ -695,8 +881,8 @@ function optimize_futures.expr_list_slice_partition(cx, node)
 end
 
 function optimize_futures.expr_list_duplicate_partition(cx, node)
-  local partition = concretize(optimize_futures.expr(cx, node.partition))
-  local indices = concretize(optimize_futures.expr(cx, node.indices))
+  local partition = concretize(cx, optimize_futures.expr(cx, node.partition))
+  local indices = concretize(cx, optimize_futures.expr(cx, node.indices))
   return node {
     partition = partition,
     indices = indices,
@@ -704,8 +890,8 @@ function optimize_futures.expr_list_duplicate_partition(cx, node)
 end
 
 function optimize_futures.expr_list_slice_cross_product(cx, node)
-  local product = concretize(optimize_futures.expr(cx, node.product))
-  local indices = concretize(optimize_futures.expr(cx, node.indices))
+  local product = concretize(cx, optimize_futures.expr(cx, node.product))
+  local indices = concretize(cx, optimize_futures.expr(cx, node.indices))
   return node {
     product = product,
     indices = indices,
@@ -713,8 +899,8 @@ function optimize_futures.expr_list_slice_cross_product(cx, node)
 end
 
 function optimize_futures.expr_list_cross_product(cx, node)
-  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
-  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  local lhs = concretize(cx, optimize_futures.expr(cx, node.lhs))
+  local rhs = concretize(cx, optimize_futures.expr(cx, node.rhs))
   return node {
     lhs = lhs,
     rhs = rhs,
@@ -723,8 +909,8 @@ function optimize_futures.expr_list_cross_product(cx, node)
 end
 
 function optimize_futures.expr_list_cross_product_complete(cx, node)
-  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
-  local product = concretize(optimize_futures.expr(cx, node.product))
+  local lhs = concretize(cx, optimize_futures.expr(cx, node.lhs))
+  local product = concretize(cx, optimize_futures.expr(cx, node.product))
   return node {
     lhs = lhs,
     product = product,
@@ -732,16 +918,16 @@ function optimize_futures.expr_list_cross_product_complete(cx, node)
 end
 
 function optimize_futures.expr_list_phase_barriers(cx, node)
-  local product = concretize(optimize_futures.expr(cx, node.product))
+  local product = concretize(cx, optimize_futures.expr(cx, node.product))
   return node {
     product = product,
   }
 end
 
 function optimize_futures.expr_list_invert(cx, node)
-  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
-  local product = concretize(optimize_futures.expr(cx, node.product))
-  local barriers = concretize(optimize_futures.expr(cx, node.barriers))
+  local rhs = concretize(cx, optimize_futures.expr(cx, node.rhs))
+  local product = concretize(cx, optimize_futures.expr(cx, node.product))
+  local barriers = concretize(cx, optimize_futures.expr(cx, node.barriers))
   return node {
     rhs = rhs,
     product = product,
@@ -750,8 +936,8 @@ function optimize_futures.expr_list_invert(cx, node)
 end
 
 function optimize_futures.expr_list_range(cx, node)
-  local start = concretize(optimize_futures.expr(cx, node.start))
-  local stop = concretize(optimize_futures.expr(cx, node.stop))
+  local start = concretize(cx, optimize_futures.expr(cx, node.start))
+  local stop = concretize(cx, optimize_futures.expr(cx, node.stop))
   return node {
     start = start,
     stop = stop,
@@ -759,15 +945,15 @@ function optimize_futures.expr_list_range(cx, node)
 end
 
 function optimize_futures.expr_list_ispace(cx, node)
-  local ispace = concretize(optimize_futures.expr(cx, node.ispace))
+  local ispace = concretize(cx, optimize_futures.expr(cx, node.ispace))
   return node {
     ispace = ispace,
   }
 end
 
 function optimize_futures.expr_list_from_element(cx, node)
-  local list = concretize(optimize_futures.expr(cx, node.list))
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local list = concretize(cx, optimize_futures.expr(cx, node.list))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     list = list,
     value = value,
@@ -775,21 +961,21 @@ function optimize_futures.expr_list_from_element(cx, node)
 end
 
 function optimize_futures.expr_phase_barrier(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     value = value,
   }
 end
 
 function optimize_futures.expr_dynamic_collective(cx, node)
-  local arrivals = concretize(optimize_futures.expr(cx, node.arrivals))
+  local arrivals = concretize(cx, optimize_futures.expr(cx, node.arrivals))
   return node {
     arrivals = arrivals,
   }
 end
 
 function optimize_futures.expr_dynamic_collective_get_result(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     value = value,
     expr_type = std.future(node.expr_type),
@@ -797,15 +983,15 @@ function optimize_futures.expr_dynamic_collective_get_result(cx, node)
 end
 
 function optimize_futures.expr_advance(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     value = value,
   }
 end
 
 function optimize_futures.expr_adjust(cx, node)
-  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local barrier = concretize(cx, optimize_futures.expr(cx, node.barrier))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     barrier = barrier,
     value = value,
@@ -813,7 +999,7 @@ function optimize_futures.expr_adjust(cx, node)
 end
 
 function optimize_futures.expr_arrive(cx, node)
-  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  local barrier = concretize(cx, optimize_futures.expr(cx, node.barrier))
   local value = node.value and optimize_futures.expr(cx, node.value)
   return node {
     barrier = barrier,
@@ -822,18 +1008,18 @@ function optimize_futures.expr_arrive(cx, node)
 end
 
 function optimize_futures.expr_await(cx, node)
-  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  local barrier = concretize(cx, optimize_futures.expr(cx, node.barrier))
   return node {
     barrier = barrier,
   }
 end
 
 function optimize_futures.expr_copy(cx, node)
-  local src = concretize(optimize_futures.expr_region_root(cx, node.src))
-  local dst = concretize(optimize_futures.expr_region_root(cx, node.dst))
+  local src = concretize(cx, optimize_futures.expr_region_root(cx, node.src))
+  local dst = concretize(cx, optimize_futures.expr_region_root(cx, node.dst))
   local conditions = node.conditions:map(
     function(condition)
-      return concretize(optimize_futures.expr_condition(cx, condition))
+      return concretize(cx, optimize_futures.expr_condition(cx, condition))
     end)
   return node {
     src = src,
@@ -843,11 +1029,11 @@ function optimize_futures.expr_copy(cx, node)
 end
 
 function optimize_futures.expr_fill(cx, node)
-  local dst = concretize(optimize_futures.expr_region_root(cx, node.dst))
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local dst = concretize(cx, optimize_futures.expr_region_root(cx, node.dst))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   local conditions = node.conditions:map(
     function(condition)
-      return concretize(optimize_futures.expr_condition(cx, condition))
+      return concretize(cx, optimize_futures.expr_condition(cx, condition))
     end)
   return node {
     dst = dst,
@@ -857,10 +1043,10 @@ function optimize_futures.expr_fill(cx, node)
 end
 
 function optimize_futures.expr_acquire(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   local conditions = node.conditions:map(
     function(condition)
-      return concretize(optimize_futures.expr_condition(cx, condition))
+      return concretize(cx, optimize_futures.expr_condition(cx, condition))
     end)
   return node {
     region = region,
@@ -869,10 +1055,10 @@ function optimize_futures.expr_acquire(cx, node)
 end
 
 function optimize_futures.expr_release(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   local conditions = node.conditions:map(
     function(condition)
-      return concretize(optimize_futures.expr_condition(cx, condition))
+      return concretize(cx, optimize_futures.expr_condition(cx, condition))
     end)
   return node {
     region = region,
@@ -881,9 +1067,9 @@ function optimize_futures.expr_release(cx, node)
 end
 
 function optimize_futures.expr_attach_hdf5(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
-  local filename = concretize(optimize_futures.expr(cx, node.filename))
-  local mode = concretize(optimize_futures.expr(cx, node.mode))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
+  local filename = concretize(cx, optimize_futures.expr(cx, node.filename))
+  local mode = concretize(cx, optimize_futures.expr(cx, node.mode))
   return node {
     region = region,
     filename = filename,
@@ -892,25 +1078,51 @@ function optimize_futures.expr_attach_hdf5(cx, node)
 end
 
 function optimize_futures.expr_detach_hdf5(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node {
     region = region,
   }
 end
 
 function optimize_futures.expr_allocate_scratch_fields(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
   return node {
     region = region,
   }
 end
 
 function optimize_futures.expr_with_scratch_fields(cx, node)
-  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
-  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  local region = concretize(cx, optimize_futures.expr_region_root(cx, node.region))
+  local field_ids = concretize(cx, optimize_futures.expr(cx, node.field_ids))
   return node {
     region = region,
     field_ids = field_ids,
+  }
+end
+
+local function lift_unary_op_to_futures(node)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local task = task_helper.make_unary_task(node.op, rhs_type, expr_type)
+
+  return ast.typed.expr.Call {
+    fn = ast.typed.expr.Function {
+      value = task,
+      expr_type = task:get_type(),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    args = terralib.newlist({
+      node.rhs,
+    }),
+    conditions = terralib.newlist(),
+    predicate = false,
+    predicate_else_value = false,
+    replicable = false,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
   }
 end
 
@@ -923,9 +1135,42 @@ function optimize_futures.expr_unary(cx, node)
     expr_type = std.future(expr_type)
   end
 
-  return node {
+  node = node {
     rhs = rhs,
     expr_type = expr_type,
+  }
+
+  if std.is_future(rhs_type) then
+    return lift_unary_op_to_futures(node)
+  end
+  return node
+end
+
+local function lift_binary_op_to_futures(node)
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local task = task_helper.make_binary_task(node.op, lhs_type, rhs_type, expr_type)
+
+  return ast.typed.expr.Call {
+    fn = ast.typed.expr.Function {
+      value = task,
+      expr_type = task:get_type(),
+      annotations = ast.default_annotations(),
+      span = node.span,
+    },
+    args = terralib.newlist({
+      node.lhs,
+      node.rhs,
+    }),
+    conditions = terralib.newlist(),
+    predicate = false,
+    predicate_else_value = false,
+    replicable = false,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
   }
 end
 
@@ -940,32 +1185,37 @@ function optimize_futures.expr_binary(cx, node)
     expr_type = std.future(expr_type)
   end
 
-  return node {
+  node = node {
     lhs = lhs,
     rhs = rhs,
     expr_type = expr_type,
   }
+
+  if std.is_future(lhs_type) or std.is_future(rhs_type) then
+    return lift_binary_op_to_futures(node)
+  end
+  return node
 end
 
 function optimize_futures.expr_deref(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_address_of(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_import_ispace(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   return node { value = value }
 end
 
 function optimize_futures.expr_import_region(cx, node)
-  local ispace    = concretize(optimize_futures.expr(cx, node.ispace))
-  local value     = concretize(optimize_futures.expr(cx, node.value))
-  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  local ispace    = concretize(cx, optimize_futures.expr(cx, node.ispace))
+  local value     = concretize(cx, optimize_futures.expr(cx, node.value))
+  local field_ids = concretize(cx, optimize_futures.expr(cx, node.field_ids))
   return node {
     ispace = ispace,
     value = value,
@@ -974,13 +1224,20 @@ function optimize_futures.expr_import_region(cx, node)
 end
 
 function optimize_futures.expr_import_partition(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
-  local colors = concretize(optimize_futures.expr(cx, node.colors))
-  local value  = concretize(optimize_futures.expr(cx, node.value))
+  local region = concretize(cx, optimize_futures.expr(cx, node.region))
+  local colors = concretize(cx, optimize_futures.expr(cx, node.colors))
+  local value  = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
     region = region,
     colors = colors,
     value = value,
+  }
+end
+
+function optimize_futures.expr_projection(cx, node)
+  local region = concretize(cx, optimize_futures.expr(cx, node.region))
+  return node {
+    region = region,
   }
 end
 
@@ -989,6 +1246,9 @@ function optimize_futures.expr(cx, node)
     return optimize_futures.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
+    return node
+
+  elseif node:is(ast.typed.expr.Global) then
     return node
 
   elseif node:is(ast.typed.expr.Function) then
@@ -1017,6 +1277,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return optimize_futures.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return optimize_futures.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return optimize_futures.expr_raw_physical(cx, node)
@@ -1171,6 +1434,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.ImportPartition) then
     return optimize_futures.expr_import_partition(cx, node)
 
+  elseif node:is(ast.typed.expr.Projection) then
+    return optimize_futures.expr_projection(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -1185,59 +1451,83 @@ function optimize_futures.block(cx, node)
 end
 
 function optimize_futures.stat_if(cx, node)
-  return terralib.newlist({
-    node {
-      cond = concretize(optimize_futures.expr(cx, node.cond)),
-      then_block = optimize_futures.block(cx, node.then_block),
-      elseif_blocks = node.elseif_blocks:map(
-        function(block) return optimize_futures.stat_elseif(cx, block) end),
-      else_block = optimize_futures.block(cx, node.else_block),
+  local cx = cx:new_stat_scope()
+  local cond = concretize(cx, optimize_futures.expr(cx, node.cond))
+  local then_block = optimize_futures.block(cx, node.then_block)
+  local else_block = node.else_block
+  for idx = #node.elseif_blocks, 1, -1 do
+    local elseif_block = node.elseif_blocks[idx]
+    else_block = ast.typed.Block {
+      stats = terralib.newlist({
+        ast.typed.stat.If {
+          cond = elseif_block.cond,
+          then_block = elseif_block.block,
+          elseif_blocks = terralib.newlist(),
+          else_block = else_block,
+          span = elseif_block.span,
+          annotations = elseif_block.annotations,
+        }
+      }),
+      span = elseif_block.span,
     }
-  })
+  end
+  local else_block = optimize_futures.block(cx, else_block)
+
+  return cx:add_spill(
+    node {
+      cond = cond,
+      then_block = then_block,
+      elseif_blocks = terralib.newlist(),
+      else_block = else_block,
+    }
+  ):get_spills()
 end
 
 function optimize_futures.stat_elseif(cx, node)
-  return node {
-    cond = concretize(optimize_futures.expr(cx, node.cond)),
-    block = optimize_futures.block(cx, node.block),
-  }
+  -- Should be unreachable
+  assert(false)
 end
 
 function optimize_futures.stat_while(cx, node)
+  -- This is guaranteed by the normalizer
+  assert(node.cond:is(ast.typed.expr.ID))
   return terralib.newlist({
     node {
-      cond = concretize(optimize_futures.expr(cx, node.cond)),
+      cond = concretize(cx, optimize_futures.expr(cx, node.cond)),
       block = optimize_futures.block(cx, node.block),
     }
   })
 end
 
 function optimize_futures.stat_for_num(cx, node)
-  return terralib.newlist({
+  local cx = cx:new_stat_scope()
+  local values = node.values:map(function(value)
+      return concretize(cx, optimize_futures.expr(cx, value))
+    end)
+  local block = optimize_futures.block(cx, node.block)
+  return cx:add_spill(
     node {
-      values = node.values:map(
-        function(value) return concretize(optimize_futures.expr(cx, value)) end),
-      block = optimize_futures.block(cx, node.block),
+      values = values,
+      block = block,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_for_list(cx, node)
-  return terralib.newlist({
+  local cx = cx:new_stat_scope()
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
+  local block = optimize_futures.block(cx, node.block)
+  return cx:add_spill(
     node {
-      value = concretize(optimize_futures.expr(cx, node.value)),
-      block = optimize_futures.block(cx, node.block),
+      value = value,
+      block = block,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_repeat(cx, node)
-  return terralib.newlist({
-    node {
-      block = optimize_futures.block(cx, node.block),
-      until_cond = concretize(optimize_futures.expr(cx, node.until_cond)),
-    }
-  })
+  -- Should be unreachable
+  assert(false)
 end
 
 function optimize_futures.stat_must_epoch(cx, node)
@@ -1257,8 +1547,9 @@ function optimize_futures.stat_block(cx, node)
 end
 
 function optimize_futures.stat_index_launch_num(cx, node)
+  local cx = cx:new_stat_scope()
   local values = node.values:map(
-    function(value) return concretize(optimize_futures.expr(cx, value)) end)
+    function(value) return concretize(cx, optimize_futures.expr(cx, value)) end)
   local preamble = terralib.newlist()
   node.preamble:map(function(stat)
     preamble:insertall(optimize_futures.stat(cx, stat))
@@ -1266,14 +1557,17 @@ function optimize_futures.stat_index_launch_num(cx, node)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
+  local reduce_task = false
 
   if call:is(ast.typed.expr.Call) then
     local args = terralib.newlist()
     for i, arg in ipairs(call.args) do
       if std.is_future(std.as_read(arg.expr_type)) and
-        not node.args_provably.invariant[i]
+         not node.args_provably.invariant[i]
       then
-        arg = concretize(arg)
+        arg = concretize(cx, arg)
+      elseif std.is_future(std.as_read(arg.expr_type)) then
+        arg = normalize_compound_expr(cx, arg)
       end
       args:insert(arg)
     end
@@ -1285,16 +1579,17 @@ function optimize_futures.stat_index_launch_num(cx, node)
       if std.is_future(call_type) and not std.is_future(reduce_type) then
         call.expr_type = call_type.result_type
       end
+      reduce_task = task_helper.make_binary_task(node.reduce_op, reduce_type, call_type, reduce_type)
     end
 
   elseif call:is(ast.typed.expr.Fill) then
     local region = call.dst.region
     local value = call.value
     if std.is_future(std.as_read(value.expr_type)) then
-      value = concretize(value)
+      value = concretize(cx, value)
     end
     if std.is_future(std.as_read(region.expr_type)) then
-      region = concretize(region)
+      region = concretize(cx, region)
     end
     call = call {
       dst = call.dst { region = region },
@@ -1305,18 +1600,20 @@ function optimize_futures.stat_index_launch_num(cx, node)
     assert(false)
   end
 
-  return terralib.newlist({
+  return cx:add_spill(
     node {
       values = values,
       preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
+      reduce_task = reduce_task,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_index_launch_list(cx, node)
-  local value = concretize(optimize_futures.expr(cx, node.value))
+  local cx = cx:new_stat_scope()
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
   local preamble = terralib.newlist()
   node.preamble:map(function(stat)
     preamble:insertall(optimize_futures.stat(cx, stat))
@@ -1324,14 +1621,17 @@ function optimize_futures.stat_index_launch_list(cx, node)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
+  local reduce_task = false
 
   if call:is(ast.typed.expr.Call) then
     local args = terralib.newlist()
     for i, arg in ipairs(call.args) do
       if std.is_future(std.as_read(arg.expr_type)) and
-        not node.args_provably.invariant[i]
+         not node.args_provably.invariant[i]
       then
-        arg = concretize(arg)
+        arg = concretize(cx, arg)
+      elseif std.is_future(std.as_read(arg.expr_type)) then
+        arg = normalize_compound_expr(cx, arg)
       end
       args:insert(arg)
     end
@@ -1343,16 +1643,17 @@ function optimize_futures.stat_index_launch_list(cx, node)
       if std.is_future(call_type) and not std.is_future(reduce_type) then
         call.expr_type = call_type.result_type
       end
+      reduce_task = task_helper.make_binary_task(node.reduce_op, reduce_type, call_type, reduce_type)
     end
 
   elseif call:is(ast.typed.expr.Fill) then
     local region = call.dst.region
     local value = call.value
     if std.is_future(std.as_read(value.expr_type)) then
-      value = concretize(value)
+      value = concretize(cx, value)
     end
     if std.is_future(std.as_read(region.expr_type)) then
-      region = concretize(region)
+      region = concretize(cx, region)
     end
     call = call {
       dst = call.dst { region = region },
@@ -1363,17 +1664,19 @@ function optimize_futures.stat_index_launch_list(cx, node)
     assert(false)
   end
 
-  return terralib.newlist({
+  return cx:add_spill(
     node {
       value = value,
       preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
+      reduce_task = reduce_task,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_var(cx, node)
+  local cx = cx:new_stat_scope()
   local stats = terralib.newlist()
 
   local value = node.value
@@ -1392,9 +1695,9 @@ function optimize_futures.stat_var(cx, node)
   local new_value = value
   if value then
     if cx:is_var_future(node.symbol) then
-      new_value = promote(optimize_futures.expr(cx, value), new_type)
+      new_value = promote(cx, optimize_futures.expr(cx, value), new_type)
     else
-      new_value = concretize(optimize_futures.expr(cx, value))
+      new_value = concretize(cx, optimize_futures.expr(cx, value))
     end
   else
     if cx:is_var_future(node.symbol) then
@@ -1414,57 +1717,59 @@ function optimize_futures.stat_var(cx, node)
         span = node.span,
       }
 
-      new_value = promote(empty_ref, new_type)
-      stats:insert(empty_var)
+      cx:add_spill(empty_var)
+      new_value = promote(cx, empty_ref, new_type)
     end
   end
 
-  stats:insert(node {
+  return cx:add_spill(node {
     symbol = new_symbol,
     type = new_type,
     value = new_value,
-  })
-  return stats
+  }):get_spills()
 end
 
 function optimize_futures.stat_var_unpack(cx, node)
-  return terralib.newlist({
+  local cx = cx:new_stat_scope()
+  local value = concretize(cx, optimize_futures.expr(cx, node.value))
+  return cx:add_spill(
     node {
-      value = concretize(optimize_futures.expr(cx, node.value)),
+      value = value,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_return(cx, node)
-  local value = node.value and concretize(optimize_futures.expr(cx, node.value))
-  return terralib.newlist({node { value = value } })
+  local cx = cx:new_stat_scope()
+  local value = node.value and concretize(cx, optimize_futures.expr(cx, node.value))
+  return cx:add_spill(node { value = value }):get_spills()
 end
 
 function optimize_futures.stat_break(cx, node)
   return terralib.newlist({node})
 end
 
-local function unwrap_field_access(node)
-  if node:is(ast.typed.expr.FieldAccess) then
-    return unwrap_field_access(node.value)
+local function unwrap_access(node)
+  if node:is(ast.typed.expr.FieldAccess) or node:is(ast.typed.expr.IndexAccess) then
+    return unwrap_access(node.value)
   end
   return node
 end
 
-local function rewrap_field_access(node, replacement)
-  if node:is(ast.typed.expr.FieldAccess) then
-    return node { value = rewrap_field_access(node.value, replacement) }
+local function rewrap_access(node, replacement)
+  if node:is(ast.typed.expr.FieldAccess) or node:is(ast.typed.expr.IndexAccess) then
+    return node { value = rewrap_access(node.value, replacement) }
   end
   return replacement
 end
 
-local function is_future_field_assignment(node)
-  return node:is(ast.typed.expr.FieldAccess) and
-    unwrap_field_access(node):is(ast.typed.expr.FutureGetResult)
+local function is_future_modify_assignment(node)
+  return (node:is(ast.typed.expr.FieldAccess) or node:is(ast.typed.expr.IndexAccess)) and
+    unwrap_access(node):is(ast.typed.expr.FutureGetResult)
 end
 
-local function handle_future_field_assignment(cx, lhs, rhs)
-  local lhs_value = unwrap_field_access(lhs)
+local function handle_future_modify_assignment(cx, lhs, rhs)
+  local lhs_value = unwrap_access(lhs)
   local lhs_type = std.as_read(lhs_value.expr_type)
   local symbol = std.newsymbol(lhs_type)
 
@@ -1475,21 +1780,21 @@ local function handle_future_field_assignment(cx, lhs, rhs)
     span = lhs.span,
   }
 
-  return terralib.newlist({
+  return cx:add_spill(
     ast.typed.stat.Var {
       symbol = symbol,
       type = lhs_type,
       value = lhs_value,
       annotations = ast.default_annotations(),
       span = lhs.span,
-    },
+    }):add_spill(
     ast.typed.stat.Assignment {
-      lhs = rewrap_field_access(lhs, symbol_value),
+      lhs = rewrap_access(lhs, symbol_value),
       rhs = rhs,
       metadata = false,
       annotations = ast.default_annotations(),
       span = lhs.span,
-    },
+    }):add_spill(
     ast.typed.stat.Assignment {
       lhs = lhs_value.value,
       rhs = ast.typed.expr.Future {
@@ -1501,70 +1806,94 @@ local function handle_future_field_assignment(cx, lhs, rhs)
       metadata = false,
       annotations = ast.default_annotations(),
       span = lhs.span,
-    },
-  })
+    }):get_spills()
 end
 
 function optimize_futures.stat_assignment(cx, node)
+  local cx = cx:new_stat_scope()
   local lhs = optimize_futures.expr(cx, node.lhs)
   local rhs = optimize_futures.expr(cx, node.rhs)
 
   local normalized_rhs
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
-    normalized_rhs = promote(rhs, lhs_type)
+    normalized_rhs = promote(cx, rhs, lhs_type)
   else
-    normalized_rhs = concretize(rhs)
+    normalized_rhs = concretize(cx, rhs)
   end
 
   -- Hack: Can't write directly to the field of a future; must write
   -- an entire struct. Generate an updated struct and assign it.
-  if is_future_field_assignment(lhs) then
-    return handle_future_field_assignment(cx, lhs, normalized_rhs)
+  if is_future_modify_assignment(lhs) then
+    return handle_future_modify_assignment(cx, lhs, normalized_rhs)
   end
 
-  return terralib.newlist({
+  return cx:add_spill(
     node {
       lhs = lhs,
       rhs = normalized_rhs,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_reduce(cx, node)
+  local cx = cx:new_stat_scope()
   local lhs = optimize_futures.expr(cx, node.lhs)
   local rhs = optimize_futures.expr(cx, node.rhs)
 
   local normalized_rhs
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
-    normalized_rhs = promote(rhs, lhs_type)
+    normalized_rhs = promote(cx, rhs, lhs_type)
+
+    return cx:add_spill(
+      ast.typed.stat.Assignment {
+        lhs = lhs,
+        rhs = lift_binary_op_to_futures(
+          ast.typed.expr.Binary {
+            op = node.op,
+            lhs = lhs,
+            rhs = normalized_rhs,
+            expr_type = lhs_type,
+            annotations = ast.default_annotations(),
+            span = node.span,
+          }
+        ),
+        metadata = false,
+        annotations = ast.default_annotations(),
+        span = node.span,
+      }
+    ):get_spills()
   else
-    normalized_rhs = concretize(rhs)
+    normalized_rhs = concretize(cx, rhs)
   end
 
-  return terralib.newlist({
+  return cx:add_spill(
     node {
       lhs = lhs,
       rhs = normalized_rhs,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_expr(cx, node)
-  return terralib.newlist({
+  local cx = cx:new_stat_scope()
+  local expr = optimize_futures.expr(cx, node.expr)
+  return cx:add_spill(
     node {
-      expr = optimize_futures.expr(cx, node.expr),
+      expr = expr,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_raw_delete(cx, node)
-  return terralib.newlist({
+  local cx = cx:new_stat_scope()
+  local value = optimize_futures.expr(cx, node.value)
+  return cx:add_spill(
     node {
-      value = optimize_futures.expr(cx, node.value),
+      value = value,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat_fence(cx, node)
@@ -1572,11 +1901,13 @@ function optimize_futures.stat_fence(cx, node)
 end
 
 function optimize_futures.stat_parallel_prefix(cx, node)
-  return terralib.newlist({
+  local cx = cx:new_stat_scope()
+  local dir = optimize_futures.expr(cx, node.dir)
+  return cx:add_spill(
     node {
-      dir = optimize_futures.expr(cx, node.dir),
+      dir = dir,
     }
-  })
+  ):get_spills()
 end
 
 function optimize_futures.stat(cx, node)
@@ -1648,30 +1979,31 @@ function optimize_futures.top_task_param(cx, param)
 
     local new_symbol = cx:symbol(param.symbol)
 
-    local new_var = ast.typed.stat.Var {
+    local cx = cx:new_stat_scope()
+    local value = promote(cx,
+      ast.typed.expr.ID {
+        value = param.symbol,
+        expr_type = std.rawref(&param.param_type),
+        annotations = param.annotations,
+        span = param.span,
+      },
+      new_type)
+    return cx:add_spill(ast.typed.stat.Var {
       symbol = new_symbol,
       type = new_type,
-      value = promote(
-        ast.typed.expr.ID {
-          value = param.symbol,
-          expr_type = std.rawref(&param.param_type),
-          annotations = param.annotations,
-          span = param.span,
-        },
-        new_type),
+      value = value,
       annotations = param.annotations,
       span = param.span,
-    }
-
-    return new_var
+    }):get_spills()
   end
 end
 
 function optimize_futures.top_task_params(cx, node)
   local actions = terralib.newlist()
   for _, param in ipairs(node.params) do
-    local action = optimize_futures.top_task_param(cx, param)
-    if action then actions:insert(action) end
+    local param_actions =
+      optimize_futures.top_task_param(cx, param)
+    if param_actions then actions:insertall(param_actions) end
   end
   return actions
 end

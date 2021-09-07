@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,8 +17,17 @@ local std = require("regent/std")
 
 local omp = {}
 
-local has_openmp = std.config["openmp"] and std.config["openmp-offline"]
-if not std.config["openmp-offline"] then
+-- Exit early if the user turned off OpenMP code generation
+
+if std.config["openmp"] == 0 then
+  function omp.check_openmp_available()
+    return false
+  end
+  return omp
+end
+
+local has_openmp = true
+if not (std.config["offline"] or std.config["openmp-offline"]) then
   local dlfcn = terralib.includec("dlfcn.h")
   local terra find_openmp_symbols()
     var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
@@ -33,16 +42,16 @@ if not std.config["openmp-offline"] then
   has_openmp = find_openmp_symbols()
 end
 
-if not (std.config["openmp"] and has_openmp) then
-  omp.check_openmp_available = function() return false end
-  terra omp.get_num_threads() return 1 end
-  terra omp.get_max_threads() return 1 end
-  terra omp.get_thread_num() return 0 end
-  local omp_worker_type =
-    terralib.types.functype(terralib.newlist({&opaque}), terralib.types.unit, false)
-  terra omp.launch(fnptr : &omp_worker_type, data : &opaque, nthreads : int32, flags : uint32)
-    fnptr(data)
+if not has_openmp then
+  function omp.check_openmp_available()
+    return false, "Regent is installed without OpenMP support"
   end
+  if std.config["openmp"] == 1 then
+    local available, message = omp.check_openmp_available()
+    print("OpenMP code generation failed since " .. message)
+    os.exit(-1)
+  end
+
 else
   omp.check_openmp_available = function() return true end
   local omp_abi = terralib.includecstring [[
@@ -80,7 +89,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
       local fun_name = string.format("__atomic_update_%s_%s", op_name, ctype)
       local C = terralib.includecstring(string.format([[
         #include <stdint.h>
-        void %s(%s *address, %s val) {
+        inline void %s(%s *address, %s val) {
           __sync_fetch_and_%s(address, val);
         }
       ]], fun_name, ctype, ctype, FAST_ATOMICS[op]))
@@ -91,7 +100,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
       local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
       local C = terralib.includecstring(string.format([[
         #include <stdint.h>
-        %s %s(%s *address, %s old, %s new) {
+        inline %s %s(%s *address, %s old, %s new) {
           return __sync_val_compare_and_swap(address, old, new);
         }
       ]], ctype, fun_name, ctype, ctype, ctype))
@@ -113,7 +122,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
     local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
     local C = terralib.includecstring(string.format([[
       #include <stdint.h>
-      %s %s(%s *address, %s old, %s new) {
+      inline %s %s(%s *address, %s old, %s new) {
         return __sync_val_compare_and_swap(address, old, new);
       }
     ]], cas_ctype, fun_name, cas_ctype, cas_ctype, cas_ctype))

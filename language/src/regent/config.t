@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -41,30 +41,34 @@ for _, expect_var in ipairs(expect_vars) do
   end
 end
 
+config.UNSPECIFIED = -1
+
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
+  ["bounds-checks-targets"] = ".*",
 
   -- Main user-facing optimization flags:
-  ["cuda"] = true,
+  ["cuda"] = config.UNSPECIFIED,
   ["cuda-offline"] = not data.is_luajit(),
   ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
   ["inline"] = true,
   ["future"] = true,
+  ["predicate"] = true,
+  ["predicate-unroll"] = 2, -- Iterations to unroll predicated loops.
   ["leaf"] = true,
   ["inner"] = true,
   ["idempotent"] = true,
   ["replicable"] = true,
   ["mapping"] = true,
-  ["openmp"] = false,
+  ["openmp"] = config.UNSPECIFIED,
   ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
-  ["skip-empty-tasks"] = true,
+  ["skip-empty-tasks"] = false,
   ["vectorize"] = true,
-
-  -- Legion runtime compile options:
-  ["legion-dim"] = tonumber(os.getenv("MAX_DIM")) or 3, -- Set this to the value of LEGION_MAX_DIM.
+  ["offline"] = not data.is_luajit(),
+  ["separate"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
@@ -81,16 +85,23 @@ local default_options = {
   ["parallelize"] = true,
   ["parallelize-dop"] = "4",
   ["parallelize-global"] = true,
+  ["parallelize-debug"] = false,
+
+  -- Experimental CUDA code generation flags:
+  ["cuda-2d-launch"] = true,
+  ["cuda-licm"] = true,
+  ["cuda-generate-cubin"] = false,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
-  ["cached-iterators"] = false,
   ["debug"] = false,
+  ["warn-as-error"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
+  ["override-demand-index-launch"] = false,
+  ["index-launch-dynamic"] = true,
   ["override-demand-openmp"] = false,
   ["override-demand-cuda"] = false,
-  ["allow-multi-field-expansion"] = false,
   ["pretty"] = false,
   ["pretty-verbose"] = false,
   ["layout-constraints"] = true,

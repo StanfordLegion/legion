@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -54,11 +54,11 @@ function parser.annotation_values(p)
 end
 
 function parser.annotation_name(p, required)
-  if p:nextif("__cuda") then
+  if p:nextif("__constant_time_launch") then
+    return "constant_time_launch"
+  elseif p:nextif("__cuda") then
     local values = p:annotation_values()
     return "cuda", values
-  elseif p:nextif("__external") then
-    return "external"
   elseif p:nextif("__idempotent") then
     return "idempotent"
   elseif p:nextif("__index_launch") then
@@ -69,12 +69,16 @@ function parser.annotation_name(p, required)
     return "inner"
   elseif p:nextif("__leaf") then
     return "leaf"
+  elseif p:nextif("__local") then
+    return "local_launch"
   elseif p:nextif("__openmp") then
     return "openmp"
   elseif p:nextif("__optimize") then
     return "optimize"
   elseif p:nextif("__parallel") then
     return "parallel"
+  elseif p:nextif("__predicate") then
+    return "predicate"
   elseif p:nextif("__replicable") then
     return "replicable"
   elseif p:nextif("__spmd") then
@@ -220,6 +224,7 @@ function parser.expr_region_root(p)
     fields = fields,
     annotations = ast.default_annotations(),
     span = ast.span(start, p),
+    has_parens = false,
   }
 end
 
@@ -405,6 +410,7 @@ function parser.expr_condition(p)
     values = values,
     annotations = ast.default_annotations(),
     span = ast.span(start, p),
+    has_parens = false,
   }
 end
 
@@ -447,6 +453,21 @@ function parser.disjointness_kind(p)
   end
 end
 
+function parser.is_completeness_kind(p)
+  return p:matches("complete") or p:matches("incomplete")
+end
+
+function parser.completeness_kind(p)
+  local start = ast.save(p)
+  if p:nextif("complete") then
+    return ast.completeness_kind.Complete {}
+  elseif p:nextif("incomplete") then
+    return ast.completeness_kind.Incomplete {}
+  else
+    p:error("expected completeness")
+  end
+end
+
 function parser.fence_kind(p)
   local start = ast.save(p)
   if p:nextif("__execution") then
@@ -474,7 +495,7 @@ function parser.expr_prefix(p)
   if p:nextif("(") then
     local expr = p:expr()
     p:expect(")")
-    return expr
+    return expr { has_parens = true }
 
   elseif p:nextif("[") then
     local expr = p:luaexpr()
@@ -483,6 +504,7 @@ function parser.expr_prefix(p)
       expr = expr,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:matches(p.name) then
@@ -492,6 +514,7 @@ function parser.expr_prefix(p)
       name = name,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("max") then
@@ -506,6 +529,7 @@ function parser.expr_prefix(p)
       rhs = rhs,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("min") then
@@ -520,6 +544,7 @@ function parser.expr_prefix(p)
       rhs = rhs,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__context") then
@@ -528,6 +553,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.RawContext {
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__fields") then
@@ -538,6 +564,21 @@ function parser.expr_prefix(p)
       region = region,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
+    }
+
+  elseif p:nextif("__future") then
+    p:expect("(")
+    local value_type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.RawFuture {
+      value_type_expr = value_type_expr,
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__physical") then
@@ -548,6 +589,7 @@ function parser.expr_prefix(p)
       region = region,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__delete") then
@@ -558,6 +600,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__runtime") then
@@ -566,6 +609,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.RawRuntime {
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__raw") then
@@ -576,6 +620,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__task") then
@@ -584,6 +629,16 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.RawTask {
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
+    }
+
+  elseif p:nextif("__line") then
+    return ast.unspecialized.expr.Constant {
+      value = start.line,
+      expr_type = int,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("isnull") then
@@ -594,6 +649,7 @@ function parser.expr_prefix(p)
       pointer = pointer,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("new") then
@@ -609,6 +665,15 @@ function parser.expr_prefix(p)
       extent = extent,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
+    }
+
+  elseif p:nextif("nil") then
+    return ast.unspecialized.expr.Null {
+      pointer_type_expr = function() return niltype end,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("null") then
@@ -619,6 +684,7 @@ function parser.expr_prefix(p)
       pointer_type_expr = pointer_type_expr,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("dynamic_cast") then
@@ -632,6 +698,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("static_cast") then
@@ -645,6 +712,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("unsafe_cast") then
@@ -658,6 +726,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("ispace") then
@@ -676,6 +745,7 @@ function parser.expr_prefix(p)
       start = start_at,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("region") then
@@ -689,13 +759,35 @@ function parser.expr_prefix(p)
       fspace_type_expr = fspace_type_expr,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("partition") then
     p:expect("(")
-    if p:is_disjointness_kind() then
+    -- case 1: equal partition
+    if p:nextif("equal") then
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionEqual {
+        region = region,
+        colors = colors,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+        has_parens = false,
+      }
+    -- case 2: old-style partition
+    -- partition(disjointness, [completeness ,] region, coloring [, colorspace])
+    elseif p:is_disjointness_kind() then
       local disjointness = p:disjointness_kind()
       p:expect(",")
+      local completeness = false
+      if p:is_completeness_kind() then
+        completeness = p:completeness_kind()
+        p:expect(",")
+      end
       local region = p:expr()
       p:expect(",")
       local coloring = p:expr()
@@ -707,34 +799,33 @@ function parser.expr_prefix(p)
       p:expect(")")
       return ast.unspecialized.expr.Partition {
         disjointness = disjointness,
+        completeness = completeness,
         region = region,
         coloring = coloring,
         colors = colors,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
-    elseif p:nextif("equal") then
-      p:expect(",")
-      local region = p:expr()
-      p:expect(",")
-      local colors = p:expr()
-      p:expect(")")
-      return ast.unspecialized.expr.PartitionEqual {
-        region = region,
-        colors = colors,
-        annotations = ast.default_annotations(),
-        span = ast.span(start, p),
-      }
+    -- case 3: partition by field
+    -- partition([completeness ,] region.field, colorspace)
     else
+      local completeness = false
+      if p:is_completeness_kind() then
+        completeness = p:completeness_kind()
+        p:expect(",")
+      end
       local region = p:expr_region_root()
       p:expect(",")
       local colors = p:expr()
       p:expect(")")
       return ast.unspecialized.expr.PartitionByField {
+        completeness = completeness,
         region = region,
         colors = colors,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
     end
 
@@ -745,6 +836,11 @@ function parser.expr_prefix(p)
        disjointness = p:disjointness_kind()
        p:expect(",")
     end
+    local completeness = false
+    if p:is_completeness_kind() then
+      completeness = p:completeness_kind()
+       p:expect(",")
+    end
     local parent = p:expr()
     p:expect(",")
     local partition = p:expr()
@@ -753,11 +849,13 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Image {
       disjointness = disjointness,
+      completeness = completeness,
       parent = parent,
       partition = partition,
       region = region,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("preimage") then
@@ -765,6 +863,11 @@ function parser.expr_prefix(p)
     local disjointness = false
     if p:is_disjointness_kind() then
        disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
+    local completeness = false
+    if p:is_completeness_kind() then
+      completeness = p:completeness_kind()
        p:expect(",")
     end
     local parent = p:expr()
@@ -775,11 +878,13 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Preimage {
       disjointness = disjointness,
+      completeness = completeness,
       parent = parent,
       partition = partition,
       region = region,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("restrict") then
@@ -787,6 +892,11 @@ function parser.expr_prefix(p)
     local disjointness = false
     if p:is_disjointness_kind() then
        disjointness = p:disjointness_kind()
+       p:expect(",")
+    end
+    local completeness = false
+    if p:is_completeness_kind() then
+       completeness = p:completeness_kind()
        p:expect(",")
     end
     local region = p:expr()
@@ -799,12 +909,14 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.PartitionByRestriction {
       disjointness = disjointness,
+      completeness = completeness,
       region = region,
       transform = transform,
       extent = extent,
       colors = colors,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("cross_product") then
@@ -815,6 +927,7 @@ function parser.expr_prefix(p)
       args = args,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("cross_product_array") then
@@ -831,6 +944,7 @@ function parser.expr_prefix(p)
       colorings = colorings,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_slice_partition") then
@@ -844,6 +958,7 @@ function parser.expr_prefix(p)
       indices = indices,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_duplicate_partition") then
@@ -857,6 +972,7 @@ function parser.expr_prefix(p)
       indices = indices,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_cross_product") then
@@ -881,6 +997,7 @@ function parser.expr_prefix(p)
       shallow = shallow,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_cross_product_complete") then
@@ -894,6 +1011,7 @@ function parser.expr_prefix(p)
       product = product,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_phase_barriers") then
@@ -904,6 +1022,7 @@ function parser.expr_prefix(p)
       product = product,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_invert") then
@@ -920,6 +1039,7 @@ function parser.expr_prefix(p)
       barriers = barriers,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_range") then
@@ -933,6 +1053,7 @@ function parser.expr_prefix(p)
       stop = range_stop,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_ispace") then
@@ -943,6 +1064,7 @@ function parser.expr_prefix(p)
       ispace = ispace,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("list_from_element") then
@@ -956,6 +1078,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("phase_barrier") then
@@ -966,6 +1089,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("dynamic_collective") then
@@ -982,6 +1106,7 @@ function parser.expr_prefix(p)
       op = op,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("dynamic_collective_get_result") then
@@ -992,6 +1117,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("advance") then
@@ -1002,6 +1128,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("adjust") then
@@ -1015,6 +1142,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("arrive") then
@@ -1030,6 +1158,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("await") then
@@ -1040,6 +1169,7 @@ function parser.expr_prefix(p)
       barrier = barrier,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("copy") then
@@ -1066,6 +1196,7 @@ function parser.expr_prefix(p)
       conditions = conditions,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("fill") then
@@ -1086,6 +1217,7 @@ function parser.expr_prefix(p)
       conditions = conditions,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("acquire") then
@@ -1103,6 +1235,7 @@ function parser.expr_prefix(p)
       conditions = conditions,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("release") then
@@ -1120,6 +1253,7 @@ function parser.expr_prefix(p)
       conditions = conditions,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("attach") then
@@ -1143,6 +1277,7 @@ function parser.expr_prefix(p)
       field_map = field_map,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("detach") then
@@ -1155,6 +1290,7 @@ function parser.expr_prefix(p)
       region = region,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("allocate_scratch_fields") then
@@ -1165,6 +1301,7 @@ function parser.expr_prefix(p)
       region = region,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("with_scratch_fields") then
@@ -1178,6 +1315,7 @@ function parser.expr_prefix(p)
       field_ids = field_ids,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__import_ispace") then
@@ -1192,6 +1330,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__import_region") then
@@ -1212,6 +1351,7 @@ function parser.expr_prefix(p)
       field_ids = field_ids,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("__import_partition") then
@@ -1232,6 +1372,7 @@ function parser.expr_prefix(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   else
@@ -1250,6 +1391,7 @@ function parser.field(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("[") then
@@ -1262,17 +1404,20 @@ function parser.field(p)
         value = value,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
     else
       local value = ast.unspecialized.expr.Escape {
         expr = name_expr,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
       return ast.unspecialized.expr.CtorListField {
         value = value,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
     end
 
@@ -1282,6 +1427,7 @@ function parser.field(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
   end
 end
@@ -1305,6 +1451,7 @@ function parser.expr_ctor(p)
     fields = fields,
     annotations = ast.default_annotations(),
     span = ast.span(start, p),
+    has_parens = false,
   }
 end
 
@@ -1342,27 +1489,64 @@ function parser.fnargs(p)
   end
 end
 
+function parser.projection_field(p)
+  local start = ast.save(p)
+  local rename = false
+  local field_name = p:field_names()
+  if p:matches("=") then
+    p:expect("=")
+    rename = field_name
+    field_name = p:field_names()
+  end
+  local fields = false -- sentinel for all fields
+  if p:nextif(".") then
+    fields = p:projection_fields()
+  end
+  return ast.unspecialized.projection.Field {
+    rename = rename,
+    field_name = field_name,
+    fields = fields,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.projection_fields(p)
+  local fields = terralib.newlist()
+  if p:nextif("{") then
+    repeat
+      if p:matches("}") then break end
+      fields:insert(p:projection_field())
+    until not p:sep()
+    p:expect("}")
+  else
+    fields:insert(p:projection_field())
+  end
+  return fields
+end
+
 function parser.expr_primary_continuation(p, expr)
   local start = ast.save(p)
 
   while true do
     if p:nextif(".") then
-      local field_names = terralib.newlist()
-      if p:nextif("{") then
-        repeat
-          if p:matches("}") then break end
-          field_names:insert(p:field_names())
-        until not p:sep()
-        p:expect("}")
+      local field_names = nil
+      if p:matches("{") then
+        expr = ast.unspecialized.expr.Projection {
+          region = expr,
+          fields = p:projection_fields(),
+          annotations = ast.default_annotations(),
+          span = ast.span(start, p),
+          has_parens = false,
+        }
       else
-        field_names:insert(p:field_names())
+        expr = ast.unspecialized.expr.FieldAccess {
+          value = expr,
+          field_names = terralib.newlist({p:field_names()}),
+          annotations = ast.default_annotations(),
+          span = ast.span(start, p),
+          has_parens = false,
+        }
       end
-      expr = ast.unspecialized.expr.FieldAccess {
-        value = expr,
-        field_names = field_names,
-        annotations = ast.default_annotations(),
-        span = ast.span(start, p),
-      }
 
     elseif p:nextif("[") then
       local index = p:expr()
@@ -1372,6 +1556,7 @@ function parser.expr_primary_continuation(p, expr)
         index = index,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
 
     elseif p:nextif(":") then
@@ -1386,6 +1571,7 @@ function parser.expr_primary_continuation(p, expr)
         args = args,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
 
     elseif p:matches("(") or p:matches("{") or p:matches(p.string) then
@@ -1396,6 +1582,7 @@ function parser.expr_primary_continuation(p, expr)
         conditions = conditions,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
 
     else
@@ -1425,6 +1612,7 @@ function parser.expr_simple(p)
       expr_type = token.valuetype,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:matches(p.string) then
@@ -1434,6 +1622,7 @@ function parser.expr_simple(p)
       expr_type = rawstring,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("true") then
@@ -1442,6 +1631,7 @@ function parser.expr_simple(p)
       expr_type = bool,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:nextif("false") then
@@ -1450,6 +1640,7 @@ function parser.expr_simple(p)
       expr_type = bool,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
 
   elseif p:matches("{") then
@@ -1470,12 +1661,14 @@ parser.expr_unary = function(precedence)
         value = rhs,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
     elseif op == "&" then
       return ast.unspecialized.expr.AddressOf {
         value = rhs,
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
+        has_parens = false,
       }
     end
     return ast.unspecialized.expr.Unary {
@@ -1483,6 +1676,7 @@ parser.expr_unary = function(precedence)
       rhs = rhs,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
   end
 end
@@ -1491,12 +1685,32 @@ parser.expr_binary_left = function(p, lhs)
   local start = lhs.span.start
   local op = p:next().type
   local rhs = p:expr(op)
+
+  -- We throw an error here if C and Terra don't agree on order of bitwise operations
+  local lhs_has_op, lhs_op = pcall(function() return lhs.op end)
+  local rhs_has_op, rhs_op = pcall(function() return rhs.op end)
+
+  if op == "^" then
+    if (lhs_has_op and (lhs_op == ">>" or lhs_op == "<<") and not lhs.has_parens) or
+       (rhs_has_op and (rhs_op == ">>" or rhs_op == "<<") and not rhs.has_parens)
+    then
+      p:error("order of operations between ^ and << or >> is unspecified, please add parentheses")
+    end
+  elseif op == "<<" or op == ">>" then
+    if (lhs_has_op and lhs_op == "^" and not lhs.has_parens) or
+       (rhs_has_op and rhs_op == "^" and not rhs.has_parens)
+    then
+      p:error("order of operations between ^ and << or >> is unspecified, please add parentheses")
+    end
+  end
+
   return ast.unspecialized.expr.Binary {
     op = op,
     lhs = lhs,
     rhs = rhs,
     annotations = ast.default_annotations(),
     span = ast.span(start, p),
+    has_parens = false,
   }
 end
 
@@ -1510,6 +1724,8 @@ parser.expr = parsing.Pratt()
   :infix("%", 40, parser.expr_binary_left)
   :infix("+", 30, parser.expr_binary_left)
   :infix("-", 30, parser.expr_binary_left)
+  :infix("<<", 25, parser.expr_binary_left)
+  :infix(">>", 25, parser.expr_binary_left)
   :infix("<", 20, parser.expr_binary_left)
   :infix(">", 20, parser.expr_binary_left)
   :infix("<=", 20, parser.expr_binary_left)
@@ -1517,6 +1733,7 @@ parser.expr = parsing.Pratt()
   :infix("==", 20, parser.expr_binary_left)
   :infix("~=", 20, parser.expr_binary_left)
   :infix("&", 15, parser.expr_binary_left)
+  :infix("^", 13, parser.expr_binary_left)
   :infix("|", 12, parser.expr_binary_left)
   :infix("and", 10, parser.expr_binary_left)
   :infix("or", 8, parser.expr_binary_left)
@@ -1530,6 +1747,7 @@ function parser.expr_lhs(p)
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
+      has_parens = false,
     }
   else
     return p:expr_primary()
@@ -1799,6 +2017,20 @@ function parser.stat_break(p, annotations)
   }
 end
 
+function parser.stat_rescape(p, annotations)
+  local start = ast.save(p)
+
+  p:expect("rescape")
+  local stats = p:luastats()
+  p:expect("end")
+
+  return ast.unspecialized.stat.Rescape {
+    stats = stats,
+    annotations = ast.default_annotations(),
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_raw_delete(p, annotations)
   local start = ast.save(p)
   p:expect("__delete")
@@ -1919,6 +2151,7 @@ function parser.stat_expr_escape(p, annotations)
     expr = value,
     annotations = ast.default_annotations(),
     span = ast.span(start, p),
+    has_parens = false,
   }
 end
 
@@ -2001,6 +2234,9 @@ function parser.stat(p)
 
   elseif p:matches("break") then
     return p:stat_break(annotations)
+
+  elseif p:matches("rescape") then
+    return p:stat_rescape(annotations)
 
   elseif p:matches("__delete") then
     return p:stat_raw_delete(annotations)
@@ -2202,7 +2438,19 @@ function parser.top_fspace(p, annotations)
   }
 end
 
-function parser.top_stat(p)
+function parser.top_remit(p, annotations)
+  local start = ast.save(p)
+  p:expect("remit")
+  local expr = p:luaexpr()
+
+  return ast.unspecialized.top.Remit {
+    expr = expr,
+    annotations = annotations,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.top_stat(p, local_stat)
   local annotations = p:annotations(false, true)
 
   if p:matches("extern") or p:matches("task") then
@@ -2211,9 +2459,20 @@ function parser.top_stat(p)
   elseif p:matches("fspace") then
     return p:top_fspace(annotations)
 
+  elseif p:matches("remit") and not local_stat then
+    return p:top_remit(annotations)
+
   else
     p:error("unexpected token in top-level statement")
   end
+end
+
+function parser.top_stat_local(p)
+  return p:top_stat(true)
+end
+
+function parser.top_stat_no_local(p)
+  return p:top_stat(false)
 end
 
 function parser.top_quote_expr(p, annotations)
@@ -2242,6 +2501,12 @@ function parser.top_quote_stat(p, annotations)
   }
 end
 
+function parser.top_line(p, annotations)
+  local start = ast.save(p)
+  p:expect("__line")
+  return start.line
+end
+
 function parser.top_expr(p)
   local annotations = p:annotations(false, true)
 
@@ -2251,8 +2516,11 @@ function parser.top_expr(p)
   elseif p:matches("rquote") then
     return p:top_quote_stat(annotations)
 
+  elseif p:matches("__line") then
+    return p:top_line(annotations)
+
   else
-    p:error("unexpected token in top-level statement")
+    p:error("unexpected token in top-level expression")
   end
 end
 
@@ -2260,8 +2528,12 @@ function parser:entry_expr(lex)
   return parsing.Parse(self, lex, "top_expr")
 end
 
-function parser:entry_stat(lex)
-  return parsing.Parse(self, lex, "top_stat")
+function parser:entry_stat(lex, local_stat)
+  if local_stat then
+    return parsing.Parse(self, lex, "top_stat_local")
+  else
+    return parsing.Parse(self, lex, "top_stat_no_local")
+  end
 end
 
 return parser

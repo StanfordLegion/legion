@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@
 --     In case that happens, the outer loop is tagged as non-parallelizable.
 --   - No region access can appear outside parallelizable for loops.
 --
--- * Partition Driven Auto-Parallelizer
+-- * Constraint-Based Auto-Parallelizer
 --   - Inadmissible statements are not allowed in anywhere in the task, except the return
 --     statement that returns a scalar reduction variable is allowed. This return statement
 --     must appear at the end of the task.
@@ -107,14 +107,10 @@ function loop_context.new_scope(task, loop, loop_var)
   local cx = {
     loop = loop,
     loop_var = loop_var,
-    demand_vectorize = std.config["vectorize"] and
-                       loop.annotations.vectorize:is(ast.annotation.Demand),
-    demand_openmp = std.config["openmp"] and
-                  loop.annotations.openmp:is(ast.annotation.Demand),
-    demand_cuda = std.config["cuda"] and
-                  task.annotations.cuda:is(ast.annotation.Demand),
-    demand_parallel = std.config["parallelize"] and
-                  task.annotations.parallel:is(ast.annotation.Demand),
+    demand_vectorize = loop.annotations.vectorize:is(ast.annotation.Demand),
+    demand_openmp = loop.annotations.openmp:is(ast.annotation.Demand),
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = task.annotations.parallel:is(ast.annotation.Demand),
     needs_iterator = needs_iterator,
     -- Tracks variables that have the same value as the loop variable
     centers = data.newmap(),
@@ -129,8 +125,7 @@ function loop_context.new_scope(task, loop, loop_var)
     reductions = data.newmap(),
     admissible = { true, nil },
     parallel = { true, nil },
-    -- True if the loop is the innermost loop that needs an index space iterator
-    innermost = needs_iterator,
+    innermost = true,
     outermost = false,
   }
   cx = setmetatable(cx, loop_context)
@@ -321,10 +316,8 @@ end
 function context.new_task_scope(task)
   local cx = {
     task = task,
-    demand_cuda = std.config["cuda"] and
-                  task.annotations.cuda:is(ast.annotation.Demand),
-    demand_parallel = std.config["parallelize"] and
-                      task.annotations.parallel:is(ast.annotation.Demand),
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = task.annotations.parallel:is(ast.annotation.Demand),
     contexts = terralib.newlist({loop_context.new_scope(task, task, false)}),
   }
   cx.contexts[1]:set_outermost(true)
@@ -379,7 +372,7 @@ function context:pop_loop_context(node)
     -- When the task demands CUDA code generation, we only keep the innermost
     -- parallelizable for list loop.
     self:forall_context(function(cx_outer)
-      if cx_outer.needs_iterator then cx_outer:set_innermost(false) end
+      cx_outer:set_innermost(false)
       if cx_outer.loop_var then cx_outer:mark_inadmissible(node) end
       return false
     end)
@@ -439,8 +432,14 @@ function analyze_access.expr_id(cx, node, new_privilege, field_path)
 end
 
 function analyze_access.expr_field_access(cx, node, privilege, field_path)
-  local field_path = field_path or node.expr_type.field_path
-  return analyze_access.expr(cx, node.value, privilege, field_path)
+  if std.is_ref(node.expr_type) then
+    local field_path = field_path or node.expr_type.field_path
+    return analyze_access.expr(cx, node.value, privilege, field_path)
+  else
+    local private, center =
+      analyze_access.expr(cx, node.value, privilege, field_path)
+    return private, false
+  end
 end
 
 function analyze_access.expr_deref(cx, node, privilege, field_path)
@@ -466,7 +465,7 @@ end
 
 function analyze_access.expr_index_access(cx, node, privilege, field_path)
   local expr_type = node.expr_type
-  if std.is_ref(expr_type) then
+  if std.is_ref(expr_type) and #expr_type.field_path == 0 then
     analyze_access.expr(cx, node.value, nil)
     local private, center = analyze_access.expr(cx, node.index, std.reads)
     cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
@@ -526,6 +525,7 @@ local whitelist = {
   [vectorof]                                = true,
   [std.assert]                              = true,
   [std.assert_error]                        = true,
+  [std.c.printf]                            = true,
 }
 
 local function is_admissible_function(cx, fn)
@@ -558,6 +558,10 @@ function analyze_access.expr_ctor(cx, node, privilege, field_path)
   return false, false, false
 end
 
+function analyze_access.expr_global(cx, node, privilege, field_path)
+  return false, false, false
+end
+
 function analyze_access.expr_not_analyzable(cx, node, privilege, field_path)
   cx:mark_inadmissible(node)
   return false, false, false
@@ -579,6 +583,7 @@ local analyze_access_expr_table = {
   [ast.typed.expr.Null]         = analyze_access.expr_constant,
   [ast.typed.expr.Isnull]       = analyze_access.expr_isnull,
   [ast.typed.expr.Ctor]         = analyze_access.expr_ctor,
+  [ast.typed.expr.Global]       = analyze_access.expr_global,
   [ast.typed.expr]              = analyze_access.expr_not_analyzable,
 }
 
@@ -641,12 +646,12 @@ function analyze_access.stat_for_num(cx, node)
     end))
   end)
 
-  cx:push_loop_context(node, not (has_stride or cx.demand_cuda) and node.symbol)
+  cx:push_loop_context(node, not has_stride and node.symbol)
   local block = analyze_access.block(cx, node.block)
   local cx = cx:pop_loop_context(node)
   local node = node {
     block = block,
-    metadata = not (has_stride or cx.demand_cuda) and cx:get_metadata(),
+    metadata = not has_stride and cx:get_metadata(),
   }
   check_demands(cx, node)
   return node
@@ -723,7 +728,7 @@ function analyze_access.stat_assignment(cx, node)
 
   return node {
     metadata = ast.metadata.Stat {
-      atomic = false,
+      centers = false,
       scalar = false,
     }
   }
@@ -743,11 +748,11 @@ function analyze_access.stat_reduce(cx, node)
   local lhs_scalar = node.lhs:is(ast.typed.expr.ID)
   local rhs_type = std.as_read(node.rhs.expr_type)
   local first = true
-  local atomic = nil
   local scalar = false
   local privilege =
     (reducible_type(lhs_type) and reducible_type(rhs_type) and std.reduces(node.op)) or
     "reads_writes"
+  local centers = (std.is_reduce(privilege) and data.newmap()) or false
   cx:forall_context(function(cx)
     local private, center, region_access =
       analyze_access.expr(cx, node.lhs, privilege)
@@ -760,16 +765,17 @@ function analyze_access.stat_reduce(cx, node)
       if lhs_scalar then
         scalar = not cx:is_local_variable(node.lhs.value)
       end
-      atomic = not private and region_access and std.is_reduce(privilege)
       first = false
+    end
+    if private and region_access and std.is_reduce(privilege) then
+      centers[cx.loop_var] = true
     end
     return private
   end)
 
-  assert(atomic ~= nil)
   return node {
     metadata = ast.metadata.Stat {
-      atomic = atomic and not scalar,
+      centers = centers,
       scalar = scalar,
     }
   }
@@ -867,7 +873,8 @@ function check_context:new_local_scope(loop)
   local cx = {
     prefix = self.prefix,
     contained =
-      (loop.metadata and loop.metadata.parallelizable) or
+      (loop:is(ast.typed.stat.ForList) and
+       loop.metadata and loop.metadata.parallelizable) or
       self.contained,
   }
   return setmetatable(cx, check_context)
@@ -980,10 +987,8 @@ function check_region_access_contained.block(cx, node)
 end
 
 function check_region_access_contained.top_task(node)
-  local demand_cuda = std.config["cuda"] and
-    node.annotations.cuda:is(ast.annotation.Demand)
-  local demand_parallel = std.config["parallelize"] and
-    node.annotations.parallel:is(ast.annotation.Demand)
+  local demand_cuda = node.annotations.cuda:is(ast.annotation.Demand)
+  local demand_parallel = node.annotations.parallel:is(ast.annotation.Demand)
   if not node.body or not (demand_cuda or demand_parallel) then
     return
   end

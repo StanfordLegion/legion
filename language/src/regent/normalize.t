@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,326 +21,6 @@ local report = require("common/report")
 local std = require("regent/std")
 
 local normalize = {}
-
--- Multi-field accesses are allowed only in unary, binary, dereference,
--- and casting expressions.
-
-local function join_num_accessed_fields(a, b)
-  if a == 1 then
-    return b
-  elseif b == 1 then
-    return a
-  elseif a ~= b then
-    return false
-  else
-    return a
-  end
-end
-
-local function get_num_accessed_fields(node)
-  if not ast.is_node(node) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ID) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Constant) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.FieldAccess) then
-    if terralib.islist(node.field_name) then
-      return get_num_accessed_fields(node.value) * #node.field_name
-    else
-      return get_num_accessed_fields(node.value)
-    end
-
-  elseif node:is(ast.specialized.expr.IndexAccess) then
-    if get_num_accessed_fields(node.value) > 1 then return false end
-    if get_num_accessed_fields(node.index) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.MethodCall) then
-    if get_num_accessed_fields(node.value) > 1 then return false end
-    for _, arg in pairs(node.args) do
-      if get_num_accessed_fields(arg) > 1 then return false end
-    end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Call) then
-    if get_num_accessed_fields(node.fn) > 1 then return false end
-    for _, arg in pairs(node.args) do
-      if get_num_accessed_fields(arg) > 1 then return false end
-    end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Ctor) then
-    node.fields:map(function(field)
-      if field:is(ast.specialized.expr.CtorListField) then
-        if get_num_accessed_fields(field.value) > 1 then return false end
-      elseif field:is(ast.specialized.expr.CtorListField) then
-        if get_num_accessed_fields(field.num_expr) > 1 then return false end
-        if get_num_accessed_fields(field.value) > 1 then return false end
-      end
-    end)
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawContext) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawFields) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawPhysical) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawRuntime) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawTask) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.RawValue) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Isnull) then
-    if get_num_accessed_fields(node.pointer) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.New) then
-    if get_num_accessed_fields(node.extent) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Null) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.DynamicCast) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.StaticCast) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.UnsafeCast) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.Ispace) then
-    if get_num_accessed_fields(node.extent) > 1 then return false end
-    if get_num_accessed_fields(node.start) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Region) then
-    if get_num_accessed_fields(node.ispace) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.Partition) then
-    if get_num_accessed_fields(node.coloring) > 1 then return false end
-    return 1
-
-  elseif node:is(ast.specialized.expr.PartitionEqual) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.PartitionByField) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Image) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Preimage) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.CrossProduct) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.CrossProductArray) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListSlicePartition) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListDuplicatePartition) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListCrossProduct) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListCrossProductComplete) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListPhaseBarriers) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListInvert) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.ListRange) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.PhaseBarrier) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.DynamicCollective) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Advance) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Arrive) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Await) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.DynamicCollectiveGetResult) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Copy) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Fill) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Acquire) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Release) then
-    return 1
-
-  elseif node:is(ast.specialized.expr.Unary) then
-    return get_num_accessed_fields(node.rhs)
-
-  elseif node:is(ast.specialized.expr.Binary) then
-    return join_num_accessed_fields(get_num_accessed_fields(node.lhs),
-                                    get_num_accessed_fields(node.rhs))
-
-  elseif node:is(ast.specialized.expr.Deref) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.AddressOf) then
-    return get_num_accessed_fields(node.value)
-
-  elseif node:is(ast.specialized.expr.Cast) then
-    return get_num_accessed_fields(node.args[1])
-
-  else
-    return 1
-
-  end
-end
-
-local function has_all_valid_field_accesses(node)
-  local valid = true
-  local print_warning = true
-  local message = "multi-field expansion is deprecated. please change it to single field expressions"
-  data.zip(node.lhs, node.rhs):map(function(pair)
-    if valid then
-      local lh, rh = unpack(pair)
-      local num_accessed_fields_lh = get_num_accessed_fields(lh)
-      local num_accessed_fields_rh = get_num_accessed_fields(rh)
-      if not std.config["allow-multi-field-expansion"] then
-        if num_accessed_fields_lh > 1 or num_accessed_fields_rh > 1 then
-          report.error(node, message)
-        end
-      else
-        if print_warning then
-          report.warn(node, message)
-          print_warning = false
-        end
-        local num_accessed_fields =
-          join_num_accessed_fields(num_accessed_fields_lh,
-                                   num_accessed_fields_rh)
-        if num_accessed_fields == false then
-          valid = false
-        -- Special case when there is only one assignee for multiple
-        -- values on the RHS
-        elseif num_accessed_fields_lh == 1 and
-               num_accessed_fields_rh > 1 then
-          valid = false
-        end
-      end
-    end
-  end)
-
-  return valid
-end
-
-local function get_nth_field_access(node, idx)
-  if node:is(ast.specialized.expr.FieldAccess) then
-    local num_accessed_fields_value = get_num_accessed_fields(node.value)
-    local num_accessed_fields = #node.field_name
-
-    local idx1 = math.floor((idx - 1) / num_accessed_fields) + 1
-    local idx2 = (idx - 1) % num_accessed_fields + 1
-
-    return node {
-      value = get_nth_field_access(node.value, idx1),
-      field_name = node.field_name[idx2],
-    }
-
-  elseif node:is(ast.specialized.expr.Unary) then
-    return node { rhs = get_nth_field_access(node.rhs, idx) }
-
-  elseif node:is(ast.specialized.expr.Binary) then
-    return node {
-      lhs = get_nth_field_access(node.lhs, idx),
-      rhs = get_nth_field_access(node.rhs, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.Deref) then
-    return node {
-      value = get_nth_field_access(node.value, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.AddressOf) then
-    return node {
-      value = get_nth_field_access(node.value, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.DynamicCast) or
-         node:is(ast.specialized.expr.StaticCast) or
-         node:is(ast.specialized.expr.UnsafeCast) then
-    return node {
-      value = get_nth_field_access(node.value, idx),
-    }
-
-  elseif node:is(ast.specialized.expr.Cast) then
-    return node {
-      args = node.args:map(function(arg)
-        return get_nth_field_access(arg, idx)
-      end)
-    }
-  else
-    return node
-  end
-end
-
-local function flatten_multifield_accesses(node)
-  if not has_all_valid_field_accesses(node) then
-    report.error(node, "invalid use of multi-field access")
-  end
-
-  local flattened_lhs = terralib.newlist()
-  local flattened_rhs = terralib.newlist()
-
-  data.zip(node.lhs, node.rhs):map(function(pair)
-    local lh, rh = unpack(pair)
-    local num_accessed_fields =
-      join_num_accessed_fields(get_num_accessed_fields(lh),
-                               get_num_accessed_fields(rh))
-    assert(num_accessed_fields ~= false, "unreachable")
-    for idx = 1, num_accessed_fields do
-      flattened_lhs:insert(get_nth_field_access(lh, idx))
-      flattened_rhs:insert(get_nth_field_access(rh, idx))
-    end
-  end)
-
-  if #node.lhs == flattened_lhs and #node.rhs == flattened_rhs then
-    return node
-  else
-    return node {
-      lhs = flattened_lhs,
-      rhs = flattened_rhs,
-    }
-  end
-end
 
 -- Normalization for Expressions
 
@@ -366,9 +46,24 @@ local normalize_expr_factory = terralib.memoize(function(field, is_list, read)
   end
 end)
 
+local normalize_expr_factory_full = function(field_list, read_list)
+  assert(field_list ~= nil)
+  assert(read_list ~= nil)
+  assert(#field_list == #read_list)
+  return function(stats, expr)
+    local normalized_fields = data.zip(field_list, read_list):map(function(pair)
+      local field, read = unpack(pair)
+      return expr[field] and normalize.expr(stats, expr[field], read)
+    end)
+    local subst = data.dict(data.zip(field_list, normalized_fields))
+    return expr(subst)
+  end
+end
+
 local predicates = {
   [ast.specialized.expr.ID]       = function(node) return true end,
   [ast.specialized.expr.Constant] = function(node) return true end,
+  [ast.specialized.expr.Global] = function(node) return true end,
   [ast.specialized.expr.Function] = function(node) return true end,
   [ast.specialized.expr.FieldAccess] =
     function(node)
@@ -406,6 +101,10 @@ local predicates = {
         return normalize.normalized(field.value)
       end))
     end,
+  [ast.specialized.expr.Projection] =
+    function(node)
+      return normalize.normalized(node.region)
+    end
 }
 
 normalize.normalized = terralib.memoize(function(expr)
@@ -413,31 +112,25 @@ normalize.normalized = terralib.memoize(function(expr)
   return predicate and predicate(expr) or false
 end)
 
-local expr_regent_cast = normalize_expr_factory("value", false, true)
-
-local function expr_ispace(stats, expr)
-  local extent = normalize.expr(stats, expr.extent, true)
-  local start = expr.start and normalize.expr(stats, expr.start, true) or false
+local function expr_field_access(stats, expr)
+  local value = normalize.expr(stats, expr.value, true)
+  local field_name = expr.field_name
   return expr {
-    extent = extent,
-    start = start,
+    value = value,
+    field_name = expr.field_name,
   }
 end
 
-local expr_region = normalize_expr_factory("ispace", false, true)
+local expr_index_access = normalize_expr_factory_full({"value", "index"}, {true, true})
 
-local expr_field_access = normalize_expr_factory("value", false, true)
-
-local expr_deref = normalize_expr_factory("value", false, true)
-
-local expr_address_of = normalize_expr_factory("value", false, true)
-
-local function expr_index_access(stats, expr)
+local function expr_method_call(stats, expr)
   local value = normalize.expr(stats, expr.value, true)
-  local index = normalize.expr(stats, expr.index, true)
+  local args = expr.args:map(function(arg)
+    return normalize.expr(stats, arg, true)
+  end)
   return expr {
-    index = index,
     value = value,
+    args = args,
   }
 end
 
@@ -461,124 +154,264 @@ local function expr_call(stats, expr)
   return expr { args = args }
 end
 
-local expr_method_call = normalize_expr_factory("args", true, true)
+local expr_cast = normalize_expr_factory("args", true, true)
 
 local expr_ctor = normalize_expr_factory("fields", true, false)
 
 local expr_ctor_field = normalize_expr_factory("value", false, true)
 
+local expr_raw_fields = normalize_expr_factory("region", false, false)
+
+local expr_raw_physical = normalize_expr_factory("region", false, false)
+
+local expr_raw_value = normalize_expr_factory("value", false, true)
+
 local expr_is_null = normalize_expr_factory("pointer", false, true)
+
+local expr_regent_cast = normalize_expr_factory("value", false, true)
+
+local expr_ispace = normalize_expr_factory_full({"extent", "start"}, {true, true})
+
+local expr_region = normalize_expr_factory("ispace", false, true)
+
+local expr_partition = normalize_expr_factory_full(
+    {"region", "coloring", "colors"},
+    {false, false, false})
+
+local expr_partition_equal =
+  normalize_expr_factory_full({"region", "colors"}, {false, false})
+
+local expr_partition_by_field =
+  normalize_expr_factory_full({"region", "colors"}, {false, false})
+
+local expr_partition_by_restriction = normalize_expr_factory_full(
+    {"region", "transform", "extent", "colors"},
+    {false, false, false, false})
+
+local expr_image = normalize_expr_factory_full(
+    {"parent", "partition", "region"},
+    {false, false, false})
+
+local expr_preimage = normalize_expr_factory_full(
+    {"parent", "partition", "region"},
+    {false, false, false})
+
+local expr_cross_product = normalize_expr_factory("args", true, false)
+
+local expr_cross_product_array =
+  normalize_expr_factory_full({"lhs", "colorings"}, {false, false})
+
+local expr_list_slice_partition =
+  normalize_expr_factory_full({"partition", "indices"}, {false, false})
+
+local expr_list_duplicate_partition =
+  normalize_expr_factory_full({"partition", "indices"}, {false, false})
+
+local expr_list_cross_product =
+  normalize_expr_factory_full({"lhs", "rhs"}, {false, false})
+
+local expr_list_cross_product_complete =
+  normalize_expr_factory_full({"lhs", "product"}, {false, false})
+
+local expr_list_phase_barriers = normalize_expr_factory("product", false, false)
+
+local expr_list_invert =
+  normalize_expr_factory_full({"rhs", "product", "barriers"}, {false, false, false})
+
+local expr_list_range =
+  normalize_expr_factory_full({"start", "stop"}, {false, false})
+
+local expr_list_ispace = normalize_expr_factory("ispace", false, false)
+
+local expr_list_from_element =
+  normalize_expr_factory_full({"list", "value"}, {false, false})
+
+local expr_phase_barrier = normalize_expr_factory("value", false, false)
+
+local expr_dynamic_collective = normalize_expr_factory("arrivals", false, false)
+
+local expr_dynamic_collective_get_result = normalize_expr_factory("value", false, false)
+
+local expr_advance = normalize_expr_factory("value", false, false)
+
+local expr_adjust =
+  normalize_expr_factory_full({"barrier", "value"}, {false, false})
+
+local expr_arrive =
+  normalize_expr_factory_full({"barrier", "value"}, {false, false})
+
+local expr_await = normalize_expr_factory("barrier", false, false)
+
+local expr_copy =
+  normalize_expr_factory_full({"src", "dst"}, {false, false})
+
+local expr_fill =
+  normalize_expr_factory_full({"dst", "value"}, {false, false})
+
+local expr_acquire = normalize_expr_factory("region", false, false)
+
+local expr_release = normalize_expr_factory("region", false, false)
+
+local expr_attach_hdf5 =
+  normalize_expr_factory_full(
+    {"region", "filename", "mode", "field_map"},
+    {false, true, true, true})
+
+local expr_detach_hdf5 = normalize_expr_factory("region", false, false)
+
+local expr_allocate_scratch_fields = normalize_expr_factory("region", false, false)
+
+local expr_with_scratch_fields = normalize_expr_factory("region", false, false)
+
+local expr_region_root = normalize_expr_factory("region", false, false)
 
 local expr_unary = normalize_expr_factory("rhs", false, true)
 
 local function expr_binary(stats, expr)
-  local lhs = normalize.expr(stats, expr.lhs, true)
-  local rhs = normalize.expr(stats, expr.rhs, true)
-  return expr {
-    lhs = lhs,
-    rhs = rhs,
-  }
+  if expr.op == "and" or expr.op == "or" then
+    local lhs = normalize.expr(stats, expr.lhs, true)
+    local rhs_stats = terralib.newlist()
+    local rhs = normalize.expr(rhs_stats, expr.rhs, true)
+    if #rhs_stats == 0 then
+      return expr {
+        lhs = lhs,
+        rhs = rhs,
+      }
+    else
+      local temp_var = std.newsymbol()
+      local cond = ast.specialized.expr.ID {
+        value = temp_var,
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      }
+      stats:insert(ast.specialized.stat.Var {
+        symbols = temp_var,
+        values = lhs,
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      })
+      rhs_stats:insert(ast.specialized.stat.Assignment {
+        lhs = cond,
+        rhs = rhs,
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      })
+      stats:insert(ast.specialized.stat.If {
+        cond = (expr.op == "or" and ast.specialized.expr.Unary {
+          rhs = cond,
+          op = "not",
+          annotations = ast.default_annotations(),
+          span = expr.span,
+        }) or cond,
+        then_block = ast.specialized.Block {
+          stats = rhs_stats,
+          span = expr.span,
+        },
+        elseif_blocks = terralib.newlist(),
+        else_block = ast.specialized.Block {
+          stats = terralib.newlist(),
+          span = expr.span,
+        },
+        annotations = ast.default_annotations(),
+        span = expr.span,
+      })
+      return cond
+    end
+
+  else
+    return expr {
+      lhs = normalize.expr(stats, expr.lhs, true),
+      rhs = normalize.expr(stats, expr.rhs, true),
+    }
+  end
 end
 
-local expr_cast = normalize_expr_factory("args", true, true)
+local expr_deref = normalize_expr_factory("value", false, true)
+
+local expr_address_of = normalize_expr_factory("value", false, true)
 
 local expr_import_ispace = normalize_expr_factory("value", false, true)
 
-local function expr_import_region(stats, expr)
-  local ispace    = normalize.expr(stats, expr.ispace   , true)
-  local value     = normalize.expr(stats, expr.value    , true)
-  local field_ids = normalize.expr(stats, expr.field_ids, true)
-  return expr {
-    ispace = ispace,
-    value = value,
-    field_ids = field_ids,
-  }
-end
+local expr_import_region =
+  normalize_expr_factory_full({"ispace", "value", "field_ids"}, {false, true, true})
 
-local function expr_import_partition(stats, expr)
-  local region = normalize.expr(stats, expr.region, true)
-  local colors = normalize.expr(stats, expr.colors, true)
-  local value  = normalize.expr(stats, expr.value,  true)
-  return expr {
-    region = region,
-    colors = colors,
-    value = value,
-  }
-end
+local expr_import_partition =
+  normalize_expr_factory_full({"region", "colors", "value"}, {false, true, true})
+
+local expr_projection = normalize_expr_factory("region", false, false)
 
 local normalize_expr_table = {
+  [ast.specialized.expr.ID]                         = pass_through_expr,
+  [ast.specialized.expr.FieldAccess]                = expr_field_access,
+  [ast.specialized.expr.IndexAccess]                = expr_index_access,
+  [ast.specialized.expr.MethodCall]                 = expr_method_call,
+  [ast.specialized.expr.Call]                       = expr_call,
+  [ast.specialized.expr.Cast]                       = expr_cast,
+  [ast.specialized.expr.Ctor]                       = expr_ctor,
+  [ast.specialized.expr.CtorListField]              = expr_ctor_field,
+  [ast.specialized.expr.CtorRecField]               = expr_ctor_field,
+  [ast.specialized.expr.Constant]                   = pass_through_expr,
+  [ast.specialized.expr.Global]                     = pass_through_expr,
+
+  [ast.specialized.expr.RawContext]                 = pass_through_expr,
+  [ast.specialized.expr.RawFields]                  = expr_raw_fields,
+  [ast.specialized.expr.RawFuture]                  = pass_through_expr,
+  [ast.specialized.expr.RawPhysical]                = expr_raw_physical,
+  [ast.specialized.expr.RawRuntime]                 = pass_through_expr,
+  [ast.specialized.expr.RawTask]                    = pass_through_expr,
+  [ast.specialized.expr.RawValue]                   = expr_raw_value,
+  [ast.specialized.expr.Isnull]                     = expr_is_null,
+  [ast.specialized.expr.New]                        = pass_through_expr,
+  [ast.specialized.expr.Null]                       = pass_through_expr,
   [ast.specialized.expr.DynamicCast]                = expr_regent_cast,
   [ast.specialized.expr.StaticCast]                 = expr_regent_cast,
   [ast.specialized.expr.UnsafeCast]                 = expr_regent_cast,
   [ast.specialized.expr.Ispace]                     = expr_ispace,
   [ast.specialized.expr.Region]                     = expr_region,
-  [ast.specialized.expr.FieldAccess]                = expr_field_access,
-  [ast.specialized.expr.Deref]                      = expr_deref,
-  [ast.specialized.expr.AddressOf]                  = expr_address_of,
-  [ast.specialized.expr.IndexAccess]                = expr_index_access,
-  [ast.specialized.expr.MethodCall]                 = expr_method_call,
-  [ast.specialized.expr.Call]                       = expr_call,
-  [ast.specialized.expr.Ctor]                       = expr_ctor,
-  [ast.specialized.expr.CtorListField]              = expr_ctor_field,
-  [ast.specialized.expr.CtorRecField]               = expr_ctor_field,
-  [ast.specialized.expr.Isnull]                     = expr_is_null,
+  [ast.specialized.expr.Partition]                  = expr_partition,
+  [ast.specialized.expr.PartitionEqual]             = expr_partition_equal,
+  [ast.specialized.expr.PartitionByField]           = expr_partition_by_field,
+  [ast.specialized.expr.PartitionByRestriction]     = expr_partition_by_restriction,
+  [ast.specialized.expr.Image]                      = expr_image,
+  [ast.specialized.expr.Preimage]                   = expr_preimage,
+  [ast.specialized.expr.CrossProduct]               = expr_cross_product,
+  [ast.specialized.expr.CrossProductArray]          = expr_cross_product_array,
+  [ast.specialized.expr.ListSlicePartition]         = expr_list_slice_partition,
+  [ast.specialized.expr.ListDuplicatePartition]     = expr_list_duplicate_partition,
+  [ast.specialized.expr.ListCrossProduct]           = expr_list_cross_product,
+  [ast.specialized.expr.ListCrossProductComplete]   = expr_list_cross_product_complete,
+  [ast.specialized.expr.ListPhaseBarriers]          = expr_list_phase_barriers,
+  [ast.specialized.expr.ListInvert]                 = expr_list_invert,
+  [ast.specialized.expr.ListRange]                  = expr_list_range,
+  [ast.specialized.expr.ListIspace]                 = expr_list_ispace,
+  [ast.specialized.expr.ListFromElement]            = expr_list_from_element,
+  [ast.specialized.expr.PhaseBarrier]               = expr_phase_barrier,
+  [ast.specialized.expr.DynamicCollective]          = expr_dynamic_collective,
+  [ast.specialized.expr.DynamicCollectiveGetResult] = expr_dynamic_collective_get_result,
+  [ast.specialized.expr.Advance]                    = expr_advance,
+  [ast.specialized.expr.Adjust]                     = expr_adjust,
+  [ast.specialized.expr.Arrive]                     = expr_arrive,
+  [ast.specialized.expr.Await]                      = expr_await,
+  [ast.specialized.expr.Copy]                       = expr_copy,
+  [ast.specialized.expr.Fill]                       = expr_fill,
+  [ast.specialized.expr.Acquire]                    = expr_acquire,
+  [ast.specialized.expr.Release]                    = expr_release,
+  [ast.specialized.expr.AttachHDF5]                 = expr_attach_hdf5,
+  [ast.specialized.expr.DetachHDF5]                 = expr_detach_hdf5,
+  [ast.specialized.expr.AllocateScratchFields]      = expr_allocate_scratch_fields,
+  [ast.specialized.expr.WithScratchFields]          = expr_with_scratch_fields,
+  [ast.specialized.expr.RegionRoot]                 = expr_region_root,
+  [ast.specialized.expr.Condition]                  = pass_through_expr,
+  [ast.specialized.expr.Function]                   = pass_through_expr,
   [ast.specialized.expr.Unary]                      = expr_unary,
   [ast.specialized.expr.Binary]                     = expr_binary,
-  [ast.specialized.expr.Cast]                       = expr_cast,
-
-  -- Normal expressions
-  [ast.specialized.expr.ID]                         = pass_through_expr,
-  [ast.specialized.expr.Function]                   = pass_through_expr,
-  [ast.specialized.expr.Constant]                   = pass_through_expr,
-
-  -- Expressions that do not need to be normalized
-  [ast.specialized.expr.New]                        = pass_through_expr,
-  [ast.specialized.expr.Null]                       = pass_through_expr,
-  [ast.specialized.expr.RawContext]                 = pass_through_expr,
-  [ast.specialized.expr.RawFields]                  = pass_through_expr,
-  [ast.specialized.expr.RawPhysical]                = pass_through_expr,
-  [ast.specialized.expr.RawRuntime]                 = pass_through_expr,
-  [ast.specialized.expr.RawTask]                    = pass_through_expr,
-  [ast.specialized.expr.RawValue]                   = pass_through_expr,
-  [ast.specialized.expr.Partition]                  = pass_through_expr,
-  [ast.specialized.expr.PartitionEqual]             = pass_through_expr,
-  [ast.specialized.expr.PartitionByField]           = pass_through_expr,
-  [ast.specialized.expr.PartitionByRestriction]     = pass_through_expr,
-  [ast.specialized.expr.Image]                      = pass_through_expr,
-  [ast.specialized.expr.Preimage]                   = pass_through_expr,
-  [ast.specialized.expr.CrossProduct]               = pass_through_expr,
-  [ast.specialized.expr.CrossProductArray]          = pass_through_expr,
-  [ast.specialized.expr.ListSlicePartition]         = pass_through_expr,
-  [ast.specialized.expr.ListDuplicatePartition]     = pass_through_expr,
-  [ast.specialized.expr.ListCrossProduct]           = pass_through_expr,
-  [ast.specialized.expr.ListCrossProductComplete]   = pass_through_expr,
-  [ast.specialized.expr.ListPhaseBarriers]          = pass_through_expr,
-  [ast.specialized.expr.ListInvert]                 = pass_through_expr,
-  [ast.specialized.expr.ListRange]                  = pass_through_expr,
-  [ast.specialized.expr.ListIspace]                 = pass_through_expr,
-  [ast.specialized.expr.ListFromElement]            = pass_through_expr,
-  [ast.specialized.expr.PhaseBarrier]               = pass_through_expr,
-  [ast.specialized.expr.DynamicCollective]          = pass_through_expr,
-  [ast.specialized.expr.DynamicCollectiveGetResult] = pass_through_expr,
-  [ast.specialized.expr.Advance]                    = pass_through_expr,
-  [ast.specialized.expr.Adjust]                     = pass_through_expr,
-  [ast.specialized.expr.Arrive]                     = pass_through_expr,
-  [ast.specialized.expr.Await]                      = pass_through_expr,
-  [ast.specialized.expr.Copy]                       = pass_through_expr,
-  [ast.specialized.expr.Fill]                       = pass_through_expr,
-  [ast.specialized.expr.Acquire]                    = pass_through_expr,
-  [ast.specialized.expr.Release]                    = pass_through_expr,
-  [ast.specialized.expr.AttachHDF5]                 = pass_through_expr,
-  [ast.specialized.expr.DetachHDF5]                 = pass_through_expr,
-  [ast.specialized.expr.AllocateScratchFields]      = pass_through_expr,
-  [ast.specialized.expr.WithScratchFields]          = pass_through_expr,
-  [ast.specialized.expr.RegionRoot]                 = pass_through_expr,
-  [ast.specialized.expr.Condition]                  = pass_through_expr,
+  [ast.specialized.expr.Deref]                      = expr_deref,
+  [ast.specialized.expr.AddressOf]                  = expr_address_of,
+  [ast.specialized.expr.LuaTable]                   = pass_through_expr,
   [ast.specialized.expr.ImportIspace]               = expr_import_ispace,
   [ast.specialized.expr.ImportRegion]               = expr_import_region,
   [ast.specialized.expr.ImportPartition]            = expr_import_partition,
-
-  [ast.specialized.expr.LuaTable]                   = pass_through_expr,
+  [ast.specialized.expr.Projection]                 = expr_projection,
 }
 
 local normalize_expr = ast.make_single_dispatch(
@@ -701,12 +534,79 @@ local function stat_for_list(stats, stat)
 end
 
 local function stat_repeat(stats, stat)
-  local block = normalize.block(stat.block)
-  local block_stats = block.stats
-  local until_cond = normalize.expr(block_stats, stat.until_cond, true)
-  stats:insert(stat {
-    until_cond = until_cond,
-    block = block { stats = block_stats },
+  -- Unfortunately, we need to keep the original reapeat loop
+  -- in the program to make it type checked correctly.
+  local dead_code = nil
+  do
+    -- Make a local context to normalize the repeat loop
+    -- that will later be eliminated.
+    local stats = terralib.newlist()
+    local until_cond = normalize.expr(stats, stat.until_cond)
+    local block = normalize.block(stat.block)
+    stats:insert(stat {
+      until_cond = until_cond,
+      block = block,
+    })
+    dead_code = ast.specialized.Block {
+      stats = stats,
+      span = stat.span,
+    }
+  end
+  stats:insert(ast.specialized.stat.If {
+    cond = ast.specialized.expr.Constant {
+      value = false,
+      expr_type = bool,
+      span = stat.span,
+      annotations = ast.default_annotations(),
+    },
+    then_block = dead_code,
+    elseif_blocks = terralib.newlist(),
+    else_block = ast.specialized.Block {
+      stats = terralib.newlist(),
+      span = stat.span,
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond_var = std.newsymbol(bool)
+  stats:insert(ast.specialized.stat.Var {
+    symbols = cond_var,
+    values = ast.specialized.expr.Constant {
+      value = true,
+      expr_type = bool,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    },
+    span = stat.span,
+    annotations = ast.default_annotations(),
+  })
+
+  local cond = ast.specialized.expr.ID {
+    value = cond_var,
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  }
+
+  local block_stats = terralib.newlist()
+  block_stats:insertall(stat.block.stats)
+  block_stats:insert(ast.specialized.stat.Assignment {
+    lhs = terralib.newlist({cond}),
+    rhs = terralib.newlist({ ast.specialized.expr.Unary {
+      op = "not",
+      rhs = stat.until_cond,
+      span = stat.until_cond.span,
+      annotations = ast.default_annotations(),
+    }}),
+    span = stat.until_cond.span,
+    annotations = ast.default_annotations(),
+  })
+
+  normalize.stat(stats, ast.specialized.stat.While {
+    cond = cond,
+    block = stat.block { stats = block_stats },
+    span = stat.span,
+    annotations = stat.annotations,
   })
 end
 
@@ -774,8 +674,6 @@ local function stat_return(stats, stat)
 end
 
 local function stat_assignment_or_reduce(stats, stat)
-  stat = flatten_multifield_accesses(stat)
-
   if #stat.lhs == 1 then
     assert(#stat.rhs == 1)
     local lhs = normalize.expr(stats, stat.lhs[1], false)

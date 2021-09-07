@@ -12,26 +12,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Bishop Logging
+-- Error Reporting in Regent
 
-local log = {}
+local common_report = require("common/report")
+local std = require("regent/std")
 
-log.warn = function(node, ...)
-  io.stderr:write(...)
-  io.stderr:write("\n")
-end
+local report = {}
 
-log.error = function(node, ...)
-  if node == nil then
-    node = { filename = "", linenumber = 0, offset = 0 }
+report.info = common_report.warn
+
+report.warn = function(node, ...)
+  if std.config["warn-as-error"] then
+    common_report.error(node, ...)
+  else
+    common_report.warn(node, ...)
   end
-
-  -- The compiler cannot handle running past an error anyway, so just
-  -- build the diagnostics object here and don't bother reusing it.
-  local diag = terralib.newdiagnostics()
-  diag:reporterror(node.position, ...)
-  diag:finishandabortiferrors("Errors reported during typechecking.", 2)
-  assert(false) -- unreachable
 end
 
-return log
+report.error = common_report.error
+
+return report

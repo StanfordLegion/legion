@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -92,7 +92,8 @@ local function convert_lua_value(cx, node, value, allow_lists)
     terralib.isoverloadedfunction(value) or
     terralib.ismacro(value) or
     terralib.types.istype(value) or
-    std.is_task(value) or std.is_math_fn(value)
+    std.is_task(value) or std.is_math_fn(value) or
+    std.is_macro(value)
   then
     return ast.specialized.expr.Function {
       value = value,
@@ -120,6 +121,14 @@ local function convert_lua_value(cx, node, value, allow_lists)
   elseif terralib.isconstant(value) then
     local expr_type = value:gettype()
     return ast.specialized.expr.Constant {
+      value = value,
+      expr_type = expr_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
+  elseif terralib.isglobalvar(value) then
+    local expr_type = value:gettype()
+    return ast.specialized.expr.Global {
       value = value,
       expr_type = expr_type,
       annotations = node.annotations,
@@ -171,11 +180,14 @@ function specialize.field_names(cx, node)
     return terralib.newlist({node.names_expr})
   else
     local value = node.names_expr(cx.env:env())
-    if type(value) == "string" then
+    if type(value) == "string" or data.is_tuple(value) then
       return terralib.newlist({value})
-    elseif terralib.islist(value) and
-      data.all(value:map(function(v) return type(v) == "string" end))
-    then
+    elseif terralib.islist(value) then
+      value:map(function(v)
+        if not (type(v) == "string" or data.is_tuple(v)) then
+          report.error(node, "unable to specialize value of type " .. type(v))
+        end
+      end)
       return value
     else
       report.error(node, "unable to specialize value of type " .. tostring(type(value)))
@@ -392,6 +404,14 @@ function specialize.disjointness_kind(cx, node)
   end
 end
 
+function specialize.completeness_kind(cx, node)
+  if node:is(ast.completeness_kind) then
+    return node
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
 function specialize.effect_expr(cx, node)
   local span = ast.trivial_span()
 
@@ -399,9 +419,10 @@ function specialize.effect_expr(cx, node)
     if i > #field_path then
       return false
     end
+    local fields = make_field(field_path, i + 1)
     return ast.specialized.region.Field {
       field_name = field_path[i],
-      fields = make_field(field_path, i + 1),
+      fields = (fields and terralib.newlist({ fields })) or false,
       span = span,
     }
   end
@@ -427,18 +448,36 @@ function specialize.effect_expr(cx, node)
     }
   end
 
+  local function make_coherence(value)
+    return ast.specialized.Coherence {
+      coherence_modes = terralib.newlist({value.coherence_mode}),
+      regions = terralib.newlist({
+        ast.specialized.region.Root {
+          symbol = value.region,
+          fields = make_fields(value.field_path),
+          span = span,
+        }
+      }),
+      span = span,
+    }
+  end
+
   local value = node.expr(cx.env:env())
   if terralib.islist(value) then
     return value:map(
       function(v)
         if v:is(ast.privilege.Privilege) then
           return make_privilege(v)
+        elseif v:is(ast.coherence.Coherence) then
+          return make_coherence(v)
         else
           assert(false, "unexpected value type " .. tostring(value:type()))
         end
       end)
   elseif value:is(ast.privilege.Privilege) then
     return make_privilege(value)
+  elseif value:is(ast.coherence.Coherence) then
+    return make_coherence(value)
   else
     assert(false, "unexpected value type " .. tostring(value:type()))
   end
@@ -516,26 +555,37 @@ end
 
 -- assumes multi-field accesses have already been flattened by the caller
 function specialize.expr_field_access(cx, node, allow_lists)
-  --if #node.field_names ~= 1 then
-  --  report.error(node, "illegal use of multi-field access")
-  --end
   local value = specialize.expr(cx, node.value)
 
-  local field_names = data.flatmap(
-    function(field_name) return specialize.field_names(cx, field_name) end,
-    node.field_names)
-  --if #field_names ~= 1 then
-  --  report.error(node, "FIXME: handle specialization of multiple fields")
-  --end
-  local field_name = field_names -- this will be flattened in the normalizer
-  if #field_names == 1 then field_name = field_names[1] end
+  assert(#node.field_names == 1)
+  local field_names = specialize.field_names(cx, node.field_names[1])
+
+  if type(field_names[1]) == "string" or data.is_tuple(field_names[1]) then
+    if #field_names > 1 then
+      report.error(expr, "multi-field access is not allowed")
+    end
+    field_names = field_names[1]
+  end
 
   if value:is(ast.specialized.expr.LuaTable) then
-    return convert_lua_value(cx, node, value.value[field_name])
+    if type(field_names) ~= "string" then
+      report.error(node, "unable to specialize multi-field access")
+    end
+    return convert_lua_value(cx, node, value.value[field_names])
+  elseif data.is_tuple(field_names) then
+    for _, field_name in ipairs(field_names) do
+      value = ast.specialized.expr.FieldAccess {
+        value = value,
+        field_name = field_name,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end
+    return value
   else
     return ast.specialized.expr.FieldAccess {
       value = value,
-      field_name = field_name,
+      field_name = field_names,
       annotations = node.annotations,
       span = node.span,
     }
@@ -589,6 +639,7 @@ function specialize.expr_call(cx, node, allow_lists)
     terralib.ismacro(fn.value) or
     std.is_task(fn.value) or
     std.is_math_fn(fn.value) or
+    std.is_macro(fn.value) or
     type(fn.value) == "cdata"
   then
     if not std.is_task(fn.value) and #node.conditions > 0 then
@@ -702,6 +753,15 @@ end
 function specialize.expr_raw_fields(cx, node, allow_lists)
   return ast.specialized.expr.RawFields {
     region = specialize.expr_region_root(cx, node.region),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_raw_future(cx, node, allow_lists)
+  return ast.specialized.expr.RawFuture {
+    value_type = node.value_type_expr(cx.env:env()),
+    value = specialize.expr(cx, node.value),
     annotations = node.annotations,
     span = node.span,
   }
@@ -836,6 +896,7 @@ end
 function specialize.expr_partition(cx, node, allow_lists)
   return ast.specialized.expr.Partition {
     disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     coloring = specialize.expr(cx, node.coloring),
     colors = node.colors and specialize.expr(cx, node.colors),
@@ -855,6 +916,7 @@ end
 
 function specialize.expr_partition_by_field(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByField {
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr_region_root(cx, node.region),
     colors = specialize.expr(cx, node.colors),
     annotations = node.annotations,
@@ -865,6 +927,7 @@ end
 function specialize.expr_partition_by_restriction(cx, node, allow_lists)
   return ast.specialized.expr.PartitionByRestriction {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     region = specialize.expr(cx, node.region),
     transform = specialize.expr(cx, node.transform),
     extent = specialize.expr(cx, node.extent),
@@ -877,6 +940,7 @@ end
 function specialize.expr_image(cx, node, allow_lists)
   return ast.specialized.expr.Image {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -888,6 +952,7 @@ end
 function specialize.expr_preimage(cx, node, allow_lists)
   return ast.specialized.expr.Preimage {
     disjointness = node.disjointness and specialize.disjointness_kind(cx, node.disjointness),
+    completeness = node.completeness and specialize.completeness_kind(cx, node.completeness),
     parent = specialize.expr(cx, node.parent),
     partition = specialize.expr(cx, node.partition),
     region = specialize.expr_region_root(cx, node.region),
@@ -1199,6 +1264,71 @@ function specialize.expr_import_partition(cx, node)
   }
 end
 
+function specialize.projection_field(cx, node)
+  local renames = node.rename and specialize.field_names(cx, node.rename)
+  local field_names = specialize.field_names(cx, node.field_name)
+  if renames and #renames ~= #field_names then
+    report.error(node, "mismatch in specialization: expected " .. tostring(#renames) ..
+        " fields to rename but got " .. tostring(#field_names) .. " fields")
+  end
+  local fields = specialize.projection_fields(cx, node.fields)
+  if renames then
+    return data.zip(renames, field_names):map(
+      function(pair)
+        local rename, field_path = unpack(pair)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = (i == 1 and rename) or false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
+      end)
+  else
+    return field_names:map(
+      function(field_path)
+        if not data.is_tuple(field_path) then
+          field_path = data.newtuple(field_path)
+        end
+        local result = fields
+        for i = #field_path, 1, -1 do
+          result = terralib.newlist({
+            ast.specialized.projection.Field {
+              rename = false,
+              field_name = field_path[i],
+              fields = result,
+              span = node.span,
+            }})
+        end
+        return result[1]
+      end)
+  end
+end
+
+function specialize.projection_fields(cx, node)
+  return node and data.flatmap(
+    function(field) return specialize.projection_field(cx, field) end,
+    node)
+end
+
+function specialize.expr_projection(cx, node)
+  local region = specialize.expr(cx, node.region)
+  local fields = specialize.projection_fields(cx, node.fields)
+  return ast.specialized.expr.Projection {
+    region = region,
+    fields = fields,
+    span = node.span,
+    annotations = node.annotations,
+  }
+end
+
 function specialize.expr(cx, node, allow_lists)
   if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node, allow_lists)
@@ -1229,6 +1359,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawFields) then
     return specialize.expr_raw_fields(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.RawFuture) then
+    return specialize.expr_raw_future(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.RawPhysical) then
     return specialize.expr_raw_physical(cx, node, allow_lists)
@@ -1383,6 +1516,9 @@ function specialize.expr(cx, node, allow_lists)
   elseif node:is(ast.unspecialized.expr.ImportPartition) then
     return specialize.expr_import_partition(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.Projection) then
+    return specialize.expr_projection(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -1463,22 +1599,14 @@ local function convert_index_launch_annotations(node)
     then
       report.error(node, "conflicting annotations for __parallel and __index_launch")
     end
-    report.warn(node, "__demand(__parallel) is deprecated, please use __demand(__index_launch)")
-    return node.annotations {
-      parallel = ast.annotation.Allow { value = false },
-      index_launch = ast.annotation.Demand { value = false },
-    }
+    report.error(node, "__demand(__parallel) is no longer supported on loops, please use __demand(__index_launch)")
   elseif node.annotations.parallel:is(ast.annotation.Forbid) then
     if not (node.annotations.index_launch:is(ast.annotation.Allow) or
               node.annotations.index_launch:is(ast.annotation.Forbid))
     then
       report.error(node, "conflicting annotations for __parallel and __index_launch")
     end
-    report.warn(node, "__forbid(__parallel) is deprecated, please use __forbid(__index_launch)")
-    return node.annotations {
-      parallel = ast.annotation.Allow { value = false },
-      index_launch = ast.annotation.Forbid { value = false },
-    }
+    report.error(node, "__forbid(__parallel) is no longer supported on loops, please use __forbid(__index_launch)")
   else
     return node.annotations
   end
@@ -1744,6 +1872,21 @@ function specialize.stat_escape(cx, node)
   end
 end
 
+local rescape_remit_key = std.newsymbol()
+function specialize.stat_rescape(cx, node)
+  local result = terralib.newlist()
+
+  -- We're going to use a special symbol to track the rescape/remit context.
+  local cx = cx:new_local_scope()
+  cx.env:insert(node, rescape_remit_key, result)
+
+  -- Now run the escape code. It will populate the result by looking
+  -- up the escape key.
+  node.stats(cx.env:env())
+
+  return data.flatmap(function(x) return get_quote_contents(cx, x) end, result)
+end
+
 function specialize.stat_raw_delete(cx, node)
   return ast.specialized.stat.RawDelete {
     value = specialize.expr(cx, node.value),
@@ -1855,6 +1998,9 @@ function specialize.stat(cx, node)
   elseif node:is(ast.unspecialized.stat.Escape) then
     return specialize.stat_escape(cx, node)
 
+  elseif node:is(ast.unspecialized.stat.Rescape) then
+    return specialize.stat_rescape(cx, node)
+
   elseif node:is(ast.unspecialized.stat.RawDelete) then
     return specialize.stat_raw_delete(cx, node)
 
@@ -1890,18 +2036,10 @@ local function make_symbols(cx, node, var_name)
   report.error(node, "mismatch in specialization: expected a symbol or list of symbols but got value of type " .. tostring(type(var_name)))
 end
 
-function specialize.top_task_param(cx, node)
-  -- Hack: Params which are regions can be recursive on the name of
-  -- the region so introduce the symbol before type checking to allow
-  -- for this recursion.
-  local params = make_symbols(cx, node, node.param_name)
-
+function specialize.top_task_param(cx, node, params)
   local result = terralib.newlist()
   for _, param in ipairs(params) do
     local param_name, symbol = unpack(param)
-
-    cx.env:insert(node, param_name, symbol)
-    if not std.is_symbol(param_name) then cx.env:insert(node, symbol, symbol) end
 
     local param_type
     if std.is_symbol(param_name) then
@@ -1944,22 +2082,41 @@ function specialize.top_task_param(cx, node)
 end
 
 function specialize.top_task_params(cx, node)
+  -- Hack: Params which are regions can be recursive on the name of
+  -- the region so introduce the symbol before completing specialization to allow
+  -- for this recursion.
+  local symbols = node:map(
+    function(node)
+      local params = make_symbols(cx, node, node.param_name)
+      for _, param in ipairs(params) do
+        local param_name, symbol = unpack(param)
+        cx.env:insert(node, param_name, symbol)
+        if not std.is_symbol(param_name) then cx.env:insert(node, symbol, symbol) end
+      end
+
+      return terralib.newlist({node, params})
+    end)
+
   return data.flatmap(
-    function(param) return specialize.top_task_param(cx, param) end,
-    node)
+    function(group)
+      local param, symbol = unpack(group)
+      return specialize.top_task_param(cx, param, symbol)
+    end,
+    symbols)
 end
 
 function specialize.top_task(cx, node)
   local cx = cx:new_local_scope()
 
-  local task = std.new_task(node.name)
+  local task = std.new_task(node.name, node.span, not node.body)
 
   if node.body then
     local variant = task:make_variant("primary")
     task:set_primary_variant(variant)
-    variant:set_is_external(node.annotations.external:is(ast.annotation.Demand))
-    variant:set_is_inline(node.annotations.inline)
+    variant:set_is_inline(node.annotations.inline:is(ast.annotation.Demand))
   end
+
+  task:set_is_local(node.annotations.local_launch:is(ast.annotation.Demand))
 
   if #node.name == 1 then
     cx.env:insert(node, node.name[1], task)
@@ -2057,10 +2214,32 @@ function specialize.top_fspace(cx, node)
   }
 end
 
+function specialize.top_remit(cx, node)
+  local result = cx.env:safe_lookup(rescape_remit_key)
+  if not result then
+    report.error(node, "remit must be used inside of rescape")
+  end
+
+  local expr = node.expr(cx.env:env())
+  if std.is_rquote(expr) then
+    result:insert(expr)
+  elseif terralib.islist(expr) then
+    if not data.all(expr:map(function(v) return std.is_rquote(v) end)) then
+      report.error(node, "unable to specialize value of type " .. tostring(type(expr)))
+    end
+    result:insertall(expr)
+  else
+    report.error(node, "unable to specialize value of type " .. tostring(type(expr)))
+  end
+
+  return false -- nothing to do at this point, statement has been executed
+end
+
 function specialize.top_quote_expr(cx, node)
   local cx = cx:new_local_scope(true)
   return std.newrquote(ast.specialized.top.QuoteExpr {
     expr = specialize.expr(cx, node.expr),
+    expr_type = false,
     annotations = node.annotations,
     span = node.span,
   })
@@ -2081,6 +2260,9 @@ function specialize.top(cx, node)
 
   elseif node:is(ast.unspecialized.top.Fspace) then
     return specialize.top_fspace(cx, node)
+
+  elseif node:is(ast.unspecialized.top.Remit) then
+    return specialize.top_remit(cx, node)
 
   elseif node:is(ast.unspecialized.top.QuoteExpr) then
     return specialize.top_quote_expr(cx, node)

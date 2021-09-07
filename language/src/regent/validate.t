@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -134,6 +134,7 @@ local node_vars_are_valid = {
   end,
 
   [ast.typed.expr.Constant]                   = continue,
+  [ast.typed.expr.Global]                     = continue,
   [ast.typed.expr.Function]                   = continue,
   [ast.typed.expr.IndexAccess]                = continue,
   [ast.typed.expr.MethodCall]                 = continue,
@@ -144,6 +145,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.CtorRecField]               = continue,
   [ast.typed.expr.RawContext]                 = continue,
   [ast.typed.expr.RawFields]                  = continue,
+  [ast.typed.expr.RawFuture]                  = continue,
   [ast.typed.expr.RawPhysical]                = continue,
   [ast.typed.expr.RawRuntime]                 = continue,
   [ast.typed.expr.RawTask]                    = continue,
@@ -201,6 +203,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.Future]                     = continue,
   [ast.typed.expr.FutureGetResult]            = continue,
   [ast.typed.expr.ParallelizerConstraint]     = continue,
+  [ast.typed.expr.Projection]                 = continue,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -288,20 +291,12 @@ local node_vars_are_valid = {
   [ast.typed.stat.UnmapRegions]    = continue,
 
   [ast.typed.stat.Internal]        = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]       = continue,
-  [ast.location]          = continue,
-  [ast.annotation]        = continue,
-  [ast.condition_kind]    = continue,
-  [ast.disjointness_kind] = continue,
-  [ast.fence_kind]        = continue,
-  [ast.metadata]          = continue,
 }
 
 local validate_vars_node = ast.make_single_dispatch(
   node_vars_are_valid,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  continue)
 
 local function validate_variables(cx, node)
   ast.traverse_node_continuation(validate_vars_node(cx), node)

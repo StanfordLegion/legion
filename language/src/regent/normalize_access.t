@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ end)
 local normalized_predicates = {
   [ast.typed.expr.ID]       = function(node) return true end,
   [ast.typed.expr.Constant] = function(node) return true end,
+  [ast.typed.expr.Global]   = function(node) return true end,
   [ast.typed.expr.Function] = function(node) return true end,
   [ast.typed.expr.FieldAccess] =
     function(node)
@@ -88,7 +89,7 @@ normalize_access.expr_address_of = normalize_expr_factory("value", false)
 
 function normalize_access.expr_index_access(stats, expr)
   local index = normalize_access.expr(stats, expr.index, true)
-  local value = normalize_access.expr(stats, expr.value, std.is_ref(expr.expr_type))
+  local value = normalize_access.expr(stats, expr.value, false)
   return expr {
     index = index,
     value = value,
@@ -149,6 +150,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.Call]                       = normalize_access.expr_call,
   [ast.typed.expr.MethodCall]                 = normalize_access.expr_call,
   [ast.typed.expr.RawFields]                  = normalize_access.pass_through_expr,
+  [ast.typed.expr.RawFuture]                  = normalize_access.pass_through_expr,
   [ast.typed.expr.RawPhysical]                = normalize_access.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = normalize_access.pass_through_expr,
   [ast.typed.expr.RawTask]                    = normalize_access.pass_through_expr,
@@ -158,11 +160,13 @@ local normalize_access_expr_table = {
   [ast.typed.expr.ListIspace]                 = normalize_access.pass_through_expr,
   [ast.typed.expr.ListFromElement]            = normalize_access.pass_through_expr,
   [ast.typed.expr.RegionRoot]                 = normalize_access.pass_through_expr,
+  [ast.typed.expr.Projection]                 = normalize_access.pass_through_expr,
 
   -- Normal expressions
   [ast.typed.expr.ID]                         = normalize_access.pass_through_expr,
   [ast.typed.expr.Function]                   = normalize_access.pass_through_expr,
   [ast.typed.expr.Constant]                   = normalize_access.pass_through_expr,
+  [ast.typed.expr.Global]                     = normalize_access.pass_through_expr,
   [ast.typed.expr.Null]                       = normalize_access.pass_through_expr,
   [ast.typed.expr.Isnull]                     = normalize_access.pass_through_expr,
 

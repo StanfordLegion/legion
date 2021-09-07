@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -84,11 +84,9 @@ do
     [ast.typed.expr.Deref]        = function(expr) return strip_expr(expr.value) end,
     [ast.typed.expr.IndexAccess]  = function(expr) return strip_expr(expr.value) end,
     [ast.typed.expr.ID]           = function(expr) return expr.value end,
-
-    [ast.typed.expr]              = function(expr) return false end,
   }
 
-  strip_expr = ast.make_single_dispatch(strip_expr_table, {ast.typed.expr})()
+  strip_expr = ast.make_single_dispatch(strip_expr_table, {}, function(expr) return false end)()
 end
 
 -- We run a flow-insensitive analysis to collect all potential kills of definitions
@@ -272,6 +270,7 @@ local copy_propagate_expr_table = {
   [ast.typed.expr.Isnull]                     = copy_propagate.expr_is_null,
 
   [ast.typed.expr.RawFields]                  = copy_propagate.pass_through_expr,
+  [ast.typed.expr.RawFuture]                  = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawPhysical]                = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawRuntime]                 = copy_propagate.pass_through_expr,
   [ast.typed.expr.RawTask]                    = copy_propagate.pass_through_expr,
@@ -284,7 +283,9 @@ local copy_propagate_expr_table = {
 
   [ast.typed.expr.Function]                   = copy_propagate.pass_through_expr,
   [ast.typed.expr.Constant]                   = copy_propagate.pass_through_expr,
+  [ast.typed.expr.Global]                     = copy_propagate.pass_through_expr,
   [ast.typed.expr.Null]                       = copy_propagate.pass_through_expr,
+  [ast.typed.expr.Projection]                 = copy_propagate.pass_through_expr,
 
   [ast.typed.expr.CtorListField]              = unreachable,
   [ast.typed.expr.CtorRecField]               = unreachable,
@@ -516,6 +517,6 @@ function copy_propagate.entry(node)
   end
 end
 
-copy_propagate.pass_name = "optimize_mapping"
+copy_propagate.pass_name = "copy_propagate"
 
 return copy_propagate

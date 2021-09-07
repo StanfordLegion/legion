@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,6 +19,11 @@ local type_check = require("bishop/type_check")
 local optimize_match = require("bishop/optimize_match")
 local codegen = require("bishop/codegen")
 local std = require("bishop/std")
+
+do
+  local config, _ = require("regent/config").args()
+  assert(not config["separate"], "Bishop cannot be used with -fseparate 1")
+end
 
 -- Add Language Builtins to Global Environment
 

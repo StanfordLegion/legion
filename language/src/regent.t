@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -45,24 +45,28 @@ local language = {
   name = "legion",
   entrypoints = {
     "__demand",
+    "__allow",
     "__forbid",
+    "__line",
     "extern",
     "fspace",
     "rexpr",
+    "remit",
     "rquote",
     "task",
   },
   keywords = {
     "__block",
+    "__constant_time_launch",
     "__context",
     "__cuda",
     "__delete",
     "__demand",
     "__execution",
-    "__external",
     "__fence",
     "__fields",
     "__forbid",
+    "__future",
     "__idempotent",
     "__import_ispace",
     "__import_region",
@@ -71,6 +75,8 @@ local language = {
     "__inline",
     "__inner",
     "__leaf",
+    "__local",
+    "__line",
     "__mapping",
     "__openmp",
     "__optimize",
@@ -78,6 +84,7 @@ local language = {
     "__parallelize_with",
     "__parallel_prefix",
     "__physical",
+    "__predicate",
     "__raw",
     "__replicable",
     "__runtime",
@@ -97,6 +104,7 @@ local language = {
     "attach",
     "awaits",
     "atomic",
+    "complete",
     "copy",
     "cross_product",
     "cross_product_array",
@@ -111,6 +119,7 @@ local language = {
     "fill",
     "hdf5",
     "image",
+    "incomplete",
     "isnull",
     "ispace",
     "list_cross_product",
@@ -136,6 +145,7 @@ local language = {
     "reduces",
     "relaxed",
     "release",
+    "rescape",
     "region",
     "restrict",
     "simultaneous",
@@ -153,11 +163,11 @@ function language:expression(lex)
 end
 
 function language:statement(lex)
-  return passes.entry_stat(lex)
+  return passes.entry_stat(lex, false)
 end
 
 function language:localstatement(lex)
-  return passes.entry_stat(lex)
+  return passes.entry_stat(lex, true)
 end
 
 return language

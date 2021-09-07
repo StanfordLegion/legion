@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -46,6 +46,13 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
+function context:new_task_scope(task_annotations)
+  assert(task_annotations and task_annotations:is(ast.annotation.Set))
+  return setmetatable({
+    task_annotations = task_annotations,
+  }, context)
+end
+
 function context.new_global_scope()
   local cx = {}
   return setmetatable(cx, context)
@@ -59,6 +66,8 @@ local function render_option(option, value)
   return "__" .. value_name .. "(__" .. tostring(option) .. ")"
 end
 
+local default = ast.default_annotations()
+
 local function check(node, allowed_set)
   -- Sanity check the allowed set.
   for option, _ in pairs(allowed_set) do
@@ -67,7 +76,7 @@ local function check(node, allowed_set)
 
   -- Check that only options in the allowed_set are enabled.
   for option, value in pairs(node.annotations) do
-    if ast.is_node(value) and not value:is(ast.annotation.Allow) and
+    if ast.is_node(value) and not value:is(default[option].node_type) and
       not allowed_set[option]
     then
       report.error(node, "option " .. render_option(option, value) ..
@@ -78,10 +87,26 @@ end
 
 local function allow(allowed_list)
   local allowed_set = data.set(allowed_list)
-  return function(node)
+  return function(cx, node)
     check(node, allowed_set)
   end
 end
+local function allow_if_task(allowed_list, extra_allow_if_task)
+  local allowed_if_task_list = terralib.newlist()
+  allowed_if_task_list:insertall(allowed_list)
+  allowed_if_task_list:insert(extra_allow_if_task)
+
+  local allowed_set = data.set(allowed_list)
+  local allowed_if_task_set = data.set(allowed_if_task_list)
+  return function(cx, node)
+    if cx.task_annotations[extra_allow_if_task]:is(ast.annotation.Demand) then
+      check(node, allowed_if_task_set)
+    else
+      check(node, allowed_set)
+    end
+  end
+end
+
 local deny_all = allow({})
 
 local function pass(node)
@@ -91,7 +116,8 @@ local function unreachable(node)
   assert(false, "unreachable")
 end
 
-local permitted_for_num_annotations = terralib.newlist({"index_launch", "spmd", "trace", "vectorize"})
+local permitted_for_num_annotations = terralib.newlist({
+  "constant_time_launch", "index_launch", "spmd", "trace", "vectorize"})
 
 local node_allow_annotations = {
   -- Expressions:
@@ -99,6 +125,7 @@ local node_allow_annotations = {
 
   [ast.typed.expr.ID]                         = deny_all,
   [ast.typed.expr.Constant]                   = deny_all,
+  [ast.typed.expr.Global]                     = deny_all,
   [ast.typed.expr.Function]                   = deny_all,
   [ast.typed.expr.FieldAccess]                = deny_all,
   [ast.typed.expr.IndexAccess]                = deny_all,
@@ -109,6 +136,7 @@ local node_allow_annotations = {
   [ast.typed.expr.CtorRecField]               = deny_all,
   [ast.typed.expr.RawContext]                 = deny_all,
   [ast.typed.expr.RawFields]                  = deny_all,
+  [ast.typed.expr.RawFuture]                  = deny_all,
   [ast.typed.expr.RawPhysical]                = deny_all,
   [ast.typed.expr.RawRuntime]                 = deny_all,
   [ast.typed.expr.RawTask]                    = deny_all,
@@ -164,17 +192,18 @@ local node_allow_annotations = {
   [ast.typed.expr.ImportIspace]               = deny_all,
   [ast.typed.expr.ImportRegion]               = deny_all,
   [ast.typed.expr.ImportPartition]            = deny_all,
+  [ast.typed.expr.Projection]                 = deny_all,
 
   [ast.typed.expr.Internal]                   = unreachable,
   [ast.typed.expr.Future]                     = unreachable,
   [ast.typed.expr.FutureGetResult]            = unreachable,
 
   -- Statements:
-  [ast.typed.stat.If]        = deny_all,
+  [ast.typed.stat.If]        = allow({"predicate"}),
   [ast.typed.stat.Elseif]    = deny_all,
-  [ast.typed.stat.While]     = allow({"spmd", "trace"}),
+  [ast.typed.stat.While]     = allow({"predicate", "spmd", "trace"}),
   [ast.typed.stat.ForNum]    = allow(permitted_for_num_annotations),
-  [ast.typed.stat.ForList]   = allow({"index_launch", "openmp", "spmd", "trace", "vectorize", "cuda"}),
+  [ast.typed.stat.ForList]   = allow_if_task({"constant_time_launch", "index_launch", "openmp", "spmd", "trace", "vectorize"}, "cuda"),
   [ast.typed.stat.Repeat]    = allow({"spmd", "trace"}),
   [ast.typed.stat.MustEpoch] = deny_all,
   [ast.typed.stat.Block]     = allow({"spmd", "trace"}),
@@ -206,11 +235,11 @@ local node_allow_annotations = {
 
   [ast.typed.top.Task] = allow({
     "cuda",
-    "external",
     "idempotent",
     "inline",
     "inner",
     "leaf",
+    "local_launch",
     "optimize",
     "parallel",
     "replicable",
@@ -234,6 +263,7 @@ local node_allow_annotations = {
   [ast.privilege_kind] = pass,
   [ast.condition_kind] = pass,
   [ast.disjointness_kind] = pass,
+  [ast.completeness_kind] = pass,
   [ast.fence_kind] = pass,
   [ast.constraint] = pass,
   [ast.privilege] = pass,
@@ -245,7 +275,13 @@ local check_annotations_node = ast.make_single_dispatch(
   {ast.typed})
 
 function check_annotations.top(cx, node)
-  ast.traverse_node_postorder(check_annotations_node(), node)
+  if node:is(ast.typed.top.Task) then
+    local cx = cx:new_task_scope(node.annotations)
+
+    ast.traverse_node_postorder(check_annotations_node(cx), node)
+  else
+    ast.traverse_node_postorder(check_annotations_node(cx), node)
+  end
 end
 
 function check_annotations.entry(node)

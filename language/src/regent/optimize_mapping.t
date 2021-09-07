@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ function context:new_task_scope(constraints, region_universe)
   local cx = {
     constraints = constraints,
     region_universe = region_universe,
+    task_global_usage = data.newmap(),
   }
   return setmetatable(cx, context)
 end
@@ -52,33 +53,6 @@ end
 local create = "create"
 local inline = "inline"
 local remote = "remote"
-
-local function uses(cx, region_type, polarity)
-  -- In order for this to be sound, we need to unmap *all* regions
-  -- that could potentially alias with this one, not just just the
-  -- region itself. Not all of these regions will necessarily be
-  -- mapped, but codegen will be able to do the right thing by
-  -- ignoring anything that isn't a root in the region forest.
-
-  assert(std.type_supports_privileges(region_type))
-  local usage = data.newmap()
-  usage[region_type] = polarity
-
-  for other_region_type, _ in cx.region_universe:items() do
-    if std.is_region(other_region_type) then -- Skip lists of regions
-      local constraint = std.constraint(
-        region_type,
-        other_region_type,
-        std.disjointness)
-      if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
-        not std.check_constraint(cx, constraint)
-      then
-        usage[other_region_type] = polarity
-      end
-    end
-  end
-  return usage
-end
 
 local function usage_meet_polarity(a, b)
   if not a then
@@ -97,7 +71,7 @@ local function usage_meet_polarity(a, b)
   end
 end
 
-local function usage_meet(...)
+function usage_meet(...)
   local usage = data.newmap()
   for _, a in pairs({...}) do
     if a then
@@ -106,6 +80,51 @@ local function usage_meet(...)
       end
     end
   end
+  return usage
+end
+
+local function uses(cx, region_type, polarity)
+  -- In order for this to be sound, we need to unmap *all* regions
+  -- that could potentially alias with this one, not just just the
+  -- region itself. Not all of these regions will necessarily be
+  -- mapped, but codegen will be able to do the right thing by
+  -- ignoring anything that isn't a root in the region forest.
+
+  assert(std.type_supports_privileges(region_type))
+  local usage = data.newmap()
+  -- We over-approximate projected regions to their sources.
+  -- Regions that are projected onto disjoint sets of fields are
+  -- in fact independent but will be treated like the same region.
+  if std.is_region(region_type) and region_type:is_projected() then
+    region_type = region_type:get_projection_source()
+  end
+  usage[region_type] = polarity
+
+  for other_region_type, _ in cx.region_universe:items() do
+    if std.is_region(other_region_type) and -- Skip lists of regions
+       not other_region_type:is_projected() -- Skip projected regions as well
+    then
+      local constraint = std.constraint(
+        region_type,
+        other_region_type,
+        std.disjointness)
+      if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
+        not std.check_constraint(cx, constraint)
+      then
+        usage[other_region_type] = polarity
+      end
+    end
+  end
+
+  -- We also need to track the global usage for the task, so that we
+  -- can know whether a region is used overall or not.
+
+  -- But DON'T do this for create, otherwise everything becomes inline
+  -- in the task (if it gets used elsewhere at all).
+  if polarity ~= create then
+    cx.task_global_usage = usage_meet(cx.task_global_usage, usage)
+  end
+
   return usage
 end
 
@@ -252,26 +271,18 @@ local node_usage = {
   end,
 
   [ast.typed.expr] = uses_nothing,
-  [ast.typed.stat] = uses_nothing,
-
-  [ast.typed.Block]             = uses_nothing,
-  [ast.IndexLaunchArgsProvably] = uses_nothing,
-  [ast.location]                = uses_nothing,
-  [ast.annotation]              = uses_nothing,
-  [ast.condition_kind]          = uses_nothing,
-  [ast.disjointness_kind]       = uses_nothing,
-  [ast.fence_kind]              = uses_nothing,
 }
 
 -- FIXME: Should fill out at least the expr cases, otherwise can't
 -- tell if the pass has been updated for all AST nodes or not.
 local analyze_usage_node = ast.make_single_dispatch(
   node_usage,
-  {}) -- ast.typed.expr
+  {}, -- ast.typed.expr
+  uses_nothing)
 
 local function analyze_usage(cx, node)
   assert(node)
-  return ast.mapreduce_node_postorder(
+  return ast.mapreduce_expr_postorder(
     analyze_usage_node(cx),
     usage_meet,
     node, nil)
@@ -618,7 +629,17 @@ function optimize_mapping.top_task(cx, node)
   local annotated_body = optimize_mapping.block(cx, node.body)
   local body = fixup_block(annotated_body, initial_usage, nil)
 
-  return node { body = body }
+  local region_usage = data.newmap()
+  for region_type, polarity in cx.task_global_usage:items() do
+    if polarity == inline then
+      region_usage[region_type] = true
+    end
+  end
+
+  return node {
+    body = body,
+    region_usage = region_usage,
+  }
 end
 
 function optimize_mapping.top(cx, node)

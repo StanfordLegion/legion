@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,8 +21,6 @@ local base = {}
 
 base.config, base.args = config.args()
 
-local max_dim = base.config["legion-dim"]
-
 -- Hack: Terra symbols don't support the hash() method so monkey patch
 -- it in here. This allows deterministic hashing of Terra symbols,
 -- which is currently required by OpenMP codegen.
@@ -34,18 +32,56 @@ do
   end
 end
 
+-- Helpers for zero/min/max values of various types.
+
+local function zero(value_type) return terralib.cast(value_type, 0) end
+local function one(value_type) return terralib.cast(value_type, 1) end
+local function min_value(value_type)
+  if type(rawget(value_type, "min")) == "function" then
+    return value_type:min()
+  else
+    return terralib.cast(value_type, -math.huge)
+  end
+end
+local function max_value(value_type)
+  if type(rawget(value_type, "max")) == "function" then
+    return value_type:max()
+  else
+    return terralib.cast(value_type, math.huge)
+  end
+end
+
 -- #####################################
 -- ## Legion Bindings
 -- #################
+
+do
+local linked_libraries = terralib.newlist()
+
+function base.linklibrary(library_name)
+  if base.config["offline"] then
+    linked_libraries:insert(library_name)
+  else
+    terralib.linklibrary(library_name)
+  end
+end
+
+function base.load_all_libraries()
+  assert(data.is_luajit())
+  linked_libraries:map(function(library)
+    terralib.linklibrary(library)
+  end)
+end
 
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
   base.binding_library = "libregent.dylib"
 else
   base.binding_library = "libregent.so"
 end
-if data.is_luajit() then
-  terralib.linklibrary(base.binding_library)
+base.linklibrary(base.binding_library)
+
 end
+
 local c = terralib.includecstring([[
 #include "legion.h"
 #include "regent.h"
@@ -59,8 +95,16 @@ local c = terralib.includecstring([[
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-]], {"-DREALM_MAX_DIM=" .. tostring(max_dim), "-DLEGION_MAX_DIM=" .. tostring(max_dim)})
+]])
 base.c = c
+
+-- Hack: Terra's parser isn't smart enough to read the value of
+-- AUTO_GENERATE_ID, so just force it here so we don't have to
+-- hard-code its value elsewhere in the compiler.
+c.AUTO_GENERATE_ID = -1
+
+local max_dim = c.LEGION_MAX_DIM
+base.max_dim = max_dim
 
 -- #####################################
 -- ## Utilities
@@ -147,6 +191,14 @@ end
 -- ## Codegen Helpers
 -- #################
 
+function base.normalize_name(name)
+  return string.gsub(
+    string.gsub(
+      string.gsub(name, ".*/", ""),
+      "[<>]", ""),
+    "[^A-Za-z0-9]", "_")
+end
+
 function base.type_meet(a, b)
   local function test()
     local terra query(x : a, y : b)
@@ -173,12 +225,28 @@ local gen_optimal = terralib.memoize(
     end
   end)
 
+local gen_optimal_skip_nan = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      -- Do NOT propogate a NaN, if any.
+      if [base.quote_binary_op(op, lhs, rhs)] or rhs ~= rhs then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
 base.fmax = macro(
   function(lhs, rhs)
     local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
     local result_type = base.type_meet(lhs_type, rhs_type)
     assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+    if result_type:isfloat() then
+      return `([gen_optimal_skip_nan(">", lhs_type, rhs_type)]([lhs], [rhs]))
+    else
+      return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+    end
   end)
 
 base.fmin = macro(
@@ -186,7 +254,11 @@ base.fmin = macro(
     local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
     local result_type = base.type_meet(lhs_type, rhs_type)
     assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+    if result_type:isfloat() then
+      return `([gen_optimal_skip_nan("<", lhs_type, rhs_type)]([lhs], [rhs]))
+    else
+      return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+    end
   end)
 
 function base.quote_unary_op(op, rhs)
@@ -214,6 +286,12 @@ function base.quote_binary_op(op, lhs, rhs)
     return `([lhs] < [rhs])
   elseif op == ">" then
     return `([lhs] > [rhs])
+  elseif op == "^" then
+    return `([lhs] ^ [rhs])
+  elseif op == "<<" then
+    return `([lhs] << [rhs])
+  elseif op == ">>" then
+    return `([lhs] >> [rhs])
   elseif op == "<=" then
     return `([lhs] <= [rhs])
   elseif op == ">=" then
@@ -236,6 +314,34 @@ function base.quote_binary_op(op, lhs, rhs)
 end
 
 -- #####################################
+-- ## Complex types
+-- #################
+
+do
+  local st = terralib.types.newstruct("complex32")
+  st.entries = terralib.newlist({
+      { "real", float },
+      { "imag", float },
+  })
+  st.base_type = float
+  st.is_complex_type = true
+  base.complex = st
+  base.complex32 = st
+end
+
+do
+  local st = terralib.types.newstruct("complex64")
+  st.entries = terralib.newlist({
+      { "real", double },
+      { "imag", double },
+  })
+  st.base_type = double
+  st.is_complex_type = true
+  base.complex = st
+  base.complex64 = st
+end
+
+-- #####################################
 -- ## Physical Privilege Helpers
 -- #################
 
@@ -249,28 +355,14 @@ end
 --  * "reads_writes" is a physical privilege (not a normal privilege),
 --    and is the top of the physical privilege lattice
 
-local function zero(value_type) return terralib.cast(value_type, 0) end
-local function one(value_type) return terralib.cast(value_type, 1) end
-local function min_value(value_type)
-  if type(rawget(value_type, "min")) == "function" then
-    return value_type:min()
-  else
-    return terralib.cast(value_type, -math.huge)
-  end
-end
-local function max_value(value_type)
-  if type(rawget(value_type, "max")) == "function" then
-    return value_type:max()
-  else
-    return terralib.cast(value_type, math.huge)
-  end
-end
 local function lift(fn)
   return function(value_type)
     if value_type:isarray() then
       return `(array([data.range(value_type.N):map(function(_)
         return lift(fn)(value_type.type)
       end)]))
+    elseif value_type == base.complex32 or value_type == base.complex64 then
+      return `([value_type] { [fn(value_type.base_type)], 0.0 })
     else
       return fn(value_type)
     end
@@ -287,17 +379,19 @@ base.reduction_ops = data.map_from_table({
 })
 base.reduction_op_ids = {}
 base.reduction_op_init = {}
+base.all_reduction_ops = terralib.newlist()
 base.registered_reduction_ops = terralib.newlist()
 do
   local base_op_id = 101
-  function base.update_reduction_op(op, op_type, init)
+  function base.update_reduction_op(op, op_type, op_id, init)
     if base.reduction_op_ids[op] ~= nil and
        base.reduction_op_ids[op][op_type] ~= nil
     then
       return
     end
-    local op_id = base_op_id
-    base_op_id = base_op_id + 1
+    local builtin = op_id ~= nil
+    local op_id = op_id or base_op_id
+    if not builtin then base_op_id = base_op_id + 1 end
     if not base.reduction_op_ids[op] then
       base.reduction_op_ids[op] = {}
     end
@@ -306,18 +400,39 @@ do
     end
     base.reduction_op_ids[op][op_type] = op_id
     base.reduction_op_init[op][op_type] = init or base.reduction_ops[op].init(op_type)
-    base.registered_reduction_ops:insert({op, op_type})
+    base.all_reduction_ops:insert({op, op_type})
+    if not builtin then
+      base.registered_reduction_ops:insert({op, op_type})
+    end
   end
 
   -- Prefill the table of reduction op IDs for primitive types.
   local reduction_ops =
     terralib.newlist({ "+", "-", "*", "/", "max", "min" })
+  local legion_op_names = data.map_from_table({
+    ["+"] = "SUM", ["-"] = "SUM",  ["*"] = "PROD",
+    ["/"] = "PROD", ["max"] = "MAX", ["min"] = "MIN" })
   local primitive_reduction_types =
-    terralib.newlist({ float, double, int32, int64, uint32, uint64 })
+    terralib.newlist({ float, double, int16, int32, int64, uint16, uint32, uint64 })
   for _, op in ipairs(reduction_ops) do
     for _, op_type in ipairs(primitive_reduction_types) do
-      base.update_reduction_op(op, op_type)
+      local type_name =
+        (op_type:isfloat() and ("FLOAT" .. tostring(sizeof(op_type) * 8))) or
+        string.upper(tostring(op_type))
+      local legion_op_id =
+        c["LEGION_REDOP_" .. legion_op_names[op] .. "_" .. type_name]
+      base.update_reduction_op(op, op_type, legion_op_id)
     end
+  end
+  -- Prefill the table of reduction op IDs for complex types.
+  do
+    base.update_reduction_op("+", base.complex32, c.LEGION_REDOP_SUM_COMPLEX64)
+    base.update_reduction_op("-", base.complex32, c.LEGION_REDOP_SUM_COMPLEX64)
+    base.update_reduction_op("*", base.complex32, c.LEGION_REDOP_PROD_COMPLEX64)
+    base.update_reduction_op("/", base.complex32, c.LEGION_REDOP_PROD_COMPLEX64)
+
+    base.update_reduction_op("+", base.complex64, c.LEGION_REDOP_SUM_COMPLEX128)
+    base.update_reduction_op("-", base.complex64, c.LEGION_REDOP_SUM_COMPLEX128)
   end
 end
 
@@ -415,6 +530,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
     field_privilege = "reads_writes"
   end
 
+  local redop_id = false
   if base.is_reduction_op(field_privilege) then
     local op = base.get_reduction_op(field_privilege)
     if not (base.reduction_op_ids[op] and base.reduction_op_ids[op][field_type]) then
@@ -422,9 +538,12 @@ local function find_field_privilege(privileges, coherence_modes, flags,
       -- have made it past the parser anyway.
       assert(false)
     end
+    -- Hack: This is a way to bucket reductions by redop ID and make
+    -- sure they sort deterministically.
+    redop_id = base.reduction_op_ids[op][field_type]
   end
 
-  return field_privilege, coherence_mode, flag
+  return field_privilege, redop_id, coherence_mode, flag
 end
 
 function base.find_task_privileges(region_type, task)
@@ -444,15 +563,22 @@ function base.find_task_privileges(region_type, task)
   local field_paths, field_types = base.types.flatten_struct_fields(
     region_type:fspace())
 
-  local fields_by_mode = data.new_recursive_map(1)
+  local fields_by_mode = data.newmap()
+  local min_field_index_by_mode = data.newmap()
   local field_type_by_field = data.newmap()
   for i, field_path in ipairs(field_paths) do
     local field_type = field_types[i]
-    local privilege, coherence, flag = find_field_privilege(
+    local privilege, redop_id, coherence, flag = find_field_privilege(
       privileges, coherence_modes, flags, region_type, field_path, field_type)
-    local mode = data.newtuple(privilege, coherence, flag)
+    local mode = data.newtuple(privilege, redop_id, coherence, flag)
     if privilege ~= "none" then
-      fields_by_mode[mode][field_path] = true
+      if not fields_by_mode[mode] then
+        fields_by_mode[mode] = terralib.newlist()
+      end
+      fields_by_mode[mode]:insert(field_path)
+      if not min_field_index_by_mode[mode] then
+        min_field_index_by_mode[mode] = i
+      end
       field_type_by_field[field_path] = field_type
     end
   end
@@ -475,41 +601,43 @@ function base.find_task_privileges(region_type, task)
         return true
       elseif py then
         return false
+      elseif x[2] and y[2] and x[2] ~= y[2] then
+        -- Reductions are relatively ordered by the field index (i.e.,
+        -- the index of the first field that appears in the field
+        -- space of the region).
+        return min_field_index_by_mode[x] < min_field_index_by_mode[y]
       elseif x[1] ~= y[1] then
-        return x[1] < y[1]
+        -- There are no other privileges.
+        assert(false)
       end
 
-      local cx = coherence_order[x[2]]
-      local cy = coherence_order[y[2]]
+      local cx = coherence_order[x[3]]
+      local cy = coherence_order[y[3]]
       if cx and cy then
         return cx < cy
       elseif cx then
         return true
       elseif cy then
         return false
-      elseif x[2] ~= y[2] then
-        return x[2] < y[2]
+      elseif x[3] ~= y[3] then
+        return x[3] < y[3]
       end
 
-      return x[3] < y[3]
+      return x[4] < y[4]
     end)
 
   local privilege_index = data.newmap()
   local privilege_next_index = 1
   for _, mode in ipairs(modes) do
-    local privilege, coherence, flag = unpack(mode)
-    for _, field_path in fields_by_mode[mode]:keys() do
+    local privilege, redop_id, coherence, flag = unpack(mode)
+    for _, field_path in ipairs(fields_by_mode[mode]) do
       local field_type = field_type_by_field[field_path]
       local index = privilege_index[mode]
       if not index then
         index = privilege_next_index
         privilege_next_index = privilege_next_index + 1
 
-        -- Reduction privileges cannot be grouped, because the Legion
-        -- runtime does not know how to handle multi-field reductions.
-        if not base.is_reduction_op(privilege) then
-          privilege_index[mode] = index
-        end
+        privilege_index[mode] = index
 
         grouped_privileges:insert(privilege)
         grouped_coherence_modes:insert(coherence)
@@ -722,6 +850,10 @@ function base.types.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance") or false
 end
 
+function base.types.is_complex_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_complex_type") or false
+end
+
 function base.types.flatten_struct_fields(struct_type)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
@@ -897,14 +1029,6 @@ function base.variant:is_openmp()
   return self.openmp
 end
 
-function base.variant:set_is_external(external)
-  self.external = external
-end
-
-function base.variant:is_external()
-  return self.external
-end
-
 function base.variant:set_is_inline(inline)
   self.inline = inline
 end
@@ -914,25 +1038,29 @@ function base.variant:is_inline()
 end
 
 do
-  local global_kernel_id = 1
+  -- We use this counter to guarantee that each CUDA kernel within a module has a unique name
+  -- Note that task-local counters prefixed by task names are insufficient because meta-programmed
+  -- tasks have the same name.
+  local global_kernel_counter = 1
   function base.variant:add_cuda_kernel(kernel)
     if not self.cudakernels then
-      self.cudakernels = {}
+      self.cudakernels = terralib.newlist()
     end
-    local kernel_id = global_kernel_id
-    local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(kernel_id)
-    self.cudakernels[kernel_id] = {
+    local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(global_kernel_counter)
+    local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
+    self.cudakernels:insert({
       name = kernel_name,
       kernel = kernel,
-    }
-    global_kernel_id = global_kernel_id + 1
+      kernel_id = kernel_id,
+    })
     kernel:setname(kernel_name)
+    global_kernel_counter = global_kernel_counter + 1
     return kernel_id
   end
 end
 
 function base.variant:get_cuda_kernels()
-  return self.cudakernels or {}
+  return self.cudakernels or terralib.newlist()
 end
 
 function base.variant:set_config_options(t)
@@ -990,6 +1118,9 @@ function base.variant:get_untyped_ast()
 end
 
 function base.variant:compile()
+  if base.config["offline"] then
+    error("Manual compile requests for individual task variants are prohibited in the offline mode.")
+  end
   self.task:complete()
   return self:get_definition():compile()
 end
@@ -1004,7 +1135,7 @@ function base.variant:wrapper_name()
   -- (generated) header file.
   return
     '__regent_task'
-    .. '_' .. self.task:get_task_id():asvalue()
+    .. '_' .. self.task.unique_task_identifier
     .. '_' .. self:get_name()
 end
 
@@ -1097,7 +1228,6 @@ do
       definition = false,
       cuda = false,
       openmp = false,
-      external = false,
       inline = false,
       cudakernels = false,
       config_options = false,
@@ -1120,6 +1250,28 @@ end
 -- #################
 
 base.initial_regent_task_id = 10000
+
+local make_unique_task_identifier
+do
+  local unique_task_ids = {}
+  function make_unique_task_identifier(name)
+    local id = base.normalize_name(tostring(name))
+
+    if not unique_task_ids[id] then
+      unique_task_ids[id] = true
+      return id
+    end
+
+    local offset = 1
+    local id_offset
+    repeat
+      id_offset = id .. "_" .. offset
+      offset = offset + 1
+    until not unique_task_ids[id_offset]
+    unique_task_ids[id_offset] = true
+    return id_offset
+  end
+end
 
 base.task = {}
 function base.task:__index(field)
@@ -1307,11 +1459,58 @@ function base.task:set_task_id(task_id)
   if #self:get_variants() > 0 then
     error("task ID can only be set when task has zero variants")
   end
-  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  if base.config["separate"] then
+    self.taskid:setinitializer(task_id)
+  else
+    self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  end
+end
+
+-- TODO: This is actually safe once we make task ids global variables
+function base.task:set_task_id_unsafe(task_id)
+  if base.config["separate"] then
+    self.taskid:setinitializer(task_id)
+  else
+    self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+  end
 end
 
 function base.task:get_task_id()
   return self.taskid
+end
+
+function base.task:has_mapper_id()
+  return self.mapper_id
+end
+
+function base.task:get_mapper_id()
+  assert(self.mapper_id)
+  return self.mapper_id
+end
+
+function base.task:set_mapper_id(mapper_id)
+  if base.config["separate"] then
+    self.mapper_id:setinitializer(mapper_id)
+  else
+    self.mapper_id = terralib.constant(c.legion_mapper_id_t, mapper_id)
+  end
+end
+
+function base.task:has_mapping_tag_id()
+  return self.mapping_tag_id
+end
+
+function base.task:get_mapping_tag_id()
+  assert(self.mapping_tag_id)
+  return self.mapping_tag_id
+end
+
+function base.task:set_mapping_tag_id(tag)
+  if base.config["separate"] then
+    self.mapping_tag_id:setinitializer(tag)
+  else
+    self.mapping_tag_id = terralib.constant(c.legion_mapping_tag_id_t, tag)
+  end
 end
 
 function base.task:set_name(name)
@@ -1324,10 +1523,18 @@ function base.task:set_name(name)
   end
 
   self.name = name
+  self.unique_task_identifier = make_unique_task_identifier(name)
+  if base.config["separate"] then
+    self.taskid:setname("__regent_task_" .. self.unique_task_identifier .. "_task_id")
+  end
 end
 
 function base.task:get_name()
   return self.name
+end
+
+function base.task:is_extern()
+  return self.extern
 end
 
 function base.task:has_calling_convention()
@@ -1359,7 +1566,7 @@ function base.task:get_variant(name)
 end
 
 function base.task:set_primary_variant(task)
-  assert(not self.primary_variant)
+  assert(not self.primary_variant and not self:is_extern())
   self.primary_variant = task
 end
 
@@ -1373,7 +1580,7 @@ function base.task:get_primary_variant()
 end
 
 function base.task:set_cuda_variant(task)
-  assert(not self.cuda_variant)
+  assert(not self.cuda_variant and not self:is_extern())
   self.cuda_variant = task
 end
 
@@ -1382,7 +1589,7 @@ function base.task:get_cuda_variant()
 end
 
 function base.task:set_parallel_task(task)
-  assert(not self.parallel_task)
+  assert(not self.parallel_task and not self:is_extern())
   self.parallel_task = task
 end
 
@@ -1425,6 +1632,10 @@ function base.task:set_is_inline(is_inline)
   self.is_inline = is_inline
 end
 
+function base.task:set_is_local(is_local)
+  self.is_local = is_local
+end
+
 function base.task:set_optimization_thunk(optimization_thunk)
   self.optimization_thunk = optimization_thunk
 end
@@ -1443,8 +1654,11 @@ function base.task:__tostring()
 end
 
 do
-  local next_task_id = base.initial_regent_task_id
-  function base.new_task(name)
+  local next_task_id
+  if not base.config["separate"] then
+    next_task_id = base.initial_regent_task_id
+  end
+  function base.new_task(name, span, extern)
     if type(name) == "string" then
       name = data.newtuple(name)
     elseif data.is_tuple(name) then
@@ -1453,13 +1667,52 @@ do
       assert(false)
     end
 
-    local task_id = next_task_id
-    next_task_id = next_task_id + 1
+    local unique_id = make_unique_task_identifier(name)
+    local task_id
+    if base.config["separate"] then
+      local global_name = "__regent_task_" .. unique_id .. "_task_id"
+      if extern then
+        task_id = terralib.global(c.legion_task_id_t, nil, global_name, true)
+      else
+        task_id = terralib.global(c.legion_task_id_t, c.AUTO_GENERATE_ID, global_name)
+      end
+    else
+      task_id = terralib.constant(c.legion_task_id_t, next_task_id)
+      next_task_id = next_task_id + 1
+    end
+
+    local mapper_id = false
+    if base.config["separate"] then
+      local global_name = "__regent_task_" .. unique_id .. "_mapper_id"
+      if extern then
+        mapper_id = terralib.global(c.legion_mapper_id_t, nil, global_name, true)
+      else
+        mapper_id = terralib.global(c.legion_mapper_id_t, 0, global_name)
+      end
+    end
+
+    local mapping_tag_id = false
+    if base.config["separate"] then
+      local global_name = "__regent_task_" .. unique_id .. "_mapping_tag_id"
+      if extern then
+        mapping_tag_id = terralib.global(c.legion_mapping_tag_id_t, nil, global_name, true)
+      else
+        mapping_tag_id = terralib.global(c.legion_mapping_tag_id_t, 0, global_name)
+      end
+    end
+
     return setmetatable({
       name = name,
-      taskid = terralib.constant(c.legion_task_id_t, task_id),
+      span = span,
+      extern = extern or false,
+      unique_task_identifier = unique_id,
+      taskid = task_id,
       variants = terralib.newlist(),
       calling_convention = false,
+
+      -- User-configurable task metadata:
+      mapper_id = mapper_id,
+      mapping_tag_id = mapping_tag_id,
 
       -- Metadata for the Regent calling convention:
       param_symbols = false,
@@ -1490,6 +1743,7 @@ do
       is_complete = false,
       optimization_thunk = false,
       is_inline = false,
+      is_local = false,
     }, base.task)
   end
 end

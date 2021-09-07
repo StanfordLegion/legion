@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ local copy_propagate = require("regent/copy_propagate")
 local optimize_config_options = require("regent/optimize_config_options")
 local optimize_divergence = require("regent/optimize_divergence")
 local optimize_futures = require("regent/optimize_futures")
+local optimize_predicate = require("regent/optimize_predicate")
 local optimize_index_launches = require("regent/optimize_index_launches")
 local optimize_mapping = require("regent/optimize_mapping")
 local optimize_traces = require("regent/optimize_traces")
@@ -50,6 +51,7 @@ if std.config["parallelize"] then passes_hooks.add_optimization(14, parallelize_
 if std.config["index-launch"] then passes_hooks.add_optimization(25, optimize_index_launches) end
 if std.config["skip-empty-tasks"] then passes_hooks.add_optimization(28, skip_empty_tasks) end
 if std.config["future"] then passes_hooks.add_optimization(30, optimize_futures) end
+if std.config["predicate"] then passes_hooks.add_optimization(40, optimize_predicate) end
 if std.config["mapping"] then passes_hooks.add_optimization(50, optimize_mapping) end
 if std.config["trace"] then passes_hooks.add_optimization(60, optimize_traces) end
 if std.config["no-dynamic-branches"] then passes_hooks.add_optimization(70, optimize_divergence) end

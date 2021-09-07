@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -300,6 +300,8 @@ function flip_types.expr(cx, simd_width, symbol, node)
         span = node.span,
       }
       return ast.typed.expr.Call {
+        predicate = false,
+        predicate_else_value = false,
         fn = ast.typed.expr.Function {
           expr_type = fn_type,
           value = fn,
@@ -518,7 +520,7 @@ function min_simd_width.expr(cx, reg_size, node)
     end
 
   elseif node:is(ast.typed.expr.IndexAccess) then
-    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
+    simd_width = min(simd_width, min_simd_width.type(reg_size, std.as_read(node.expr_type)))
 
   elseif node:is(ast.typed.expr.Unary) then
     simd_width = min_simd_width.expr(cx, reg_size, node.rhs)
@@ -553,7 +555,7 @@ function min_simd_width.expr(cx, reg_size, node)
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
   elseif node:is(ast.typed.expr.Deref) then
-    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
+    simd_width = min(simd_width, min_simd_width.type(reg_size, std.as_read(node.expr_type)))
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

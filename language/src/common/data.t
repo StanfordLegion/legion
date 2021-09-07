@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -224,6 +224,16 @@ function data.dict(list)
   return result
 end
 
+function data.find_key(dict, val)
+  -- given a value find the key
+  for k, v in pairs(dict) do
+    if v == val then
+      return k
+    end
+  end
+  return nil
+end
+
 function data.set(list)
   local result = {}
   for _, k in ipairs(list) do
@@ -277,6 +287,13 @@ end
 function data.tuple:starts_with(t)
   assert(data.is_tuple(t))
   return self:slice(1, data.min(#self, #t)) == t
+end
+
+function data.tuple:contains(f)
+  for i = 1, #self do
+    if self[i] == f then return true end
+  end
+  return false
 end
 
 function data.tuple:mkstring(first, sep, last)

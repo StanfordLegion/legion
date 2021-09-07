@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -61,12 +61,12 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context.new_global_scope()
+function context.new_global_scope(node)
   local cx = {
-    leaf       = { true, nil },
-    inner      = { true, nil },
-    idempotent = { true, nil },
-    replicable = { true, nil },
+    leaf       = { not node.annotations.leaf:is(ast.annotation.Forbid), nil },
+    inner      = { not node.annotations.inner:is(ast.annotation.Forbid), nil },
+    idempotent = { not node.annotations.idempotent:is(ast.annotation.Forbid), nil },
+    replicable = { not node.annotations.replicable:is(ast.annotation.Forbid), nil },
   }
   return setmetatable(cx, context)
 end
@@ -82,7 +82,9 @@ end
 local node_is_leaf = {
   -- Expressions:
   [ast.typed.expr.Call] = function(node)
-    return {not std.is_task(node.fn.value), node}
+    return {not std.is_task(node.fn.value) or
+              (node.fn.value.is_local and node.fn.value:get_primary_variant():get_config_options().leaf),
+            node}
   end,
 
   [ast.typed.expr.RawContext]                 = always_false,
@@ -128,6 +130,7 @@ local node_is_leaf = {
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
+  [ast.typed.expr.Global]          = always_true,
   [ast.typed.expr.Function]        = always_true,
   [ast.typed.expr.FieldAccess]     = always_true,
   [ast.typed.expr.IndexAccess]     = always_true,
@@ -137,6 +140,7 @@ local node_is_leaf = {
   [ast.typed.expr.CtorListField]   = always_true,
   [ast.typed.expr.CtorRecField]    = always_true,
   [ast.typed.expr.RawFields]       = always_true,
+  [ast.typed.expr.RawFuture]       = always_true,
   [ast.typed.expr.RawPhysical]     = always_true,
   [ast.typed.expr.RawRuntime]      = always_true,
   [ast.typed.expr.RawTask]         = always_true,
@@ -155,6 +159,7 @@ local node_is_leaf = {
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
   [ast.typed.expr.AddressOf]       = always_true,
+  [ast.typed.expr.Projection]      = always_true,
 
   [ast.typed.expr.Internal]        = unreachable,
 
@@ -189,21 +194,12 @@ local node_is_leaf = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_leaf_node = ast.make_single_dispatch(
   node_is_leaf,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
@@ -221,6 +217,13 @@ local node_is_inner = {
     return {not std.is_ref(node.expr_type), node}
   end,
 
+  [ast.typed.expr.Call] = function(node)
+    return {not std.is_task(node.fn.value) or
+              not node.fn.value.is_local or
+              node.fn.value:get_primary_variant():get_config_options().inner,
+            node}
+  end,
+
   [ast.typed.expr.RawPhysical] = always_false,
   [ast.typed.expr.Adjust]      = always_false,
   [ast.typed.expr.Arrive]      = always_false,
@@ -228,16 +231,17 @@ local node_is_inner = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Function]                   = always_true,
   [ast.typed.expr.FieldAccess]                = always_true,
   [ast.typed.expr.MethodCall]                 = always_true,
-  [ast.typed.expr.Call]                       = always_true,
   [ast.typed.expr.Cast]                       = always_true,
   [ast.typed.expr.Ctor]                       = always_true,
   [ast.typed.expr.CtorListField]              = always_true,
   [ast.typed.expr.CtorRecField]               = always_true,
   [ast.typed.expr.RawContext]                 = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawFuture]                  = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
   [ast.typed.expr.RawTask]                    = always_true,
   [ast.typed.expr.RawValue]                   = always_true,
@@ -291,6 +295,7 @@ local node_is_inner = {
   [ast.typed.expr.ImportIspace]               = always_true,
   [ast.typed.expr.ImportRegion]               = always_true,
   [ast.typed.expr.ImportPartition]            = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -325,21 +330,12 @@ local node_is_inner = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_inner_node = ast.make_single_dispatch(
   node_is_inner,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
@@ -355,7 +351,11 @@ local node_is_idempotent = {
   -- do no external call of any kind and also
   -- do not perform any kind of file I/O
   [ast.typed.expr.Call] = function(node)
-    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or node.replicable, node}
+    return {(std.is_task(node.fn.value) and
+               (not node.fn.value.is_local or node.fn.value:get_primary_variant():get_config_options().idempotent)) or
+              std.is_math_fn(node.fn.value) or
+              node.replicable,
+            node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,
@@ -371,6 +371,7 @@ local node_is_idempotent = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Deref]                      = always_true,
   [ast.typed.expr.IndexAccess]                = always_true,
   [ast.typed.expr.Function]                   = always_true,
@@ -381,6 +382,7 @@ local node_is_idempotent = {
   [ast.typed.expr.CtorRecField]               = always_true,
   [ast.typed.expr.RawContext]                 = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawFuture]                  = always_true,
   [ast.typed.expr.RawPhysical]                = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
   [ast.typed.expr.RawTask]                    = always_true,
@@ -430,6 +432,7 @@ local node_is_idempotent = {
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
   [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -463,21 +466,12 @@ local node_is_idempotent = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_idempotent_node = ast.make_single_dispatch(
   node_is_idempotent,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_idempotent(cx, node)
   return ast.mapreduce_node_postorder(
@@ -503,8 +497,13 @@ local node_is_replicable = {
   -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
     local is_user_replicable = type(node.fn.value) == "table" and rawget(node.fn.value, "replicable")
-    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or is_user_replicable or
-            node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
+    return {(std.is_task(node.fn.value) and
+              (not node.fn.value.is_local or node.fn.value:get_primary_variant():get_config_options().replicable)) or
+              std.is_math_fn(node.fn.value) or
+              is_user_replicable or
+              node.replicable or
+              std.replicable_whitelist[node.fn.value] or false,
+            node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,
@@ -515,6 +514,7 @@ local node_is_replicable = {
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
+  [ast.typed.expr.Global]                     = always_true,
   [ast.typed.expr.Deref]                      = always_true,
   [ast.typed.expr.IndexAccess]                = always_true,
   [ast.typed.expr.Function]                   = always_true,
@@ -525,6 +525,7 @@ local node_is_replicable = {
   [ast.typed.expr.CtorRecField]               = always_true,
   [ast.typed.expr.RawContext]                 = always_true,
   [ast.typed.expr.RawFields]                  = always_true,
+  [ast.typed.expr.RawFuture]                  = always_true,
   [ast.typed.expr.RawPhysical]                = always_true,
   [ast.typed.expr.RawRuntime]                 = always_true,
   [ast.typed.expr.RawTask]                    = always_true,
@@ -578,6 +579,7 @@ local node_is_replicable = {
   [ast.typed.expr.ImportIspace]               = always_true,
   [ast.typed.expr.ImportRegion]               = always_true,
   [ast.typed.expr.ImportPartition]            = always_true,
+  [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -611,21 +613,12 @@ local node_is_replicable = {
   [ast.typed.stat.EndTrace]          = unreachable,
   [ast.typed.stat.MapRegions]        = unreachable,
   [ast.typed.stat.UnmapRegions]      = unreachable,
-
-  -- Miscellaneous:
-  [ast.typed.Block]             = always_true,
-  [ast.IndexLaunchArgsProvably] = always_true,
-  [ast.location]                = always_true,
-  [ast.annotation]              = always_true,
-  [ast.condition_kind]          = always_true,
-  [ast.disjointness_kind]       = always_true,
-  [ast.fence_kind]              = always_true,
-  [ast.metadata]                = always_true,
 }
 
 local analyze_replicable_node = ast.make_single_dispatch(
   node_is_replicable,
-  {ast.typed.expr, ast.typed.stat})
+  {ast.typed.expr, ast.typed.stat},
+  always_true)
 
 local function analyze_replicable(cx, node)
   return ast.mapreduce_node_postorder(
@@ -717,7 +710,7 @@ function optimize_config_options.top(cx, node)
 end
 
 function optimize_config_options.entry(node)
-  local cx = context.new_global_scope()
+  local cx = context.new_global_scope(node)
   return optimize_config_options.top(cx, node)
 end
 

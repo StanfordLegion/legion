@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -194,12 +194,15 @@ local update_block_with_loop_values = update_block_with_symbol_value("symbol", "
 local node_alpha_conversion = {
   [ast.condition_kind]           = pass_through,
   [ast.disjointness_kind]        = pass_through,
+  [ast.completeness_kind]        = pass_through,
   [ast.fence_kind]               = pass_through,
 
   [ast.specialized.region.Bare]  = update_value,
   [ast.specialized.region.Root]  = update_value,
 
   [ast.specialized.region.Field] = pass_through,
+
+  [ast.specialized.projection.Field] = pass_through,
 
   [ast.specialized.expr.ID]      = update_value,
 
@@ -222,6 +225,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.Region]      = update_fspace_type,
 
   [ast.specialized.expr.Constant]                   = pass_through,
+  [ast.specialized.expr.Global]                     = pass_through,
   [ast.specialized.expr.FieldAccess]                = pass_through,
   [ast.specialized.expr.IndexAccess]                = pass_through,
   [ast.specialized.expr.MethodCall]                 = pass_through,
@@ -232,6 +236,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.CtorRecField]               = pass_through,
   [ast.specialized.expr.RawContext]                 = pass_through,
   [ast.specialized.expr.RawFields]                  = pass_through,
+  [ast.specialized.expr.RawFuture]                  = pass_through,
   [ast.specialized.expr.RawPhysical]                = pass_through,
   [ast.specialized.expr.RawRuntime]                 = pass_through,
   [ast.specialized.expr.RawTask]                    = pass_through,
@@ -278,8 +283,10 @@ local node_alpha_conversion = {
   [ast.specialized.expr.ImportIspace]               = pass_through,
   [ast.specialized.expr.ImportRegion]               = update_fspace_type,
   [ast.specialized.expr.ImportPartition]            = pass_through,
+  [ast.specialized.expr.Projection]                 = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
+    for k, v in pairs(node.value) do print(k, v) end
     report.error(node, "unable to specialize value of type table")
   end,
 
@@ -376,14 +383,12 @@ local node_alpha_conversion = {
   [ast.specialized.stat.Expr] = pass_through,
   [ast.specialized.stat.RawDelete] = pass_through,
   [ast.specialized.stat.Fence] = pass_through,
-  [ast.specialized.Block] = pass_through,
-  [ast.location] = pass_through,
-  [ast.annotation] = pass_through,
 }
 
 local alpha_convert_node = ast.make_single_dispatch(
   node_alpha_conversion,
-  {ast.specialized.expr, ast.specialized.stat})
+  {ast.specialized.expr, ast.specialized.stat},
+  pass_through)
 
 local function alpha_convert_body(cx, node)
   return ast.map_node_continuation(alpha_convert_node(cx), node)

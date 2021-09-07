@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, Los Alamos National Laboratory
+-- Copyright 2021 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,43 +12,47 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local ast = require("regent/ast")
 local base = require("regent/std_base")
 local config = require("regent/config").args()
 local data = require("common/data")
+local profile = require("regent/profile")
 local report = require("common/report")
 
 local cudahelper = {}
-cudahelper.check_cuda_available = function() return false end
 
-if not config["cuda"] or not terralib.cudacompile then
+-- Exit early if the user turned off CUDA code generation
+
+if config["cuda"] == 0 then
+  function cudahelper.check_cuda_available()
+    return false
+  end
   return cudahelper
 end
 
--- copied and modified from cudalib.lua in Terra interpreter
-
-local ffi = require('ffi')
-
+local c = base.c
+local ef = terralib.externfunction
+local externcall_builtin = terralib.externfunction
 local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
-local cudaruntimelinked = false
-function cudahelper.link_driver_library()
-    if cudaruntimelinked then return end
-    local path = assert(cudapaths[ffi.os],"unknown OS?")
-    terralib.linklibrary(path)
-    cudaruntimelinked = true
-end
+-- #####################################
+-- ## CUDA Hijack API
+-- #################
 
---
-
-local ef = terralib.externfunction
-local externcall_builtin = terralib.externfunction
-
-local RuntimeAPI = terralib.includec("cuda_runtime.h")
 local HijackAPI = terralib.includec("regent_cudart_hijack.h")
 
-local C = base.c
+struct fat_bin_t {
+  magic : int,
+  versions : int,
+  data : &opaque,
+  filename : &opaque,
+}
+
+-- #####################################
+-- ## CUDA Device API
+-- #################
 
 local struct CUctx_st
 local struct CUmod_st
@@ -61,6 +65,14 @@ local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
 local CU_JIT_INPUT_PTX = 1
 local CU_JIT_TARGET = 9
 local DriverAPI = {
+  CU_JIT_ERROR_LOG_BUFFER = 5;
+  CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6;
+  CU_JIT_INPUT_PTX = 1;
+  CU_JIT_TARGET = 9;
+
+  CUlinkState = &CUlinkState_st;
+  CUjit_option = uint32;
+
   cuInit = ef("cuInit", {uint32} -> uint32);
   cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
   cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
@@ -69,119 +81,129 @@ local DriverAPI = {
   cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
   cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
     {&int32,&int32,int32} -> uint32);
+  cuLinkCreate_v2 = ef("cuLinkCreate_v2",{uint32,&uint32,&&opaque,&&CUlinkState_st} -> uint32);
+  cuLinkAddData_v2 = ef("cuLinkAddData_v2",
+    {&CUlinkState_st,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> uint32);
+  cuLinkComplete = ef("cuLinkComplete",{&CUlinkState_st,&&opaque,&uint64} -> uint32);
+  cuLinkDestroy = ef("cuLinkDestroy",{&CUlinkState_st} -> uint32);
 }
 
-local dlfcn = terralib.includec("dlfcn.h")
-local terra has_symbol(symbol : rawstring)
-  var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
-  var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
-  dlfcn.dlclose(lib)
-  return has_symbol
-end
-
+local RuntimeAPI = false
 do
-  if not config["cuda-offline"] then
-    if has_symbol("cuInit") then
-      local r = DriverAPI.cuInit(0)
-      assert(r == 0)
+  if not terralib.cudacompile then
+    function cudahelper.check_cuda_available()
+      return false, "Terra is built without CUDA support"
+    end
+  else
+    -- Try to load the CUDA runtime header
+    pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
+
+    if RuntimeAPI == nil then
+      function cudahelper.check_cuda_available()
+        return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
+      end
+    elseif config["offline"] or config["cuda-offline"] then
       function cudahelper.check_cuda_available()
         return true
       end
     else
-      function cudahelper.check_cuda_available()
-        return false
+      local dlfcn = terralib.includec("dlfcn.h")
+      local terra has_symbol(symbol : rawstring)
+        var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
+        var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
+        dlfcn.dlclose(lib)
+        return has_symbol
+      end
+
+      if has_symbol("cuInit") then
+        local r = DriverAPI.cuInit(0)
+        if r == 0 then
+          function cudahelper.check_cuda_available()
+            return true
+          end
+        else
+          function cudahelper.check_cuda_available()
+            return false, "calling cuInit(0) failed for some reason (CUDA devices might not exist)"
+          end
+        end
+      else
+        function cudahelper.check_cuda_available()
+          return false, "the cuInit function is missing (Regent might have been installed without CUDA support)"
+        end
       end
     end
-  else
-    function cudahelper.check_cuda_available()
-      return true
+  end
+end
+
+do
+  local available, error_message = cudahelper.check_cuda_available()
+  if not available then
+    if config["cuda"] == 1 then
+      print("CUDA code generation failed since " .. error_message)
+      os.exit(-1)
+    else
+      return cudahelper
     end
   end
 end
 
--- copied and modified from cudalib.lua in Terra interpreter
-
-local c = terralib.includec("unistd.h")
-
-local lua_assert = assert
-local terra assert(x : bool, message : rawstring)
-  if not x then
-    var stderr = C.fdopen(2, "w")
-    C.fprintf(stderr, "assertion failed: %s\n", message)
-    -- Just because it's stderr doesn't mean it's unbuffered...
-    C.fflush(stderr)
-    C.abort()
-  end
-end
-
-local terra get_cuda_version_terra() : uint64
-  var cx : &CUctx_st
-  var cx_created = false
-  var r = DriverAPI.cuCtxGetCurrent(&cx)
-  assert(r == 0, "CUDA error in cuCtxGetCurrent")
-  var device : int32
-  if cx ~= nil then
-    r = DriverAPI.cuCtxGetDevice(&device)
-    assert(r == 0, "CUDA error in cuCtxGetDevice")
-  else
-    r = DriverAPI.cuDeviceGet(&device, 0)
-    assert(r == 0, "CUDA error in cuDeviceGet")
-    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
-    assert(r == 0, "CUDA error in cuCtxCreate_v2")
-    cx_created = true
-  end
-
-  var major : int, minor : int
-  r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
-  assert(r == 0, "CUDA error in cuDeviceComputeCapability")
-  var version = [uint64](major * 10 + minor)
-  if cx_created then
-    DriverAPI.cuCtxDestroy(cx)
-  end
-  return version
-end
-
---
-
-struct fat_bin_t {
-  magic : int,
-  versions : int,
-  data : &opaque,
-  filename : &opaque,
+-- Declare the API calls that are deprecated in CUDA SDK 10
+-- TODO: We must move on to the new execution control API as these old functions
+--       can be dropped in the future.
+local ExecutionAPI = {
+  cudaConfigureCall =
+    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
+  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
+  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
 }
 
-local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
-  var fat_bin : &fat_bin_t
-  var fat_size = sizeof(fat_bin_t)
-  -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](C.malloc(fat_size))
-  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
-  fat_bin.magic = 1234
-  fat_bin.versions = 5678
-  var fat_data_size = ptxSize + 1
-  fat_bin.data = C.malloc(fat_data_size)
-  base.assert(fat_data_size == 0 or fat_bin.data ~= nil, "malloc failed in register_ptx")
-  fat_bin.data = ptxc
-  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
-  return handle
-end
-
-local terra register_function(handle : &&opaque, id : int, name : &int8)
-  HijackAPI.hijackCudaRegisterFunction(handle, [&int8](id), name)
-end
-
-local function find_device_library(target)
-  local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
-  local libdevice = nil
-  for f in io.popen("ls " .. device_lib_dir):lines() do
-    local version = tonumber(string.match(string.match(f, "[0-9][0-9][.]"), "[0-9][0-9]"))
-    if version <= target then
-      libdevice = device_lib_dir .. f
-    end
+do
+  local ffi = require('ffi')
+  local cudaruntimelinked = false
+  function cudahelper.link_driver_library()
+    if cudaruntimelinked then return end
+    local path = assert(cudapaths[ffi.os],"unknown OS?")
+    base.linklibrary(path)
+    cudaruntimelinked = true
   end
-  lua_assert(libdevice ~= nil, "Failed to find a device library")
-  return libdevice
 end
+
+-- #####################################
+-- ## Printf for CUDA (not exposed to the user for the moment)
+-- #################
+
+local vprintf = ef("cudart:vprintf", {&int8,&int8} -> int)
+
+local function createbuffer(args)
+  local Buf = terralib.types.newstruct()
+  for i,e in ipairs(args) do
+    local typ = e:gettype()
+    local field = "_"..tonumber(i)
+    typ = typ == float and double or typ
+    table.insert(Buf.entries,{field,typ})
+  end
+  return quote
+    var buf : Buf
+    escape
+        for i,e in ipairs(args) do
+            emit quote
+               buf.["_"..tonumber(i)] = e
+            end
+        end
+    end
+  in
+    [&int8](&buf)
+  end
+end
+
+local cuda_printf = macro(function(fmt,...)
+  local buf = createbuffer({...})
+  return `vprintf(fmt,buf)
+end)
+
+-- #####################################
+-- ## Supported CUDA compute versions
+-- #################
 
 local supported_archs = {
   ["fermi"]   = 20,
@@ -207,14 +229,84 @@ local function parse_cuda_arch(arch)
   return sm
 end
 
+-- #####################################
+-- ## Registration functions
+-- #################
+
+local terra register_ptx(ptxc : rawstring) : &&opaque
+  var fat_bin : &fat_bin_t
+  var fat_size = sizeof(fat_bin_t)
+  -- TODO: this line is leaking memory
+  fat_bin = [&fat_bin_t](c.malloc(fat_size))
+  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
+  fat_bin.magic = 1234
+  fat_bin.versions = 5678
+  fat_bin.data = ptxc
+  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
+  return handle
+end
+
+local terra register_cubin(cubin : rawstring) : &&opaque
+  var fat_bin : &fat_bin_t
+  var fat_size = sizeof(fat_bin_t)
+  -- TODO: this line is leaking memory
+  fat_bin = [&fat_bin_t](c.malloc(fat_size))
+  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_cubin")
+  fat_bin.magic = 1234
+  fat_bin.versions = 5678
+  fat_bin.data = cubin
+  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
+  return handle
+end
+
+local function find_device_library(target)
+  local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
+  local libdevice = nil
+  for f in io.popen("ls " .. device_lib_dir):lines() do
+    local version = tonumber(string.match(string.match(f, "[0-9][0-9][.]"), "[0-9][0-9]"))
+    if version <= target then
+      libdevice = device_lib_dir .. f
+    end
+  end
+  assert(libdevice ~= nil, "Failed to find a device library")
+  return libdevice
+end
+
 local get_cuda_version
 do
   local cached_cuda_version = nil
+  local terra get_cuda_version_terra() : uint64
+    var cx : &CUctx_st
+    var cx_created = false
+    var r = DriverAPI.cuCtxGetCurrent(&cx)
+    base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
+    var device : int32
+    if cx ~= nil then
+      r = DriverAPI.cuCtxGetDevice(&device)
+      base.assert(r == 0, "CUDA error in cuCtxGetDevice")
+    else
+      r = DriverAPI.cuDeviceGet(&device, 0)
+      base.assert(r == 0, "CUDA error in cuDeviceGet")
+      r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
+      base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
+      cx_created = true
+    end
+
+    var major : int, minor : int
+    r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
+    base.assert(r == 0, "CUDA error in cuDeviceComputeCapability")
+    var version = [uint64](major * 10 + minor)
+    if cx_created then
+      DriverAPI.cuCtxDestroy(cx)
+    end
+    return version
+  end
+
   get_cuda_version = function()
     if cached_cuda_version ~= nil then
       return cached_cuda_version
     end
-    if not config["cuda-offline"] then
+    if not (config["offline"] or config["cuda-offline"]) then
       cached_cuda_version = get_cuda_version_terra()
     else
       cached_cuda_version = parse_cuda_arch(config["cuda-arch"])
@@ -223,39 +315,125 @@ do
   end
 end
 
+local struct cubin_t {
+  data : rawstring,
+  size : uint64
+}
+
+local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
+  var linkState : DriverAPI.CUlinkState
+  var cubin : &opaque
+  var cubinSize : uint64
+  var error_str : rawstring = nil
+  var error_sz : uint64 = 0
+
+  var options = arrayof(
+    DriverAPI.CUjit_option,
+    DriverAPI.CU_JIT_TARGET,
+    DriverAPI.CU_JIT_ERROR_LOG_BUFFER,
+    DriverAPI.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES
+  )
+  var option_values = arrayof(
+    [&opaque],
+    [&opaque](version),
+    &error_str,
+    [&opaque](&error_sz)
+  );
+
+  var cx : &CUctx_st
+  var cx_created = false
+
+  var r = DriverAPI.cuCtxGetCurrent(&cx)
+  base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
+  var device : int32
+  if cx ~= nil then
+    r = DriverAPI.cuCtxGetDevice(&device)
+    base.assert(r == 0, "CUDA error in cuCtxGetDevice")
+  else
+    r = DriverAPI.cuDeviceGet(&device, 0)
+    base.assert(r == 0, "CUDA error in cuDeviceGet")
+    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
+    base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
+    cx_created = true
+  end
+
+  r = DriverAPI.cuLinkCreate_v2(1, options, option_values, &linkState)
+  base.assert(r == 0, "CUDA error in cuLinkCreate_v2")
+  r = DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil)
+  base.assert(r == 0, "CUDA error in cuLinkAddData_v2")
+  r = DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize)
+  base.assert(r == 0, "CUDA error in cuLinkComplete")
+
+  -- Make a copy of the returned cubin before we destroy the linker and cuda context,
+  -- which may deallocate the cubin
+  var to_return : rawstring = [rawstring](c.malloc(cubinSize + 1))
+  to_return[cubinSize] = 0
+  c.memcpy([&opaque](to_return), cubin, cubinSize)
+
+  r = DriverAPI.cuLinkDestroy(linkState)
+  base.assert(r == 0, "CUDA error in cuLinkDestroy")
+  if cx_created then
+    DriverAPI.cuCtxDestroy(cx)
+  end
+
+  return cubin_t { to_return, cubinSize }
+end
+
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
-  for k, v in pairs(kernels) do
-    module[v.name] = v.kernel
-  end
+  kernels:map(function(kernel) module[kernel.name] = kernel.kernel end)
   local version = get_cuda_version()
-  local libdevice = find_device_library(tonumber(version))
-  local llvmbc = terralib.linkllvm(libdevice)
-  externcall_builtin = function(name, ftype)
-    return llvmbc:extern(name, ftype)
-  end
-  local ptx = cudalib.toptx(module, nil, version)
+  local ptx = profile('cuda:ptx_gen', nil, function()
+    return cudalib.toptx(module, nil, version)
+  end)()
 
-  local ptxc = terralib.constant(ptx)
+  local cubin = nil
+  local offline = config["offline"] or config["cuda-offline"]
+  if not offline and config["cuda-generate-cubin"] then
+    local ffi = require('ffi')
+    cubin = profile('cuda:cubin_gen', nil, function()
+      local result = ptx_to_cubin(ptx, ptx:len() + 1, version)
+      return ffi.string(result.data, result.size)
+    end)()
+  end
+
   local handle = terralib.newsymbol(&&opaque, "handle")
-  local register = quote
-    var [handle] = register_ptx(ptxc, [ptx:len() + 1], [version])
+  local register = nil
+  if cubin == nil then
+    local ptxc = terralib.constant(ptx)
+    register = quote
+      var [handle] = register_ptx(ptxc)
+    end
+  else
+    local cubin = terralib.constant(cubin)
+    register = quote
+      var [handle] = register_cubin(cubin)
+    end
   end
 
-  for k, v in pairs(kernels) do
-    register = quote
-      [register]
-      register_function([handle], [k], [v.name])
-    end
+  register = quote
+    [register]
+    [kernels:map(function(kernel)
+      return quote
+        [kernel.kernel_id] = [&int8]([c.regent_generate_dynamic_kernel_id]())
+        [HijackAPI.hijackCudaRegisterFunction]([handle], [kernel.kernel_id], [kernel.name])
+      end
+    end)]
   end
 
   return register
 end
 
+-- #####################################
+-- ## Primitives
+-- #################
+
 local THREAD_BLOCK_SIZE = 128
+local NUM_THREAD_X = 16
+local NUM_THREAD_Y = THREAD_BLOCK_SIZE / NUM_THREAD_X
 local MAX_NUM_BLOCK = 32768
 local GLOBAL_RED_BUFFER = 256
-lua_assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
+assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
 
 local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
 local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
@@ -295,6 +473,14 @@ function cudahelper.get_thread_block_size()
   return THREAD_BLOCK_SIZE
 end
 
+function cudahelper.get_num_thread_x()
+  return NUM_THREAD_X
+end
+
+function cudahelper.get_num_thread_y()
+  return NUM_THREAD_Y
+end
+
 -- Slow atomic operation implementations (copied and modified from Ebb)
 local terra cas_uint64(address : &uint64, compare : uint64, value : uint64)
   return terralib.asm(terralib.types.uint64,
@@ -311,12 +497,14 @@ end
 cas_uint32:setinlined(true)
 
 function cudahelper.generate_atomic_update(op, typ)
-  if op == "+" and typ == float then
-    return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
-                              {&float,float} -> {float})
-  elseif op == "+" and typ == double and get_cuda_version() >= 60 then
-    return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
-                              {&double,double} -> {double})
+  if terralib.llvmversion <= 38 then
+    if op == "+" and typ == float then
+      return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
+                                {&float,float} -> {float})
+    elseif op == "+" and typ == double and get_cuda_version() >= 60 then
+      return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
+                                {&double,double} -> {double})
+    end
   end
 
   local cas_type
@@ -325,7 +513,7 @@ function cudahelper.generate_atomic_update(op, typ)
     cas_type = uint32
     cas_func = cas_uint32
   else
-    lua_assert(sizeof(typ) == 8)
+    assert(sizeof(typ) == 8)
     cas_type = uint64
     cas_func = cas_uint64
   end
@@ -353,43 +541,44 @@ function cudahelper.generate_atomic_update(op, typ)
   return atomic_op
 end
 
-local vprintf = ef("cudart:vprintf", {&int8,&int8} -> int)
-
-local function createbuffer(args)
-  local Buf = terralib.types.newstruct()
-  for i,e in ipairs(args) do
-    local typ = e:gettype()
-    local field = "_"..tonumber(i)
-    typ = typ == float and double or typ
-    table.insert(Buf.entries,{field,typ})
-  end
-  return quote
-    var buf : Buf
-    escape
-        for i,e in ipairs(args) do
-            emit quote
-               buf.["_"..tonumber(i)] = e
-            end
-        end
+local function generate_element_reduction(lhs, rhs, op, volatile)
+  if volatile then
+    return quote
+      do
+        var v = [base.quote_binary_op(op, lhs, rhs)]
+        terralib.attrstore(&[lhs], v, { isvolatile = true })
+      end
     end
-  in
-    [&int8](&buf)
+  else
+    return quote
+      [lhs] = [base.quote_binary_op(op, lhs, rhs)]
+    end
   end
 end
 
-local cuda_printf = macro(function(fmt,...)
-  local buf = createbuffer({...})
-  return `vprintf(fmt,buf)
-end)
+local function generate_element_reductions(lhs, rhs, op, type, volatile)
+  local actions = terralib.newlist()
+  if type:isarray() then
+    for k = 1, type.N do -- inclusive!
+      local lhs = `([lhs][ [k - 1] ])
+      local rhs = `([rhs][ [k - 1] ])
+      actions:insert(generate_element_reduction(lhs, rhs, op, volatile))
+    end
+  else
+    assert(type:isprimitive())
+    actions:insert(generate_element_reduction(lhs, rhs, op, volatile))
+  end
+  return quote [actions] end
+end
 
-function cudahelper.compute_reduction_buffer_size(node, reductions)
+-- #####################################
+-- ## Code generation for scalar reduction
+-- #################
+
+function cudahelper.compute_reduction_buffer_size(cx, node, reductions)
   local size = 0
   for k, v in pairs(reductions) do
-    if size ~= 0 then
-      -- TODO: We assume there is only one scalar reduction for now
-      report.error(node,
-          "Multiple scalar reductions in a CUDA task are not supported yet")
-    elseif not supported_scalar_red_ops[v] then
+    if not supported_scalar_red_ops[v] then
       report.error(node,
           "Scalar reduction with operator " .. v .. " is not supported yet")
     elseif not (sizeof(k.type) == 4 or sizeof(k.type) == 8) then
@@ -398,11 +587,11 @@ function cudahelper.compute_reduction_buffer_size(node, reductions)
     end
     size = size + THREAD_BLOCK_SIZE * sizeof(k.type)
   end
+  size = size + cx:compute_reduction_buffer_size()
   return size
 end
 
-local internal_kernel_id = 2 ^ 30
-local internal_kernels = {}
+local internal_kernels = terralib.newlist()
 local INTERNAL_KERNEL_PREFIX = "__internal"
 
 function cudahelper.get_internal_kernels()
@@ -412,31 +601,30 @@ end
 cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
   local value = base.reduction_op_init[op][type]
   local op_name = base.reduction_ops[op].name
-  local kernel_id = internal_kernel_id
-  internal_kernel_id = internal_kernel_id - 1
   local kernel_name =
     INTERNAL_KERNEL_PREFIX .. "__init__" .. tostring(type) ..
     "__" .. tostring(op_name) .. "__"
+  local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
   local terra init(buffer : &type)
     var tid = tid_x() + bid_x() * n_tid_x()
     buffer[tid] = [value]
   end
   init:setname(kernel_name)
-  internal_kernels[kernel_id] = {
+  internal_kernels:insert({
     name = kernel_name,
     kernel = init,
-  }
+    kernel_id = kernel_id,
+  })
   return kernel_id
 end)
 
 cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
   local value = base.reduction_op_init[op][type]
   local op_name = base.reduction_ops[op].name
-  local kernel_id = internal_kernel_id
-  internal_kernel_id = internal_kernel_id - 1
   local kernel_name =
     INTERNAL_KERNEL_PREFIX .. "__red__" .. tostring(type) ..
     "__" .. tostring(op_name) .. "__"
+  local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
 
   local tid = terralib.newsymbol(c.size_t, "tid")
   local input = terralib.newsymbol(&type, "input")
@@ -453,116 +641,128 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
     var [tid] = tid_x()
     [shared_mem_ptr][ [tid] ] = [shared_mem_init]
     barrier()
-    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, op)]
+    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, op, type)]
     barrier()
     if [tid] == 0 then [result][0] = [shared_mem_ptr][ [tid] ] end
   end
 
   red:setname(kernel_name)
-  internal_kernels[kernel_id] = {
+  internal_kernels:insert({
     name = kernel_name,
     kernel = red,
-  }
+    kernel_id = kernel_id,
+  })
   return kernel_id
 end)
 
-function cudahelper.generate_reduction_preamble(reductions)
-  local preamble = quote end
+function cudahelper.generate_reduction_preamble(cx, reductions)
+  local preamble = terralib.newlist()
   local device_ptrs = terralib.newlist()
+  local buffer_cleanups = terralib.newlist()
   local device_ptrs_map = {}
   local host_ptrs_map = {}
 
   for red_var, red_op in pairs(reductions) do
     local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
     local host_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
+    local device_buffer =
+      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
+                         "__d_buffer_" .. red_var.displayname)
+    local host_buffer =
+      terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
+                         "__h_buffer_" .. red_var.displayname)
     local init_kernel_id = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
-    preamble = quote
-      [preamble];
+    preamble:insert(quote
       var [device_ptr] = [&red_var.type](nil)
       var [host_ptr] = [&red_var.type](nil)
+      var [device_buffer]
+      var [host_buffer]
       do
-        var bounds : C.legion_rect_1d_t
+        var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
-        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.GPU_FB_MEM, [&int8](nil))
+        [device_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
-          [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
-        [cudahelper.codegen_kernel_call(init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([device_buffer], bounds.lo)))
+        [cudahelper.codegen_kernel_call(cx, init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
       do
-        var bounds : C.legion_rect_1d_t
+        var bounds : c.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) - 1]
-        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.Z_COPY_MEM, [&int8](nil))
+        [host_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
         [host_ptr] =
-          [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+          [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([host_buffer], bounds.lo)))
       end
-    end
+    end)
     device_ptrs:insert(device_ptr)
     device_ptrs_map[device_ptr] = red_var
     host_ptrs_map[device_ptr] = host_ptr
+    buffer_cleanups:insert(quote
+      c.legion_deferred_buffer_char_1d_destroy([host_buffer])
+      c.legion_deferred_buffer_char_1d_destroy([device_buffer])
+    end)
   end
 
-  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble
+  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble, buffer_cleanups
 end
 
-function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
-  local reduction_tree = quote end
-  local step = THREAD_BLOCK_SIZE
+function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, num_threads, red_op, type)
+  local outer_reductions = terralib.newlist()
+  local step = num_threads
   while step > 64 do
     step = step / 2
-    reduction_tree = quote
-      [reduction_tree]
+    outer_reductions:insert(quote
       if [tid] < step then
-        var v = [base.quote_binary_op(red_op,
-                                      `([shared_mem_ptr][ [tid] ]),
-                                      `([shared_mem_ptr][ [tid] + [step] ]))]
-
-        terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
+        [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
+                                     `([shared_mem_ptr][ [tid] + [step] ]),
+                                     red_op, type, false)]
       end
       barrier()
-    end
+    end)
   end
   local unrolled_reductions = terralib.newlist()
   while step > 1 do
     step = step / 2
     unrolled_reductions:insert(quote
-      do
-        var v = [base.quote_binary_op(red_op,
-                                      `([shared_mem_ptr][ [tid] ]),
-                                      `([shared_mem_ptr][ [tid] + [step] ]))]
-        terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
-      end
+      [generate_element_reductions(`([shared_mem_ptr][ [tid] ]),
+                                   `([shared_mem_ptr][ [tid] + [step] ]),
+                                   red_op, type, false)]
       barrier()
     end)
   end
-  reduction_tree = quote
-    [reduction_tree]
-    if [tid] < 32 then
+  if #outer_reductions > 0 then
+    return quote
+      [outer_reductions]
+      if [tid] < 32 then
+        [unrolled_reductions]
+      end
+    end
+  else
+    return quote
       [unrolled_reductions]
     end
   end
-  return reduction_tree
 end
 
-function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
-  local preamble = quote end
-  local postamble = quote end
+function cudahelper.generate_reduction_kernel(cx, reductions, device_ptrs_map)
+  local preamble = terralib.newlist()
+  local postamble = terralib.newlist()
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
     local shared_mem_ptr =
       cudalib.sharedmemory(red_var.type, THREAD_BLOCK_SIZE)
     local init = base.reduction_op_init[red_op][red_var.type]
-    preamble = quote
-      [preamble]
+    preamble:insert(quote
       var [red_var] = [init]
       [shared_mem_ptr][ tid_x() ] = [red_var]
-    end
+    end)
 
     local tid = terralib.newsymbol(c.size_t, "tid")
-    local reduction_tree = cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
-    postamble = quote
+    local reduction_tree =
+      cudahelper.generate_reduction_tree(tid, shared_mem_ptr, THREAD_BLOCK_SIZE, red_op, red_var.type)
+    postamble:insert(quote
       do
         var [tid] = tid_x()
         var bid = [cudahelper.global_block_id()]
@@ -574,12 +774,16 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
             &[device_ptr][bid % [GLOBAL_RED_BUFFER] ], [shared_mem_ptr][ [tid] ])
         end
       end
-    end
+    end)
   end
+
+  preamble:insertall(cx:generate_preamble())
+  postamble:insertall(cx:generate_postamble())
+
   return preamble, postamble
 end
 
-function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
+function cudahelper.generate_reduction_postamble(cx, reductions, device_ptrs_map, host_ptrs_map)
   local postamble = quote end
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
@@ -589,7 +793,7 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, ho
     local shared_mem_size = terralib.sizeof(red_var.type) * THREAD_BLOCK_SIZE
     postamble = quote
       [postamble];
-      [cudahelper.codegen_kernel_call(red_kernel_id, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
+      [cudahelper.codegen_kernel_call(cx, red_kernel_id, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
     end
   end
 
@@ -884,7 +1088,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
                             num_elmts : uint64,
                             [dir])
     var t = [cudahelper.global_thread_id()]
-    if t >= num_elmts - [BLOCK_SIZE] or t % [BLOCK_SIZE] == [BLOCK_SIZE - 1]then return end
+    if t >= num_elmts - [BLOCK_SIZE] or t % [BLOCK_SIZE] == [BLOCK_SIZE - 1] then return end
 
     var sum_loc = t / [BLOCK_SIZE] * [BLOCK_SIZE] + [BLOCK_SIZE - 1]
     var val_loc = t + [BLOCK_SIZE]
@@ -920,8 +1124,8 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
   return prescan_full, prescan_arbitrary, scan_full, scan_arbitrary, postscan_full
 end
 
-function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, rhs, lhs_ptr, rhs_ptr,
-                                                res, idx, dir, op, elem_type)
+function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_rd, rhs, lhs_ptr,
+                                                rhs_ptr, res, idx, dir, op, elem_type)
   local BLOCK_SIZE = THREAD_BLOCK_SIZE * 2
   local SHMEM_SIZE = terralib.sizeof(elem_type) * THREAD_BLOCK_SIZE * 2
 
@@ -944,27 +1148,27 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   local prescan_full_args = terralib.newlist()
   prescan_full_args:insertall({lhs_ptr_arg, rhs_ptr_arg, dir})
   local call_prescan_full =
-    cudahelper.codegen_kernel_call(prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE, true)
 
   local prescan_arb_args = terralib.newlist()
   prescan_arb_args:insertall({lhs_ptr_arg, rhs_ptr_arg, num_elmts, num_leaves, dir})
   local call_prescan_arbitrary =
-    cudahelper.codegen_kernel_call(prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE, true)
 
   local scan_full_args = terralib.newlist()
   scan_full_args:insertall({lhs_ptr_arg, offset, dir})
   local call_scan_full =
-    cudahelper.codegen_kernel_call(scan_full_id, num_threads, scan_full_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, scan_full_id, num_threads, scan_full_args, SHMEM_SIZE, true)
 
   local scan_arb_args = terralib.newlist()
   scan_arb_args:insertall({lhs_ptr_arg, num_elmts, num_leaves, offset, dir})
   local call_scan_arbitrary =
-    cudahelper.codegen_kernel_call(scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE, true)
+    cudahelper.codegen_kernel_call(cx, scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE, true)
 
   local postscan_full_args = terralib.newlist()
   postscan_full_args:insertall({lhs_ptr, offset, num_elmts, dir})
   local call_postscan_full =
-    cudahelper.codegen_kernel_call(postscan_full_id, num_threads, postscan_full_args, 0, true)
+    cudahelper.codegen_kernel_call(cx, postscan_full_id, num_threads, postscan_full_args, 0, true)
 
   local terra recursive_scan :: {uint64,uint64,uint64,lhs_ptr.type,dir.type} -> {}
 
@@ -1084,7 +1288,7 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight)
+function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -1092,27 +1296,44 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
     local arg =  args[i]
     local size = terralib.sizeof(arg.type)
     setupArguments:insert(quote
-      RuntimeAPI.cudaSetupArgument(&[arg], size, offset)
+      ExecutionAPI.cudaSetupArgument(&[arg], size, offset)
     end)
     offset = offset + size
   end
 
   local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
   local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
+  local num_blocks = terralib.newsymbol(int64, "num_blocks")
 
   local function round_exp(v, n)
     return `((v + (n - 1)) / n)
   end
 
-  local launch_domain_init = quote
-    if [count] <= THREAD_BLOCK_SIZE and tight then
-      [block].x, [block].y, [block].z = [count], 1, 1
-    else
-      [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+  local launch_domain_init = nil
+  if not cx.use_2d_launch then
+    launch_domain_init = quote
+      if [count] <= THREAD_BLOCK_SIZE and tight then
+        [block].x, [block].y, [block].z = [count], 1, 1
+      else
+        [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
+      end
+      var [num_blocks] = [round_exp(count, THREAD_BLOCK_SIZE)]
     end
-    var num_blocks = [round_exp(count, THREAD_BLOCK_SIZE)]
-    if num_blocks <= MAX_NUM_BLOCK then
-      [grid].x, [grid].y, [grid].z = num_blocks, 1, 1
+  else
+    launch_domain_init = quote
+      if [count] <= NUM_THREAD_X and tight then
+        [block].x, [block].y, [block].z = [count], NUM_THREAD_Y, 1
+      else
+        [block].x, [block].y, [block].z = NUM_THREAD_X, NUM_THREAD_Y, 1
+      end
+      var [num_blocks] = [round_exp(count, NUM_THREAD_X)]
+    end
+  end
+
+  launch_domain_init = quote
+    [launch_domain_init]
+    if [num_blocks] <= MAX_NUM_BLOCK then
+      [grid].x, [grid].y, [grid].z = [num_blocks], 1, 1
     elseif [count] / MAX_NUM_BLOCK <= MAX_NUM_BLOCK then
       [grid].x, [grid].y, [grid].z =
         MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK)], 1
@@ -1124,16 +1345,18 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
   end
 
   return quote
-    var [grid], [block]
-    [launch_domain_init]
-    RuntimeAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
-    [setupArguments]
-    RuntimeAPI.cudaLaunch([&int8](kernel_id))
+    if [count] > 0 then
+      var [grid], [block]
+      [launch_domain_init]
+      ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
+      [setupArguments]
+      ExecutionAPI.cudaLaunch([&int8](kernel_id))
+    end
   end
 end
 
 local function get_nv_fn_name(name, type)
-  lua_assert(type:isfloat())
+  assert(type:isfloat())
   local nv_name = "__nv_" .. name
 
   -- Okay. a little divergence from the C standard...
@@ -1162,7 +1385,7 @@ local function get_cuda_definition(self)
   else
     local fn_type = self.super:get_definition().type
     local fn_name = get_nv_fn_name(self:get_name(), self:get_arg_type())
-    lua_assert(fn_name ~= nil)
+    assert(fn_name ~= nil)
     local fn = externcall_builtin(fn_name, fn_type)
     self:set_variant("cuda", fn)
     return fn
@@ -1171,6 +1394,239 @@ end
 
 function cudahelper.get_cuda_variant(math_fn)
   return math_fn:override(get_cuda_definition)
+end
+
+-- #####################################
+-- ## CUDA Codegen Context
+-- #################
+
+local context = {}
+
+function context:__index(field)
+  local value = context[field]
+  if value ~= nil then
+    return value
+  end
+  error("context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function context:__newindex(field, value)
+  error("context has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function context.new(use_2d_launch, offset_2d)
+  local offset_2d = offset_2d or false
+  return setmetatable({
+    use_2d_launch = use_2d_launch,
+    offset_2d = offset_2d,
+    buffered_reductions = data.newmap(),
+  }, context)
+end
+
+function context:reduction_buffer(ref_type, value_type, op, generator)
+  local tbl = self.buffered_reductions[ref_type]
+  if tbl == nil then
+    tbl = {
+      buffer = cudalib.sharedmemory(value_type, THREAD_BLOCK_SIZE),
+      type = value_type,
+      op = op,
+      generator = generator,
+    }
+    self.buffered_reductions[ref_type] = tbl
+  end
+  return tbl
+end
+
+function context:compute_reduction_buffer_size()
+  local size = 0
+  for k, tbl in self.buffered_reductions:items() do
+    size = size + sizeof(tbl.type) * THREAD_BLOCK_SIZE
+  end
+  return size
+end
+
+function context:generate_preamble()
+  local preamble = terralib.newlist()
+
+  if self.use_2d_launch then
+    preamble:insert(quote
+      var [self.offset_2d:getsymbol()] = tid_y()
+    end)
+  end
+
+  for k, tbl in self.buffered_reductions:items() do
+    if tbl.type:isarray() then
+      local init = base.reduction_op_init[tbl.op][tbl.type.type]
+      preamble:insert(quote
+        for k = 0, [tbl.type.N] do
+          [tbl.buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ][k] = [init]
+        end
+      end)
+    else
+      local init = base.reduction_op_init[tbl.op][tbl.type]
+      preamble:insert(quote
+        [tbl.buffer][ tid_y() + tid_x() * [NUM_THREAD_Y] ] = [init]
+      end)
+    end
+  end
+
+  return preamble
+end
+
+function context:generate_postamble()
+  local postamble = terralib.newlist()
+
+  for k, tbl in self.buffered_reductions:items() do
+    postamble:insert(quote
+      do
+        var tid = tid_y()
+        var buf = &[tbl.buffer][ tid_x() * [NUM_THREAD_Y] ]
+        barrier()
+        [cudahelper.generate_reduction_tree(tid, buf, NUM_THREAD_Y, tbl.op, tbl.type)]
+        if tid == 0 then [tbl.generator(`(@buf))] end
+      end
+    end)
+  end
+
+  return postamble
+end
+
+local function check_2d_launch_profitable(node)
+  if not base.config["cuda-2d-launch"] or not node:is(ast.typed.stat.ForList) then
+    return false, false
+  end
+  -- TODO: This is a very simple heurstic that does not even extend to 3D case.
+  --       At least we need to check if the inner loop has any centered accesses with
+  --       respect to that loop. In the longer term, we need a better algorithm to detect
+  --       cases where multi-dimensional kernel launches are profitable.
+  if #node.block.stats == 1 and node.block.stats[1]:is(ast.typed.stat.ForNum) then
+    local inner_loop = node.block.stats[1]
+    if inner_loop.metadata and inner_loop.metadata.parallelizable then
+      assert(#inner_loop.values == 2)
+      return true, base.newsymbol(inner_loop.symbol:gettype(), "offset")
+    end
+  end
+  return false, false
+end
+
+function cudahelper.new_kernel_context(node)
+  local use_2d_launch, offset_2d = check_2d_launch_profitable(node)
+  return context.new(use_2d_launch, offset_2d)
+end
+
+function cudahelper.optimize_loop(cx, node, block)
+  if cx.use_2d_launch then
+    local inner_loop = block.stats[1]
+    local index_type = inner_loop.symbol:gettype()
+    -- If the inner loop is eligible to a 2D kernel launch, we change the stride of the inner
+    -- loop accordingly.
+    inner_loop = inner_loop {
+      values = terralib.newlist({
+        ast.typed.expr.Binary {
+          op = "+",
+          lhs = inner_loop.values[1],
+          rhs = ast.typed.expr.ID {
+            value = cx.offset_2d,
+            expr_type = index_type,
+            annotations = ast.default_annotations(),
+            span = inner_loop.span,
+          },
+          expr_type = inner_loop.values[1].expr_type,
+          annotations = ast.default_annotations(),
+          span = inner_loop.span,
+        },
+        inner_loop.values[2],
+        ast.typed.expr.Constant {
+          value = NUM_THREAD_Y,
+          expr_type = index_type,
+          annotations = ast.default_annotations(),
+          span = inner_loop.span,
+        }
+      })
+    }
+    block = block { stats = terralib.newlist({ inner_loop }) }
+  end
+  return block
+end
+
+function cudahelper.generate_region_reduction(cx, loop_symbol, node, rhs, lhs_type, value_type, gen)
+  if cx.use_2d_launch then
+    local needs_buffer = base.types.is_ref(lhs_type) and
+                         (value_type:isprimitive() or value_type:isarray()) and
+                         node.metadata and
+                         node.metadata.centers and
+                         node.metadata.centers:has(loop_symbol)
+    if needs_buffer then
+      local buffer = cx:reduction_buffer(lhs_type, value_type, node.op, gen).buffer
+      return quote
+        do
+          var idx = tid_y() + tid_x() * [NUM_THREAD_Y]
+          [generate_element_reductions(`([buffer][ [idx] ]), rhs, node.op, value_type, false)]
+        end
+      end
+    else
+      return gen(rhs)
+    end
+  else
+    return gen(rhs)
+  end
+end
+
+-- #####################################
+-- ## Code generation for kernel argument spill
+-- #################
+
+local MAX_SIZE_INLINE_KERNEL_PARAMS = 1024
+
+function cudahelper.check_arguments_need_spill(args)
+  local param_size = 0
+  args:map(function(arg) param_size = param_size + terralib.sizeof(arg.type) end)
+  return param_size > MAX_SIZE_INLINE_KERNEL_PARAMS
+end
+
+function cudahelper.generate_argument_spill(args)
+  local arg_type = terralib.types.newstruct("cuda_kernel_arg")
+  arg_type.entries = terralib.newlist()
+  local mapping = {}
+  for i, symbol in pairs(args) do
+    local field_name
+    field_name = "_arg" .. tostring(i)
+    arg_type.entries:insert({ field_name, symbol.type })
+    mapping[field_name] = symbol
+  end
+
+  local kernel_arg = terralib.newsymbol(&arg_type)
+  local buffer = terralib.newsymbol(c.legion_deferred_buffer_char_1d_t, "__spill_buf")
+  local buffer_size = sizeof(arg_type)
+  buffer_size = (buffer_size + 7) / 8 * 8
+
+  local param_pack = terralib.newlist()
+  local param_unpack = terralib.newlist()
+
+  param_pack:insert(quote
+    var [kernel_arg]
+    var [buffer]
+    do
+      var bounds : c.legion_rect_1d_t
+      bounds.lo.x[0] = 0
+      bounds.hi.x[0] = [buffer_size - 1]
+      [buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.Z_COPY_MEM, [&int8](nil))
+      [kernel_arg] =
+        [&arg_type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([buffer], bounds.lo)))
+    end
+  end)
+  arg_type.entries:map(function(pair)
+    local field_name, field_type = unpack(pair)
+    local arg = mapping[field_name]
+    param_pack:insert(quote (@[kernel_arg]).[field_name] = [arg] end)
+    param_unpack:insert(quote var [arg] = (@[kernel_arg]).[field_name] end)
+  end)
+
+  local spill_cleanup = quote
+    c.legion_deferred_buffer_char_1d_destroy([buffer])
+  end
+
+  return param_pack, param_unpack, spill_cleanup, kernel_arg
 end
 
 return cudahelper

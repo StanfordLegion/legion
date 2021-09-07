@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -131,7 +131,7 @@ end
 
 local function bounds_checks(res)
   local checks = quote end
-  if std.config["bounds-checks"] then
+  if std.config["parallelize-debug"] then
     checks = quote
       std.assert(
         [res].lo <= [res].hi,
@@ -427,7 +427,10 @@ do
       if std.is_bounded_type(binder_type) then
         binder_type = binder_type.index_type
       end
-      if std.type_eq(binder_type, arg_type) then
+      if std.type_eq(binder_type, arg_type) or
+         (std.is_region(binder_type) and std.is_region(arg_type) and
+          std.type_eq(binder_type:fspace(), arg_type:fspace()))
+      then
         binder = binders[idx]
       else
         new_binders:insert(binders[idx])
@@ -1393,7 +1396,7 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
     local colors_expr = ast_util.mk_expr_colors_access(partition_symbol)
     stats:insert(ast_util.mk_stat_var(color_space_symbol, nil, colors_expr))
     caller_cx:add_color_space(pparam, color_space_symbol)
-  elseif std.config["bounds-checks"] then
+  elseif std.config["parallelize-debug"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
     local my_bounds = ast_util.mk_expr_bounds_access(
       ast_util.mk_expr_colors_access(partition_symbol))
@@ -1506,7 +1509,7 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
                                          coloring_expr,
                                          true)))
 
-  if std.config["bounds-checks"] then
+  if std.config["parallelize-debug"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
     local my_bounds = ast_util.mk_expr_bounds_access(
       ast_util.mk_expr_colors_access(gp_symbol))
@@ -1593,7 +1596,7 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
                                          coloring_expr,
                                          true)))
 
-  if std.config["bounds-checks"] then
+  if std.config["parallelize-debug"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
     local my_bounds = ast_util.mk_expr_bounds_access(
       ast_util.mk_expr_colors_access(sp_symbol))
@@ -2068,8 +2071,9 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
                 base_name .. "__gp" .. "__image_" .. tostring(field_path))
               stats:insert(ast_util.mk_stat_var(gp_symbol, nil,
                 ast.typed.expr.Image {
-		  -- TODO: determine disjointness
-		  disjointness = false,
+                  -- TODO: determine disjointness
+                  disjointness = false,
+                  completeness = false,
                   expr_type = gp_type,
                   parent = ast_util.mk_expr_id(region, std.rawref(&region:gettype())),
                   partition = ast_util.mk_expr_id(pp, std.rawref(&pp:gettype())),
@@ -2194,7 +2198,7 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
         stats:insert(ast_util.mk_stat_var(color_space_symbol, nil, colors_expr))
         caller_cx:add_color_space(param, color_space_symbol)
 
-        if std.config["bounds-checks"] and not color_space_symbol:gettype():is_opaque() then
+        if std.config["parallelize-debug"] and not color_space_symbol:gettype():is_opaque() then
           for idx = 2, #node.hints do
             local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
             local my_partition_type = partition_type_from_hint(node.hints[idx])
@@ -2385,14 +2389,20 @@ end
 
 local function find_field_accesses(context, accesses)
   return function(node, continuation)
-    if node:is(ast.typed.expr) and
-       std.is_ref(node.expr_type) then
-      if not context:is_centered(node) then
-        accesses:insert(node)
+    if node:is(ast.typed.expr) and std.is_ref(node.expr_type) then
+      local privileged_field_path =
+        std.extract_privileged_prefix(node.expr_type.refers_to_type,
+                                      node.expr_type.field_path)
+      if privileged_field_path == node.expr_type.field_path then
+        if not context:is_centered(node) then
+          accesses:insert(node)
+        end
+        context:push_scope(node.expr_type)
+        continuation(node, true)
+        context:pop_scope()
+      else
+        continuation(node, true)
       end
-      context:push_scope(node.expr_type)
-      continuation(node, true)
-      context:pop_scope()
     else
       continuation(node, true)
     end
@@ -3142,7 +3152,7 @@ function parallelize_tasks.stat(task_cx)
         end
 
         assert(case_split_if)
-        if std.config["bounds-checks"] then
+        if std.config["parallelize-debug"] then
           local index_symbol = get_new_tmp_var(std.as_read(stencil_expr.expr_type), "__index")
           case_split_if.else_block.stats:insertall(terralib.newlist {
             ast_util.mk_stat_var(index_symbol, nil, stencil_expr),
@@ -3328,6 +3338,7 @@ function parallelize_tasks.top_task(global_cx, node)
       idempotent = false,
       replicable = false,
     },
+    region_usage = false,
     region_divergence = false,
     metadata = false,
     prototype = task,

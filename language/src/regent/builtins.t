@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@
 
 local std = require("regent/std")
 
-local max_dim = std.config["legion-dim"]
-
 local builtins = {}
 
 -- Builtins consists of a list of which will be stuffed into the
@@ -25,14 +23,16 @@ local builtins = {}
 -- via std).
 
 builtins.aliased = std.aliased
+builtins.complete = std.complete
 builtins.complex = std.complex
 builtins.complex32 = std.complex32
 builtins.complex64 = std.complex64
 builtins.cross_product = std.cross_product
 builtins.disjoint = std.disjoint
 builtins.dynamic_collective = std.dynamic_collective
+builtins.incomplete = std.incomplete
 builtins.index_type = std.index_type
-for dim = 1, max_dim do
+for dim = 1, std.max_dim do
   builtins["int" .. dim .. "d"] = std["int" .. dim .. "d"]
   builtins["rect" .. dim .. "d"] = std["rect" .. dim .. "d"]
 end

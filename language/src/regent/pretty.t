@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -252,10 +252,12 @@ function pretty.metadata(cx, node)
     end
     return text.Lines { lines = terralib.newlist({ join(result) }) }
   elseif node:is(ast.metadata.Stat) then
+    local centers =
+      (node.centers and "{" ..  node.centers:map_list(function(k, _) return tostring(k) end):concat(",") .. "}") or
+      tostring(node.centers)
     return text.Lines {
       lines = terralib.newlist({
-        join({"-- ", "atomic: ", tostring(node.atomic),
-              ", scalar: ", tostring(node.scalar)})}),
+        join({"-- ", "centers: ", centers, ", scalar: ", tostring(node.scalar)})}),
     }
   else
     assert(false)
@@ -292,6 +294,10 @@ function pretty.expr_constant(cx, node)
     value = tonumber(value)
   end
   return text.Line { value = tostring(value) }
+end
+
+function pretty.expr_global(cx, node)
+  return text.Line { value = tostring(node.value) }
 end
 
 function pretty.expr_function(cx, node)
@@ -335,6 +341,12 @@ function pretty.expr_call(cx, node)
   args:insertall(
     node.conditions:map(
       function(condition) return pretty.expr_condition(cx, condition) end))
+  if node.predicate then
+    args:insert(join({"predicate=", pretty.expr(cx, node.predicate)}))
+  end
+  if node.predicate_else_value then
+    args:insert(join({"predicate_else_value=", pretty.expr(cx, node.predicate_else_value)}))
+  end
   return join({pretty.expr(cx, node.fn), "(", commas(args) , ")"})
 end
 
@@ -375,6 +387,10 @@ end
 
 function pretty.expr_raw_fields(cx, node)
   return join({"__fields(", pretty.expr_region_root(cx, node.region), ")"})
+end
+
+function pretty.expr_raw_future(cx, node)
+  return join({"__future(", pretty.expr(cx, node.value), ")"})
 end
 
 function pretty.expr_raw_physical(cx, node)
@@ -741,12 +757,29 @@ function pretty.expr_import_partition(cx, node)
       ")"})
 end
 
+function pretty.expr_projection(cx, node)
+  return join({
+    pretty.expr(cx, node.region),
+    ".{",
+    node.field_mapping:map(function(entry)
+      if #entry[2] == 0 or entry[1] == entry[2] then
+        return entry[1]:mkstring(".")
+      else
+        return entry[2]:mkstring(".") .. "=" .. entry[1]:mkstring(".")
+      end
+    end):concat(","),
+    "}"})
+end
+
 function pretty.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return pretty.expr_id(cx, node)
 
   elseif node:is(ast.typed.expr.Constant) then
     return pretty.expr_constant(cx, node)
+
+  elseif node:is(ast.typed.expr.Global) then
+    return pretty.expr_global(cx, node)
 
   elseif node:is(ast.typed.expr.Function) then
     return pretty.expr_function(cx, node)
@@ -774,6 +807,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.RawFields) then
     return pretty.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.RawFuture) then
+    return pretty.expr_raw_future(cx, node)
 
   elseif node:is(ast.typed.expr.RawPhysical) then
     return pretty.expr_raw_physical(cx, node)
@@ -937,6 +973,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.ImportPartition) then
     return pretty.expr_import_partition(cx, node)
 
+  elseif node:is(ast.typed.expr.Projection) then
+    return pretty.expr_projection(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -1078,8 +1117,12 @@ function pretty.stat_index_launch_num(cx, node)
   local values = pretty.expr_list(cx, node.values)
   local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
+  local ctl = "(linear time launch)"
+  if node.is_constant_time then
+    ctl = "(constant time launch)"
+  end
   result:insert(join({"for", cx:print_var(node.symbol), "=", values,
-                      "do -- index launch"}, true))
+                      "do -- index launch", ctl}, true))
   local call = pretty.expr(cx, node.call)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)
@@ -1098,8 +1141,12 @@ function pretty.stat_index_launch_list(cx, node)
   local value = pretty.expr(cx, node.value)
   local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
+  local ctl = "(linear time launch)"
+  if node.is_constant_time then
+    ctl = "(constant time launch)"
+  end
   result:insert(join({"for", cx:print_var(node.symbol), "in", value,
-                      "do -- index launch"}, true))
+                      "do -- index launch", ctl}, true))
   local call = pretty.expr(cx, node.call)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)

@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -46,16 +46,8 @@ local header_helper = {}
 
 local c = base.c
 
-function header_helper.normalize_name(name)
-  return string.gsub(
-    string.gsub(
-      string.gsub(name, ".*/", ""),
-      "[<>]", ""),
-    "[^A-Za-z0-9]", "_")
-end
-
 local function get_launcher_name(task)
-  return header_helper.normalize_name(tostring(task:get_name())) .. "_launcher"
+  return base.normalize_name(tostring(task:get_name())) .. "_launcher"
 end
 
 local function get_task_params(task)
@@ -65,37 +57,43 @@ local function get_task_params(task)
 
       local param_type = param:gettype()
 
-      local terra_type, c_type, cxx_type
-      if base.types.is_region(param_type) then
-        terra_type, c_type, cxx_type = c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion"
-      elseif base.types.is_ispace(param_type) then
-        terra_type, c_type, cxx_type = c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
-      elseif param_type == int32 then
-        terra_type, c_type, cxx_type = int32, "int32_t",  "int32_t"
-      elseif param_type == int64 then
-        terra_type, c_type, cxx_type = int64, "int64_t", "int64_t"
-      elseif param_type == uint32 then
-        terra_type, c_type, cxx_type = uint32, "uint32_t", "uint32_t"
-      elseif param_type == uint64 then
-        terra_type, c_type, cxx_type = uint64, "uint64_t", "uint64_t"
-      elseif param_type == float then
-        terra_type, c_type, cxx_type = float, "float", "float"
-      elseif param_type == double then
-        terra_type, c_type, cxx_type = double, "double", "double"
-      elseif param_type == bool then
-        terra_type, c_type, cxx_type = bool, "bool", "bool"
-      else
-        assert(false, "unknown type " .. tostring(param_type))
+      local function lower_type(t)
+        if base.types.is_region(t) then
+          return c.legion_logical_region_t, "legion_logical_region_t %s", "Legion::LogicalRegion %s"
+        elseif base.types.is_ispace(t) then
+          return c.legion_index_space_t, "legion_index_space_t", "Legion::IndexSpace"
+        elseif t == int32 then
+          return int32, "int32_t %s",  "int32_t %s"
+        elseif t == int64 then
+          return int64, "int64_t %s", "int64_t %s"
+        elseif t == uint32 then
+          return uint32, "uint32_t %s", "uint32_t %s"
+        elseif t == uint64 then
+          return uint64, "uint64_t %s", "uint64_t %s"
+        elseif t == float then
+          return float, "float %s", "float %s"
+        elseif t == double then
+          return double, "double %s", "double %s"
+        elseif t == bool then
+          return bool, "bool %s", "bool %s"
+        elseif t:isarray() then
+          local elt_t, elt_c, elt_cxx = lower_type(t.type)
+          return &elt_t, elt_c .. "[" .. t.N .. "]", elt_cxx .. "[" .. t.N .. "]"
+        else
+          assert(false, "unknown type " .. tostring(t))
+        end
       end
+
+      local terra_type, c_type, cxx_type = lower_type(param_type)
 
       assert(terra_type and c_type and cxx_type)
       result:insert({terra_type, c_type, cxx_type, param:getname()})
 
       -- Add secondary symbols for special types
       if base.types.is_region(param_type) then
-        result:insert({c.legion_logical_region_t, "legion_logical_region_t", "Legion::LogicalRegion", param:getname() .. "_parent"})
-        result:insert({&c.legion_field_id_t, "const legion_field_id_t *", "const std::vector<Legion::FieldID> &", param:getname() .. "_fields"})
-        result:insert({c.size_t, "size_t", false, param:getname() .. "_num_fields"})
+        result:insert({c.legion_logical_region_t, "legion_logical_region_t %s", "Legion::LogicalRegion %s", param:getname() .. "_parent"})
+        result:insert({&c.legion_field_id_t, "const legion_field_id_t * %s", "const std::vector<Legion::FieldID> & %s", param:getname() .. "_fields"})
+        result:insert({c.size_t, "size_t %s", false, param:getname() .. "_num_fields"})
       end
 
       return result
@@ -106,7 +104,7 @@ local function render_c_params(param_list)
   local result = terralib.newlist()
   for _, param in ipairs(param_list) do
     local terra_type, c_type, cxx_type, param_name = unpack(param)
-    result:insert(c_type .. " " .. header_helper.normalize_name(param_name))
+    result:insert(string.format(c_type, base.normalize_name(param_name)))
   end
   return result
 end
@@ -116,7 +114,7 @@ local function render_cxx_params(param_list)
   for _, param in ipairs(param_list) do
     local terra_type, c_type, cxx_type, param_name = unpack(param)
     if cxx_type then
-      result:insert(cxx_type .. " " .. header_helper.normalize_name(param_name))
+      result:insert(string.format(cxx_type, base.normalize_name(param_name)))
     end
   end
   return result
@@ -150,6 +148,7 @@ function header_helper.generate_task_c_interface(task)
 
   local create_name = name .. "_create"
   local destroy_name = name .. "_destroy"
+  local set_enable_inlining_name = name .. "_set_enable_inlining"
   local execute_name = name .. "_execute"
 
   local create_args = terralib.newlist({
@@ -166,6 +165,13 @@ function header_helper.generate_task_c_interface(task)
   local destroy_proto = render_c_proto(
     destroy_name, destroy_args, "void")
 
+  local set_enable_inlining_args = terralib.newlist({
+    launcher_type .. " launcher",
+    "bool enable_inlining",
+  })
+  local set_enable_inlining_proto = render_c_proto(
+    set_enable_inlining_name, set_enable_inlining_args, "void")
+
   local execute_args = terralib.newlist({
     "legion_runtime_t runtime",
     "legion_context_t context",
@@ -174,11 +180,15 @@ function header_helper.generate_task_c_interface(task)
   local execute_proto = render_c_proto(
     execute_name, execute_args, "legion_future_t")
 
-  local result = terralib.newlist({launcher_proto, create_proto, destroy_proto, execute_proto})
+  local result = terralib.newlist({launcher_proto,
+                                   create_proto,
+                                   destroy_proto,
+                                   set_enable_inlining_proto,
+                                   execute_proto})
 
   local params = get_task_params(task)
   for _, param_list in ipairs(params) do
-    local param_name = header_helper.normalize_name(param_list[1][4])
+    local param_name = base.normalize_name(param_list[1][4])
     local add_name = name .. "_add_argument_" .. param_name
     local add_args = render_c_params(param_list)
     add_args:insert(1, launcher_type .. " launcher")
@@ -197,6 +207,7 @@ function header_helper.generate_task_cxx_interface(task)
 
   local c_create_name = name .. "_create"
   local c_destroy_name = name .. "_destroy"
+  local c_set_enable_inlining_name = name .. "_set_enable_inlining"
   local c_execute_name = name .. "_execute"
 
   local launcher_type = name
@@ -206,6 +217,7 @@ function header_helper.generate_task_cxx_interface(task)
 
   local ctor_name = launcher_type
   local dtor_name = "~" .. launcher_type
+  local set_enable_inlining_name = "set_enable_inlining"
   local execute_name = "execute"
 
   local ctor_args = terralib.newlist({
@@ -228,6 +240,15 @@ function header_helper.generate_task_cxx_interface(task)
       "delete predicate;",
     }))
 
+  local set_enable_inlining_args = terralib.newlist({
+    "bool enable_inlining"
+  })
+  local set_enable_inlining_def = render_c_def(
+    set_enable_inlining_name, set_enable_inlining_args, "void",
+    terralib.newlist({
+      c_set_enable_inlining_name .. "(launcher, enable_inlining);"
+    }))
+
   local execute_args = terralib.newlist({
     "Legion::Runtime *runtime",
     "Legion::Context ctx",
@@ -247,12 +268,13 @@ function header_helper.generate_task_cxx_interface(task)
   local body = terralib.newlist()
   body:insertall(ctor_def)
   body:insertall(dtor_def)
+  body:insertall(set_enable_inlining_def)
   body:insertall(execute_def)
 
   local task_param_symbols = task:get_param_symbols()
   local params = get_task_params(task)
   for i, param_list in ipairs(params) do
-    local param_name = header_helper.normalize_name(param_list[1][4])
+    local param_name = base.normalize_name(param_list[1][4])
     local param_type = task_param_symbols[i]:gettype()
 
     local c_add_name = name .. "_add_argument_" .. param_name
@@ -367,6 +389,16 @@ local function make_destroy_launcher(launcher_name, wrapper_type, state_type)
   return { helper_name, helper }
 end
 
+local function make_set_enable_inlining_launcher(launcher_name, wrapper_type, state_type)
+  local helper_name = launcher_name .. "_set_enable_inlining"
+  local terra helper(wrapper : wrapper_type, enable_inlining : bool)
+    var launcher_state = [&state_type](wrapper.impl)
+    c.legion_task_launcher_set_enable_inlining(launcher_state.launcher, enable_inlining)
+  end
+  helper:setname(helper_name)
+  return { helper_name, helper }
+end
+
 local function make_execute_launcher(launcher_name, wrapper_type, state_type, params)
   local helper_name = launcher_name .. "_execute"
   local terra helper(runtime : c.legion_runtime_t, context : c.legion_context_t,
@@ -394,7 +426,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
                                  task, params_struct_type,
                                  param_i, first_req_i, param_list, task_param_symbol,
                                  param_field_id_array)
-  local param_name = header_helper.normalize_name(param_list[1][4])
+  local param_name = base.normalize_name(param_list[1][4])
 
   local param_symbol = param_list:map(
     function(param)
@@ -419,6 +451,8 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     cast_value = `([param_type] { impl = [arg_value] })
   elseif base.types.is_ispace(param_type) then
     cast_value = `([param_type] { impl = [arg_value] })
+  elseif param_type:isarray() then
+    cast_value = `(@([&param_type]([arg_value])))
   end
 
   local c_field = params_struct_type:getentries()[param_i + 1]
@@ -442,8 +476,11 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     local field_paths, _ = base.types.flatten_struct_fields(param_type:fspace())
     arg_setup:insert(
       quote
-          base.assert([field_count] == [#field_paths],
-            ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i .. ")"])
+          if [field_count] ~= [#field_paths] then
+            c.printf([launcher_name .. " wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i
+                        .. ") expected: " .. #field_paths .. " got: %d\n"], field_count)
+            c.abort()
+          end
         [launcher_state].task_args.[param_field_id_array] = @[&c.legion_field_id_t[#field_paths]]([field_ids])
       end)
     local field_id_by_path = data.newmap()
@@ -559,9 +596,11 @@ function header_helper.generate_task_implementation(task)
     task, launcher_name, wrapper_type, state_type, params, params_struct_type)
   local destroy = make_destroy_launcher(
     launcher_name, wrapper_type, state_type)
+  local set_enable_inlining = make_set_enable_inlining_launcher(
+    launcher_name, wrapper_type, state_type)
   local execute = make_execute_launcher(
     launcher_name, wrapper_type, state_type, params)
-  local result = terralib.newlist({create, destroy, execute})
+  local result = terralib.newlist({create, destroy, set_enable_inlining, execute})
 
   local task_param_symbols = task:get_param_symbols()
   local param_field_ids = task:get_field_id_param_labels()
@@ -655,8 +694,11 @@ local function OLD_generate_task_implementation(task)
       local field_paths, _ = base.types.flatten_struct_fields(param_type:fspace())
       args_setup:insert(
         quote
-            base.assert([field_count] == [#field_paths],
-              ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. i .. ")"])
+            if [field_count] ~= [#field_paths] then
+              c.printf([launcher_name .. " wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i
+                          .. ") expected: " .. #field_paths .. " got: %d\n"], field_count)
+              c.abort()
+            end
         end)
       local field_id_by_path = data.newmap()
       for j, field_path in pairs(field_paths) do

@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University, NVIDIA Corporation
+-- Copyright 2021 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -149,6 +149,22 @@ function ast_node:get_fields()
 end
 
 function ast_node:__call(fields_to_update)
+  -- Optimization: In many cases optimizations use this to regenerate AST
+  -- nodes without checking if they've actually changed. Rather than stuffing
+  -- the checking code into every place where it's used, just centralize the
+  -- check here. The check has some cost but saves several allocations when it
+  -- triggers, which is often enough to be a win.
+  local changed = false
+  for f, v in pairs(fields_to_update) do
+    if not rawequal(self[f], v) then
+      changed = true
+      break
+    end
+  end
+  if not changed then
+    return self
+  end
+
   local ctor = rawget(self, "node_type")
   local values = {}
   for _, f in ipairs(ctor.expected_fields) do
@@ -360,7 +376,7 @@ local function check_dispatch_completeness(table, node_type)
   assert(false, "dispatch table is missing node type " .. tostring(node_type))
 end
 
-function ast.make_single_dispatch(table, required_cases)
+function ast.make_single_dispatch(table, required_cases, default_handler)
   assert(table and required_cases)
 
   for _, parent_type in ipairs(required_cases) do
@@ -376,6 +392,8 @@ function ast.make_single_dispatch(table, required_cases)
         end
         if table[node_type] then
           return table[node_type](cx, node, ...)
+        elseif default_handler then
+          return default_handler(cx, node, ...)
         else
           assert(false, "unexpected node type " .. tostring(node.node_type))
         end
@@ -388,6 +406,8 @@ function ast.make_single_dispatch(table, required_cases)
         end
         if table[node_type] then
           return table[node_type](node, ...)
+        elseif default_handler then
+          return default_handler(node, ...)
         else
           assert(false, "unexpected node type " .. tostring(node.node_type))
         end
@@ -449,83 +469,96 @@ function ast.map_node_continuation(fn, node)
   return continuation(node)
 end
 
-function ast.traverse_node_postorder(fn, node)
+function ast.traverse_node_postorder(fn, node, filter_fn)
   if ast.is_node(node) then
-    for _, child in pairs(node) do
-      ast.traverse_node_postorder(fn, child)
+    if not filter_fn or filter_fn(node) then
+      for _, child in pairs(node) do
+        ast.traverse_node_postorder(fn, child, filter_fn)
+      end
+      fn(node)
     end
-    fn(node)
   elseif terralib.islist(node) then
     for _, child in ipairs(node) do
-      ast.traverse_node_postorder(fn, child)
+      ast.traverse_node_postorder(fn, child, filter_fn)
     end
   end
 end
 
-function ast.traverse_node_prepostorder(pre_fn, post_fn, node)
+function ast.traverse_node_prepostorder(pre_fn, post_fn, node, filter_fn)
   if ast.is_node(node) then
-    pre_fn(node)
-    for k, child in pairs(node) do
-      if k ~= "node_type" and k ~= "node_id" then
-        ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+    if not filter_fn or filter_fn(node) then
+      pre_fn(node)
+      for k, child in pairs(node) do
+        if k ~= "node_type" and k ~= "node_id" then
+          ast.traverse_node_prepostorder(pre_fn, post_fn, child, filter_fn)
+        end
       end
+      post_fn(node)
     end
-    post_fn(node)
   elseif terralib.islist(node) then
     for _, child in ipairs(node) do
-      ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+      ast.traverse_node_prepostorder(pre_fn, post_fn, child, filter_fn)
     end
   end
 end
 
-function ast.map_node_postorder(fn, node)
+function ast.map_node_postorder(fn, node, filter_fn)
   if ast.is_node(node) then
-    local tmp = {}
-    for k, child in pairs(node) do
-      if k ~= "node_type" and k ~= "node_id" then
-        tmp[k] = ast.map_node_postorder(fn, child)
+    if not filter_fn or filter_fn(node) then
+      local tmp = {}
+      for k, child in pairs(node) do
+        if k ~= "node_type" and k ~= "node_id" then
+          tmp[k] = ast.map_node_postorder(fn, child, filter_fn)
+        end
       end
+      return fn(node(tmp))
     end
-    return fn(node(tmp))
+    return node
   elseif terralib.islist(node) then
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
-      tmp:insert(ast.map_node_postorder(fn, child))
+      tmp:insert(ast.map_node_postorder(fn, child, filter_fn))
     end
     return tmp
   end
   return node
 end
 
-function ast.map_node_prepostorder(pre_fn, post_fn, node)
+function ast.map_node_prepostorder(pre_fn, post_fn, node, filter_fn)
   if ast.is_node(node) then
-    local new_node = pre_fn(node)
-    local tmp = {}
-    for k, child in pairs(new_node) do
-      if k ~= "node_type" and k ~= "node_id" then
-        tmp[k] = ast.map_node_prepostorder(pre_fn, post_fn, child)
+    if not filter_fn or filter_fn(node) then
+      local new_node = pre_fn(node)
+      local tmp = {}
+      for k, child in pairs(new_node) do
+        if k ~= "node_type" and k ~= "node_id" then
+          tmp[k] = ast.map_node_prepostorder(pre_fn, post_fn, child, filter_fn)
+        end
       end
+      return post_fn(new_node(tmp))
     end
-    return post_fn(new_node(tmp))
+    return node
   elseif terralib.islist(node) then
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
-      tmp:insert(ast.map_node_prepostorder(pre_fn, post_fn, child))
+      tmp:insert(ast.map_node_prepostorder(pre_fn, post_fn, child, filter_fn))
     end
     return tmp
   end
   return node
 end
 
-function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
+function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init, filter_fn)
   if ast.is_node(node) then
-    local result = init
-    for _, child in pairs(node) do
-      result = reduce_fn(
-        result,
-        ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init))
+    if not filter_fn or filter_fn(node) then
+      local result = init
+      for _, child in pairs(node) do
+        result = reduce_fn(
+          result,
+          ast.mapreduce_node_postorder(map_fn, reduce_fn, child, init, filter_fn))
+      end
+      return reduce_fn(result, map_fn(node))
     end
-    return reduce_fn(result, map_fn(node))
+    return init
   elseif terralib.islist(node) then
     local result = init
     for _, child in ipairs(node) do
@@ -538,14 +571,70 @@ function ast.mapreduce_node_postorder(map_fn, reduce_fn, node, init)
   return init
 end
 
-function ast.traverse_expr_postorder(fn, node)
-  ast.traverse_node_postorder(
-    function(child)
-      if rawget(child, "expr_type") then
-        fn(child)
+function ast.flatmap_node_continuation(fn, node)
+  local function continuation(node, continuing)
+    if ast.is_node(node) then
+      -- First entry: invoke the callback.
+      if continuing == nil then
+        return fn(node, continuation)
+
+      -- Second entry: (if true) continue to children.
+      elseif continuing then
+        local tmp = {}
+        for k, child in pairs(node) do
+          if k ~= "node_type" and k ~= "node_id" then
+            tmp[k] = continuation(child)
+            local is_src_list = terralib.islist(child)
+            local is_dst_list = terralib.islist(tmp[k])
+            assert((is_src_list and is_dst_list) or (not is_src_list and not is_dst_list),
+                   "flatmap only flattens a list of statements")
+          end
+        end
+        return node(tmp)
       end
-    end,
-    node)
+    elseif terralib.islist(node) then
+      local tmp = terralib.newlist()
+      for _, child in ipairs(node) do
+        child = continuation(child)
+        if terralib.islist(child) then
+          tmp:insertall(child)
+        else
+          tmp:insert(child)
+        end
+      end
+      return tmp
+    end
+    return node
+  end
+  return continuation(node)
+end
+
+function ast.flatmap_node_postorder(fn, node)
+  if ast.is_node(node) then
+    local tmp = {}
+    for k, child in pairs(node) do
+       if k ~= "node_type" and k ~= "node_id" then
+        tmp[k] = ast.flatmap_node_postorder(fn, child)
+        local is_src_list = terralib.islist(child)
+        local is_dst_list = terralib.islist(tmp[k])
+        assert((is_src_list and is_dst_list) or (not is_src_list and not is_dst_list),
+               "flatmap only flattens a list of statements")
+      end
+    end
+    return fn(node(tmp))
+  elseif terralib.islist(node) then
+    local tmp = terralib.newlist()
+    for _, child in ipairs(node) do
+      local child = ast.flatmap_node_postorder(fn, child)
+      if terralib.islist(child) then
+        tmp:insertall(child)
+      else
+        tmp:insert(child)
+      end
+    end
+    return tmp
+  end
+  return node
 end
 
 -- Location
