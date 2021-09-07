@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -69,6 +69,7 @@ terra top_level_task(task : c.legion_task_t,
     c.printf("abort\n")
     c.abort()
   end
+  c.legion_future_destroy(f)
 end
 
 local args = require("manual_capi_args")

@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -60,12 +60,12 @@ fspace Edge(rsrc : region(Node), rdst : region(Node)) {
 task read_edge_data(g : GraphCfg, re : region(Edge(wild, wild)))
   where reads writes(re.{n1,n2,cost})
 do
-  helpers.read_ptr_field(__runtime(), __context(), __physical(re)[0], __fields(re)[0],
+  helpers.read_ptr_field(__runtime(), __context(), __physical(re.n1)[0], __fields(re.n1)[0],
 			 g.datafile, 0)
-  helpers.read_ptr_field(__runtime(), __context(), __physical(re)[1], __fields(re)[1],
+  helpers.read_ptr_field(__runtime(), __context(), __physical(re.n2)[0], __fields(re.n2)[0],
 			 g.datafile, g.edges * [ sizeof(int) ])
 
-  helpers.read_float_field(__runtime(), __context(), __physical(re)[2], __fields(re)[2],
+  helpers.read_float_field(__runtime(), __context(), __physical(re.cost)[0], __fields(re.cost)[0],
 			   g.datafile, g.edges * [ sizeof(int) + sizeof(float) ])
 
   --for e in re do
@@ -140,7 +140,9 @@ end
 task read_expected_distances(rn : region(Node), filename : &int8)
   where reads writes(rn.exp_distance)
 do
-  helpers.read_float_field(__runtime(), __context(), __physical(rn)[0], __fields(rn)[0],
+  helpers.read_float_field(__runtime(), __context(),
+         __physical(rn.exp_distance)[0],
+         __fields(rn.exp_distance)[0],
 			   filename, 0)
 end
 

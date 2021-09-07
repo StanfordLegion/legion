@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -27,6 +27,8 @@
 
 import "regent"
 
+local format = require("std/format")
+
 require("pennant_common")
 
 local use_python_main = rawget(_G, "pennant_use_python_main") == true
@@ -54,6 +56,7 @@ do
   end
 end
 
+__demand(__cuda)
 task init_mesh_zones(rz : region(zone))
 where
   writes(rz.{zx, zarea, zvol})
@@ -68,6 +71,7 @@ end
 -- Call calc_centers_full.
 -- Call calc_volumes_full.
 
+__demand(__cuda)
 task init_side_fracs(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)))
 where
@@ -81,6 +85,7 @@ do
   end
 end
 
+__demand(__cuda)
 task init_hydro(rz : region(zone), rinit : double, einit : double,
                 rinitsub : double, einitsub : double,
                 subregion_x0 : double, subregion_x1 : double,
@@ -113,6 +118,7 @@ do
   end
 end
 
+__demand(__cuda)
 task init_radial_velocity(rp : region(point), vel : double)
 where
   reads(rp.px),
@@ -133,6 +139,7 @@ end
 -- #################
 
 -- Save off point variable values from previous cycle.
+__demand(__cuda)
 task init_step_points(rp : region(point),
                       enable : bool)
 where
@@ -158,6 +165,7 @@ end
 --
 -- 1. Advance mesh to center of time step.
 --
+__demand(__cuda)
 task adv_pos_half(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -188,6 +196,7 @@ do
 end
 
 -- Save off zone variable value from previous cycle.
+__demand(__cuda)
 task init_step_zones(rz : region(zone), enable : bool)
 where
   reads(rz.zvol),
@@ -207,6 +216,7 @@ end
 --
 
 -- Compute centers of zones and edges.
+__demand(__cuda)
 task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   enable : bool)
@@ -240,6 +250,7 @@ end
 
 -- Compute volumes of zones and sides.
 -- Compute edge lengths.
+__demand(__cuda)
 task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   enable : bool)
@@ -276,10 +287,13 @@ do
     num_negatives += [int](sv <= 0.0)
   end
 
+  regentlib.assert(num_negatives == 0, "sv negative in calc_volumes")
+
   return num_negatives
 end
 
 -- Compute zone characteristic lengths.
+__demand(__cuda)
 task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    enable : bool)
@@ -317,6 +331,7 @@ end
 --
 
 -- Compute zone densities.
+__demand(__cuda)
 task calc_rho_half(rz : region(zone), enable : bool)
 where
   reads(rz.{zvolp, zm}),
@@ -331,6 +346,7 @@ do
 end
 
 -- Reduce masses into points.
+__demand(__cuda)
 task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     enable : bool)
@@ -355,6 +371,7 @@ end
 -- 3. Compute material state (half-advanced).
 --
 
+__demand(__cuda)
 task calc_state_at_half(rz : region(zone),
                         gamma : double, ssmin : double, dt : double,
                         enable : bool)
@@ -393,6 +410,7 @@ end
 --
 
 -- Compute PolyGas and TTS forces.
+__demand(__cuda)
 task calc_force_pgas_tts(rz : region(zone), rpp : region(point),
                          rpg : region(point),
                          rs : region(side(rz, rpp, rpg, rs)),
@@ -425,6 +443,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : region(point),
                               rs : region(side(rz, rpp, rpg, rs)),
                               enable : bool)
@@ -449,6 +468,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_corner_divergence(rz : region(zone), rpp : region(point), rpg : region(point),
                            rs : region(side(rz, rpp, rpg, rs)),
                            enable : bool)
@@ -542,6 +562,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_qcn_force(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    gamma : double, q1 : double, q2 : double,
@@ -579,6 +600,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_force(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                enable : bool)
@@ -615,6 +637,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_vel_diff(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   q1 : double, q2 : double,
@@ -652,6 +675,7 @@ do
 end
 
 -- Reduce forces into points.
+__demand(__cuda)
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
                      enable : bool)
@@ -676,6 +700,7 @@ end
 -- 4a. Apply boundary conditions.
 --
 
+__demand(__cuda)
 task apply_boundary_conditions(rp : region(point),
                                enable : bool)
 where
@@ -708,6 +733,7 @@ end
 -- 6. Advance mesh to end of time step.
 --
 
+__demand(__cuda)
 task adv_pos_full(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -741,6 +767,7 @@ end
 -- FIXME: This is a duplicate of calc_centers but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
+__demand(__cuda)
 task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
                        enable : bool)
@@ -773,6 +800,7 @@ end
 -- FIXME: This is a duplicate of calc_volumes but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
+__demand(__cuda)
 task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
                        enable : bool)
@@ -809,6 +837,8 @@ do
     num_negatives += [int](sv <= 0)
   end
 
+  regentlib.assert(num_negatives == 0, "sv negative in calc_volumes_full")
+
   return num_negatives
 end
 
@@ -816,6 +846,7 @@ end
 -- 7. Compute work
 --
 
+__demand(__cuda)
 task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                dt : double,
@@ -852,6 +883,7 @@ end
 -- 8. Update state variables.
 --
 
+__demand(__cuda)
 task calc_work_rate_energy_rho_full(rz : region(zone), dt : double,
                                     enable : bool)
 where
@@ -908,6 +940,7 @@ do
 end
 ]]
 
+__demand(__cuda)
 task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double,
                    cfl : double, cflv : double, enable : bool) : double
 where
@@ -1012,6 +1045,7 @@ where
   reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
+  var pieces = ispace(int1d, conf.npieces)
   var prune = conf.prune
 
   var alfa = conf.alfa
@@ -1042,46 +1076,54 @@ do
   var dthydro = dtmax
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  while continue_simulation(cycle, cstop, time, tstop) do
+  var cont = true
+  while cont do
+    if cycle == prune then
+      __fence(__execution, __block)
+      ts_start = c.legion_get_current_time_in_micros()
+    elseif cycle == cstop - prune then
+      __fence(__execution, __block)
+      ts_end = c.legion_get_current_time_in_micros()
+    end
+
+  if not continue_simulation(cycle, cstop, time, tstop) then break end
+  __demand(__trace)
+  do
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       init_step_points(rp_all_private_p[i], enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       init_step_points(rp_all_shared_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       init_step_zones(rz_all_p[i], enable)
     end
 
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
-    if cycle > 0 and cycle % interval == 0 then
-      var current_time = c.legion_get_current_time_in_micros()/1.e6
-      output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      last_time = current_time
-    end
-    if cycle == prune then
-      ts_start = c.legion_get_current_time_in_micros()
-    elseif cycle == cstop - prune then
-      ts_end = c.legion_get_current_time_in_micros()
-    end
+    -- FIXME: this code violates the trace consistency
+    -- if cycle > 0 and cycle % interval == 0 then
+    --   var current_time = c.legion_get_current_time_in_micros()/1.e6
+    --   output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+    --   last_time = current_time
+    -- end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_half(rp_all_private_p[i], dt, enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_half(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_centers(rz_all_p[i],
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
@@ -1089,20 +1131,20 @@ do
                    enable)
     end
 
-    var num_negatives = 0
+    -- var num_negatives = 0
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      num_negatives +=
+    for i in pieces do
+      -- num_negatives +=
         calc_volumes(rz_all_p[i],
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
                      rs_all_p[i],
                      enable)
     end
-    verify_calc_volumes(num_negatives)
+    -- verify_calc_volumes(num_negatives)
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_char_len(rz_all_p[i],
                     rp_all_private_p[i],
                     rp_all_ghost_p[i],
@@ -1111,12 +1153,12 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_rho_half(rz_all_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       sum_point_mass(rz_all_p[i],
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
@@ -1125,12 +1167,12 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_force_pgas_tts(rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_ghost_p[i],
@@ -1140,7 +1182,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_zone_center_velocity(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1150,7 +1192,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_corner_divergence(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1160,7 +1202,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_qcn_force(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1171,7 +1213,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_force(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1181,7 +1223,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       qcs_vel_diff(
         rz_all_p[i],
         rp_all_private_p[i],
@@ -1192,7 +1234,7 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       sum_point_force(rz_all_p[i],
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
@@ -1201,25 +1243,25 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       apply_boundary_conditions(rp_all_private_p[i], enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       apply_boundary_conditions(rp_all_shared_p[i], enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_full(rp_all_private_p[i], dt, enable)
     end
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       adv_pos_full(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_centers_full(rz_all_p[i],
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
@@ -1227,20 +1269,20 @@ do
                         enable)
     end
 
-    var num_negatives_full = 0
+    -- var num_negatives_full = 0
     __demand(__index_launch)
-    for i = 0, conf.npieces do
-      num_negatives_full +=
+    for i in pieces do
+      -- num_negatives_full +=
         calc_volumes_full(rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_ghost_p[i],
                           rs_all_p[i],
                           enable)
     end
-    verify_calc_volumes_full(num_negatives_full)
+    -- verify_calc_volumes_full(num_negatives_full)
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_work(rz_all_p[i],
                 rp_all_private_p[i],
                 rp_all_ghost_p[i],
@@ -1249,18 +1291,21 @@ do
     end
 
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       calc_work_rate_energy_rho_full(rz_all_p[i], dt, enable)
     end
 
     dthydro = dtmax
     __demand(__index_launch)
-    for i = 0, conf.npieces do
+    for i in pieces do
       dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv, enable)
     end
 
     cycle += 1
     time += dt
+
+    cont = continue_simulation(cycle, cstop, time, tstop)
+  end
   end
   if prune == 0 then
     ts_end = c.legion_get_current_time_in_micros()
@@ -1337,6 +1382,8 @@ do
 
   for i = 0, conf.npieces do
     init_radial_velocity(rp_all_private_p[i], uinitradial)
+  end
+  for i = 0, conf.npieces do
     init_radial_velocity(rp_all_shared_p[i], uinitradial)
   end
 end
@@ -1439,7 +1486,7 @@ task toplevel()
   if conf.par_init then
     __demand(__index_launch)
     for i = 0, conf.npieces do
-      initialize_topology(conf, i, rz_all_p[i],
+      initialize_topology(conf, rz_all_p[i],
                           rp_all_private_p[i],
                           rp_all_shared_p[i],
                           rp_all_ghost_p[i],

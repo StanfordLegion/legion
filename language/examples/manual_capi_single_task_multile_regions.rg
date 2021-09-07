@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -77,8 +77,9 @@ terra top_level_task(task : c.legion_task_t,
     var r1idx = c.legion_task_launcher_add_region_requirement_logical_region(
       task_launcher, lr1, c.READ_WRITE, c.EXCLUSIVE, lr1, 0, false)
     c.legion_task_launcher_add_field(task_launcher, r1idx, F1R1, true)
-    c.legion_task_launcher_execute(runtime, ctx, task_launcher)
+    var f = c.legion_task_launcher_execute(runtime, ctx, task_launcher)
     c.printf("Launched task with single regions\n")
+    c.legion_future_destroy(f)
   end
 
   do
@@ -91,8 +92,9 @@ terra top_level_task(task : c.legion_task_t,
     var r2idx = c.legion_task_launcher_add_region_requirement_logical_region(
       task_launcher, lr2, c.READ_WRITE, c.EXCLUSIVE, lr2, 0, false)
     c.legion_task_launcher_add_field(task_launcher, r2idx, F1R2, true)
-    c.legion_task_launcher_execute(runtime, ctx, task_launcher)
+    var f = c.legion_task_launcher_execute(runtime, ctx, task_launcher)
     c.printf("Launched task with multiple regions\n")
+    c.legion_future_destroy(f)
   end
 
   c.printf("End top task!\n")

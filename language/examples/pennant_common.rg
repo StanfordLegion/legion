@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -24,7 +24,17 @@ local parallel = rawget(_G, "pennant_parallel") ~= false
 -- Compile and link pennant.cc
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local pennant_cc = root_dir .. "pennant.cc"
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
@@ -35,9 +45,9 @@ do
     pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   end
   local cxx = os.getenv('CXX') or 'c++'
-  local max_dim = os.getenv('MAX_DIM') or '3'
 
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -46,14 +56,14 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                 pennant_cc .. " -o " .. pennant_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
-  terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir})
+  regentlib.linklibrary(pennant_so)
+  cpennant = terralib.includec("pennant.h", include_dirs)
 end
 
 -- Also copy input files into the destination directory.
@@ -72,7 +82,7 @@ local cstring = terralib.includec("string.h")
 -- Hack: Make everything global for now, so it's available unqualified
 -- in the caller.
 
-sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
+sqrt = regentlib.sqrt(double)
 
 -- #####################################
 -- ## Data Structures
@@ -82,54 +92,53 @@ sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
 max = regentlib.fmax
 min = regentlib.fmin
 
-terra abs(a : double) : double
-  if a < 0 then
-    return -a
-  else
-    return a
-  end
-end
+abs = regentlib.fabs(double)
 
 struct vec2 {
   x : double,
   y : double,
 }
 
-terra vec2.metamethods.__add(a : vec2, b : vec2) : vec2
-  return vec2 { x = a.x + b.x, y = a.y + b.y }
-end
+vec2.metamethods.__add = macro(function(a, b)
+  return `vec2 { x = a.x + b.x, y = a.y + b.y }
+end)
 
-terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
-  return vec2 { x = a.x - b.x, y = a.y - b.y }
-end
+vec2.metamethods.__sub = macro(function(a, b)
+  return `vec2 { x = a.x - b.x, y = a.y - b.y }
+end)
 
-vec2.metamethods.__mul = terralib.overloadedfunction(
-  "__mul", {
-    terra(a : double, b : vec2) : vec2
-      return vec2 { x = a * b.x, y = a * b.y }
-    end,
-    terra(a : vec2, b : double) : vec2
-      return vec2 { x = a.x * b, y = a.y * b }
-    end
-  })
+vec2.metamethods.__mul = macro(function(a, b)
+  if a:gettype() == double and b:gettype() == vec2 then
+    return `vec2 { x = a * b.x, y = a * b.y }
+  end
+  if a:gettype() == vec2 and b:gettype() == double then
+    return `vec2 { x = a.x * b, y = a.y * b }
+  end
+  assert(false)
+end)
 
-terra dot(a : vec2, b : vec2) : double
+__demand(__inline)
+task dot(a : vec2, b : vec2) : double
   return a.x*b.x + a.y*b.y
 end
 
-terra cross(a : vec2, b : vec2) : double
+__demand(__inline)
+task cross(a : vec2, b : vec2) : double
   return a.x*b.y - a.y*b.x
 end
 
-terra length(a : vec2) : double
+__demand(__inline)
+task length(a : vec2) : double
   return sqrt(dot(a, a))
 end
 
-terra rotateCCW(a : vec2) : vec2
+__demand(__inline)
+task rotateCCW(a : vec2) : vec2
   return vec2 { x = -a.y, y = a.x }
 end
 
-terra project(a : vec2, b : vec2)
+__demand(__inline)
+task project(a : vec2, b : vec2)
   return a - b*dot(a, b)
 end
 
@@ -444,7 +453,7 @@ local terra get_submesh_config(conf : &config)
   var nx : double, ny : double = conf.nzx, conf.nzy
   var swapflag = nx > ny
   if swapflag then nx, ny = ny, nx end
-  var n = sqrt(conf.npieces * nx / ny)
+  var n = cmath.sqrt(conf.npieces * nx / ny)
   var n1 : int64 = max(cmath.floor(n + 1e-12), 1)
   while conf.npieces % n1 ~= 0 do n1 = n1 - 1 end
   var n2 : int64 = cmath.ceil(n - 1e-12)
@@ -709,6 +718,7 @@ terra read_config()
 
   return conf
 end
+read_config.replicable = true
 
 -- This is in a task so that it can be called from Python.
 task read_config_task()
@@ -1058,7 +1068,6 @@ terra read_input(runtime : c.legion_runtime_t,
 
   return result
 end
-read_input:compile()
 
 -- #####################################
 -- ## Distributed Mesh Generator
@@ -1394,7 +1403,6 @@ terra read_partitions(conf : config) : mesh_colorings
 
   return result
 end
-read_partitions:compile()
 
 -- This is in a task so that it can be called from Python.
 task read_partitions_task2(rz_all : region(zone),
@@ -1604,7 +1612,7 @@ do
 end
 
 task initialize_topology(conf : config,
-                         piece : int64,
+                         -- piece : int64,
                          rz : region(zone),
                          rpp : region(point),
                          rps : region(point),
@@ -1619,6 +1627,8 @@ do
     conf.meshtype == MESH_RECT,
     "distributed initialization only works on rectangular meshes")
   var znump = 4
+
+  var piece = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rz))
 
   var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
 
@@ -2064,7 +2074,6 @@ terra validate_output(runtime : c.legion_runtime_t,
   c.free(solution_ze)
   c.free(solution_zp)
 end
-validate_output:compile()
 end
 
 local common = {}

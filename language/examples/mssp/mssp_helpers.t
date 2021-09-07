@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -31,41 +31,31 @@ function read_region_data(src_t, dst_t)
     var fa = c.legion_physical_region_get_field_accessor_array_1d(pr, fld)
 
     var ispace = c.legion_physical_region_get_logical_region(pr).index_space
-    var itr = c.legion_index_iterator_create(runtime, ctx, ispace)
-    while c.legion_index_iterator_has_next(itr) do
-      var start : c.legion_ptr_t
-      var count : uint64
-      start = c.legion_index_iterator_next_span(itr, &count, -1)
-      for idx = 0, count do
-        var pos : c.legion_ptr_t = c.legion_ptr_t { value = start.value + idx }
+    var itr = c.legion_rect_in_domain_iterator_create_1d(c.legion_index_space_get_domain(runtime, ispace))
+    while c.legion_rect_in_domain_iterator_valid_1d(itr) do
+      var rect = c.legion_rect_in_domain_iterator_get_rect_1d(itr)
+      c.legion_rect_in_domain_iterator_step_1d(itr)
+      for idx = rect.lo.x[0], rect.hi.x[0] + 1 do
+        var pos : c.legion_ptr_t = c.legion_ptr_t { value = idx }
         @[&dst_t](c.legion_accessor_array_1d_ref(fa, pos)) = 0
         var amt = unistd.pread(fd,
           		     [&dst_t](c.legion_accessor_array_1d_ref(fa, pos)),
           		     sizeof(src_t),
-          		     offset + sizeof(src_t) * (start.value + idx))
+          		     offset + sizeof(src_t) * (idx))
         regentlib.assert(amt == sizeof(src_t), "short read!")
       end
     end
+    c.legion_rect_in_domain_iterator_destroy_1d(itr)
     unistd.close(fd)
   end
   specialized:compile()
   return specialized
 end
 
--- simple helper to allocate a large block of elements in a region
--- No longer necessary to explicitly allocate elements
-terra allocate_elements(runtime : c.legion_runtime_t,
-			ctx : c.legion_context_t,
-			region : c.legion_logical_region_t,
-			count : uint64) 
-end
-
 helpers = { 
   read_region_data = read_region_data,
   read_ptr_field = read_region_data(int, int64),
   read_float_field = read_region_data(float, float),
-
-  allocate_elements = allocate_elements,
 }
 
 return helpers

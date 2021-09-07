@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -36,7 +36,6 @@ local c = regentlib.c
 -- ## Initialization
 -- #################
 
-__demand(__parallel)
 task init_mesh_zones(rz : region(zone))
 where
   writes(rz.{zx, zarea, zvol})
@@ -51,7 +50,6 @@ end
 -- Call calc_centers_full.
 -- Call calc_volumes_full.
 
-__demand(__parallel)
 task init_side_fracs(rz : region(zone), rp : region(point),
                      rs : region(side(rz, rp, rs)))
 where
@@ -65,7 +63,6 @@ do
   end
 end
 
-__demand(__parallel)
 task init_hydro(rz : region(zone), rinit : double, einit : double,
                 rinitsub : double, einitsub : double,
                 subregion_x0 : double, subregion_x1 : double,
@@ -98,7 +95,6 @@ do
   end
 end
 
-__demand(__parallel)
 task init_radial_velocity(rp : region(point), vel : double)
 where
   reads(rp.px),
@@ -119,14 +115,11 @@ end
 -- #################
 
 -- Save off point variable values from previous cycle.
-__demand(__parallel)
 task init_step_points(rp : region(point),
                       enable : bool)
 where
   writes(rp.{pmaswt, pf})
 do
-  if not enable then return end
-
   -- Initialize fields used in reductions.
   __demand(__vectorize)
   for p in rp do

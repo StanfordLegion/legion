@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -63,11 +63,5 @@ terra GraphCfg:show()
 	   self.nodes, self.edges, self.num_sources)
 end
 --GraphCfg.methods['show']:compile()
-
--- compile all methods eagerly to catch errors
-for k,v in pairs(GraphCfg.methods) do
-  --print(k)
-  v:compile()
-end
 
 return GraphCfg

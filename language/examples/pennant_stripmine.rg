@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1192,7 +1192,7 @@ task toplevel()
     for _ = 0, par_init do
       -- __demand(__index_launch)
       for i = 0, npieces do
-        initialize_topology(conf, i, rz_all_p[i],
+        initialize_topology(conf, rz_all_p[i],
                             rp_all_private_p[i],
                             rp_all_shared_p[i],
                             rp_all_ghost_p[i],
@@ -1258,7 +1258,7 @@ task toplevel()
   var time_copy = time
 
   -- Main Simulation Loop
-  __demand(__spmd, __trace)
+  __demand(__spmd, __predicate, __trace)
   while continue_simulation(warmup, cycle, cstop, time, tstop) do
     -- if warmup and cycle > 0 then
     --   wait_for(dthydro)

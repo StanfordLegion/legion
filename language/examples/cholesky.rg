@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -40,11 +40,11 @@ extern void dsyrk_(char *uplo, char* trans, int* n, int* k,
 ]]
 
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
-  terralib.linklibrary("libblas.dylib")
-  terralib.linklibrary("liblapack.dylib")
+  regentlib.linklibrary("libblas.dylib")
+  regentlib.linklibrary("liblapack.dylib")
 else
-  terralib.linklibrary("libblas.so")
-  terralib.linklibrary("liblapack.so")
+  regentlib.linklibrary("libblas.so")
+  regentlib.linklibrary("liblapack.so")
 end
 
 local c = regentlib.c
@@ -112,6 +112,7 @@ terra get_raw_ptr(y : int, x : int, bn : int,
   rect.hi.x[0] = (y + 1) * bn - 1
   rect.hi.x[1] = (x + 1) * bn - 1
   var ptr = c.legion_accessor_array_2d_raw_rect_ptr(fa, rect, &subrect, offsets)
+  c.legion_accessor_array_2d_destroy(fa)
   return raw_ptr { ptr = [&double](ptr), offset = offsets[1].offset / sizeof(double) }
 end
 

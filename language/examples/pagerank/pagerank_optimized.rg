@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ do
   end
   local cxx = os.getenv('NVCC') or 'nvcc'
 
-  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
   -- cxx_flags = cxx_flags
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
@@ -118,7 +118,7 @@ do
     print("Error: failed to compile " .. legion_interop_cc)
     assert(false)
   end
-  terralib.linklibrary(legion_interop_so)
+  regentlib.linklibrary(legion_interop_so)
   clegion_interop =
     terralib.includec("legion_interop.h", {"-I", root_dir, "-I", runtime_dir,
                                            "-I", mapper_dir, "-I", legion_dir,

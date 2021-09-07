@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -16,9 +16,18 @@ import "regent"
 
 local clegion_interop
 do
-  assert(os.getenv('LG_RT_DIR') ~= nil, "$LG_RT_DIR should be set!")
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
+
+  local include_path = ""
+  local include_dirs = terralib.newlist()
+  include_dirs:insert("-I")
+  include_dirs:insert(root_dir)
+  for path in string.gmatch(os.getenv("INCLUDE_PATH"), "[^;]+") do
+    include_path = include_path .. " -I " .. path
+    include_dirs:insert("-I")
+    include_dirs:insert(path)
+  end
+
   local legion_interop_cc = root_dir .. "legion_interop.cc"
   local legion_interop_so
   if os.getenv('SAVEOBJ') == '1' then
@@ -28,7 +37,7 @@ do
   end
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  local cxx_flags = os.getenv('CXXFLAGS') or ''
   cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
@@ -38,15 +47,15 @@ do
     cxx_flags = cxx_flags .. " -shared -fPIC"
   end
 
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+  local cmd = (cxx .. " " .. cxx_flags .. " " .. include_path .. " " ..
                  legion_interop_cc .. " -o " .. legion_interop_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. legion_interop_cc)
     assert(false)
   end
-  terralib.linklibrary(legion_interop_so)
+  regentlib.linklibrary(legion_interop_so)
   clegion_interop =
-    terralib.includec("legion_interop.h", {"-I", root_dir, "-I", runtime_dir})
+    terralib.includec("legion_interop.h", include_dirs)
 end
 
 struct s {

@@ -1,4 +1,4 @@
--- Copyright 2019 Stanford University
+-- Copyright 2021 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@
 -- Inspired by https://github.com/losalamos/PENNANT
 
 import "regent"
+
+local format = require("std/format")
 
 require("pennant_common")
 
@@ -337,7 +339,7 @@ where
 do
   if not enable then return end
 
-  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+  if print_ts then format.println("t: {}", c.legion_get_current_time_in_micros()) end
 
   var dth = 0.5 * dt
 
@@ -1447,7 +1449,7 @@ do
     dthydro min= dtlast * cflv / dvovmax
   end
 
-  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+  if print_ts then format.println("t: {}", c.legion_get_current_time_in_micros()) end
 
   return dthydro
 end
@@ -1508,16 +1510,18 @@ where reads writes(rz_all, rp_all, rs_all) do
   return colorings
 end
 
-terra get_raw_span(runtime : c.legion_runtime_t, ctx : c.legion_context_t,
+terra get_raw_span(runtime : c.legion_runtime_t,
                    r : c.legion_logical_region_t)
-  var it = c.legion_index_iterator_create(runtime, ctx, r.index_space)
-  while c.legion_index_iterator_has_next(it) do
-    var count : c.size_t = 0
-    var start = c.legion_index_iterator_next_span(it, &count, -1)
-    regentlib.assert(not c.legion_index_iterator_has_next(it), "multiple spans")
+  var it = c.legion_rect_in_domain_iterator_create_1d(c.legion_index_space_get_domain(runtime, r.index_space))
+  while c.legion_rect_in_domain_iterator_valid_1d(it) do
+    var rect = c.legion_rect_in_domain_iterator_get_rect_1d(it)
+    c.legion_rect_in_domain_iterator_step_1d(it)
+    regentlib.assert(not c.legion_rect_in_domain_iterator_valid_1d(it), "multiple spans")
 
-    return span { start = start.value, stop = start.value + count, internal = false }
+    c.legion_rect_in_domain_iterator_destroy_1d(it)
+    return span { start = rect.lo.x[0], stop = rect.hi.x[0] + 1, internal = false }
   end
+  c.legion_rect_in_domain_iterator_destroy_1d(it)
   return span { start = 0, stop = 0, internal = false }
 end
 
@@ -1554,19 +1558,19 @@ do
   for i = 0, conf.npieces do
     for j = 0, conf.nspans_zones do
       var z = unsafe_cast(ptr(span, rz_spans), i*conf.nspans_zones + j)
-      @z = get_raw_span(__runtime(), __context(), __raw(rz_spans_x[i][j]))
+      @z = get_raw_span(__runtime(), __raw(rz_spans_x[i][j]))
     end
     for j = 0, conf.nspans_zones do
       var s = unsafe_cast(ptr(span, rs_spans), i*conf.nspans_zones + j)
-      @s = get_raw_span(__runtime(), __context(), __raw(rs_spans_x[i][j]))
+      @s = get_raw_span(__runtime(), __raw(rs_spans_x[i][j]))
     end
     for j = 0, conf.nspans_points do
       var p = unsafe_cast(ptr(span, rp_spans_private), i*conf.nspans_points + j)
-      @p = get_raw_span(__runtime(), __context(), __raw(rp_spans_private_x[i][j]))
+      @p = get_raw_span(__runtime(), __raw(rp_spans_private_x[i][j]))
     end
     for j = 0, conf.nspans_points do
       var p = unsafe_cast(ptr(span, rp_spans_shared), i*conf.nspans_points + j)
-      @p = get_raw_span(__runtime(), __context(), __raw(rp_spans_shared_x[i][j]))
+      @p = get_raw_span(__runtime(), __raw(rp_spans_shared_x[i][j]))
     end
   end
   end
@@ -1595,7 +1599,7 @@ end
 terra unwrap(x : mesh_colorings) return x end
 
 task toplevel()
-  c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  format.println("Running test (t={.1})...", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
 
@@ -1603,7 +1607,7 @@ task toplevel()
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
-  c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  format.println("Reading input (t={.1}...", c.legion_get_current_time_in_micros()/1.e6)
 
   var colorings : mesh_colorings
 
@@ -1744,7 +1748,7 @@ task toplevel()
     for _ = 0, par_init do
       -- __demand(__index_launch)
       for i = 0, npieces do
-        initialize_topology(conf, i, rz_all_p[i],
+        initialize_topology(conf, rz_all_p[i],
                             rp_all_private_p[i],
                             rp_all_shared_p[i],
                             rp_all_ghost_p[i],
@@ -1816,7 +1820,7 @@ task toplevel()
   var time_copy = time
 
   -- Main Simulation Loop
-  __demand(__spmd, __trace)
+  __demand(__spmd, __predicate, __trace)
   while continue_simulation(warmup, cycle, cstop, time, tstop) do
     -- if warmup and cycle > 0 then
     --   wait_for(dthydro)
@@ -1836,7 +1840,7 @@ task toplevel()
 
     -- if cycle > 0 and cycle % interval == 0 then
     --   var current_time = c.legion_get_current_time_in_micros()/1.e6
-    --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --   format.println("cycle {4}    sim time {.3e}    dt {.3e}    time {.3e} (per iteration) {.3e} (total)",
     --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
     --   last_time = current_time
     -- end
@@ -1924,7 +1928,7 @@ task toplevel()
     validate_output_sequential(
       rz_all, rp_all, rs_all, conf)
   else
-    c.printf("Warning: Skipping sequential validation\n")
+    format.println("Warning: Skipping sequential validation")
   end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
