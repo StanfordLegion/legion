@@ -20333,8 +20333,7 @@ namespace Legion {
           {
             // do not invalidate trackers if we don't own the equivalence sets
             it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/,
-                nonexclusive_virtual_mapping_root ? source_context : NULL);
+                local_space, NULL/*no collective mapping*/);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }

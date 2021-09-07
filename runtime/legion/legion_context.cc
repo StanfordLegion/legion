@@ -3901,7 +3901,7 @@ namespace Legion {
             to_untrack.begin(); it != to_untrack.end(); it++)
         it->first->invalidate_trackers(it->second, applied_events,
             runtime->address_space, NULL/*no collective mapping*/,
-            local_only ? this : NULL/*filter everything*/);
+            local_only ? get_context_uid() : 0/*filter everything*/);
     }
 
     //--------------------------------------------------------------------------
@@ -20205,7 +20205,7 @@ namespace Legion {
           if (first_local_shard)
             it->first->invalidate_trackers(it->second, applied_events,
                 runtime->address_space, &collective_mapping,
-                local_only ? this : NULL/*filter everything*/);
+                local_only ? get_context_uid() : 0/*filter everything*/);
         }
         else
         {
@@ -20231,7 +20231,7 @@ namespace Legion {
           if (target_shard == owner_shard->shard_id)
             it->first->invalidate_trackers(it->second, applied_events,
                   runtime->address_space, NULL/*collective manager*/,
-                  local_only ? this : NULL/*filter everything*/);
+                  local_only ? get_context_uid() : 0/*filter everything*/);
         }
       }
     }
