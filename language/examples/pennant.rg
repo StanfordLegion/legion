@@ -1030,6 +1030,10 @@ task output5(fmt : regentlib.string,
   c.printf(fmt, arg0, arg1, arg2, arg3, arg4)
 end
 
+task dummy() return 1 end
+terra wait_for(x : int) end
+wait_for.replicable = true
+
 __demand(__inline)
 task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rp_all : region(point),
@@ -1079,10 +1083,12 @@ do
   var cont = true
   while cont do
     if cycle == prune then
-      __fence(__execution, __block)
+      __fence(__execution)
+      wait_for(dummy())
       ts_start = c.legion_get_current_time_in_micros()
     elseif cycle == cstop - prune then
-      __fence(__execution, __block)
+      __fence(__execution)
+      wait_for(dummy())
       ts_end = c.legion_get_current_time_in_micros()
     end
 
@@ -1501,7 +1507,8 @@ task toplevel()
              rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
              rs_all, rs_all_p,
              conf)
-  __fence(__execution, __block)
+  __fence(__execution)
+  wait_for(dummy())
 
   output1("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   var start_time = c.legion_get_current_time_in_micros()/1.e6

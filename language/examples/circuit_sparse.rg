@@ -697,6 +697,10 @@ task print_summary(color : int, sim_time : double, conf : Config)
   end
 end
 
+task dummy() return 1 end
+terra wait_for(x : int) end
+wait_for.replicable = true
+
 __demand(__inner, __replicable)
 task toplevel()
   var conf : Config
@@ -771,7 +775,8 @@ task toplevel()
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
 
-  __fence(__execution, __block)
+  __fence(__execution)
+  wait_for(dummy())
   __demand(__spmd, __trace)
   for j = 0, num_loops do
     for i in launch_domain do

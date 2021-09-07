@@ -524,6 +524,10 @@ task print_time(color : int, sim_time : double)
   end
 end
 
+task dummy() return 1 end
+terra wait_for(x : int) end
+wait_for.replicable = true
+
 __demand(__inner, __replicable)
 task main()
   var conf = read_config()
@@ -588,7 +592,8 @@ task main()
   --   end
   -- end
 
-  __fence(__execution, __block)
+  __fence(__execution)
+  wait_for(dummy())
 
   __demand(__spmd)
   do

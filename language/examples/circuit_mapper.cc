@@ -168,8 +168,7 @@ public:
   virtual Memory default_policy_select_target_memory(
                                 MapperContext ctx,
                                 Processor target_proc,
-                                const RegionRequirement &req,
-                                MemoryConstraint mc = MemoryConstraint());
+                                const RegionRequirement &req);
   virtual LogicalRegion default_policy_select_instance_region(
                                 MapperContext ctx, Memory target_memory,
                                 const RegionRequirement &req,
@@ -275,8 +274,7 @@ void CircuitMapper::default_policy_select_target_processors(
 
 Memory CircuitMapper::default_policy_select_target_memory(MapperContext ctx,
                                                           Processor target_proc,
-                                                          const RegionRequirement &req,
-                                                          MemoryConstraint mc)
+                                                          const RegionRequirement &req)
 {
   if (target_proc.kind() != Processor::TOC_PROC ||
       !runtime->has_parent_logical_partition(ctx, req.region))
@@ -295,7 +293,7 @@ Memory CircuitMapper::default_policy_select_target_memory(MapperContext ctx,
     return *visible_memories.begin();
   }
   else
-    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req, mc);
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
 }
 
 void CircuitMapper::map_copy(const MapperContext ctx,
