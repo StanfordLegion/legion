@@ -551,6 +551,7 @@ namespace Legion {
       // Whether to map tasks locally
       // Controlled by -dm:map_locally (false by default)
       bool map_locally;
+      bool same_address_space;
     };
 
   }; // namespace Mapping

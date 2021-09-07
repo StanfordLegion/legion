@@ -28,6 +28,7 @@
 #define STATIC_MAX_SCHEDULE_COUNT     8
 #define STATIC_MEMOIZE                false
 #define STATIC_MAP_LOCALLY            false
+#define STATIC_SAME_ADDRESS_SPACE     false
 
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
@@ -70,7 +71,8 @@ namespace Legion {
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
         memoize(STATIC_MEMOIZE),
-        map_locally(STATIC_MAP_LOCALLY)
+        map_locally(STATIC_MAP_LOCALLY),
+        same_address_space(STATIC_SAME_ADDRESS_SPACE)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -100,6 +102,7 @@ namespace Legion {
           INT_ARG("-dm:sched", max_schedule_count);
           BOOL_ARG("-dm:memoize", memoize);
           BOOL_ARG("-dm:map_locally", map_locally);
+          BOOL_ARG("-dm:same_address_space", same_address_space);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -432,7 +435,7 @@ namespace Legion {
 	    // told not to
             // TODO: Fix this when we implement a good stealing algorithm
             // to instead encourage locality
-	    if ((task.tag & SAME_ADDRESS_SPACE) == 0)
+	    if (!same_address_space && (task.tag & SAME_ADDRESS_SPACE) == 0)
             {
 	      switch (info.proc_kind)
               {
@@ -1298,7 +1301,7 @@ namespace Legion {
       // simple one-level decomposition across all the processors.
       Machine::ProcessorQuery all_procs(machine);
       all_procs.only_kind(local[0].kind());
-      if ((task.tag & SAME_ADDRESS_SPACE) != 0)
+      if ((task.tag & SAME_ADDRESS_SPACE) != 0 || same_address_space)
 	all_procs.local_address_space();
       std::vector<Processor> procs(all_procs.begin(), all_procs.end());
 
