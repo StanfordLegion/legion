@@ -4009,7 +4009,8 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
         [register]([ base.reduction_op_ids[op][op_type] ], [op_type.N], true --[[ permit duplicates ]])
       end)
     else
-      assert(false)
+      print("Elliott: WARNING: no complex reductions on this runtime")
+      -- assert(false)
     end
   end
 
@@ -4222,7 +4223,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   if main_task then
     main_setup = quote
       c.legion_runtime_set_top_level_task_id([main_task:get_task_id()])
-      c.legion_runtime_initialize(&[argc], &[argv], true)
+      c.legion_runtime_initialize(&[argc], &[argv])
       return c.legion_runtime_start([argc], [argv], false)
     end
   end

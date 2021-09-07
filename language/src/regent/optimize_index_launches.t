@@ -1224,6 +1224,11 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     report_pass("loop optimization succeeded")
   end
 
+  if is_constant_time then
+    print("Elliott: WARNING: no constant time launches in this runtime (the runtime corrupts region requirements in index launches)")
+    is_constant_time = false
+  end
+
   return {
     preamble = preamble,
     call = call,

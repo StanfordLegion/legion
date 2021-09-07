@@ -419,20 +419,21 @@ do
       local type_name =
         (op_type:isfloat() and ("FLOAT" .. tostring(sizeof(op_type) * 8))) or
         string.upper(tostring(op_type))
-      local legion_op_id =
-        c["LEGION_REDOP_" .. legion_op_names[op] .. "_" .. type_name]
-      base.update_reduction_op(op, op_type, legion_op_id)
+      -- local legion_op_id =
+      --   c["LEGION_REDOP_" .. legion_op_names[op] .. "_" .. type_name]
+      -- base.update_reduction_op(op, op_type, legion_op_id)
+      base.update_reduction_op(op, op_type, nil)
     end
   end
   -- Prefill the table of reduction op IDs for complex types.
   do
-    base.update_reduction_op("+", base.complex32, c.LEGION_REDOP_SUM_COMPLEX64)
-    base.update_reduction_op("-", base.complex32, c.LEGION_REDOP_SUM_COMPLEX64)
-    base.update_reduction_op("*", base.complex32, c.LEGION_REDOP_PROD_COMPLEX64)
-    base.update_reduction_op("/", base.complex32, c.LEGION_REDOP_PROD_COMPLEX64)
+    base.update_reduction_op("+", base.complex32, nil)
+    base.update_reduction_op("-", base.complex32, nil)
+    base.update_reduction_op("*", base.complex32, nil)
+    base.update_reduction_op("/", base.complex32, nil)
 
-    base.update_reduction_op("+", base.complex64, c.LEGION_REDOP_SUM_COMPLEX128)
-    base.update_reduction_op("-", base.complex64, c.LEGION_REDOP_SUM_COMPLEX128)
+    base.update_reduction_op("+", base.complex64, nil)
+    base.update_reduction_op("-", base.complex64, nil)
   end
 end
 

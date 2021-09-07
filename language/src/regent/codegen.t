@@ -4525,10 +4525,10 @@ function codegen.expr_ispace(cx, node)
 
   actions = quote
     [actions]
-    c.legion_index_space_attach_semantic_information(
-      [cx.runtime], [is], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
-    c.legion_index_space_attach_semantic_information(
-      [cx.runtime], [is], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
+    -- c.legion_index_space_attach_semantic_information(
+    --   [cx.runtime], [is], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+    -- c.legion_index_space_attach_semantic_information(
+    --   [cx.runtime], [is], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
     var [i] = [ispace_type]{ impl = [is] }
     [bounds_actions]
   end
@@ -4603,10 +4603,10 @@ function codegen.expr_region(cx, node)
 
   local fs_naming_actions = quote
     c.legion_field_space_attach_name([cx.runtime], [fs], [tostring(fspace_type)], false)
-    c.legion_field_space_attach_semantic_information(
-      [cx.runtime], [fs], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
-    c.legion_field_space_attach_semantic_information(
-      [cx.runtime], [fs], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
+    -- c.legion_field_space_attach_semantic_information(
+    --   [cx.runtime], [fs], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+    -- c.legion_field_space_attach_semantic_information(
+    --   [cx.runtime], [fs], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
   end
   if fspace_type:isstruct() then
     fs_naming_actions = quote
@@ -4671,10 +4671,10 @@ function codegen.expr_region(cx, node)
     [fs_naming_actions];
     c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
-    c.legion_logical_region_attach_semantic_information(
-      [cx.runtime], [lr], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
-    c.legion_logical_region_attach_semantic_information(
-      [cx.runtime], [lr], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
+    -- c.legion_logical_region_attach_semantic_information(
+    --   [cx.runtime], [lr], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+    -- c.legion_logical_region_attach_semantic_information(
+    --   [cx.runtime], [lr], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
     var [r] = [region_type]{ impl = [lr] }
     [tag_imported(cx, lr)]
   end
@@ -5377,10 +5377,10 @@ function codegen.expr_list_duplicate_partition(cx, node)
       c.legion_logical_region_retrieve_name([cx.runtime], root, &name)
       std.assert(name ~= nil, "invalid name")
       c.legion_logical_region_attach_name([cx.runtime], new_root, name, false)
-      c.legion_logical_region_attach_semantic_information(
-        [cx.runtime], [r], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
-      c.legion_logical_region_attach_semantic_information(
-        [cx.runtime], [r], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
+      -- c.legion_logical_region_attach_semantic_information(
+      --   [cx.runtime], [r], c.SOURCE_FILE_TAG, [source_file], [string.len(source_file)+1], false)
+      -- c.legion_logical_region_attach_semantic_information(
+      --   [cx.runtime], [r], c.SOURCE_LINE_TAG, [source_line], [string.len(source_line)+1], false)
 
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
@@ -9971,6 +9971,7 @@ end
 function codegen.stat_fence(cx, node)
   local kind = node.kind
   local blocking = node.blocking
+  assert(not blocking, "Elliott: blocking fences are not supported by this runtime, use a dummy task to work around it")
 
   local issue_fence
   if kind:is(ast.fence_kind.Execution) then
@@ -9981,23 +9982,9 @@ function codegen.stat_fence(cx, node)
 
   local actions = terralib.newlist()
 
-  local f = terralib.newsymbol(c.legion_future_t)
-
   actions:insert(
     quote
-      var [f] = [issue_fence]([cx.runtime], [cx.context])
-    end)
-
-  if blocking then
-    actions:insert(
-      quote
-        c.legion_future_get_void_result([f])
-      end)
-  end
-
-  actions:insert(
-    quote
-      c.legion_future_destroy([f])
+      [issue_fence]([cx.runtime], [cx.context])
     end)
 
   return quote
@@ -10860,7 +10847,9 @@ function codegen.top_task(cx, node)
     -- launches. The value of the region in the task arguments will be
     -- bogus, but we can recover it from the task's region requirement
     -- so we should be good.
-    if #privilege_field_paths > 0 then
+    -- Elliott: The runtime doesn't seem to compute these region
+    -- requirements, so I'm disabling constant time launches for now.
+    if false then -- #privilege_field_paths > 0 then
       local physical_region_index = physical_regions_index[1]
       actions = quote
         [actions]
