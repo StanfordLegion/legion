@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-# Copyright 2019 Stanford University
+# Copyright 2021 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,8 @@ def load_json_config(filename):
 os_name = platform.system()
 
 # Find Regent.
-regent_dir = os.path.dirname(os.path.realpath(__file__))
+regent_exe = os.path.realpath(__file__)
+regent_dir = os.path.dirname(regent_exe)
 terra_dir = os.path.join(regent_dir, 'terra')
 
 # Find Legion (in the environment, or relative to Regent).
@@ -40,12 +41,9 @@ bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'regent')
 python_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'python')
 
 # Find CUDA.
-if 'CUDA' in os.environ:
-    cuda_dir = os.path.realpath(os.environ['CUDA'])
-elif 'CUDATOOLKIT_HOME' in os.environ:
-    cuda_dir = os.path.realpath(os.environ['CUDATOOLKIT_HOME'])
-else:
-    cuda_dir = None
+cuda_dir = os.environ.get('CUDA') or os.environ.get('CUDA_HOME') or os.environ.get('CUDATOOLKIT_HOME')
+if cuda_dir:
+    cuda_dir = os.path.realpath(cuda_dir)
 cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
 
 # Find RDIR.
@@ -69,7 +67,8 @@ include_path = (
      if 'INCLUDE_PATH' in os.environ else []) +
     [bindings_dir,
      runtime_dir,
-])
+    ] +
+    ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []))
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)
 
@@ -114,6 +113,7 @@ def regent(args, env={}, cwd=None, **kwargs):
           os.path.join(os.path.dirname(first_arg), '?.rg')]
           if first_arg is not None and os.path.exists(first_arg) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
+         os.path.join(regent_dir, 'src', '?.rg'),
          os.path.join(regent_dir, 'src', 'rdir', 'plugin', 'src', '?.t'),
          os.path.join(terra_dir, 'tests', 'lib', '?.t'),
          os.path.join(terra_dir, 'release', 'include', '?.t'),
@@ -124,6 +124,7 @@ def regent(args, env={}, cwd=None, **kwargs):
     python_path.append(python_dir)
 
     terra_env = {
+        'REGENT': regent_exe,
         'TERRA_PATH': ';'.join(terra_path),
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
