@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-# Copyright 2019 Stanford University
+# Copyright 2021 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, json, multiprocessing, os, platform, shutil, subprocess, sys
+import argparse, json, multiprocessing, os, platform, re, shutil, subprocess, sys
 
 # Requires:
 #   * Terra-compatible LLVM installation on PATH
@@ -119,9 +119,11 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
     build_dir = os.path.join(terra_dir, 'build')
     release_dir = os.path.join(terra_dir, 'release')
     if use_cmake is None:
-        use_cmake = os.path.exists(os.path.join(build_dir, 'CMakeCache.txt'))
-        if use_cmake:
-            print('Detected previous CMake build in Terra, enabling Terra CMake build...')
+        build_detected = os.path.exists(os.path.join(build_dir, 'main.o'))
+        cmake_detected = os.path.exists(os.path.join(build_dir, 'CMakeCache.txt'))
+        use_cmake = cmake_detected or not build_detected
+        if not use_cmake:
+            print('Detected previous Makefile build in Terra, disabling Terra CMake build...')
 
     flags = []
     if llvm:
@@ -129,9 +131,10 @@ def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llv
         flags.extend(['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'])
 
     if use_cmake:
-        subprocess.check_call(
-            [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
-            cwd=build_dir)
+        if not os.path.exists(os.path.join(build_dir, 'CMakeCache.txt')):
+            subprocess.check_call(
+                [cmake_exe, '..', '-DCMAKE_INSTALL_PREFIX=%s' % release_dir],
+                cwd=build_dir)
         subprocess.check_call(
             [make_exe, 'install', '-j', str(thread_count)],
             cwd=build_dir)
@@ -176,7 +179,7 @@ def install_terra(terra_dir, terra_url, terra_branch, use_cmake, cmake_exe,
 
     if not os.path.exists(terra_dir):
         if terra_url is None:
-            terra_url = 'https://github.com/zdevito/terra.git'
+            terra_url = 'https://github.com/terralang/terra.git'
         if terra_branch is None:
             terra_branch = 'master'
         git_clone(terra_dir, terra_url, terra_branch)
@@ -186,18 +189,85 @@ def install_terra(terra_dir, terra_url, terra_branch, use_cmake, cmake_exe,
         git_update(terra_dir)
     build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, thread_count, llvm)
 
+def install_luarocks(terra_dir, luarocks_dir):
+    if not os.path.exists(luarocks_dir):
+        # For now we need to use Git until the following patch makes
+        # it into a release:
+        # https://github.com/luarocks/luarocks/commit/708fed20d013e69fd79d80f0b59a45a25eed3a00
+        luarocks_url = 'https://github.com/luarocks/luarocks.git'
+        luarocks_branch = 'master'
+        git_clone(luarocks_dir, luarocks_url, luarocks_branch)
+
+    if os.path.exists(os.path.join(terra_dir, 'bin', 'terra')):
+        terra_prefix = os.path.join(terra_dir)
+    elif os.path.exists(os.path.join(terra_dir, 'release', 'bin', 'terra')):
+        terra_prefix = os.path.join(terra_dir, 'release')
+    else:
+        raise Exception('Unable to determine correct prefix for LuaRocks installation')
+
+    luarocks_prefix = os.path.join(luarocks_dir, 'install')
+    luarocks_exe = os.path.join(luarocks_prefix, 'bin', 'luarocks')
+    if not os.path.exists(luarocks_exe):
+        subprocess.check_call(
+            [os.path.join(luarocks_dir, 'configure'),
+             '--prefix=%s' % luarocks_prefix,
+             '--with-lua=%s' % terra_prefix,
+             '--with-lua-include=%s' % os.path.join(terra_prefix, 'include', 'terra'),
+             '--with-lua-interpreter=terra'],
+            cwd=luarocks_dir)
+        # Hack: This throws an error but we'll keep going anyway...
+        subprocess.call(['make'], cwd=luarocks_dir)
+        subprocess.check_call(['make', 'install'], cwd=luarocks_dir)
+
+    ldoc_exe = os.path.join(luarocks_prefix, 'bin', 'ldoc')
+    if not os.path.exists(ldoc_exe):
+        ldoc_url = 'https://raw.githubusercontent.com/StanfordLegion/LDoc/master/ldoc-scm-2.rockspec'
+        subprocess.check_call([luarocks_exe, 'install', ldoc_url])
+
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
+def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
                      cmake, cmake_exe, build_dir,
-                     debug, cuda, openmp, llvm, hdf, spy,
+                     debug, cuda, openmp, python, llvm, hdf, spy,
                      gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose):
     # Don't blow away an existing directory
     assert not (clean_first and build_dir is not None)
 
+    # If building support for CUDA then check CUDA version is not blacklisted
+    # CUDA 9.2 and 10.0 have thrust bugs that break complex support
+    if cuda:
+        try:
+            nvcc_version = subprocess.check_output([os.environ['CUDA']+'/bin/nvcc', '--version']).decode('utf-8')
+        except (KeyError,FileNotFoundError,subprocess.CalledProcessError):
+            try:
+                nvcc_version = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
+            except (FileNotFoundError,subprocess.CalledProcessError):
+                print('Error: Unable to verify CUDA version is not blacklisted for Regent')
+                sys.exit(1)
+        pattern = re.compile(' V(?P<major>[0-9]+)\.(?P<minor>[0-9]+)')
+        major_version = None
+        minor_version = None
+        for line in nvcc_version.splitlines():
+            match = pattern.search(line)
+            if match is None:
+                continue
+            major_version = int(match.group('major'))
+            minor_version = int(match.group('minor'))
+            break
+        if major_version is None:
+            print('Error: Unabled to verify CUDA version is not blacklisted for Regent')
+            sys.exit(1)
+        elif (major_version == 9 and minor_version == 2) or \
+                (major_version == 10 and minor_version == 0):
+            print('Error: CUDA version '+str(major_version)+'.'+
+                    str(minor_version)+' is blacklisted for Regent due '+
+                    'to a Thrust bug that breaks complex number support. '+
+                    'Please either upgrade or downgrade your version '+
+                    'of CUDA to a version that is not 9.2 or 10.0')
+            sys.exit(1)
     if cmake:
         regent_build_dir = os.path.join(regent_dir, 'build')
         if build_dir is None:
@@ -218,24 +288,21 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             shutil.rmtree(build_dir)
         if not os.path.exists(build_dir):
             os.mkdir(build_dir)
-        cc_flags = os.environ['CC_FLAGS'] if 'CC_FLAGS' in os.environ else ''
-        if spy:
-            cc_flags = cc_flags + ' -DLEGION_SPY'
         flags = (
             ['-DCMAKE_BUILD_TYPE=%s' % ('Debug' if debug else 'Release'),
              '-DLegion_USE_CUDA=%s' % ('ON' if cuda else 'OFF'),
              '-DLegion_USE_OpenMP=%s' % ('ON' if openmp else 'OFF'),
+             '-DLegion_USE_Python=%s' % ('ON' if python else 'OFF'),
              '-DLegion_USE_LLVM=%s' % ('ON' if llvm else 'OFF'),
              '-DLegion_USE_GASNet=%s' % ('ON' if gasnet else 'OFF'),
              '-DLegion_USE_HDF5=%s' % ('ON' if hdf else 'OFF'),
+             '-DLegion_SPY=%s' % ('ON' if spy else 'OFF'),
              '-DLegion_BUILD_BINDINGS=ON',
              '-DBUILD_SHARED_LIBS=ON',
             ] +
             extra_flags +
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
-            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
-            (['-DCMAKE_CXX_COMPILER=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
-            (['-DCMAKE_CXX_FLAGS=%s' % cc_flags] if cc_flags else []))
+            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []))
         if llvm:
             # mess with a few things so that Realm uses terra's LLVM
             flags.append('-DLegion_ALLOW_MISSING_LLVM_LIBS=ON')
@@ -262,9 +329,11 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
     else:
         flags = (
             ['LG_RT_DIR=%s' % runtime_dir,
+             'DEFINE_HEADERS_DIR=%s' % bindings_dir, # otherwise Python build recompiles everything
              'DEBUG=%s' % (1 if debug else 0),
              'USE_CUDA=%s' % (1 if cuda else 0),
              'USE_OPENMP=%s' % (1 if openmp else 0),
+             'USE_PYTHON=%s' % (1 if python else 0),
              'USE_LLVM=%s' % (1 if llvm else 0),
              'USE_GASNET=%s' % (1 if gasnet else 0),
              'USE_HDF=%s' % (1 if hdf else 0),
@@ -279,9 +348,17 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
             subprocess.check_call(
                 [make_exe] + flags + ['clean'],
                 cwd=bindings_dir)
+            if python:
+                subprocess.check_call(
+                    [make_exe] + flags + ['clean'],
+                    cwd=python_bindings_dir)
         subprocess.check_call(
             [make_exe] + flags + ['-j', str(thread_count)],
             cwd=bindings_dir)
+        if python:
+            subprocess.check_call(
+                [make_exe] + flags + ['-j', str(thread_count)],
+                cwd=python_bindings_dir)
 
         # This last bit is necessary because Mac OS X shared libraries
         # have paths hard-coded into them, and in this case those paths
@@ -311,7 +388,7 @@ def get_cmake_config(cmake, regent_dir, default=None):
     dump_json_config(config_filename, cmake)
     return cmake
 
-def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
+def install(gasnet=False, cuda=False, openmp=False, python=False, llvm=False, hdf=False,
             spy=False, conduit=None, cmake=None, rdir=None,
             cmake_exe=None, cmake_build_dir=None,
             terra_url=None, terra_branch=None, terra_use_cmake=None, external_terra_dir=None,
@@ -331,12 +408,13 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     if clean_first and cmake_build_dir is not None:
         raise Exception('Cannot clean a pre-existing build directory')
 
-    if spy and not debug:
-        raise Exception('Debugging mode is required for detailed Legion Spy.')
-
-    thread_count = thread_count
     if thread_count is None:
-        thread_count = multiprocessing.cpu_count()
+        try:
+            # this correctly considers the current affinity mask
+            thread_count = len(os.sched_getaffinity(0))
+        except AttributeError:
+            # this works on macos
+            thread_count = multiprocessing.cpu_count()
 
     # Grab LG_RT_DIR from the environment if available, otherwise
     # assume we're running relative to our own location.
@@ -349,11 +427,14 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, terra_url, terra_branch, terra_use_cmake, cmake_exe,
                   external_terra_dir, thread_count, llvm)
+    # luarocks_dir = os.path.join(regent_dir, 'luarocks')
+    # install_luarocks(terra_dir, luarocks_dir)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'regent')
-    install_bindings(regent_dir, legion_dir, bindings_dir, runtime_dir,
+    python_bindings_dir = os.path.join(legion_dir, 'bindings', 'python')
+    install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, runtime_dir,
                      cmake, cmake_exe, cmake_build_dir,
-                     debug, cuda, openmp, llvm, hdf, spy,
+                     debug, cuda, openmp, python, llvm, hdf, spy,
                      gasnet, gasnet_dir, conduit, clean_first,
                      extra_flags, thread_count, verbose)
 
@@ -397,6 +478,10 @@ def driver():
         '--openmp', dest='openmp', action='store_true', required=False,
         default=os.environ.get('USE_OPENMP') == '1',
         help='Build Legion with OpenMP support.')
+    parser.add_argument(
+        '--python', dest='python', action='store_true', required=False,
+        default=os.environ.get('USE_PYTHON') == '1',
+        help='Build Legion with Python support.')
     parser.add_argument(
         '--llvm', dest='llvm', action='store_true', required=False,
         default=os.environ.get('USE_LLVM') == '1',
