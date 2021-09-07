@@ -2946,36 +2946,36 @@ namespace Legion {
       {
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             {
               const Task *task = mappable->as_task();
               return project(upper_bound, point, task->index_domain);
             }
-          case Mappable::COPY_MAPPABLE:
+          case COPY_MAPPABLE:
             {
               const Copy *copy = mappable->as_copy();
               return project(upper_bound, point, copy->index_domain);
             }
-          case Mappable::INLINE_MAPPABLE:
-          case Mappable::ACQUIRE_MAPPABLE:
-          case Mappable::RELEASE_MAPPABLE:
-          case Mappable::CLOSE_MAPPABLE:
-          case Mappable::DYNAMIC_COLLECTIVE_MAPPABLE:
+          case INLINE_MAPPABLE:
+          case ACQUIRE_MAPPABLE:
+          case RELEASE_MAPPABLE:
+          case CLOSE_MAPPABLE:
+          case DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
             }
-          case Mappable::FILL_MAPPABLE:
+          case FILL_MAPPABLE:
             {
               const Fill *fill = mappable->as_fill();
               return project(upper_bound, point, fill->index_domain);
             }
-          case Mappable::PARTITION_MAPPABLE:
+          case PARTITION_MAPPABLE:
             {
               const Partition *part = mappable->as_partition();
               return project(upper_bound, point, part->index_domain);
             }
-          case Mappable::MUST_EPOCH_MAPPABLE:
+          case MUST_EPOCH_MAPPABLE:
             {
               const MustEpoch *must = mappable->as_must_epoch();
               return project(upper_bound, point, must->launch_domain);
@@ -2998,7 +2998,7 @@ namespace Legion {
 #endif
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             return project(0/*dummy ctx*/, 
                            const_cast<Task*>(mappable->as_task()),
                            index, upper_bound, point);
@@ -3027,36 +3027,36 @@ namespace Legion {
       {
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             {
               const Task *task = mappable->as_task();
               return project(upper_bound, point, task->index_domain);
             }
-          case Mappable::COPY_MAPPABLE:
+          case COPY_MAPPABLE:
             {
               const Copy *copy = mappable->as_copy();
               return project(upper_bound, point, copy->index_domain);
             }
-          case Mappable::INLINE_MAPPABLE:
-          case Mappable::ACQUIRE_MAPPABLE:
-          case Mappable::RELEASE_MAPPABLE:
-          case Mappable::CLOSE_MAPPABLE:
-          case Mappable::DYNAMIC_COLLECTIVE_MAPPABLE:
+          case INLINE_MAPPABLE:
+          case ACQUIRE_MAPPABLE:
+          case RELEASE_MAPPABLE:
+          case CLOSE_MAPPABLE:
+          case DYNAMIC_COLLECTIVE_MAPPABLE:
             {
               const Domain launch_domain(point, point);
               return project(upper_bound, point, launch_domain);
             }
-          case Mappable::FILL_MAPPABLE:
+          case FILL_MAPPABLE:
             {
               const Fill *fill = mappable->as_fill();
               return project(upper_bound, point, fill->index_domain);
             }
-          case Mappable::PARTITION_MAPPABLE:
+          case PARTITION_MAPPABLE:
             {
               const Partition *part = mappable->as_partition();
               return project(upper_bound, point, part->index_domain);
             }
-          case Mappable::MUST_EPOCH_MAPPABLE:
+          case MUST_EPOCH_MAPPABLE:
             {
               const MustEpoch *must = mappable->as_must_epoch();
               return project(upper_bound, point, must->launch_domain);
@@ -3079,7 +3079,7 @@ namespace Legion {
 #endif
         switch (mappable->get_mappable_type())
         {
-          case Mappable::TASK_MAPPABLE:
+          case TASK_MAPPABLE:
             return project(0/*dummy ctx*/, 
                            const_cast<Task*>(mappable->as_task()),
                            index, upper_bound, point);

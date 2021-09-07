@@ -84,6 +84,7 @@ namespace Legion {
   typedef ::legion_external_resource_t ExternalResource;
   typedef ::legion_timing_measurement_t TimingMeasurement;
   typedef ::legion_dependence_type_t DependenceType;
+  typedef ::legion_mappable_type_id_t MappableType;
   typedef ::legion_file_mode_t LegionFileMode;
   typedef ::legion_execution_constraint_t ExecutionConstraintKind;
   typedef ::legion_layout_constraint_t LayoutConstraintKind;

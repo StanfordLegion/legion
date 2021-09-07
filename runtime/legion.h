@@ -2670,18 +2670,6 @@ namespace Legion {
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:
-      enum MappableType {
-        TASK_MAPPABLE,
-        COPY_MAPPABLE,
-        INLINE_MAPPABLE,
-        ACQUIRE_MAPPABLE,
-        RELEASE_MAPPABLE,
-        CLOSE_MAPPABLE,
-        FILL_MAPPABLE,
-        PARTITION_MAPPABLE,
-        DYNAMIC_COLLECTIVE_MAPPABLE,
-        MUST_EPOCH_MAPPABLE,
-      };
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
       virtual const Copy* as_copy(void) const = 0;

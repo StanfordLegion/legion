@@ -1295,6 +1295,19 @@ enum {
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
 
+typedef enum legion_mappable_type_id_t {
+  TASK_MAPPABLE,
+  COPY_MAPPABLE,
+  INLINE_MAPPABLE,
+  ACQUIRE_MAPPABLE,
+  RELEASE_MAPPABLE,
+  CLOSE_MAPPABLE,
+  FILL_MAPPABLE,
+  PARTITION_MAPPABLE,
+  DYNAMIC_COLLECTIVE_MAPPABLE,
+  MUST_EPOCH_MAPPABLE,
+} legion_mappable_type_id_t;
+
 typedef enum legion_type_id_t {
   LEGION_TYPE_BOOL = 0,
   LEGION_TYPE_INT16 = 1,

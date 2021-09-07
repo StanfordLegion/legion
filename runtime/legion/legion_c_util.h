@@ -1,4 +1,4 @@
-/* Copyright 2019 Stanford University
+/* Copyright 2021 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@
 namespace Legion {
 
     class CContext;
+    class TaskMut;
 
     class CObjectWrapper {
     public:
@@ -58,6 +59,11 @@ namespace Legion {
 // but it's pretty annoying to get this macro to handle all the cases right
 #pragma warning (push)
 #pragma warning (disable: 858)
+#endif
+#ifdef __PGIC__
+#pragma warning (push)
+#pragma diag_suppress 191
+#pragma diag_suppress 816
 #endif
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
@@ -104,34 +110,27 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_copy_launcher_t, IndexCopyLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_fill_launcher_t, FillLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_index_fill_launcher_t, IndexFillLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
+      // NEW_OPAQUE_WRAPPER(legion_index_attach_launcher_t, IndexAttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
+      // NEW_OPAQUE_WRAPPER(legion_external_resources_t, ExternalResources *);
 #define ACCESSOR_ARRAY(DIM) \
       NEW_OPAQUE_WRAPPER(legion_accessor_array_##DIM##d_t, ArrayAccessor##DIM##D *);
       LEGION_FOREACH_N(ACCESSOR_ARRAY)
 #undef ACCESSOR_ARRAY
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-      NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
+      NEW_OPAQUE_WRAPPER(legion_task_mut_t, TaskMut *);
+      NEW_OPAQUE_WRAPPER(legion_copy_t, Copy *);
+      NEW_OPAQUE_WRAPPER(legion_fill_t, Fill *);
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
+      // NEW_OPAQUE_WRAPPER(legion_output_requirement_t , OutputRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
       NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
       NEW_OPAQUE_WRAPPER(legion_processor_query_t, Machine::ProcessorQuery *);
@@ -154,6 +153,9 @@ namespace Legion {
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
 // but it's pretty annoying to get this macro to handle all the cases right
+#pragma warning (pop)
+#endif
+#ifdef __PGIC__
 #pragma warning (pop)
 #endif
 
@@ -263,7 +265,7 @@ namespace Legion {
         legion_domain_t domain_;
         domain_.is_id = domain.is_id;
         domain_.dim = domain.dim;
-        std::copy(domain.rect_data, domain.rect_data + 2 * MAX_RECT_DIM, domain_.rect_data);
+        std::copy(domain.rect_data, domain.rect_data + 2 * LEGION_MAX_DIM, domain_.rect_data);
         return domain_;
       }
 
@@ -272,7 +274,7 @@ namespace Legion {
         Domain domain;
         domain.is_id = domain_.is_id;
         domain.dim = domain_.dim;
-        std::copy(domain_.rect_data, domain_.rect_data + 2 * MAX_RECT_DIM, domain.rect_data);
+        std::copy(domain_.rect_data, domain_.rect_data + 2 * LEGION_MAX_DIM, domain.rect_data);
         return domain;
       }
 
@@ -280,7 +282,7 @@ namespace Legion {
       wrap(DomainPoint dp) {
         legion_domain_point_t dp_;
         dp_.dim = dp.dim;
-        std::copy(dp.point_data, dp.point_data + MAX_POINT_DIM, dp_.point_data);
+        std::copy(dp.point_data, dp.point_data + LEGION_MAX_DIM, dp_.point_data);
         return dp_;
       }
 
@@ -288,7 +290,7 @@ namespace Legion {
       unwrap(legion_domain_point_t dp_) {
         DomainPoint dp;
         dp.dim = dp_.dim;
-        std::copy(dp_.point_data, dp_.point_data + MAX_POINT_DIM, dp.point_data);
+        std::copy(dp_.point_data, dp_.point_data + LEGION_MAX_DIM, dp.point_data);
         return dp;
       }
 
@@ -297,7 +299,7 @@ namespace Legion {
         legion_domain_transform_t transform_;
         transform_.m = transform.m;
         transform_.n = transform.n;
-        std::copy(transform.matrix, transform.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform_.matrix);
+        std::copy(transform.matrix, transform.matrix + LEGION_MAX_DIM * LEGION_MAX_DIM, transform_.matrix);
         return transform_;
       }
 
@@ -306,7 +308,7 @@ namespace Legion {
         DomainTransform transform;
         transform.m = transform_.m;
         transform.n = transform_.n;
-        std::copy(transform_.matrix, transform_.matrix + MAX_POINT_DIM * MAX_POINT_DIM, transform.matrix);
+        std::copy(transform_.matrix, transform_.matrix + LEGION_MAX_DIM * LEGION_MAX_DIM, transform.matrix);
         return transform;
       }
 
@@ -691,6 +693,34 @@ namespace Legion {
       std::vector<legion_physical_region_t> physical_regions;
     };
 
+    class TaskMut : public Task {
+    public:
+      virtual ~TaskMut() {}
+      virtual UniqueID get_unique_id(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual size_t get_context_index(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual int get_depth(void) const {
+        assert(false);
+        return 0;
+      }
+      virtual const Task* get_parent_task(void) const {
+        assert(false);
+        return NULL;
+      }
+      virtual bool has_parent_task(void) const {
+        assert(false);
+        return false;
+      }
+      virtual const char* get_task_name(void) const {
+        assert(false);
+        return NULL;
+      }
+    };
 };
 
 #endif // __LEGION_C_UTIL_H__
