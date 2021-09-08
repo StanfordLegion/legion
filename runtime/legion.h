@@ -3100,6 +3100,7 @@ namespace Legion {
       inline void finalize(Runtime *runtime, Context ctx) const;
     protected:
       friend class UntypedDeferredValue;
+      DeferredValue(void);
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
     };

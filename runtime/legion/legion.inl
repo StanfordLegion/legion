@@ -16118,6 +16118,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
+    inline DeferredValue<T>::DeferredValue(void)
+      : instance(Realm::RegionInstance::NO_INST)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
     inline DeferredValue<T>::DeferredValue(T initial_value, size_t alignment)
     //--------------------------------------------------------------------------
     {
