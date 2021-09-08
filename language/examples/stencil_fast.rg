@@ -142,6 +142,7 @@ fspace point {
 }
 
 fspace timestamp {
+  init : int64,
   start : int64,
   stop : int64,
 }
@@ -452,6 +453,7 @@ task increment(private : region(ispace(int2d), point),
                ym : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
                times : region(ispace(int1d), timestamp),
+               init_ts : bool,
                print_ts : bool)
 where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times) do
   [make_increment_interior(private, exterior)]
@@ -460,8 +462,11 @@ where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times)
   for i in ym do i.input += 1 end
   for i in yp do i.input += 1 end
 
+  var t = c.legion_get_current_time_in_micros()
+  if init_ts then
+    for x in times do x.init = t end
+  end
   if print_ts then
-    var t = c.legion_get_current_time_in_micros()
     for x in times do x.stop = t end
   end
 end
@@ -507,19 +512,22 @@ end
 
 task get_elapsed(all_times : region(ispace(int1d), timestamp))
 where reads(all_times) do
+  var init = [int64:min()]
   var start = [int64:max()]
   var stop = [int64:min()]
 
   for t in all_times do
+    init max= t.init
     start min= t.start
     stop max= t.stop
   end
 
-  return 1e-6 * (stop - start)
+  return { init_time = init * 1e-6, sim_time = 1e-6 * (stop - start) }
 end
 
-task print_time(color : int, sim_time : double)
+task print_time(color : int, init_time : double, sim_time : double)
   if color == 0 then
+    c.printf("INIT TIME = %7.3f s\n", init_time)
     c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
   end
 end
@@ -561,7 +569,7 @@ task main()
   var times = region(ispace(int1d, nt2), timestamp)
   var p_times = partition(equal, times, ispace(int1d, nt2))
 
-  fill(times.{start, stop}, 0)
+  fill(times.{init, start, stop}, 0)
 
   fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
@@ -604,7 +612,7 @@ task main()
       end
       -- __demand(__index_launch)
       for i in tiles do
-        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == tsteps - tprune - 1)
+        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], p_times[i], t == 0, t == tsteps - tprune - 1)
       end
     end
 
@@ -613,8 +621,8 @@ task main()
     end
   end
 
-  var sim_time = get_elapsed(times)
-  for i = 0, nt2 do print_time(i, sim_time) end
+  var { init_time, sim_time } = get_elapsed(times)
+  for i = 0, nt2 do print_time(i, init_time, sim_time) end
 end
 
 else -- not use_python_main

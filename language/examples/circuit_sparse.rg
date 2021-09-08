@@ -145,6 +145,7 @@ fspace wire(rpn : region(node),
 }
 
 fspace timestamp {
+  init : int64,
   start : int64,
   stop : int64,
 }
@@ -516,7 +517,8 @@ do
 end
 
 __demand(__cuda)
-task update_voltages(print_ts : bool,
+task update_voltages(init_ts : bool,
+                     print_ts : bool,
                      rpn : region(node),
                      rsn : region(node),
                      rt : region(timestamp))
@@ -537,8 +539,11 @@ do
     node.charge = 0.0
   end
 
+  var t = c.legion_get_current_time_in_micros()
+  if init_ts then
+    for x in rt do x.init = t end
+  end
   if print_ts then
-    var t = c.legion_get_current_time_in_micros()
     for x in rt do x.stop = t end
   end
 end
@@ -664,19 +669,22 @@ end
 
 task get_elapsed(all_times : region(timestamp))
 where reads(all_times) do
+  var init = [int64:min()]
   var start = [int64:max()]
   var stop = [int64:min()]
 
   for t in all_times do
+    init max= t.init
     start min= t.start
     stop max= t.stop
   end
 
-  return 1e-6 * (stop - start)
+  return { init_time = init * 1e-6, sim_time = 1e-6 * (stop - start) }
 end
 
-task print_summary(color : int, sim_time : double, conf : Config)
+task print_summary(color : int, init_time : double, sim_time : double, conf : Config)
   if color == 0 then
+    format.println("INIT TIME = {7.3} s", init_time)
     format.println("ELAPSED TIME = {7.3} s", sim_time)
 
     -- Compute the floating point operations per second
@@ -730,7 +738,7 @@ task toplevel()
 
   fill(all_nodes.{node_cap, leakage, charge, node_voltage}, 0.0)
   fill(all_wires.{inductance, resistance, wire_cap, current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9}, voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8}}, 0.0)
-  fill(all_times.{start, stop}, 0)
+  fill(all_times.{init, start, stop}, 0)
 
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
@@ -781,12 +789,12 @@ task toplevel()
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     for i in launch_domain do
-      update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i], rp_times[i])
+      update_voltages(j == 0, j == num_loops - prune - 1, rp_private[i], rp_shared[i], rp_times[i])
     end
   end
 
-  var sim_time = get_elapsed(all_times)
-  for i = 0, num_superpieces do print_summary(i, sim_time, conf) end
+  var { init_time, sim_time } = get_elapsed(all_times)
+  for i = 0, num_superpieces do print_summary(i, init_time, sim_time, conf) end
 end
 
 else -- not use_python_main
