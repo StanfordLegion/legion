@@ -1080,7 +1080,8 @@ do
   var dthydro = dtmax
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  var cont = true
+  var ts_init = 0
+  var cont = continue_simulation(cycle, cstop, time, tstop)
   while cont do
     if cycle == prune then
       __fence(__execution)
@@ -1091,8 +1092,11 @@ do
       wait_for(dummy())
       ts_end = c.legion_get_current_time_in_micros()
     end
+    if cycle == 1 then
+      __fence(__execution, __block)
+      ts_init = c.legion_get_current_time_in_micros()
+    end
 
-  if not continue_simulation(cycle, cstop, time, tstop) then break end
   __demand(__trace)
   do
     __demand(__index_launch)
@@ -1316,6 +1320,7 @@ do
   if prune == 0 then
     ts_end = c.legion_get_current_time_in_micros()
   end
+  output1("INIT TIME = %7.3f s\n", 1e-6 * (ts_init))
   output1("ELAPSED TIME = %7.3f s\n", 1e-6 * (ts_end - ts_start))
 end
 
