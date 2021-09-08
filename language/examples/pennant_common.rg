@@ -251,6 +251,8 @@ fspace zone {
 
   -- Placed at end to avoid messing up alignment
   znump :  uint8,        -- number of points in zone
+
+  dummy : int8,
 }
 
 fspace point {
@@ -266,6 +268,8 @@ fspace point {
   -- Used for computing boundary conditions
   has_bcx : bool,
   has_bcy : bool,
+
+  dummy : int8,
 }
 
 if parallel then
@@ -310,6 +314,8 @@ fspace side(rz : region(zone),
   ccos :   double,       -- corner cosine
   cqe1 :   vec2,         -- ??????????
   cqe2 :   vec2,         -- ??????????
+
+  dummy : int8,
 }
 else
 -- Sequential version
@@ -352,6 +358,8 @@ fspace side(rz : region(zone),
   ccos :   double,       -- corner cosine
   cqe1 :   vec2,         -- ??????????
   cqe2 :   vec2,         -- ??????????
+
+  dummy : int8,
 }
 end
 
@@ -805,13 +813,13 @@ local terra compute_coloring(ncolors : int64, nitems : int64,
   end
 end
 
-local side_n_fields = parallel and 34 or 32
+local side_n_fields = parallel and 35 or 33
 terra read_input(runtime : c.legion_runtime_t,
                  ctx : c.legion_context_t,
-                 rz_physical : c.legion_physical_region_t[24],
-                 rz_fields : c.legion_field_id_t[24],
-                 rp_physical : c.legion_physical_region_t[17],
-                 rp_fields : c.legion_field_id_t[17],
+                 rz_physical : c.legion_physical_region_t[25],
+                 rz_fields : c.legion_field_id_t[25],
+                 rp_physical : c.legion_physical_region_t[18],
+                 rp_fields : c.legion_field_id_t[18],
                  rs_physical : c.legion_physical_region_t[side_n_fields],
                  rs_fields : c.legion_field_id_t[side_n_fields],
                  conf : config)
@@ -1621,7 +1629,8 @@ task initialize_topology(conf : config,
 where reads writes(rz.znump,
                    rpp.{px, has_bcx, has_bcy},
                    rps.{px, has_bcx, has_bcy},
-                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
+                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4}),
+      reads(rpg.dummy)
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,
@@ -1894,10 +1903,10 @@ do
 local solution_filename_maxlen = 1024
 terra validate_output(runtime : c.legion_runtime_t,
                       ctx : c.legion_context_t,
-                      rz_physical : c.legion_physical_region_t[24],
-                      rz_fields : c.legion_field_id_t[24],
-                      rp_physical : c.legion_physical_region_t[17],
-                      rp_fields : c.legion_field_id_t[17],
+                      rz_physical : c.legion_physical_region_t[25],
+                      rz_fields : c.legion_field_id_t[25],
+                      rp_physical : c.legion_physical_region_t[18],
+                      rp_fields : c.legion_field_id_t[18],
                       rs_physical : c.legion_physical_region_t[side_n_fields],
                       rs_fields : c.legion_field_id_t[side_n_fields],
                       conf : config)

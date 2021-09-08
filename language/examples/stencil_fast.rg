@@ -139,6 +139,7 @@ local max = regentlib.fmax
 fspace point {
   input : DTYPE,
   output : DTYPE,
+  dummy : int8,
 }
 
 fspace timestamp {
@@ -380,7 +381,7 @@ local function make_stencil(radius)
                      print_ts : bool)
   where
     reads writes(private.{input, output}, times),
-    reads(xm.input, xp.input, ym.input, yp.input)
+    reads(xm.input, xp.input, ym.input, yp.input, interior.dummy)
   do
     if print_ts then
       var t = c.legion_get_current_time_in_micros()
@@ -453,7 +454,7 @@ task increment(private : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
                times : region(ispace(int1d), timestamp),
                print_ts : bool)
-where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times) do
+where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times), reads(exterior.dummy) do
   [make_increment_interior(private, exterior)]
   for i in xm do i.input += 1 end
   for i in xp do i.input += 1 end
@@ -469,7 +470,7 @@ end
 task check(private : region(ispace(int2d), point),
            interior : region(ispace(int2d), point),
            tsteps : int64, init : int64)
-where reads(private.{input, output}) do
+where reads(private.{input, output}, interior.dummy) do
   var expect_in = init + tsteps
   var expect_out = init
   for i in interior do
@@ -568,6 +569,7 @@ task main()
   fill(times.{start, stop}, 0)
 
   fill(points.{input, output}, init)
+  fill(points.dummy, 0)
   fill(xm.{input, output}, init)
   fill(xp.{input, output}, init)
   fill(ym.{input, output}, init)

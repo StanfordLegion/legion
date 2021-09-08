@@ -46,7 +46,7 @@ local c = regentlib.c
 task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)))
 where
-  reads writes(rs.{mapsp1, mapsp2})
+  reads writes(rs.{mapsp1, mapsp2}), reads(rz.dummy), reads(rpp.dummy, rpg.dummy)
 do
   for s in rs do
     s.mapsp1 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp1)

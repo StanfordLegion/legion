@@ -101,6 +101,7 @@ fspace node {
   leakage  : float,
   charge   : float,
   node_voltage  : float,
+  dummy : int8,
 }
 
 struct currents {
@@ -142,6 +143,7 @@ fspace wire(rpn : region(node),
   wire_cap : float,
   current : currents,
   voltage : voltages,
+  dummy : int8,
 }
 
 fspace timestamp {
@@ -203,7 +205,7 @@ end -- not use_python_main
 
 task init_nodes(rn : region(node))
 where
-  reads writes(rn)
+  reads writes(rn.{node_cap, leakage, charge, node_voltage})
 do
   for node in rn do
     node.node_cap = drand48() + 1.0
@@ -373,7 +375,7 @@ task init_piece(-- spiece_id   : int,
                 all_shared  : region(node),
                 rw          : region(wire(rpn, rsn, all_shared)))
 where
-  reads writes(rgr, rpn, rsn, rw)
+  reads writes(rgr, rpn.{node_cap, leakage, charge, node_voltage}, rsn.{node_cap, leakage, charge, node_voltage}, rw), reads(all_shared.dummy)
 do
   var spiece_id = regentlib.c.legion_logical_region_get_color(__runtime(), __raw(rpn))
   init_nodes(rpn)
@@ -386,7 +388,7 @@ task init_pointers(rpn : region(node),
                    rgn : region(node),
                    rw : region(wire(rpn, rsn, rgn)))
 where
-  reads writes(rw.{in_ptr, out_ptr})
+  reads writes(rw.{in_ptr, out_ptr}), reads(rpn.dummy, rsn.dummy, rgn.dummy)
 do
   for w in rw do
     w.in_ptr = dynamic_cast(ptr(node, rpn, rsn), w.in_ptr)
@@ -733,7 +735,9 @@ task toplevel()
   var all_times = region(ispace(ptr, num_superpieces), timestamp)
 
   fill(all_nodes.{node_cap, leakage, charge, node_voltage}, 0.0)
+  fill(all_nodes.dummy, 0)
   fill(all_wires.{inductance, resistance, wire_cap, current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9}, voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8}}, 0.0)
+  fill(all_wires.dummy, 0)
   fill(all_times.{start, stop}, 0)
 
   var colorings = create_colorings(conf)

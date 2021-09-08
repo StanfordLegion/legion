@@ -10849,23 +10849,20 @@ function codegen.top_task(cx, node)
     -- so we should be good.
     -- Elliott: The runtime doesn't seem to compute these region
     -- requirements, so I'm disabling constant time launches for now.
-    if false then -- #privilege_field_paths > 0 then
+    if #privilege_field_paths > 0 and privileges[1] ~= "none" then
       local physical_region_index = physical_regions_index[1]
+      local physical_region = physical_regions[1]
       actions = quote
         [actions]
-        std.assert([physical_region_index] < c_num_regions, "too few physical regions in task setup")
         -- Important: local tasks do not have region requirements filled out, so we have to avoid pulling this in that case.
         if c.legion_task_get_is_index_space(c_task) then
-          var req = c.legion_task_get_requirement(c_task, [physical_region_index])
-          if c.legion_region_requirement_get_handle_type(req) == c.SINGULAR then
-            var new_r = c.legion_region_requirement_get_region(req)
-            if new_r.tree_id ~= 0 then
-              [r].impl = new_r
-            else
-              std.assert(false, "corrupted tree_id in region argument unpack")
-            end
+          std.assert([physical_region_index] < c_num_regions, "too few physical regions in task setup")
+          var [physical_region] = [c_regions][ [physical_region_index] ]
+          var new_r = c.legion_physical_region_get_logical_region([physical_region])
+          if new_r.tree_id ~= 0 then
+            [r].impl = new_r
           else
-            std.assert(false, "non-singular region requirement in region argument unpack")
+            std.assert(false, [tostring(task:get_name()) .. " pr " .. physical_regions_index[1] .. " privilege " .. tostring(privileges[1]) .. " #field paths " .. #privilege_field_paths .. " corrupted tree_id in region argument unpack"])
           end
         end
       end
