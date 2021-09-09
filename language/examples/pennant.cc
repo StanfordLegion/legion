@@ -1003,6 +1003,15 @@ public:
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances,
                                     bool meets_constraints);
+  virtual void default_policy_select_constraint_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    std::vector<FieldID> &fields);
+  virtual void default_policy_select_instance_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    const std::set<FieldID> &needed_fields,
+                                    std::vector<FieldID> &fields);
   virtual void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
@@ -1143,6 +1152,35 @@ LogicalRegion PennantMapper::default_policy_select_instance_region(
                                 bool meets_constraints)
 {
   return req.region;
+}
+
+void PennantMapper::default_policy_select_constraint_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    std::vector<FieldID> &fields)
+{
+  // Special case for dummy regions to avoid over-allocating memory.
+  if (req.instance_fields.size() == 1) {
+    FieldSpace fspace = req.region.get_field_space();
+    FieldID fid = req.instance_fields[0];
+    const char *name;
+    runtime->retrieve_name(ctx, fspace, fid, name);
+    if (strcmp(name, "dummy")) {
+      fields.push_back(fid);
+      return;
+    }
+  }
+
+  DefaultMapper::default_policy_select_constraint_fields(ctx, req, fields);
+}
+
+void PennantMapper::default_policy_select_instance_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    const std::set<FieldID> &needed_fields,
+                                    std::vector<FieldID> &fields)
+{
+  fields.insert(fields.end(), needed_fields.begin(), needed_fields.end());
 }
 
 //--------------------------------------------------------------------------
