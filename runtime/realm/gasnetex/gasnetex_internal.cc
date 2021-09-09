@@ -2809,9 +2809,7 @@ namespace Realm {
 				client,
 				&args,
 				0 /*flags*/);
-  printf("gex deveice %d\n", gpu->info->device);
 	if(ret != GASNET_OK) {
-    assert(0);
 	  log_gex_bind.info() << "mk_create failed?  ret=" << ret
                               << " mtype=" << memtype << " extra=" << memextra
                               << " gpu_index=" << gpu->info->index;

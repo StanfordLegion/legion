@@ -26,7 +26,7 @@ namespace Realm {
   namespace NetworkSegmentInfo {
     // HIP device memory - extra is a uintptr_t'd pointer to the GPU
     //  object
-    static const MemoryType HipDeviceMem = 2;
+    static const MemoryType HipDeviceMem = 3;
   };
   
   namespace Hip {
