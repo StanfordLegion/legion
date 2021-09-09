@@ -1093,7 +1093,8 @@ do
       ts_end = c.legion_get_current_time_in_micros()
     end
     if cycle == 1 then
-      __fence(__execution, __block)
+      __fence(__execution)
+      wait_for(dummy())
       ts_init = c.legion_get_current_time_in_micros()
     end
 
