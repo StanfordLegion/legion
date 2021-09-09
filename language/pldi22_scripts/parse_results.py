@@ -11,14 +11,16 @@ def parse_basename(filename):
     assert match is not None
     return match.groups()
 
-_content_re = re.compile(r'^ELAPSED TIME = +([0-9.]+) s$', re.MULTILINE)
+_init_re = re.compile(r'^INIT TIME = +([0-9.]+) s$', re.MULTILINE)
+_elapsed_re = re.compile(r'^ELAPSED TIME = +([0-9.]+) s$', re.MULTILINE)
 def parse_content(path):
     with open(path, 'r') as f:
         content = f.read()
-        match = re.search(_content_re, content)
-        if match is None:
-            return ('ERROR',)
-        return match.groups()
+        init_match = re.search(_init_re, content)
+        init = init_match.group(1) if init_match is not None else 'ERROR'
+        elapsed_match = re.search(_elapsed_re, content)
+        elapsed = elapsed_match.group(1) if elapsed_match is not None else 'ERROR'
+        return (init, elapsed)
 
 def main():
     paths = glob.glob('*/*.log')
@@ -28,7 +30,7 @@ def main():
     import sys
     # with open(out_filename, 'w') as f:
     out = csv.writer(sys.stdout, dialect='excel-tab') # f)
-    out.writerow(['system', 'nodes', 'procs_per_node', 'rep', 'elapsed_time'])
+    out.writerow(['system', 'nodes', 'procs_per_node', 'rep', 'init_time', 'elapsed_time'])
     out.writerows(content)
 
 if __name__ == '__main__':
