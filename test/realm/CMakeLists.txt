@@ -57,9 +57,23 @@ if(Legion_USE_CUDA)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
 endif()
 
+if(Legion_USE_HIP)
+  if(Legion_HIP_TARGET STREQUAL "CUDA")
+    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
+
+    # some tests have CUDA source files too
+    set(CUDASRC_memspeed memspeed_gpu.cu)
+  elseif (Legion_HIP_TARGET STREQUAL "ROCM")
+    # some tests have HIP source files too
+    set(HIPSRC_memspeed memspeed_gpu.cpp)
+  endif()
+endif()
+
 foreach(test IN LISTS REALM_TESTS)
   if(CUDASRC_${test})
     cuda_add_executable(${test} ${test}.cc ${CUDASRC_${test}})
+  elseif(HIPSRC_${test})
+    hip_add_executable(${test} ${test}.cc ${HIPSRC_${test}})
   else()
     add_executable(${test} ${test}.cc)
   endif()

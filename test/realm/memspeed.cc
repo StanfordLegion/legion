@@ -184,7 +184,7 @@ void memspeed_cpu_task(const void *args, size_t arglen,
   log_app.info() << " on proc " << p << " latency:" << latency;
 }
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
 extern "C" {
   double gpu_seqwr_test(void *buffer, size_t reps, size_t elements);
   double gpu_seqrd_test(void *buffer, size_t reps, size_t elements);
@@ -519,7 +519,7 @@ int main(int argc, char **argv)
 				   0, 0).wait();
   supported_proc_kinds.insert(Processor::IO_PROC);
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
   Processor::register_task_by_kind(Processor::TOC_PROC, false /*!global*/,
 				   MEMSPEED_TASK,
 				   CodeDescriptor(memspeed_gpu_task),
