@@ -147,7 +147,8 @@ fspace wire(rpn : region(node),
 }
 
 fspace timestamp {
-  init : int64,
+  init_start : int64,
+  init_stop : int64,
   start : int64,
   stop : int64,
 }
@@ -543,7 +544,7 @@ do
 
   var t = c.legion_get_current_time_in_micros()
   if init_ts then
-    for x in rt do x.init = t end
+    for x in rt do x.init_stop = t end
   end
   if print_ts then
     for x in rt do x.stop = t end
@@ -669,19 +670,27 @@ task parse_input(conf : Config)
   return conf
 end
 
+task begin_init(rt : region(timestamp))
+where writes(rt) do
+  var t = c.legion_get_current_time_in_micros()
+  for x in rt do x.init_start = t end
+end
+
 task get_elapsed(all_times : region(timestamp))
 where reads(all_times) do
-  var init = [int64:min()]
+  var init_start = [int64:max()]
+  var init_stop = [int64:min()]
   var start = [int64:max()]
   var stop = [int64:min()]
 
   for t in all_times do
-    init max= t.init
+    init_start min= t.init_start
+    init_stop max= t.init_stop
     start min= t.start
     stop max= t.stop
   end
 
-  return { init_time = init * 1e-6, sim_time = 1e-6 * (stop - start) }
+  return { init_time = 1e-6 * (init_stop - init_start), sim_time = 1e-6 * (stop - start) }
 end
 
 task print_summary(color : int, init_time : double, sim_time : double, conf : Config)
@@ -738,22 +747,33 @@ task toplevel()
   var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
   var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
 
+  var launch_domain = ispace(ptr, num_superpieces)
+  var all_times = region(ispace(ptr, num_superpieces), timestamp)
+  fill(all_times.{init_start, init_stop, start, stop}, 0)
+  var rp_times = partition(equal, all_times, launch_domain)
+
+  __fence(__execution)
+  wait_for(dummy())
+  __demand(__index_launch)
+  for i in launch_domain do
+    begin_init(rp_times[i])
+  end
+  __fence(__execution)
+  wait_for(dummy())
+
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
-  var all_times = region(ispace(ptr, num_superpieces), timestamp)
 
   fill(all_nodes.{node_cap, leakage, charge, node_voltage}, 0.0)
   fill(all_nodes.dummy, 0)
   fill(all_wires.{inductance, resistance, wire_cap, current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9}, voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8}}, 0.0)
   fill(all_wires.dummy, 0)
-  fill(all_times.{init, start, stop}, 0)
 
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
   var all_private = rp_all_nodes[0]
   var all_shared = rp_all_nodes[1]
 
-  var launch_domain = ispace(ptr, num_superpieces)
   var rp_private = partition(disjoint, all_private, colorings.private_node_map, launch_domain)
   var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map, launch_domain)
   var rp_wires = partition(equal, all_wires, launch_domain)
@@ -763,11 +783,9 @@ task toplevel()
 
   fill(ghost_ranges.rect, rect1d { 0, 0 })
 
-  var rp_times = partition(equal, all_times, launch_domain)
-
   for j = 0, 1 do
     __demand(__index_launch)
-    for i = 0, num_superpieces do
+    for i in launch_domain do
       init_piece(conf, rp_ghost_ranges[i],
                  rp_private[i], rp_shared[i], all_shared, rp_wires[i])
     end
@@ -777,7 +795,7 @@ task toplevel()
 
   __demand(__spmd)
   for j = 0, 1 do
-    for i = 0, num_superpieces do
+    for i in launch_domain do
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
   end

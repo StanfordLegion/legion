@@ -143,7 +143,8 @@ fspace point {
 }
 
 fspace timestamp {
-  init : int64,
+  init_start : int64,
+  init_stop : int64,
   start : int64,
   stop : int64,
 }
@@ -465,7 +466,7 @@ where reads writes(private.input, xm.input, xp.input, ym.input, yp.input, times)
 
   var t = c.legion_get_current_time_in_micros()
   if init_ts then
-    for x in times do x.init = t end
+    for x in times do x.init_stop = t end
   end
   if print_ts then
     for x in times do x.stop = t end
@@ -511,19 +512,27 @@ task read_config()
   return common.read_config()
 end
 
+task begin_init(times : region(ispace(int1d), timestamp))
+where writes(times) do
+  var t = c.legion_get_current_time_in_micros()
+  for x in times do x.init_start = t end
+end
+
 task get_elapsed(all_times : region(ispace(int1d), timestamp))
 where reads(all_times) do
-  var init = [int64:min()]
+  var init_start = [int64:max()]
+  var init_stop = [int64:min()]
   var start = [int64:max()]
   var stop = [int64:min()]
 
   for t in all_times do
-    init max= t.init
+    init_start min= t.init_start
+    init_stop max= t.init_stop
     start min= t.start
     stop max= t.stop
   end
 
-  return { init_time = init * 1e-6, sim_time = 1e-6 * (stop - start) }
+  return { init_time = 1e-6 * (init_stop - init_start), sim_time = 1e-6 * (stop - start) }
 end
 
 task print_time(color : int, init_time : double, sim_time : double)
@@ -553,6 +562,19 @@ task main()
   var nt2 = nt.x*nt.y
   var tiles = ispace(int1d, nt2)
 
+  var times = region(ispace(int1d, nt2), timestamp)
+  var p_times = partition(equal, times, ispace(int1d, nt2))
+  fill(times.{init_start, init_stop, start, stop}, 0)
+
+  __fence(__execution)
+  wait_for(dummy())
+  __demand(__index_launch)
+  for i in tiles do
+    begin_init(p_times[i])
+  end
+  __fence(__execution)
+  wait_for(dummy())
+
   var points = region(grid, point)
   var private = make_private_partition(points, tiles, n, nt, radius)
   var interior = make_interior_partition(points, tiles, n, nt, radius)
@@ -570,11 +592,6 @@ task main()
   var pxp_out = [make_ghost_x_partition(true)](xp, tiles, n, nt, radius, 0)
   var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
-
-  var times = region(ispace(int1d, nt2), timestamp)
-  var p_times = partition(equal, times, ispace(int1d, nt2))
-
-  fill(times.{init, start, stop}, 0)
 
   fill(points.{input, output}, init)
   fill(points.dummy, 0)
