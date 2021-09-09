@@ -1040,7 +1040,7 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rp_all_shared_p : partition(disjoint, rp_all_ghost),
               rs_all : region(side(wild, wild, wild, wild)),
               rs_all_p : partition(disjoint, rs_all),
-              conf : config)
+              conf : config, ts_init_start : int64)
 where
   reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
@@ -1076,7 +1076,7 @@ do
   var dthydro = dtmax
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
-  var ts_init = 0
+  var ts_init_stop = 0
   var cont = continue_simulation(cycle, cstop, time, tstop)
   while cont do
     if cycle == prune then
@@ -1088,7 +1088,7 @@ do
     end
     if cycle == 1 then
       __fence(__execution, __block)
-      ts_init = c.legion_get_current_time_in_micros()
+      ts_init_stop = c.legion_get_current_time_in_micros()
     end
 
   __demand(__trace)
@@ -1314,7 +1314,7 @@ do
   if prune == 0 then
     ts_end = c.legion_get_current_time_in_micros()
   end
-  output1("INIT TIME = %7.3f s\n", 1e-6 * (ts_init))
+  output1("INIT TIME = %7.3f s\n", 1e-6 * (ts_init_stop - ts_init_start))
   output1("ELAPSED TIME = %7.3f s\n", 1e-6 * (ts_end - ts_start))
 end
 
@@ -1432,6 +1432,8 @@ where reads(rz_all, rp_all, rs_all) do
     conf)
 end
 
+task dummy() end
+
 if not use_python_main then
 
 terra unwrap(x : mesh_colorings) return x end
@@ -1444,6 +1446,15 @@ task toplevel()
   output1("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
+
+  __fence(__execution, __block)
+  __demand(__index_launch)
+  for i = 0, conf.npieces do
+    dummy()
+  end
+  __fence(__execution, __block)
+
+  var ts_init_start = c.legion_get_current_time_in_micros()
 
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)
@@ -1515,7 +1526,7 @@ task toplevel()
            rp_all_private, rp_all_private_p,
            rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
            rs_all, rs_all_p,
-           conf)
+           conf, ts_init_start)
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   output1("Elapsed time = %.6e (total)\n", stop_time - start_time)
 
