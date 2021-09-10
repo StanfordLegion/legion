@@ -7440,7 +7440,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
       : memory(m), owner_space(m.address_space()), 
-        is_owner(m.address_space() == rt->address_space),
+        is_owner(is_owner_memory(m, rt->address_space)),
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
         eager_pool_instance(PhysicalInstance::NO_INST), eager_pool(0),
         eager_allocator(NULL), eager_remaining_capacity(0),
@@ -10656,7 +10656,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_external_instance());
 #endif
-      if (!manager->is_owner())
+      if (!is_owner)
       {
         // Send a message to the owner node to do the record
         RtUserEvent result = Runtime::create_rt_user_event();
@@ -10810,7 +10810,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager->is_external_instance());
 #endif
-      if (!manager->is_owner())
+      if (!is_owner)
       {
         // Send a message to the owner node to do the deletion
         RtUserEvent result = Runtime::create_rt_user_event();

@@ -20701,7 +20701,7 @@ namespace Legion {
       PhysicalManager *external_manager = 
         external_instance.get_physical_manager();
       const RtEvent attached = external_manager->attach_external_instance();
-      if (attached.exists())
+      if (attached.exists() && !attached.has_triggered())
         attached.wait();
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       InstanceSet external(1);
@@ -20879,7 +20879,10 @@ namespace Legion {
       }
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make it
-      if (result.address_space() != runtime->address_space)
+      // Only external instances can be non-local, file instances
+      // are always "local" to the node that they are on
+      if ((resource == LEGION_EXTERNAL_INSTANCE) && 
+          (result.address_space() != runtime->address_space))
       {
         Serializer rez;
         volatile DistributedID remote_did = 0;
@@ -20901,6 +20904,7 @@ namespace Legion {
             rez.serialize(serdez[idx]);
           }
           rez.serialize(node->row_source->handle);
+          rez.serialize<size_t>(0); // no collective mapping
           rez.serialize(&remote_did);
           rez.serialize(wait_for);
         }

@@ -656,6 +656,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t CollectiveMapping::count_children(const AddressSpaceID origin,
+                                             const AddressSpaceID local) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local);
+      const unsigned origin_index = find_index(origin);
+#ifdef DEBUG_LEGION
+      assert(local_index < unique_sorted_spaces.size());
+      assert(origin_index < unique_sorted_spaces.size());
+#endif
+      const unsigned offset = radix * 
+        convert_to_offset(local_index, origin_index);
+      size_t result = 0;
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < unique_sorted_spaces.size())
+          result++;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void CollectiveMapping::get_children(const AddressSpaceID origin,
         const AddressSpaceID local, std::vector<AddressSpaceID> &children) const
     //--------------------------------------------------------------------------
@@ -684,6 +707,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (find_index(space) < unique_sorted_spaces.size()); 
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* CollectiveMapping::clone_with(AddressSpaceID space) const
+    //--------------------------------------------------------------------------
+    {
+      std::vector<AddressSpaceID> copy_spaces = unique_sorted_spaces;
+      copy_spaces.push_back(space);
+      return new CollectiveMapping(copy_spaces, radix);
     }
 
     //--------------------------------------------------------------------------
@@ -1365,14 +1397,15 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop_id, 
                         bool register_now, size_t footprint,
                         ApEvent u_event, InstanceKind k,
-                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/)
+                        const ReductionOp *op /*= NULL*/, bool shadow/*=false*/,
+                        CollectiveMapping *mapping)
       : PhysicalManager(ctx, desc, encode_instance_did(did, 
            (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow,
-          (k == UNBOUND_INSTANCE_KIND)), memory_manager(memory), instance(inst),
-        use_event(Runtime::create_ap_user_event(NULL)),
+          (k == UNBOUND_INSTANCE_KIND), mapping), memory_manager(memory),
+        instance(inst), use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
         kind(k), external_pointer(-1UL),
@@ -1549,13 +1582,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndividualManager::get_use_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return use_event;
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent IndividualManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
@@ -1564,7 +1590,7 @@ namespace Legion {
       else
         // If the user is the one that is going to bind an instance
         // to this manager, return a no event
-        return user == producer_event ? ApEvent::NO_AP_EVENT : use_event;
+        return (user == producer_event) ? ApEvent::NO_AP_EVENT : use_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2453,16 +2479,8 @@ namespace Legion {
     {
       if (point_space != NULL)
         point_space->add_nested_valid_ref(did);
-#if 0
-#ifdef DEBUG_LEGION
-      if (is_owner())
-        assert(left == local_space);
-      else
-        assert(left != local_space);
-#endif
-      if (!right_spaces.empty())
+      if (collective_mapping->count_children(owner_space, local_space) > 0)
         add_nested_resource_ref(did);
-#endif
 #ifdef LEGION_GC
       log_garbage.info("GC Collective Manager %lld %d",
                         LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 
@@ -2485,9 +2503,6 @@ namespace Legion {
     {
       if ((point_space != NULL) && point_space->remove_nested_valid_ref(did))
         delete point_space;
-      if ((collective_mapping != NULL) && 
-          collective_mapping->remove_reference()) 
-        delete collective_mapping;
       if (is_owner())
         collective_barrier.destroy_barrier();
     }
@@ -2503,39 +2518,201 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CollectiveManager::get_use_event(void) const
+    bool CollectiveManager::contains_point(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
+      if (point_space != NULL)
+        return point_space->contains_point(point);
+      // Check the local points first since they are read-only at this point
+      for (std::vector<DomainPoint>::const_iterator it =
+            instance_points.begin(); it != instance_points.end(); it++)
+        if ((*it) == point)
+          return true;
+      {
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        std::map<DomainPoint,PhysicalInstance>::const_iterator finder =
+          remote_instances.find(point);
+        if (finder != remote_instances.end())
+          return true;
+      }
+      // Broadcast out a request for this remote instance
+      std::vector<AddressSpaceID> child_spaces;
+      collective_mapping->get_children(local_space, local_space, child_spaces);
+      if (child_spaces.empty())
+        return false;
+      std::vector<RtEvent> ready_events;
+      ready_events.reserve(child_spaces.size());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            child_spaces.begin(); it != child_spaces.end(); it++)
+      {
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize(point);
+          rez.serialize(local_space);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_instance_message(*it, rez);
+        ready_events.push_back(ready_event);
+      }
+      const RtEvent wait_on = Runtime::merge_events(ready_events);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+      return (remote_instances.find(point) != remote_instances.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::find_or_forward_physical_instance(
+        const DomainPoint &point, AddressSpaceID origin, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(origin != local_space);
+#endif
+      for (unsigned idx = 0; idx < instance_points.size(); idx++)
+      {
+        if (instance_points[idx] == point)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(COLLECTIVE_REMOTE_INSTANCE_RESPONSE);
+            rez.serialize(point);
+            rez.serialize(instances[idx]);
+            rez.serialize(to_trigger);
+          }
+          runtime->send_collective_instance_message(origin, rez);
+          return;
+        }
+      }
+      std::vector<AddressSpaceID> child_spaces;
+      collective_mapping->get_children(local_space, local_space, child_spaces);
+      if (child_spaces.empty())
+      {
+        Runtime::trigger_event(to_trigger);
+        return;
+      }
+      std::vector<RtEvent> ready_events;
+      ready_events.reserve(child_spaces.size());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            child_spaces.begin(); it != child_spaces.end(); it++)
+      {
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize(point);
+          rez.serialize(origin);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_instance_message(*it, rez);
+        ready_events.push_back(ready_event);
+      }
+      Runtime::trigger_event(to_trigger, Runtime::merge_events(ready_events));
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::record_remote_physical_instance(
+                            const DomainPoint &point, PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert((remote_instances.find(point) == remote_instances.end()) ||
+              (remote_instances[point] == instance));
+#endif
+      remote_instances[point] = instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::record_point_instance(const DomainPoint &point,
+                                                  PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      const Memory mem = instance.get_location();
+      MemoryManager *memory = runtime->find_memory_manager(mem);
+#ifdef DEBUG_LEGION
+      assert(memory->is_owner);
+      assert((point_space == NULL) || point_space->contains_point(point));
+#endif
+      AutoLock i_lock(inst_lock);
+      memories.push_back(memory);
+      instances.push_back(instance);
+      instance_points.push_back(point);
     }
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
+      return unique_event;
     }
 
     //--------------------------------------------------------------------------
     RtEvent CollectiveManager::get_instance_ready_event(void) const
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
+      // should never be called
       assert(false);
       return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance CollectiveManager::get_instance(const DomainPoint &k) const
+    PhysicalInstance CollectiveManager::get_instance(const DomainPoint &p) const
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
-      return PhysicalInstance::NO_INST;
+      // Check the local points first since they are read-only at this point
+      for (unsigned idx = 0; idx < instance_points.size(); idx++)
+        if (instance_points[idx] == p)
+          return instances[idx];
+      {
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        std::map<DomainPoint,PhysicalInstance>::const_iterator finder =
+          remote_instances.find(p);
+        if (finder != remote_instances.end())
+          return finder->second;
+      }
+      // Broadcast out a request for this remote instance
+      std::vector<AddressSpaceID> child_spaces;
+      collective_mapping->get_children(local_space, local_space, child_spaces);
+#ifdef DEBUG_LEGION
+      assert(!child_spaces.empty());
+#endif
+      std::vector<RtEvent> ready_events;
+      ready_events.reserve(child_spaces.size());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            child_spaces.begin(); it != child_spaces.end(); it++)
+      {
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize(p);
+          rez.serialize(local_space);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_instance_message(*it, rez);
+        ready_events.push_back(ready_event);
+      }
+      const RtEvent wait_on = Runtime::merge_events(ready_events);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+      std::map<DomainPoint,PhysicalInstance>::const_iterator finder =
+        remote_instances.find(p);
+#ifdef DEBUG_LEGION
+      assert(finder != remote_instances.end());
+#endif
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -2543,49 +2720,53 @@ namespace Legion {
                                                    const DomainPoint &key) const
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
-      return PointerConstraint();
+      const PhysicalInstance instance = get_instance(key);
+      void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
+      return PointerConstraint(instance.get_location(), uintptr_t(inst_ptr));
     }
 
     //--------------------------------------------------------------------------
     void CollectiveManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (left_space == local_space)
+      if (is_owner())
         activate_collective(mutator);
       else
-        send_remote_gc_increment(left_space, mutator);
+        send_remote_gc_increment(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
     }
 
     //--------------------------------------------------------------------------
     void CollectiveManager::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (left_space == local_space)
+      if (is_owner())
         deactivate_collective(mutator);
       else
-        send_remote_gc_decrement(left_space, mutator);
+        send_remote_gc_decrement(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
     }
 
     //--------------------------------------------------------------------------
     void CollectiveManager::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (left_space == local_space)
+      if (is_owner())
         validate_collective(mutator);
       else
-        send_remote_valid_increment(left_space, mutator);
+        send_remote_valid_increment(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
     }
 
     //--------------------------------------------------------------------------
     void CollectiveManager::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (left_space == local_space)
+      if (is_owner())
         invalidate_collective(mutator);
       else
-        send_remote_valid_decrement(left_space, mutator);
+        send_remote_valid_decrement(
+            collective_mapping->get_parent(owner_space, local_space), mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -2618,6 +2799,8 @@ namespace Legion {
     void CollectiveManager::activate_collective(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     { 
+      std::vector<AddressSpaceID> right_spaces;
+      collective_mapping->get_children(owner_space, local_space, right_spaces);
       for (std::vector<AddressSpaceID>::const_iterator it = 
             right_spaces.begin(); it != right_spaces.end(); it++)
       {
@@ -2626,7 +2809,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(ACTIVATE_MESSAGE);
+          rez.serialize(COLLECTIVE_ACTIVATE_MESSAGE);
           rez.serialize(done_event);
         }
         runtime->send_collective_instance_message(*it, rez);
@@ -2641,6 +2824,8 @@ namespace Legion {
     void CollectiveManager::deactivate_collective(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     { 
+      std::vector<AddressSpaceID> right_spaces;
+      collective_mapping->get_children(owner_space, local_space, right_spaces);
       for (std::vector<AddressSpaceID>::const_iterator it = 
             right_spaces.begin(); it != right_spaces.end(); it++)
       {
@@ -2649,7 +2834,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(DEACTIVATE_MESSAGE);
+          rez.serialize(COLLECTIVE_DEACTIVATE_MESSAGE);
           rez.serialize(done_event);
         }
         runtime->send_collective_instance_message(*it, rez);
@@ -2664,6 +2849,8 @@ namespace Legion {
     void CollectiveManager::validate_collective(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     { 
+      std::vector<AddressSpaceID> right_spaces;
+      collective_mapping->get_children(owner_space, local_space, right_spaces);
       for (std::vector<AddressSpaceID>::const_iterator it = 
             right_spaces.begin(); it != right_spaces.end(); it++)
       {
@@ -2672,7 +2859,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(VALIDATE_MESSAGE);
+          rez.serialize(COLLECTIVE_VALIDATE_MESSAGE);
           rez.serialize(done_event);
         }
         runtime->send_collective_instance_message(*it, rez);
@@ -2687,6 +2874,8 @@ namespace Legion {
     void CollectiveManager::invalidate_collective(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     { 
+      std::vector<AddressSpaceID> right_spaces;
+      collective_mapping->get_children(owner_space, local_space, right_spaces);
       for (std::vector<AddressSpaceID>::const_iterator it = 
             right_spaces.begin(); it != right_spaces.end(); it++)
       {
@@ -2695,7 +2884,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(VALIDATE_MESSAGE);
+          rez.serialize(COLLECTIVE_INVALIDATE_MESSAGE);
           rez.serialize(done_event);
         }
         runtime->send_collective_instance_message(*it, rez);
@@ -2743,18 +2932,68 @@ namespace Legion {
     RtEvent CollectiveManager::attach_external_instance(void)
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
+      // At this point the points should all be filled in so these
+      // data structures are all read-only
+#ifdef DEBUG_LEGION
+      assert(!memories.empty());
+#endif
+      if (memories.size() > 1)
+      {
+        // Need to make sure we don't duplicate memory attaches
+        // in the case where we have multiple instances in the
+        // same memory
+        std::set<MemoryManager*> unique_memories;
+        std::vector<RtEvent> ready_events;
+        for (unsigned idx = 0; idx < memories.size(); idx++)
+        {
+          MemoryManager *manager = memories[idx];
+          if (unique_memories.find(manager) != unique_memories.end())
+            continue;
+          unique_memories.insert(manager);
+          const RtEvent ready = manager->attach_external_instance(this);
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
+        if (!ready_events.empty())
+          return Runtime::merge_events(ready_events);
+        else
+          return RtEvent::NO_RT_EVENT;
+      }
+      else
+        return memories.back()->attach_external_instance(this);
     }
 
     //--------------------------------------------------------------------------
     RtEvent CollectiveManager::detach_external_instance(void)
     //--------------------------------------------------------------------------
     {
-      const RtUserEvent result = Runtime::create_rt_user_event(); 
-      detach_external(result, true/*left*/);
-      return result;
+ #ifdef DEBUG_LEGION
+      assert(!memories.empty());
+#endif
+      if (memories.size() > 1)
+      {
+        // Need to make sure we don't duplicate memory attaches
+        // in the case where we have multiple instances in the
+        // same memory
+        std::set<MemoryManager*> unique_memories;
+        std::vector<RtEvent> ready_events;
+        for (unsigned idx = 0; idx < memories.size(); idx++)
+        {
+          MemoryManager *manager = memories[idx];
+          if (unique_memories.find(manager) != unique_memories.end())
+            continue;
+          unique_memories.insert(manager);
+          const RtEvent ready = manager->detach_external_instance(this);
+          if (ready.exists())
+            ready_events.push_back(ready);
+        }
+        if (!ready_events.empty())
+          return Runtime::merge_events(ready_events);
+        else
+          return RtEvent::NO_RT_EVENT;
+      }
+      else
+        return memories.back()->detach_external_instance(this);      
     }
 
     //--------------------------------------------------------------------------
@@ -2809,6 +3048,8 @@ namespace Legion {
     void CollectiveManager::perform_delete(RtEvent deferred_event, bool left)
     //--------------------------------------------------------------------------
     {
+      const AddressSpaceID left_space =
+        collective_mapping->get_parent(owner_space, local_space);
       if (left)
       {
         if (local_space == left_space)
@@ -2820,8 +3061,11 @@ namespace Legion {
               return;
             deleted_or_detached = true;
           }
-          // If we make it here we are the first ones so so the deletion
+          // If we make it here we are the first ones so do the deletion
           collective_deletion(deferred_event);
+          std::vector<AddressSpaceID> right_spaces;
+          collective_mapping->get_children(owner_space, local_space,
+                                           right_spaces);
           for (std::vector<AddressSpaceID>::const_iterator it = 
                 right_spaces.begin(); it != right_spaces.end(); it++)
           {
@@ -2829,7 +3073,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(PERFORM_DELETE_MESSAGE);
+              rez.serialize(COLLECTIVE_PERFORM_DELETE_MESSAGE);
               rez.serialize(deferred_event);
               rez.serialize<bool>(false/*left*/);
             }
@@ -2843,7 +3087,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(PERFORM_DELETE_MESSAGE);
+            rez.serialize(COLLECTIVE_PERFORM_DELETE_MESSAGE);
             rez.serialize(deferred_event);
             rez.serialize<bool>(true/*left*/);
           }
@@ -2867,6 +3111,8 @@ namespace Legion {
         }
         // Do the deletion
         collective_deletion(deferred_event); 
+        std::vector<AddressSpaceID> right_spaces;
+        collective_mapping->get_children(owner_space, local_space,right_spaces);
         // If we have no right users send back messages
         if (right_spaces.empty())
         {
@@ -2874,7 +3120,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(FINALIZE_MESSAGE);
+            rez.serialize(COLLECTIVE_FINALIZE_MESSAGE);
           }
           runtime->send_collective_instance_message(left_space, rez);
         }
@@ -2887,7 +3133,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(PERFORM_DELETE_MESSAGE);
+              rez.serialize(COLLECTIVE_PERFORM_DELETE_MESSAGE);
               rez.serialize(deferred_event);
               rez.serialize(false/*left*/);
             }
@@ -2901,6 +3147,8 @@ namespace Legion {
     void CollectiveManager::force_delete(bool left)
     //--------------------------------------------------------------------------
     {
+      const AddressSpaceID left_space =
+        collective_mapping->get_parent(owner_space, local_space);
       if (left)
       {
         if (local_space == left_space)
@@ -2914,6 +3162,9 @@ namespace Legion {
           }
           // If we make it here we are the first ones so so the deletion
           collective_force();
+          std::vector<AddressSpaceID> right_spaces;
+          collective_mapping->get_children(owner_space, local_space,
+                                           right_spaces);
           for (std::vector<AddressSpaceID>::const_iterator it = 
                 right_spaces.begin(); it != right_spaces.end(); it++)
           {
@@ -2921,7 +3172,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(FORCE_DELETE_MESSAGE);
+              rez.serialize(COLLECTIVE_FORCE_DELETE_MESSAGE);
               rez.serialize<bool>(false/*left*/);
             }
             runtime->send_collective_instance_message(*it, rez);
@@ -2934,7 +3185,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(FORCE_DELETE_MESSAGE);
+            rez.serialize(COLLECTIVE_FORCE_DELETE_MESSAGE);
             rez.serialize<bool>(true/*left*/);
           }
           AutoLock i_lock(inst_lock);
@@ -2957,6 +3208,8 @@ namespace Legion {
         }
         // Do the deletion
         collective_force(); 
+        std::vector<AddressSpaceID> right_spaces;
+        collective_mapping->get_children(owner_space, local_space,right_spaces);
         // If we have no right users send back messages
         if (right_spaces.empty())
         {
@@ -2964,7 +3217,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(FINALIZE_MESSAGE);
+            rez.serialize(COLLECTIVE_FINALIZE_MESSAGE);
           }
           runtime->send_collective_instance_message(left_space, rez);
         }
@@ -2977,7 +3230,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(FORCE_DELETE_MESSAGE);
+              rez.serialize(COLLECTIVE_FORCE_DELETE_MESSAGE);
               rez.serialize(false/*left*/);
             }
             runtime->send_collective_instance_message(*it, rez);
@@ -2991,6 +3244,8 @@ namespace Legion {
                                             GCPriority priority, bool left)
     //--------------------------------------------------------------------------
     {
+      const AddressSpaceID left_space =
+        collective_mapping->get_parent(owner_space, local_space);
       if (left)
       {
         if (local_space == left_space)
@@ -3003,6 +3258,9 @@ namespace Legion {
           }
           // If we make it here we are the first ones so so the deletion
           collective_set_gc_priority(mapper_id, proc, priority);
+          std::vector<AddressSpaceID> right_spaces;
+          collective_mapping->get_children(owner_space, local_space,
+                                           right_spaces);
           for (std::vector<AddressSpaceID>::const_iterator it = 
                 right_spaces.begin(); it != right_spaces.end(); it++)
           {
@@ -3010,7 +3268,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(SET_GC_PRIORITY_MESSAGE);
+              rez.serialize(COLLECTIVE_SET_GC_PRIORITY_MESSAGE);
               rez.serialize(mapper_id);
               rez.serialize(proc);
               rez.serialize(priority);
@@ -3026,7 +3284,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(SET_GC_PRIORITY_MESSAGE);
+            rez.serialize(COLLECTIVE_SET_GC_PRIORITY_MESSAGE);
             rez.serialize(mapper_id);
             rez.serialize(proc);
             rez.serialize(priority);
@@ -3044,6 +3302,8 @@ namespace Legion {
 #endif
         // Do the deletion
         collective_set_gc_priority(mapper_id, proc, priority); 
+        std::vector<AddressSpaceID> right_spaces;
+        collective_mapping->get_children(owner_space, local_space,right_spaces);
         // If we have no right users send back messages
         if (!right_spaces.empty())
         {
@@ -3054,7 +3314,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(SET_GC_PRIORITY_MESSAGE);
+              rez.serialize(COLLECTIVE_SET_GC_PRIORITY_MESSAGE);
               rez.serialize(mapper_id);
               rez.serialize(proc);
               rez.serialize(priority);
@@ -3067,149 +3327,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::detach_external(RtUserEvent to_trigger, 
-                                            bool left, RtEvent full_detach)
-    //--------------------------------------------------------------------------
-    {
-      if (left)
-      {
-        if (local_space == left_space)
-        {
-          // See if we can do the deletion
-          {
-            AutoLock i_lock(inst_lock);
-            if (deleted_or_detached)
-            {
-#ifdef DEBUG_LEGION
-              assert(detached.exists());
-#endif
-              Runtime::trigger_event(to_trigger, detached);
-              return;
-            }
-            deleted_or_detached = true;
-            detached = to_trigger;
-          }
-          // If we make it here we are the first ones so so the deletion
-          std::set<RtEvent> preconditions;
-          collective_detach(preconditions);
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                right_spaces.begin(); it != right_spaces.end(); it++)
-          {
-            const RtUserEvent right_event = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(DETACH_EXTERNAL_MESSAGE);
-              rez.serialize(right_event);
-              rez.serialize<bool>(false/*left*/);
-              rez.serialize(to_trigger);
-            }
-            runtime->send_collective_instance_message(*it, rez);
-            preconditions.insert(right_event);
-          }
-          if (!preconditions.empty())
-            Runtime::trigger_event(to_trigger, 
-                Runtime::merge_events(preconditions));
-          else
-            Runtime::trigger_event(to_trigger);
-        }
-        else
-        {
-          // Forward this on to the left space
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(DETACH_EXTERNAL_MESSAGE);
-            rez.serialize(to_trigger);
-            rez.serialize<bool>(true/*left*/);
-          }
-          AutoLock i_lock(inst_lock);
-          if (deleted_or_detached)
-          {
-#ifdef DEBUG_LEGION
-            assert(detached.exists());
-#endif
-            Runtime::trigger_event(to_trigger, detached);
-          }
-          else
-            runtime->send_collective_instance_message(left_space, rez);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(local_space != left_space);
-#endif
-        // Update our local event
-        {
-          AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-          assert(!deleted_or_detached);
-          assert(!detached.exists());
-#endif
-          deleted_or_detached = true;
-          detached = full_detach;
-        }
-        // Do the deletion
-        std::set<RtEvent> preconditions;
-        collective_detach(preconditions);
-        // If we have no right users send back messages
-        if (right_spaces.empty())
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(FINALIZE_MESSAGE);
-          }
-          runtime->send_collective_instance_message(left_space, rez);
-        }
-        else
-        {
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                right_spaces.begin(); it != right_spaces.end(); it++)
-          {
-            const RtUserEvent right_event = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(DETACH_EXTERNAL_MESSAGE);
-              rez.serialize(right_event);
-              rez.serialize(false/*left*/);
-              rez.serialize(full_detach);
-            }
-            runtime->send_collective_instance_message(*it, rez);
-            preconditions.insert(right_event);
-          }
-        }
-        if (!preconditions.empty())
-            Runtime::trigger_event(to_trigger, 
-                Runtime::merge_events(preconditions));
-          else
-            Runtime::trigger_event(to_trigger);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     bool CollectiveManager::finalize_message(void)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert(finalize_messages < right_spaces.size());
+      assert(finalize_messages <
+              collective_mapping->count_children(owner_space, local_space));
 #endif
-      if (++finalize_messages == right_spaces.size())
+      if (++finalize_messages ==
+          collective_mapping->count_children(owner_space, local_space))
       {
+        const AddressSpaceID left_space =
+          collective_mapping->get_parent(owner_space, local_space);
         if (left_space != local_space)
         {
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(FINALIZE_MESSAGE);
+            rez.serialize(COLLECTIVE_FINALIZE_MESSAGE);
           }
           runtime->send_collective_instance_message(left_space, rez);
         }
@@ -3570,7 +3707,7 @@ namespace Legion {
       derez.deserialize(kind);
       switch (kind)
       {
-        case ACTIVATE_MESSAGE:
+        case COLLECTIVE_ACTIVATE_MESSAGE:
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
@@ -3579,7 +3716,7 @@ namespace Legion {
             Runtime::trigger_event(to_trigger, mutator.get_done_event()); 
             break;
           }
-        case DEACTIVATE_MESSAGE:
+        case COLLECTIVE_DEACTIVATE_MESSAGE:
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
@@ -3588,7 +3725,7 @@ namespace Legion {
             Runtime::trigger_event(to_trigger, mutator.get_done_event());
             break;
           }
-        case VALIDATE_MESSAGE:
+        case COLLECTIVE_VALIDATE_MESSAGE:
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
@@ -3597,7 +3734,7 @@ namespace Legion {
             Runtime::trigger_event(to_trigger, mutator.get_done_event());
             break;
           }
-        case INVALIDATE_MESSAGE:
+        case COLLECTIVE_INVALIDATE_MESSAGE:
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
@@ -3606,7 +3743,7 @@ namespace Legion {
             Runtime::trigger_event(to_trigger, mutator.get_done_event());
             break;
           }
-        case PERFORM_DELETE_MESSAGE:
+        case COLLECTIVE_PERFORM_DELETE_MESSAGE:
           {
             RtEvent deferred_event;
             derez.deserialize(deferred_event);
@@ -3615,14 +3752,14 @@ namespace Legion {
             manager->perform_delete(deferred_event, left);
             break;
           }
-        case FORCE_DELETE_MESSAGE:
+        case COLLECTIVE_FORCE_DELETE_MESSAGE:
           {
             bool left;
             derez.deserialize(left);
             manager->force_delete(left);
             break;
           }
-        case SET_GC_PRIORITY_MESSAGE:
+        case COLLECTIVE_SET_GC_PRIORITY_MESSAGE:
           {
             MapperID mapper_id;
             derez.deserialize(mapper_id);
@@ -3635,20 +3772,34 @@ namespace Legion {
             manager->set_gc_priority(mapper_id, proc, priority, left);
             break;
           }
-        case DETACH_EXTERNAL_MESSAGE:
-          {
-            RtUserEvent to_trigger;
-            derez.deserialize(to_trigger);
-            bool left;
-            derez.deserialize(left);
-            manager->detach_external(to_trigger, left);
-            break;
-          }
-        case FINALIZE_MESSAGE:
+        case COLLECTIVE_FINALIZE_MESSAGE:
           {
             if (manager->finalize_message() &&
                 manager->remove_nested_resource_ref(did))
               delete manager;
+            break;
+          }
+        case COLLECTIVE_REMOTE_INSTANCE_REQUEST:
+          {
+            DomainPoint point;
+            derez.deserialize(point);
+            AddressSpaceID origin;
+            derez.deserialize(origin);
+            RtUserEvent to_trigger;
+            derez.deserialize(to_trigger);
+            manager->find_or_forward_physical_instance(point,origin,to_trigger);
+            break;
+          }
+        case COLLECTIVE_REMOTE_INSTANCE_RESPONSE:
+          {
+            DomainPoint point;
+            derez.deserialize(point);
+            PhysicalInstance instance;
+            derez.deserialize(instance);
+            RtUserEvent to_trigger;
+            derez.deserialize(to_trigger);
+            manager->record_remote_physical_instance(point, instance);
+            Runtime::trigger_event(to_trigger);
             break;
           }
         default:
@@ -3754,13 +3905,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent VirtualManager::get_use_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------

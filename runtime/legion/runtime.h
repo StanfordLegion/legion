@@ -1424,6 +1424,14 @@ namespace Legion {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
       inline Processor get_local_gpu(void) const { return local_gpu; }
 #endif
+      static inline bool is_owner_memory(Memory m, AddressSpace space)
+        {
+          if (m.address_space() == space)
+            return true;
+          const Memory::Kind kind = m.kind();
+          // File system memories are "local" everywhere
+          return ((kind == Memory::HDF_MEM) || (kind == Memory::FILE_MEM));
+        }
     public:
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);

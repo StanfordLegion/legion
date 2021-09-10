@@ -2155,6 +2155,7 @@ namespace Legion {
       ReplAttachOp& operator=(const ReplAttachOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
+                                  RtBarrier &resource_barrier,
                                   ApBarrier &attach_barrier,
                                   bool collective_instances,
                                   bool deduplicate_across_shards,
@@ -2182,6 +2183,8 @@ namespace Legion {
       bool collective_instance;
       bool deduplicate_across_shards;
       bool is_first_local_shard;
+      // individual insts: whether at least one shard lives on the local process
+      bool contains_individual; 
     protected:
       RtBarrier resource_barrier;
       ValueBroadcast<DistributedID> *did_broadcast;
@@ -2642,6 +2645,7 @@ namespace Legion {
       void find_shard_local_op_data(size_t context_index,
                                     size_t exchange_index,
                                     void *data, size_t size);
+      void barrier_shard_local(size_t context_index, size_t exchange_index);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(FutureInstance *instance, void *metadata,

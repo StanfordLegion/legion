@@ -3553,7 +3553,7 @@ namespace Legion {
             const std::vector<size_t> &field_sizes, const FieldMask &file_mask,
             const std::vector<unsigned> &mask_index_map,
             RegionNode *node, const std::vector<CustomSerdezID> &serdez,
-            DistributedID did);
+            DistributedID did, CollectiveMapping *collective_mapping = NULL);
       static void handle_external_create_request(Deserializer &derez,
                                 Runtime *runtime, AddressSpaceID source);
       static void handle_external_create_response(Deserializer &derez);

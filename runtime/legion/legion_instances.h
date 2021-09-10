@@ -126,9 +126,12 @@ namespace Legion {
     public:
       AddressSpaceID get_parent(const AddressSpaceID origin, 
                                 const AddressSpaceID local) const;
+      size_t count_children(const AddressSpaceID origin,
+                            const AddressSpaceID local) const;
       void get_children(const AddressSpaceID origin, const AddressSpaceID local,
                         std::vector<AddressSpaceID> &children) const;
       bool contains(const AddressSpaceID space) const;
+      CollectiveMapping* clone_with(AddressSpace space) const;
     public:
       void pack(Serializer &rez) const;
     protected:
@@ -167,8 +170,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
     public: 
-      virtual ApEvent get_use_event(void) const = 0;
-      virtual ApEvent get_use_event(ApEvent user) const = 0;
+      virtual ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const = 0;
       virtual ApEvent get_unique_event(void) const = 0;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
@@ -486,7 +488,8 @@ namespace Legion {
                         bool register_now, size_t footprint,
                         ApEvent use_event, InstanceKind kind,
                         const ReductionOp *op = NULL,
-                        bool shadow_instance = false);
+                        bool shadow_instance = false,
+                        CollectiveMapping *collective_mapping = NULL);
       IndividualManager(const IndividualManager &rhs);
       virtual ~IndividualManager(void);
     public:
@@ -504,8 +507,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
     public:
-      virtual ApEvent get_use_event(void) const;
-      virtual ApEvent get_use_event(ApEvent user) const;
+      virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual RtEvent get_instance_ready_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const 
                                                    { return instance; }
@@ -612,15 +614,16 @@ namespace Legion {
       static const AllocationType alloc_type = COLLECTIVE_INST_MANAGER_ALLOC;
     public:
       enum MessageKind {
-        ACTIVATE_MESSAGE,
-        DEACTIVATE_MESSAGE,
-        VALIDATE_MESSAGE,
-        INVALIDATE_MESSAGE,
-        PERFORM_DELETE_MESSAGE,
-        FORCE_DELETE_MESSAGE,
-        SET_GC_PRIORITY_MESSAGE,
-        DETACH_EXTERNAL_MESSAGE,
-        FINALIZE_MESSAGE,
+        COLLECTIVE_ACTIVATE_MESSAGE,
+        COLLECTIVE_DEACTIVATE_MESSAGE,
+        COLLECTIVE_VALIDATE_MESSAGE,
+        COLLECTIVE_INVALIDATE_MESSAGE,
+        COLLECTIVE_PERFORM_DELETE_MESSAGE,
+        COLLECTIVE_FORCE_DELETE_MESSAGE,
+        COLLECTIVE_SET_GC_PRIORITY_MESSAGE,
+        COLLECTIVE_FINALIZE_MESSAGE,
+        COLLECTIVE_REMOTE_INSTANCE_REQUEST,
+        COLLECTIVE_REMOTE_INSTANCE_RESPONSE,
       };
     public:
       struct DeferCollectiveManagerArgs : 
@@ -678,8 +681,7 @@ namespace Legion {
       void record_point_instance(const DomainPoint &point,
                                  PhysicalInstance instance);
     public:
-      virtual ApEvent get_use_event(void) const;
-      virtual ApEvent get_use_event(ApEvent user) const;
+      virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual RtEvent get_instance_ready_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
@@ -717,8 +719,6 @@ namespace Legion {
       void force_delete(bool left);
       void set_gc_priority(MapperID mapper_id, Processor p, 
                            GCPriority priority, bool left);
-      void detach_external(RtUserEvent to_trigger, bool left, 
-                  RtEvent full_detach = RtEvent::NO_RT_EVENT);
       bool finalize_message(void);
     protected:
       void collective_deletion(RtEvent deferred_event);
@@ -726,6 +726,10 @@ namespace Legion {
       void collective_set_gc_priority(MapperID mapper_id, Processor proc,
                                       GCPriority priority);
       void collective_detach(std::set<RtEvent> &detach_events);
+      void find_or_forward_physical_instance(const DomainPoint &point,
+                        AddressSpaceID origin, RtUserEvent to_trigger);
+      void record_remote_physical_instance(const DomainPoint &point,
+                                           PhysicalInstance instance);
     public:
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -781,8 +785,8 @@ namespace Legion {
       //CollectiveMapping *collective_mapping;
       std::vector<MemoryManager*> memories; // local memories
       std::vector<PhysicalInstance> instances; // local instances
-      std::vector<AddressSpaceID> right_spaces;
-      AddressSpaceID left_space;
+      std::vector<DomainPoint> instance_points; // points for local instances
+      std::map<DomainPoint,PhysicalInstance> remote_instances;
     protected:
       ApBarrier collective_barrier;
       RtEvent detached;
@@ -818,8 +822,7 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public: 
-      virtual ApEvent get_use_event(void) const;
-      virtual ApEvent get_use_event(ApEvent user) const;
+      virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
       virtual RtEvent get_instance_ready_event(void) const;
       virtual ApEvent get_unique_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;

@@ -14378,6 +14378,15 @@ namespace Legion {
       LogicalRegion region_handle;
       derez.deserialize(region_handle);
       RegionNode *region_node = runtime->forest->get_node(region_handle);
+      size_t collective_mapping_size;
+      derez.deserialize(collective_mapping_size);
+      CollectiveMapping *collective_mapping = NULL;
+      if (collective_mapping_size > 0)
+      {
+        collective_mapping =
+          new CollectiveMapping(derez, collective_mapping_size);
+        collective_mapping->add_reference();
+      }
       DistributedID *did_ptr;
       derez.deserialize(did_ptr);
       RtUserEvent done_event;
@@ -14386,7 +14395,22 @@ namespace Legion {
       PhysicalManager *manager = fs->create_external_manager(inst, ready_event,
           footprint, constraints, field_set, field_sizes, file_mask,
           mask_index_map, region_node, serdez,
-          runtime->get_available_distributed_id());
+          runtime->get_available_distributed_id(), collective_mapping);
+      
+      if (collective_mapping != NULL)
+      {
+        // Since we're the owner address space, record that we have 
+        // instances on all other address spaces in the control
+        // replicated parent task's collective mapping
+        for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
+        {
+          const AddressSpaceID space = (*collective_mapping)[idx];
+          if (space == manager->owner_space)
+            continue;
+          manager->update_remote_instances(space);
+        }
+      }
+
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14395,6 +14419,10 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_external_create_response(source, rez);
+
+      if ((collective_mapping != NULL) &&
+          collective_mapping->remove_reference())
+        delete collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -14421,7 +14449,7 @@ namespace Legion {
             const FieldMask &external_mask,
             const std::vector<unsigned> &mask_index_map,
             RegionNode *node, const std::vector<CustomSerdezID> &serdez,
-            DistributedID did)
+            DistributedID did, CollectiveMapping *collective_mapping)
     //--------------------------------------------------------------------------
     {
       // Pull out the pointer constraint so that we can use it separately
@@ -14456,7 +14484,9 @@ namespace Legion {
                                          layout, 0/*redop*/, 
                                          true/*register now*/,
                                          instance_footprint, ready_event,
-                              PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND);
+                              PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND,
+                                         NULL/*redop*/, false/*shadow*/,
+                                         collective_mapping);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

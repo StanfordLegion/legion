@@ -7375,6 +7375,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
+                                              RtBarrier &resource_bar,
                                               ApBarrier &attach_bar,
                                               bool collective_inst,
                                               bool dedup_across_shards,
@@ -7382,13 +7383,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      //assert(resource_bar.exists());
       assert(did_broadcast == NULL);
       assert(single_broadcast == NULL);
 #endif
-      //resource_barrier = resource_bar;
-      //ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
       shard_space = ctx->find_sharding_launch_space(true/*can create*/);
+      resource_barrier = resource_bar;
+      ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
       shard_fn = ctx->shard_manager->find_sharding_function(0/*cyclic*/);
       collective_instance = collective_inst;
       deduplicate_across_shards = dedup_across_shards;
@@ -7396,6 +7396,31 @@ namespace Legion {
       // Setup the distributed ID broadcast and send out the value
       if (collective_instance)
       {
+        // Check to make sure that everything is local here
+        if (resource == LEGION_EXTERNAL_INSTANCE)
+        {
+          const PointerConstraint &pointer =
+                                  layout_constraint_set.pointer_constraint;
+          const AddressSpaceID owner_space = pointer.memory.address_space();
+          if (owner_space != runtime->address_space)
+          {
+            const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+              REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+            };
+            REPORT_LEGION_ERROR(ERROR_NONLOCAL_COLLECTIVE_ATTACH,
+                "Illegal collective attach operation performed by shard %d of "
+                "control-replicated task %s (UID %lld). External instance in "
+                "%s memory " IDFMT " of address space %d, but shard %d is "
+                "executing on address space %d. All collective attach ops must "
+                "attach to instances in the local address space.",
+                ctx->owner_shard->shard_id, ctx->get_task_name(),
+                ctx->get_unique_id(), mem_names[pointer.memory.kind()],
+                pointer.memory.id, pointer.memory.address_space(), 
+                ctx->owner_shard->shard_id, runtime->address_space)
+          }
+        }
         if (deduplicate_across_shards)
           point_space = ctx->find_collective_map_launch_space();
         else
@@ -7421,7 +7446,7 @@ namespace Legion {
             break;
           case LEGION_EXTERNAL_INSTANCE:
             {
-              const PointerConstraint &pointer = 
+              const PointerConstraint &pointer =
                                       layout_constraint_set.pointer_constraint;
               const AddressSpaceID owner_space = pointer.memory.address_space();
               const ShardMapping &mapping = ctx->shard_manager->get_mapping();
@@ -7430,6 +7455,7 @@ namespace Legion {
                 if (mapping[sid] != owner_space)
                   continue;
                 owner_shard = sid;
+                contains_individual = true;
                 break;
               }
               // If we didn't find it we default to 0
@@ -7440,7 +7466,11 @@ namespace Legion {
         }
         did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_78);
-        if (did_broadcast->is_origin())
+        // Can only do the broadcast if we know we can make the ID safely
+        // For external instances, if they are remote from all shards then
+        // we'll need to create a remote manager with a remote distributed ID
+        if (did_broadcast->is_origin() &&
+            ((resource != LEGION_EXTERNAL_INSTANCE) || contains_individual))
           did_broadcast->broadcast(runtime->get_available_distributed_id());
         single_broadcast =
           new ValueBroadcast<std::pair<PhysicalInstance,ApEvent> >(
@@ -7461,6 +7491,7 @@ namespace Legion {
       collective_instance = false;
       deduplicate_across_shards = false;
       is_first_local_shard = false;
+      contains_individual = false;
       resource_barrier = RtBarrier::NO_RT_BARRIER;
       did_broadcast = NULL;
       single_broadcast = NULL;
@@ -7543,9 +7574,26 @@ namespace Legion {
       // Register this instance with the memory manager
       PhysicalManager *external_manager = 
         external_instance.get_physical_manager();
-      const RtEvent attached = external_manager->attach_external_instance();
-      if (attached.exists())
-        attached.wait();
+      if (external_manager->is_collective_manager())
+      {
+        if (is_first_local_shard)
+        {
+          const RtEvent attached = external_manager->attach_external_instance();
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
+        }
+        else
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+      }
+      else if (external_manager->is_owner())
+      {
+        const RtEvent attached = external_manager->attach_external_instance();
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
+      }
+      else
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+      // Make sure the attaches are done across all shards before continuing
+      if (!resource_barrier.has_triggered())
+        resource_barrier.wait();
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       ApEvent attach_event;
       if (is_first_local_shard)
@@ -7757,12 +7805,12 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       ShardManager *shard_manager = repl_ctx->shard_manager;
-      // Get the distributed ID from the broadcast
-      const DistributedID manager_did = 
-        did_broadcast->get_value(!did_broadcast->is_origin());
       // Now we need to make the instance to span the shards
       if (collective_instance)
       {
+        // Get the distributed ID from the broadcast
+        const DistributedID manager_did = 
+          did_broadcast->get_value(!did_broadcast->is_origin());
         // Making a collective instance across the shards
         CollectiveManager *manager = NULL;
         // Make the manager first
@@ -7821,34 +7869,35 @@ namespace Legion {
           manager = shard_manager->find_shard_local_op_data<CollectiveManager*>(
                                                context_index, exchange_index++);
         // Then record the local instance data with the manager
+        // If this is an external instance then we need to do the 
+        // exchange to check to make sure that we always attach instances
+        // on the local node to where they live, file instances don't have
+        // this problem because the memory is "local" everywhere
         if (!deduplicate_across_shards)
         {
           const DomainPoint point(repl_ctx->owner_shard->shard_id);
           manager->record_point_instance(point, instance);
+          // Make sure that all the shards are done recording before we proceed
+          shard_manager->barrier_shard_local(context_index, exchange_index++);
         }
         else if (is_first_local_shard)
         {
           // Figure out which point we are in the collective mapping
           CollectiveMapping &mapping = 
             shard_manager->get_collective_mapping();
-#if defined(DEBUG_LEGION) && !defined(NDEBUG)
-          bool found = false;
-#endif
+          DomainPoint point;
           for (unsigned idx = 0; idx < mapping.size(); idx++)
           {
             const AddressSpaceID space = mapping[idx];
             if (space != runtime->address_space)
               continue;
-            const DomainPoint point(idx);
-            manager->record_point_instance(point, instance);
-#if defined(DEBUG_LEGION) && !defined(NDEBUG)
-            found = true;
-#endif
+            point = DomainPoint(idx);
             break;
           }
 #ifdef DEBUG_LEGION
-          assert(found);
+          assert(point.get_dim() == 1); // test if point was set
 #endif
+          manager->record_point_instance(point, instance);
           shard_manager->exchange_shard_local_op_data(context_index,
                                           exchange_index++, manager);
         }
@@ -7864,29 +7913,86 @@ namespace Legion {
       }
       else
       {
+        // Figure out what the collective mapping is for this instance
+        CollectiveMapping *mapping = &shard_manager->get_collective_mapping();
+        volatile DistributedID manager_did = 0;
+        if ((resource == LEGION_EXTERNAL_INSTANCE) && !contains_individual)
+        {
+          // We need to send a message to the remote node where no shard
+          // lives in order to make this particular instance, we'll give
+          // it a collective mapping containing all our address spaces
+          // plus the remote address space where the instance lives
+          if (did_broadcast->is_origin())
+          {
+            // Create new collective mapping with the remote address
+            // space contained in all of our spaces
+            const AddressSpaceID owner_space = instance.address_space();
+#ifdef DEBUG_LEGION
+            assert(!mapping->contains(owner_space));
+#endif
+            mapping = mapping->clone_with(owner_space);
+            // We're the ones to send the message to the owner
+            const RtUserEvent wait_for = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(node->column_source->handle);
+              rez.serialize(instance);
+              rez.serialize(ready_event);
+              rez.serialize(footprint);
+              constraints.serialize(rez);
+              rez.serialize(external_mask);
+              rez.serialize<size_t>(field_set.size());
+              for (unsigned idx = 0; idx < field_set.size(); idx++)
+              {
+                rez.serialize(field_set[idx]);
+                rez.serialize(field_sizes[idx]);
+                rez.serialize(mask_index_map[idx]);
+                rez.serialize(serdez[idx]);
+              }
+              rez.serialize(node->row_source->handle);
+              mapping->pack(rez);
+              rez.serialize(&manager_did);
+              rez.serialize(wait_for);
+            }
+            runtime->send_external_create_request(owner_space, rez);
+            // Wait for the response to come back
+            wait_for.wait();
+#ifdef DEBUG_LEGION
+            assert(manager_did > 0);
+#endif
+            const DistributedID did_copy = manager_did;
+            did_broadcast->broadcast(did_copy);
+          }
+          else
+            manager_did = did_broadcast->get_value(false/*not origin*/);
+        }
+        else
+          manager_did = did_broadcast->get_value(!did_broadcast->is_origin());
         // Making an individual instance across all shards
         // Have the first shard be the one to make it 
         if (is_first_local_shard)
         {
+          mapping->add_reference();
           PhysicalManager *manager =
             node->column_source->create_external_manager(instance, ready_event,
             footprint, constraints, field_set, field_sizes, external_mask,
-            mask_index_map, node, serdez, manager_did);
+            mask_index_map, node, serdez, manager_did, mapping);
           // If we're the owner address space, record that we have 
           // instances on all other address spaces in the control
           // replicated parent task's collective mapping
           if (manager->is_owner())
           {
-            const CollectiveMapping &mapping = 
-              shard_manager->get_collective_mapping();
-            for (unsigned idx = 0; idx < mapping.size(); idx++)
+            for (unsigned idx = 0; idx < mapping->size(); idx++)
             {
-              const AddressSpaceID space = mapping[idx];
+              const AddressSpaceID space = (*mapping)[idx];
               if (space == manager->owner_space)
                 continue;
               manager->update_remote_instances(space);
             }
           }
+          if (mapping->remove_reference())
+            delete mapping;
           shard_manager->exchange_shard_local_op_data(context_index,
                                           exchange_index++, manager);
           return manager;
@@ -8088,10 +8194,19 @@ namespace Legion {
           detach_event = effects_done;
         shard_manager->exchange_shard_local_op_data(context_index, 0/*first*/,
                                                     detach_event);
+        // Also tell the runtime to detach the external instance from memory
+        // This has to be done before we can consider this mapped
+        const RtEvent detached_event = manager->detach_external_instance();
+        shard_manager->exchange_shard_local_op_data(context_index, 1/*second*/,
+                                                    detached_event);
+        if (detached_event.exists())
+          map_applied_conditions.insert(detached_event);
       }
       else
+      {
         detach_event = shard_manager->find_shard_local_op_data<ApEvent>(
             context_index, 0/*first*/);
+      }
       if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
@@ -8101,11 +8216,7 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      // Also tell the runtime to detach the external instance from memory
-      // This has to be done before we can consider this mapped
-      RtEvent detached_event = manager->detach_external_instance();
-      if (detached_event.exists())
-        map_applied_conditions.insert(detached_event);
+      
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -10386,6 +10497,9 @@ namespace Legion {
                                                 void *result, size_t size)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(local_shards.size() > 1);
+#endif
       RtEvent wait_on;
       const std::pair<size_t,size_t> key(context_index, exchange_index);
       {
@@ -10428,6 +10542,50 @@ namespace Legion {
         free(finder->second.buffer);
         shard_local_data.erase(finder);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::barrier_shard_local(size_t context_index,
+                                           size_t exchange_index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!local_shards.empty());
+#endif
+      if (local_shards.size() == 1)
+        return;
+      RtEvent wait_on;
+      const std::pair<size_t,size_t> key(context_index, exchange_index);
+      {
+        AutoLock m_lock(manager_lock);
+        std::map<std::pair<size_t,size_t>,ShardLocalData>::iterator finder =
+          shard_local_data.find(key);
+        if (finder != shard_local_data.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(finder->second.remaining > 0);
+          assert(finder->second.pending.exists());
+#endif
+          finder->second.remaining--;
+          if (finder->second.remaining == 0)
+          {
+            Runtime::trigger_event(finder->second.pending);
+            shard_local_data.erase(finder);
+            return;
+          }
+          else
+            wait_on = finder->second.pending;
+        }
+        else
+        {
+          ShardLocalData &data = shard_local_data[key];
+          data.pending = Runtime::create_rt_user_event();
+          data.remaining = local_shards.size() - 1;
+          wait_on = data.pending;
+        }
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
     }
 
     //--------------------------------------------------------------------------

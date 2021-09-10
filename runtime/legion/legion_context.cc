@@ -17617,8 +17617,9 @@ namespace Legion {
             get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher);
-      attach_op->initialize_replication(this, attach_instance_barrier, 
-          launcher.collective, launcher.deduplicate_across_shards,
+      attach_op->initialize_replication(this, attach_resource_barrier,
+          attach_instance_barrier, launcher.collective, 
+          launcher.deduplicate_across_shards,
           shard_manager->is_first_local_shard(owner_shard));
 
       bool parent_conflict = false, inline_conflict = false;
