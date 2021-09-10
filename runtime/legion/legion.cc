@@ -2794,6 +2794,111 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // UntypedDeferredValue
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    UntypedDeferredValue::UntypedDeferredValue(void)
+      : instance(Realm::RegionInstance::NO_INST), field_size(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    UntypedDeferredValue::UntypedDeferredValue(size_t fs, Memory memory,
+                                    const void *initial_value, size_t alignment) 
+      : field_size(fs)
+    //--------------------------------------------------------------------------
+    {
+      const Realm::Point<1,coord_t> zero(0);
+      Realm::IndexSpace<1,coord_t> bounds = Realm::Rect<1,coord_t>(zero, zero);
+      const std::vector<size_t> field_sizes(1, field_size);
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[1];
+      dim_order[0] = 0;
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Runtime *runtime = Runtime::get_runtime();
+      instance = runtime->create_task_local_instance(memory, layout);
+      if (initial_value != NULL)
+      {
+        Realm::ProfilingRequestSet no_requests; 
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, field_size);
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, field_size));
+        if (wait_on.exists())
+          wait_on.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    UntypedDeferredValue::UntypedDeferredValue(size_t fs, Memory::Kind memkind,
+                                    const void *initial_value, size_t alignment) 
+      : field_size(fs)
+    //--------------------------------------------------------------------------
+    {
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      const Processor exec_proc = Processor::get_executing_processor();
+      finder.has_affinity_to(exec_proc);
+      finder.only_kind(memkind);
+      if (finder.count() == 0)
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        const char *proc_names[] = {
+#define PROC_NAMES(name, desc) desc,
+          REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+        };
+        Context ctx = Runtime::get_context();
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+            "Unable to find associated %s memory for %s processor when "
+            "performing an UntypedDeferredValue creation in task %s (UID %lld)",
+            mem_names[memkind], proc_names[exec_proc.kind()],
+            ctx->get_task_name(), ctx->get_unique_id());
+      }
+      const Memory memory = finder.first();
+      const Realm::Point<1,coord_t> zero(0);
+      Realm::IndexSpace<1,coord_t> bounds = Realm::Rect<1,coord_t>(zero, zero);
+      const std::vector<size_t> field_sizes(1, field_size);
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[1];
+      dim_order[0] = 0;
+      Realm::InstanceLayoutGeneric *layout = 
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
+            constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      Runtime *runtime = Runtime::get_runtime();
+      instance = runtime->create_task_local_instance(memory, layout);
+      if (initial_value != NULL)
+      {
+        Realm::ProfilingRequestSet no_requests; 
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, field_size);
+        const Internal::LgEvent wait_on(
+            bounds.fill(dsts, no_requests, initial_value, field_size));
+        if (wait_on.exists())
+          wait_on.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void UntypedDeferredValue::finalize(Runtime *runtime, Context ctx) const
+    //--------------------------------------------------------------------------
+    {
+      Runtime::legion_task_postamble(runtime, ctx, 
+                    instance.pointer_untyped(0, field_size), field_size,
+                    true/*owner*/, instance, instance.get_location().kind());
+    }
+
+    /////////////////////////////////////////////////////////////
     // Output Region
     /////////////////////////////////////////////////////////////
 

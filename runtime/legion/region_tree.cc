@@ -8733,14 +8733,27 @@ namespace Legion {
             // Still need to record the effects so this is not collected early
             std::map<AddressSpaceID,RtEvent>::iterator finder =
               send_effects.find(target);
-#ifdef DEBUG_LEGION
-            assert(finder != send_effects.end());
-#endif
-            send_precondition = finder->second;
-            if (!send_precondition.has_triggered())
-              finder->second = Runtime::merge_events(send_precondition, done);
+            // Because of control replication we could have made this index
+            // space on multiple nodes although there is no way to know for
+            // certain to confirm this is the case unfortunately so check
+            // to see if we actually have any send effects
+            if (finder != send_effects.end())
+            {
+              send_precondition = finder->second;
+              if (!send_precondition.has_triggered())
+                finder->second = Runtime::merge_events(send_precondition, done);
+              else
+                finder->second = done;
+            }
             else
-              finder->second = done;
+            {
+              // This is the control replication case
+              // It should only happen for root index spaces
+#ifdef DEBUG_LEGION
+              assert(parent == NULL);
+#endif
+              send_effects[target] = done;
+            }
             return true;
           }
           else
@@ -10912,14 +10925,32 @@ namespace Legion {
           // Still need to record the effects so this is not collected early
           std::map<AddressSpaceID,RtEvent>::iterator finder =
             send_effects.find(target);
-#ifdef DEBUG_LEGION
-          assert(finder != send_effects.end());
-#endif
-          send_precondition = finder->second;
-          if (!send_precondition.has_triggered())
-            finder->second = Runtime::merge_events(send_precondition, done);
+          // Check to see if we could find it, we might not be able to because
+          // it already exists from a shard mapping from control repliction
+          if (finder != send_effects.end())
+          {
+            send_precondition = finder->second;
+            if (!send_precondition.has_triggered())
+              finder->second = Runtime::merge_events(send_precondition, done);
+            else
+              finder->second = done;
+          }
           else
-            finder->second = done;
+          {
+#ifdef DEBUG_LEGION
+            assert(shard_mapping != NULL);
+            bool found = false;
+            for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
+            {
+              if ((*shard_mapping)[idx] != target)
+                continue;
+              found = true;
+              break;
+            }
+            assert(found);
+#endif
+            send_effects[target] = done;
+          }
           return true;
         }
         // Record this as an effect for when the node is no longer valid
@@ -20350,8 +20381,7 @@ namespace Legion {
           {
             // do not invalidate trackers if we don't own the equivalence sets
             it->first->invalidate_trackers(it->second, applied_events,
-                local_space, NULL/*no collective mapping*/,
-                nonexclusive_virtual_mapping_root ? source_context : NULL);
+                local_space, NULL/*no collective mapping*/);
             if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
               delete it->first;
           }
