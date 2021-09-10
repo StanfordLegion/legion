@@ -2588,7 +2588,7 @@ namespace Legion {
     RHS oldval = atomic.load();
     RHS newval;
     do {
-      newval = oldval || rhs2;
+      newval = oldval && rhs2;
     } while (!atomic.compare_exchange_weak(oldval, newval));
 #else
     // No atomic logical operations so use compare and swap
@@ -2596,7 +2596,7 @@ namespace Legion {
     TypePunning::Pointer<int8_t> pointer((void*)&rhs1);
     do {
       oldval.load(pointer);
-      newval = oldval.as_two() || rhs2;
+      newval = oldval.as_two() && rhs2;
     } while (!__sync_bool_compare_and_swap((int8_t*)pointer,
           oldval.as_one(), newval.as_one()));
 #endif
