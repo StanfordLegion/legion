@@ -3772,17 +3772,9 @@ namespace Legion {
       post_indirection_barriers.clear();
       indirection_barrier_owner_shards.clear();
       if (!src_collectives.empty())
-      {
-        for (unsigned idx = 0; idx < src_collectives.size(); idx++)
-          delete src_collectives[idx];
         src_collectives.clear();
-      }
       if (!dst_collectives.empty())
-      {
-        for (unsigned idx = 0; idx < dst_collectives.size(); idx++)
-          delete dst_collectives[idx];
         dst_collectives.clear();
-      }
       deactivate_repl_collective_instance_creator();
       deactivate_index_copy();
       runtime->free_repl_index_copy_op(this);
@@ -3937,7 +3929,8 @@ namespace Legion {
           LegionVector<IndirectRecord>::aligned empty_records;
           for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
-            src_collectives[idx]->exchange_records(empty_records);
+            IndirectRecordExchange collective(repl_ctx, src_collectives[idx]);
+            collective.exchange_records(empty_records);
             empty_records.clear();
           }
         }
@@ -3947,7 +3940,8 @@ namespace Legion {
           LegionVector<IndirectRecord>::aligned empty_records;
           for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
-            dst_collectives[idx]->exchange_records(empty_records);
+            IndirectRecordExchange collective(repl_ctx, dst_collectives[idx]);
+            collective.exchange_records(empty_records);
             empty_records.clear();
           }
         }
@@ -4178,11 +4172,24 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
         // Perform the collective
         if (sources)
-          src_collectives[index]->exchange_records(src_records[index]);
+        {
+          IndirectRecordExchange collective(repl_ctx, src_collectives[index]);
+          collective.exchange_records(src_records[index]);
+        }
         else
-          dst_collectives[index]->exchange_records(dst_records[index]);
+        {
+          IndirectRecordExchange collective(repl_ctx, dst_collectives[index]);
+          collective.exchange_records(dst_records[index]);
+        }
         Runtime::trigger_event(to_trigger);
       }
       else if (!wait_on.has_triggered())
@@ -4223,14 +4230,14 @@ namespace Legion {
         src_collectives.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           src_collectives[idx] = 
-            new IndirectRecordExchange(ctx, COLLECTIVE_LOC_80);
+            ctx->get_next_collective_index(COLLECTIVE_LOC_80); 
       }
       if (!dst_indirect_requirements.empty() && collective_dst_indirect_points)
       {
         dst_collectives.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           dst_collectives[idx] = 
-            new IndirectRecordExchange(ctx, COLLECTIVE_LOC_81);
+            ctx->get_next_collective_index(COLLECTIVE_LOC_81);
       }
       if (!src_indirect_requirements.empty() || 
           !dst_indirect_requirements.empty())
@@ -13505,8 +13512,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndirectRecordExchange::IndirectRecordExchange(ReplicateContext *ctx,
-                                                   CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx)
+                                                   CollectiveID id)
+      : AllGatherCollective(ctx, id)
     //--------------------------------------------------------------------------
     {
     }
