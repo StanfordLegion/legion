@@ -616,8 +616,7 @@ namespace Legion {
         Domain domain;
       };
     public:
-      IndirectRecordExchange(ReplicateContext *ctx,
-                             CollectiveIndexLocation loc);
+      IndirectRecordExchange(ReplicateContext *ctx, CollectiveID id);
       IndirectRecordExchange(const IndirectRecordExchange &rhs);
       virtual ~IndirectRecordExchange(void);
     public:
@@ -1549,8 +1548,8 @@ namespace Legion {
       std::vector<ApBarrier> pre_indirection_barriers;
       std::vector<ApBarrier> post_indirection_barriers;
       std::vector<ShardID> indirection_barrier_owner_shards;
-      std::vector<IndirectRecordExchange*> src_collectives;
-      std::vector<IndirectRecordExchange*> dst_collectives;
+      std::vector<CollectiveID> src_collectives;
+      std::vector<CollectiveID> dst_collectives;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
