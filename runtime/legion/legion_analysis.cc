@@ -603,8 +603,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_collective_barrier(ShardID owner_shard,
-                                    ApBarrier bar, ApEvent pre, size_t arrivals)
+    void RemoteTraceRecorder::record_collective_barrier(ApBarrier bar, 
+              ApEvent pre, const std::pair<size_t,size_t> &key, size_t arrivals)
     //--------------------------------------------------------------------------
     {
       // Should be no cases where this is called remotely

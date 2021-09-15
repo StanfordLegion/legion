@@ -1688,7 +1688,6 @@ namespace Legion {
       ShardingFunction *sharding_function;
       std::vector<ApBarrier> pre_indirection_barriers;
       std::vector<ApBarrier> post_indirection_barriers;
-      std::vector<ShardID> indirection_barrier_owner_shards;
       std::vector<CollectiveID> src_collectives;
       std::vector<CollectiveID> dst_collectives;
 #ifdef DEBUG_LEGION

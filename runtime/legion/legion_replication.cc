@@ -3770,7 +3770,6 @@ namespace Legion {
 #endif
       pre_indirection_barriers.clear();
       post_indirection_barriers.clear();
-      indirection_barrier_owner_shards.clear();
       if (!src_collectives.empty())
         src_collectives.clear();
       if (!dst_collectives.empty())
@@ -3953,17 +3952,22 @@ namespace Legion {
           {
             Runtime::phase_barrier_arrive(pre_indirection_barriers[idx], 1);
             if (trace_info.recording)
+            {
+              const std::pair<size_t,size_t> key(trace_local_id, idx);
               trace_info.record_collective_barrier(
-                  indirection_barrier_owner_shards[idx],
-                  pre_indirection_barriers[idx], ApEvent::NO_AP_EVENT);
+                  pre_indirection_barriers[idx], ApEvent::NO_AP_EVENT, key);
+            }
           }
           for (unsigned idx = 0; idx < post_indirection_barriers.size(); idx++)
           {
             Runtime::phase_barrier_arrive(post_indirection_barriers[idx], 1);
             if (trace_info.recording)
+            {
+              const std::pair<size_t,size_t> key(trace_local_id,
+                          pre_indirection_barriers.size() + idx);
               trace_info.record_collective_barrier(
-                  indirection_barrier_owner_shards[idx],
-                  post_indirection_barriers[idx], ApEvent::NO_AP_EVENT);
+                  post_indirection_barriers[idx], ApEvent::NO_AP_EVENT, key);
+            }
           }
         }
 #ifdef LEGION_SPY
@@ -3994,6 +3998,33 @@ namespace Legion {
       assert(sharding_collective != NULL);
       sharding_collective->elide_collective();
 #endif
+      // No matter what we need to tell the shard template about any
+      // collective barriers that it is going to need for its replay
+      if (!pre_indirection_barriers.empty() ||
+          !post_indirection_barriers.empty())
+      {
+#ifdef DEBUG_LEGION
+        ShardedPhysicalTemplate *shard_template =
+          dynamic_cast<ShardedPhysicalTemplate*>(tpl);
+        assert(shard_template != NULL);
+#else
+        ShardedPhysicalTemplate *shard_template =
+          static_cast<ShardedPhysicalTemplate*>(tpl);
+#endif
+        std::pair<size_t,size_t> key(trace_local_id, 0);
+        for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
+        {
+          shard_template->prepare_collective_barrier_replay(key, 
+                                  pre_indirection_barriers[idx]);
+          key.second++;
+        }
+        for (unsigned idx = 0; idx < post_indirection_barriers.size(); idx++)
+        {
+          shard_template->prepare_collective_barrier_replay(key, 
+                                post_indirection_barriers[idx]);
+          key.second++;
+        }
+      }
       const IndexSpace local_space = tpl->find_local_space(trace_local_id);
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
@@ -4017,6 +4048,7 @@ namespace Legion {
           delete launch_space;
         launch_space = runtime->forest->get_node(local_space);
         add_launch_space_reference(launch_space);
+        std::vector<ApBarrier> copy_pre_barriers, copy_post_barriers;
         IndexCopyOp::trigger_replay();
       }
     }
@@ -4083,9 +4115,11 @@ namespace Legion {
             Runtime::phase_barrier_arrive(
               pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
             if (trace_info.recording)
+            {
+              const std::pair<size_t,size_t> key(trace_local_id, next);
               trace_info.record_collective_barrier(
-                  indirection_barrier_owner_shards[next],
-                  pre_indirection_barriers[next], pre_merged.back());
+                  pre_indirection_barriers[next], pre_merged.back(), key);
+            }
           }
           if (index >= exchange_post_events.size())
             exchange_post_events.resize(index+1);
@@ -4097,9 +4131,12 @@ namespace Legion {
             Runtime::phase_barrier_arrive(
                post_indirection_barriers[next], 1/*count*/, post_merged.back());
             if (trace_info.recording)
+            {
+              const std::pair<size_t,size_t> key(trace_local_id,
+                        pre_indirection_barriers.size() + next);
               trace_info.record_collective_barrier(
-                  indirection_barrier_owner_shards[next],
-                  post_indirection_barriers[next], post_merged.back());
+                  post_indirection_barriers[next], post_merged.back(), key);
+            }
           }
           if (!src_exchanged[index].exists())
             src_exchanged[index] = Runtime::create_rt_user_event();
@@ -4132,9 +4169,11 @@ namespace Legion {
             Runtime::phase_barrier_arrive(
               pre_indirection_barriers[next], 1/*count*/, pre_merged.back());
             if (trace_info.recording)
+            {
+              const std::pair<size_t,size_t> key(trace_local_id, next);
               trace_info.record_collective_barrier(
-                  indirection_barrier_owner_shards[next],
-                  pre_indirection_barriers[next], pre_merged.back());
+                  pre_indirection_barriers[next], pre_merged.back(), key);
+            }
           }
           if (index >= exchange_post_events.size())
             exchange_post_events.resize(index+1);
@@ -4146,9 +4185,12 @@ namespace Legion {
             Runtime::phase_barrier_arrive(
                post_indirection_barriers[next], 1/*count*/, post_merged.back());
             if (trace_info.recording)
+            {
+              const std::pair<size_t,size_t> key(trace_local_id,
+                        pre_indirection_barriers.size() + next);
               trace_info.record_collective_barrier(
-                  indirection_barrier_owner_shards[next],
-                  post_indirection_barriers[next], post_merged.back());
+                  post_indirection_barriers[next], post_merged.back(), key);
+            }
           }
           if (!dst_exchanged[index].exists())
             dst_exchanged[index] = Runtime::create_rt_user_event();
@@ -4254,12 +4296,8 @@ namespace Legion {
                 src_indirect_requirements.size() : 
                 dst_indirect_requirements.size());
         post_indirection_barriers.resize(pre_indirection_barriers.size());
-        indirection_barrier_owner_shards.resize(
-            pre_indirection_barriers.size());
         for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
         {
-          indirection_barrier_owner_shards[idx] = 
-            next_indirection_index % ctx->shard_manager->total_shards; 
           ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
           pre_indirection_barriers[idx] = next_bar;
           ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
