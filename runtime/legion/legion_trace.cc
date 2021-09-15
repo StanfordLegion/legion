@@ -7206,7 +7206,7 @@ namespace Legion {
       // Use a NO_BARRIER here since it is going to be filled in on each replay
       // by an operation that will provide the name of the barrier to use
       BarrierArrival *arrival =
-        new BarrierArrival(*this, bar, bar_, pre_, arrivals);
+        new BarrierArrival(*this, bar, bar_, pre_, arrivals, true/*collect*/);
       insert_instruction(arrival);
 #ifdef DEBUG_LEGION
       assert(collective_barriers.find(key) == collective_barriers.end());
