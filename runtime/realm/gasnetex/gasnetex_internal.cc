@@ -1625,6 +1625,8 @@ namespace Realm {
 	// TODO: safely put this xpair to sleep?
 	if(!realbuf) {
 	  log_gex_xpair.debug() << "re-enqueue (overflow stall) " << this;
+	  if(first_fail_time < 0)
+	    first_fail_time = Clock::current_time_in_nanoseconds();
 	  internal->poller.add_critical_xpair(this);
 	  return;
 	}
@@ -2464,6 +2466,11 @@ namespace Realm {
       else
 	immediate_mode = (xpair->time_since_failure() <
 			  internal->module->cfg_crit_timeout);
+
+      // if we're not in immediate mode, do some polling to hopefully free up
+      //  resources
+      if(!immediate_mode)
+        gasnet_AMPoll();
 
       // ask the pair to push packets, it'll requeue itself if needed
       xpair->push_packets(immediate_mode, work_until);
