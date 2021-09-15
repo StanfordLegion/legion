@@ -1528,9 +1528,10 @@ namespace Realm {
 	// always updated before the generation - the load_acquire above makes
 	// sure we read in the correct order
 	int npg_cached = impl->num_poisoned_generations.load_acquire();
-	ActiveMessage<EventUpdateMessage> amsg(sender, npg_cached*sizeof(EventImpl::gen_t));
+	ActiveMessage<EventUpdateMessage> amsg(sender,
+                                               impl->poisoned_generations,
+                                               npg_cached*sizeof(EventImpl::gen_t));
 	amsg->event = triggered;
-	amsg.add_payload(impl->poisoned_generations, npg_cached*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
 	amsg.commit();
       }
     } 
