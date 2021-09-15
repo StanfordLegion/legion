@@ -8375,14 +8375,13 @@ namespace Legion {
         for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
               remote_arrivals.begin(); it != remote_arrivals.end(); it++)
           it->second->refresh_barrier(it->first, notifications);
-        const ShardID local_shard = repl_ctx->owner_shard->shard_id;
         // Send out the notifications to all the shards
         ShardManager *manager = repl_ctx->shard_manager;
         for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
               nit = notifications.begin(); nit != notifications.end(); nit++)
         {
 #ifdef DEBUG_LEGION
-          assert(nit->first != local_shard);
+          assert(nit->first != repl_ctx->owner_shard->shard_id);
 #endif
           Serializer rez;
           rez.serialize(manager->repl_id);
