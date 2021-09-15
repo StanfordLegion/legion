@@ -3790,6 +3790,8 @@ namespace Realm {
 		  }
 
 		  size_t src_2d_maxbytes = 0;
+                  // TODO: permit if source memory is cpu-accessible?
+#ifdef ALLOW_RDMA_SOURCE_2D
 		  if(in_dim > 1) {
 		    size_t lines = in_alc.remaining(1);
 		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
@@ -3804,7 +3806,10 @@ namespace Realm {
 			                         icount * lines,
 			                         rec_bytes });
 		  }
+#endif
 		  size_t src_ga_maxbytes = 0;
+                  // TODO: permit if source memory is cpu-accessible?
+#ifdef ALLOW_RDMA_GATHER
 		  {
 		    // a gather will assemble into a buffer provided by the network
 		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
@@ -3814,6 +3819,7 @@ namespace Realm {
 					         bytes_left,
 					         rec_bytes });
 		  }
+#endif
 
 		  // source also favors 1d >> 2d >> gather
 		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
