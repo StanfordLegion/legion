@@ -767,26 +767,36 @@ namespace Realm {
 			 << " finish=" << e;
 
 	get_runtime()->optable.add_remote_operation(e, target);
-	Serialization::ByteCountSerializer bcs;
-	{
-	  bool ok = (bcs.append_bytes(args, arglen) &&
-		     (bcs << reqs));
-	  assert(ok);
-	}
-	size_t req_size = bcs.bytes_used();
-	ActiveMessage<SpawnTaskMessage> amsg(target, req_size);
-	amsg->proc = me;
-	amsg->start_event = start_event;
-	amsg->finish_event = e;
-	amsg->arglen = arglen;
-	amsg->priority = priority;
-	amsg->func_id = func_id;
-	{
-	  amsg.add_payload(args, arglen);
-	  bool ok = (amsg << reqs);
-	  assert(ok);
-	}
-	amsg.commit();
+
+        Serialization::DynamicBufferSerializer dbs(arglen + 4096);
+        bool ok = ((dbs << start_event) &&
+                   (dbs << priority) &&
+                   (dbs << arglen) &&
+                   dbs.append_bytes(args, arglen) &&
+                   (dbs << reqs));
+        assert(ok);
+
+        // fragment payload as needed
+        size_t payload_len = dbs.bytes_used();
+        size_t offset = 0;
+        while(offset < payload_len) {
+          size_t to_send = std::min((payload_len - offset),
+                                    ActiveMessage<SpawnTaskMessage>::recommended_max_payload(target,
+                                                                                             false /*without congestion*/));
+
+          ActiveMessage<SpawnTaskMessage> amsg(target, to_send);
+          amsg->proc = me;
+          amsg->finish_event = e;
+          amsg->func_id = func_id;
+          amsg->offset = offset;
+          amsg->total_bytes = payload_len;
+	  amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
+                           to_send);
+          amsg.commit();
+
+          offset += to_send;
+        }
+
 	return;
       }
 
@@ -945,26 +955,35 @@ namespace Realm {
       }
 
       get_runtime()->optable.add_remote_operation(e, target);
-      Serialization::ByteCountSerializer bcs;
-      {
-	bool ok = (bcs.append_bytes(args, arglen) &&
-		   (bcs << reqs));
-	assert(ok);
+
+      Serialization::DynamicBufferSerializer dbs(arglen + 4096);
+      bool ok = ((dbs << start_event) &&
+                 (dbs << priority) &&
+                 (dbs << arglen) &&
+                 dbs.append_bytes(args, arglen) &&
+                 (dbs << reqs));
+      assert(ok);
+
+      // fragment payload as needed
+      size_t payload_len = dbs.bytes_used();
+      size_t offset = 0;
+      while(offset < payload_len) {
+        size_t to_send = std::min((payload_len - offset),
+                                  ActiveMessage<SpawnTaskMessage>::recommended_max_payload(target,
+                                                                                           false /*without congestion*/));
+
+        ActiveMessage<SpawnTaskMessage> amsg(target, to_send);
+        amsg->proc = me;
+        amsg->finish_event = e;
+        amsg->func_id = func_id;
+        amsg->offset = offset;
+        amsg->total_bytes = payload_len;
+        amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
+                         to_send);
+        amsg.commit();
+
+        offset += to_send;
       }
-      size_t req_size = bcs.bytes_used();
-      ActiveMessage<SpawnTaskMessage> amsg(target, req_size);
-      amsg->proc = me;
-      amsg->start_event = start_event;
-      amsg->finish_event = e;
-      amsg->arglen = arglen;
-      amsg->priority = priority;
-      amsg->func_id = func_id;
-      {
-	amsg.add_payload(args, arglen);
-	bool ok = (amsg << reqs);
-	assert(ok);
-      }
-      amsg.commit();
     }
 
     void RemoteProcessor::remove_from_group(ProcessorGroupImpl *group)
@@ -1356,6 +1375,15 @@ namespace Realm {
   //
   // class SpawnTaskMessage
   //
+
+  // TODO: have ProcessorImpl's manage their own pool of task arg memory?
+  Mutex taskarg_frag_mutex;
+  struct TaskArgumentReassembly {
+    char *buffer;
+    atomic<size_t> bytes_received;
+  };
+  std::map<Event, TaskArgumentReassembly> taskarg_frags;
+
   /*static*/ void SpawnTaskMessage::handle_message(NodeID sender,
 						      const SpawnTaskMessage &args,
 						      const void *data,
@@ -1367,22 +1395,78 @@ namespace Realm {
     log_task.debug() << "received remote spawn request:"
 		     << " func=" << args.func_id
 		     << " proc=" << args.proc
+                     << " offset=" << args.offset
 		     << " finish=" << args.finish_event;
 
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-
-    const void *taskargs = fbd.peek_bytes(args.arglen);
+    const void *taskargs;
+    char *to_free = 0;
+    Event start_event;
+    int priority;
+    size_t arglen = 0;
     ProfilingRequestSet prs;
 
-    bool ok = (fbd.extract_bytes(0, args.arglen) &&
-	       (fbd >> prs));
-    assert(ok);
+    if(args.total_bytes == datalen) {
+      // complete message - can be decoded now
+      Serialization::FixedBufferDeserializer fbd(data, datalen);
+
+      bool ok = ((fbd >> start_event) &&
+                 (fbd >> priority) &&
+                 (fbd >> arglen));
+      taskargs = fbd.peek_bytes(arglen);
+      ok = ok && (fbd.extract_bytes(0, arglen) &&
+                  (fbd >> prs));
+      assert(ok && (fbd.bytes_left() == 0));
+    } else {
+      // fragmented - perform reassembly
+      TaskArgumentReassembly *tar;
+      {
+        AutoLock<> al(taskarg_frag_mutex);
+        std::map<Event, TaskArgumentReassembly>::iterator it = taskarg_frags.find(args.finish_event);
+        if(it == taskarg_frags.end()) {
+          // create a new entry
+          tar = &taskarg_frags[args.finish_event];
+          tar->buffer = new char[args.total_bytes];
+          tar->bytes_received.store(0);
+        } else {
+          tar = &it->second;
+        }
+      }
+
+      assert((args.offset + datalen) <= args.total_bytes);
+      memcpy(tar->buffer + args.offset, data, datalen);
+      size_t prev_total = tar->bytes_received.fetch_add(datalen);
+      assert((prev_total + datalen) <= args.total_bytes);
+      if((prev_total + datalen) < args.total_bytes) {
+        // not ready yet
+        return;
+      }
+
+      to_free = tar->buffer;
+      {
+        AutoLock<> al(taskarg_frag_mutex);
+        size_t count = taskarg_frags.erase(args.finish_event);
+        assert(count == 1);
+      }
+
+      Serialization::FixedBufferDeserializer fbd(to_free, args.total_bytes);
+
+      bool ok = ((fbd >> start_event) &&
+                 (fbd >> priority) &&
+                 (fbd >> arglen));
+      taskargs = fbd.peek_bytes(arglen);
+      ok = ok && (fbd.extract_bytes(0, arglen) &&
+                  (fbd >> prs));
+      assert(ok && (fbd.bytes_left() == 0));
+    }
 
     GenEventImpl *finish_impl = get_runtime()->get_genevent_impl(args.finish_event);
-    p->spawn_task(args.func_id, taskargs, args.arglen, prs,
-		  args.start_event,
+    p->spawn_task(args.func_id, taskargs, arglen, prs,
+		  start_event,
 		  finish_impl, ID(args.finish_event).event_generation(),
-		  args.priority);
+		  priority);
+
+    if(to_free)
+      delete[] to_free;
   }
 
 
