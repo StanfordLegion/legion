@@ -157,8 +157,8 @@ namespace Legion {
                             const std::set<ApEvent>& rhs, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs,
                          const std::vector<ApEvent>& rhs, Memoizable *memo) = 0;
-      virtual void record_collective_barrier(ShardID owner_shard, ApBarrier bar,
-                                             ApEvent pre, size_t arrivals) = 0;
+      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
+                 const std::pair<size_t,size_t> &key, size_t arrival_count) = 0;
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -298,8 +298,8 @@ namespace Legion {
                             const std::set<ApEvent>& rhs, Memoizable *memo);
       virtual void record_merge_events(ApEvent &lhs, 
                             const std::vector<ApEvent>& rhs, Memoizable *memo);
-      virtual void record_collective_barrier(ShardID owner_shard, ApBarrier bar,
-                                             ApEvent pre, size_t arrivals);
+      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
+                    const std::pair<size_t,size_t> &key, size_t arrival_count);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -453,11 +453,11 @@ namespace Legion {
           base_sanity_check();
           rec->record_merge_events(result, events, memo);
         }
-      inline void record_collective_barrier(ShardID owner_shard, ApBarrier bar,
-                                    ApEvent pre, size_t arrival_count = 1) const
+      inline void record_collective_barrier(ApBarrier bar, ApEvent pre,
+           const std::pair<size_t,size_t> &key, size_t arrival_count = 1) const
         {
           base_sanity_check();
-          rec->record_collective_barrier(owner_shard, bar, pre, arrival_count);
+          rec->record_collective_barrier(bar, pre, key, arrival_count);
         }
       inline void record_op_sync_event(ApEvent &result) const
         {
