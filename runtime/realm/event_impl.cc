@@ -1587,6 +1587,11 @@ namespace Realm {
     {
       AutoLock<> a(mutex);
 
+      // this might be old news (due to packet reordering or if we had
+      //  subscribed to an event and then triggered it ourselves)
+      if(current_gen <= generation.load())
+	return;
+
 #define CHECK_POISONED_GENS
 #ifdef CHECK_POISONED_GENS
       if(new_poisoned_count > 0) {
@@ -1601,10 +1606,6 @@ namespace Realm {
 	assert(num_poisoned_generations.load() == 0);
       }
 #endif
-
-      // this might be old news if we had subscribed to an event and then triggered it ourselves
-      if(current_gen <= generation.load())
-	return;
 
       // first thing - update the poisoned generation list
       if(new_poisoned_count > 0) {
