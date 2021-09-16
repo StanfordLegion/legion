@@ -3237,7 +3237,7 @@ namespace Legion {
         return false;
       }
       if (instances.empty())
-        return false;
+        return true;
       // Quick fast path
       if (instances.size() == 1)
         return acquire_instance(ctx, instances[0], collective_tag);
@@ -3309,7 +3309,7 @@ namespace Legion {
         return false;
       }
       if (instances.empty())
-        return false;
+        return true;
       // Quick fast path
       if (instances.size() == 1)
       {

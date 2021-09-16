@@ -2524,6 +2524,86 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool CollectiveManager::contains_isomorphic_points(
+                                                   IndexSpaceNode *points) const
+    //--------------------------------------------------------------------------
+    {
+      if (points->get_volume() != total_points)
+        return false;
+      if (point_space != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(point_space->get_volume() == points->get_volume());
+#endif
+        IndexSpaceExpression *intersection =
+          runtime->forest->intersect_index_spaces(point_space, points);
+        return (intersection->get_volume() == total_points);
+      }
+      // Have to do this the hard way by looking up all the points
+      ApEvent ready;
+      const Domain point_domain = points->get_domain(ready, true/*need tight*/);
+      if (ready.exists() && !ready.has_triggered_faultignorant())
+        ready.wait_faultignorant();
+      std::set<DomainPoint> known_points;
+      {
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        for (unsigned idx = 0; idx < instance_points.size(); idx++)
+          known_points.insert(instance_points[idx]);
+        for (std::map<DomainPoint,PhysicalInstance>::const_iterator it =
+              remote_instances.begin(); it != remote_instances.end(); it++)
+          known_points.insert(it->first);
+      }
+      std::vector<DomainPoint> unknown_points;
+      for (Domain::DomainPointIterator itr(point_domain); itr; itr++)
+      {
+        if (known_points.find(*itr) != known_points.end())
+          continue;
+        unknown_points.push_back(*itr);
+      }
+      if (unknown_points.empty())
+        return true;
+      // Broadcast out a request for the remote instance
+      std::vector<AddressSpaceID> child_spaces;
+      collective_mapping->get_children(local_space, local_space, child_spaces);
+      if (child_spaces.empty())
+        return false;
+      std::vector<RtEvent> ready_events;
+      ready_events.reserve(child_spaces.size());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            child_spaces.begin(); it != child_spaces.end(); it++)
+      {
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize<size_t>(unknown_points.size());
+          for (unsigned idx = 0; idx < unknown_points.size(); idx++)
+            rez.serialize(unknown_points[idx]);
+          rez.serialize(local_space);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_instance_message(*it, rez);
+        ready_events.push_back(ready_event);
+      }
+      const RtEvent wait_on = Runtime::merge_events(ready_events);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      {
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        for (std::map<DomainPoint,PhysicalInstance>::const_iterator it =
+              remote_instances.begin(); it != remote_instances.end(); it++)
+          known_points.insert(it->first);
+      }
+      for (std::vector<DomainPoint>::const_iterator it =
+            unknown_points.begin(); it != unknown_points.end(); it++)
+        if (known_points.find(*it) == known_points.end())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     bool CollectiveManager::contains_point(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
@@ -2557,6 +2637,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize<size_t>(1); // total number of points
           rez.serialize(point);
           rez.serialize(local_space);
           rez.serialize(ready_event);
@@ -2573,40 +2654,80 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveManager::find_or_forward_physical_instance(
-        const DomainPoint &point, AddressSpaceID origin, RtUserEvent to_trigger)
+     AddressSpaceID origin,std::set<DomainPoint> &points,RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(origin != local_space);
 #endif
+      std::map<DomainPoint,PhysicalInstance> found_instances;
       for (unsigned idx = 0; idx < instance_points.size(); idx++)
       {
-        if (instance_points[idx] == point)
+        std::set<DomainPoint>::iterator finder = 
+          points.find(instance_points[idx]);
+        if (finder == points.end())
+          continue;
+        found_instances[instance_points[idx]] = instances[idx];
+        points.erase(finder);
+        if (points.empty())
+          break;
+      }
+      if (!points.empty())
+      {
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        for (std::set<DomainPoint>::iterator it =
+              points.begin(); it != points.end(); /*nothing*/)
         {
-          Serializer rez;
+          std::map<DomainPoint,PhysicalInstance>::const_iterator finder =
+            remote_instances.find(*it);
+          if (finder != remote_instances.end())
           {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(COLLECTIVE_REMOTE_INSTANCE_RESPONSE);
-            rez.serialize(point);
-            rez.serialize(instances[idx]);
-            rez.serialize(to_trigger);
+            found_instances.insert(*finder);
+            std::set<DomainPoint>::iterator to_delete = it++;
+            points.erase(to_delete);
           }
-          runtime->send_collective_instance_message(origin, rez);
-          return;
+          else
+            it++;
         }
       }
+      std::vector<RtEvent> ready_events;
+      // Send back anything that we found
+      if (!found_instances.empty())
+      {
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_REMOTE_INSTANCE_RESPONSE);
+          rez.serialize<size_t>(found_instances.size());
+          for (std::map<DomainPoint,PhysicalInstance>::const_iterator it =
+                found_instances.begin(); it != found_instances.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_instance_message(origin, rez);
+        ready_events.push_back(ready_event);
+      }
       std::vector<AddressSpaceID> child_spaces;
-      collective_mapping->get_children(local_space, local_space, child_spaces);
+      if (!points.empty())
+        collective_mapping->get_children(origin, local_space, child_spaces);
       if (child_spaces.empty())
       {
-        Runtime::trigger_event(to_trigger);
+#ifdef DEBUG_LEGION
+        assert(ready_events.empty() || (ready_events.size() == 1));
+#endif
+        if (!ready_events.empty())
+          Runtime::trigger_event(to_trigger, ready_events.back());
+        else
+          Runtime::trigger_event(to_trigger);
         return;
       }
-      std::vector<RtEvent> ready_events;
-      ready_events.reserve(child_spaces.size());
-      for (std::vector<AddressSpaceID>::const_iterator it =
-            child_spaces.begin(); it != child_spaces.end(); it++)
+      ready_events.reserve(ready_events.size() + child_spaces.size());
+      for (unsigned idx = 0; idx < child_spaces.size(); idx++)
       {
         const RtUserEvent ready_event = Runtime::create_rt_user_event();
         Serializer rez; 
@@ -2614,27 +2735,41 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
-          rez.serialize(point);
+          rez.serialize<size_t>(points.size());
+          for (std::set<DomainPoint>::const_iterator it =
+                points.begin(); it != points.end(); it++)
+            rez.serialize(*it);
           rez.serialize(origin);
           rez.serialize(ready_event);
         }
-        runtime->send_collective_instance_message(*it, rez);
+        runtime->send_collective_instance_message(child_spaces[idx], rez);
         ready_events.push_back(ready_event);
       }
       Runtime::trigger_event(to_trigger, Runtime::merge_events(ready_events));
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::record_remote_physical_instance(
-                            const DomainPoint &point, PhysicalInstance instance)
+    void CollectiveManager::record_remote_physical_instances(
+                    const std::map<DomainPoint,PhysicalInstance> &new_instances)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert((remote_instances.find(point) == remote_instances.end()) ||
-              (remote_instances[point] == instance));
+      for (std::map<DomainPoint,PhysicalInstance>::const_iterator it =
+            new_instances.begin(); it != new_instances.end(); it++)
+      {
+        std::map<DomainPoint,PhysicalInstance>::const_iterator finder =
+          remote_instances.find(it->first);
+        if (finder == remote_instances.end())
+          remote_instances.insert(*it);
+#ifndef NDEBUG
+        else
+          assert(finder->second == it->second);
 #endif
-      remote_instances[point] = instance;
+      }
+#else
+      remote_instances.insert(new_instances.begin(), new_instances.end()); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2702,6 +2837,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize<size_t>(1); // total number of points
           rez.serialize(p);
           rez.serialize(local_space);
           rez.serialize(ready_event);
@@ -3290,16 +3426,29 @@ namespace Legion {
       layout->compute_destroyed_fields(serdez_fields); 
       if (!serdez_fields.empty())
       {
-        for (std::vector<PhysicalInstance>::const_iterator it = 
-              instances.begin(); it != instances.end(); it++)
-          it->destroy(serdez_fields, deferred_event);
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          log_garbage.spew("Deleting collective instance " IDFMT " in memory "
+                       IDFMT "", instances[idx].id, memories[idx]->memory.id);
+          instances[idx].destroy(serdez_fields, deferred_event);
+        }
       }
       else
       {
-        for (std::vector<PhysicalInstance>::const_iterator it = 
-              instances.begin(); it != instances.end(); it++)
-          it->destroy(deferred_event);
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          log_garbage.spew("Deleting collective instance " IDFMT " in memory "
+                       IDFMT "", instances[idx].id, memories[idx]->memory.id);
+          instances[idx].destroy(deferred_event);
+        }
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      if (is_external_instance())
+      {
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+          memories[idx]->free_legion_instance(instances[idx], deferred_event);
+      }
+#endif
 #endif
       // Notify any contexts of our deletion
       // Grab a copy of this in case we get any removal calls
@@ -3331,16 +3480,30 @@ namespace Legion {
       layout->compute_destroyed_fields(serdez_fields); 
       if (!serdez_fields.empty())
       {
-        for (std::vector<PhysicalInstance>::const_iterator it = 
-              instances.begin(); it != instances.end(); it++)
-          it->destroy(serdez_fields);
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          log_garbage.spew("Force deleting collective instance " IDFMT 
+           " in memory " IDFMT "", instances[idx].id, memories[idx]->memory.id);
+          instances[idx].destroy(serdez_fields);
+        }
       }
       else
       {
-        for (std::vector<PhysicalInstance>::const_iterator it = 
-              instances.begin(); it != instances.end(); it++)
-          it->destroy();
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          log_garbage.spew("Force deleting collective instance " IDFMT
+           " in memory " IDFMT "", instances[idx].id, memories[idx]->memory.id);
+          instances[idx].destroy();
+        }
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      if (is_external_instance())
+      {
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+          memories[idx]->free_legion_instance(instances[idx], 
+                                              RtEvent::NO_RT_EVENT);
+      }
+#endif
 #endif
     }
 
@@ -3670,24 +3833,37 @@ namespace Legion {
           }
         case COLLECTIVE_REMOTE_INSTANCE_REQUEST:
           {
-            DomainPoint point;
-            derez.deserialize(point);
+            size_t num_points;
+            derez.deserialize(num_points);
+            std::set<DomainPoint> points;
+            for (unsigned idx = 0; idx < num_points; idx++)
+            {
+              DomainPoint point;
+              derez.deserialize(point);
+              points.insert(point);
+            }
             AddressSpaceID origin;
             derez.deserialize(origin);
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
-            manager->find_or_forward_physical_instance(point,origin,to_trigger);
+            manager->find_or_forward_physical_instance(origin, points,
+                                                       to_trigger);
             break;
           }
         case COLLECTIVE_REMOTE_INSTANCE_RESPONSE:
           {
-            DomainPoint point;
-            derez.deserialize(point);
-            PhysicalInstance instance;
-            derez.deserialize(instance);
+            size_t num_points;
+            derez.deserialize(num_points);
+            std::map<DomainPoint,PhysicalInstance> instances;
+            for (unsigned idx = 0; idx < num_points; idx++)
+            {
+              DomainPoint point;
+              derez.deserialize(point);
+              derez.deserialize(instances[point]);
+            }
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
-            manager->record_remote_physical_instance(point, instance);
+            manager->record_remote_physical_instances(instances);
             Runtime::trigger_event(to_trigger);
             break;
           }
