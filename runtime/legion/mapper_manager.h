@@ -436,17 +436,22 @@ namespace Legion {
                                     const MappingInstance &instance, 
                                     GCPriority priority);
       bool acquire_instance(        MappingCallInfo *ctx, 
-                                    const MappingInstance &instance);
+                                    const MappingInstance &instance,
+                                    size_t collective_tag);
       bool acquire_instances(       MappingCallInfo *ctx,
-                                    const std::vector<MappingInstance> &insts);
+                                    const std::vector<MappingInstance> &insts,
+                                    size_t collective_tag);
       bool acquire_and_filter_instances(MappingCallInfo *ctx,
                                     std::vector<MappingInstance> &instances,
-                                    const bool filter_acquired_instances);
+                                    const bool filter_acquired_instances,
+                                    size_t collective_tag);
       bool acquire_instances(       MappingCallInfo *ctx, const std::vector<
-                                    std::vector<MappingInstance> > &instances);
+                                    std::vector<MappingInstance> > &instances,
+                                    size_t collective_tag);
       bool acquire_and_filter_instances(MappingCallInfo *ctx, std::vector<
                                     std::vector<MappingInstance> > &instances,
-                                    const bool filter_acquired_instances);
+                                    const bool filter_acquired_instances,
+                                    size_t collective_tag);
       void release_instance(        MappingCallInfo *ctx, 
                                     const MappingInstance &instance);
       void release_instances(       MappingCallInfo *ctx,
@@ -461,13 +466,11 @@ namespace Legion {
                                      InstanceManager *manager);
       void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
-      bool perform_local_acquires(MappingCallInfo *info,
-                                  const std::vector<MappingInstance> &instances,
-                       std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                                  std::vector<unsigned> *to_erase,
-                                  const bool filter_acquired_instances = false);
-      bool perform_remote_acquires(MappingCallInfo *info,
-                      std::map<MemoryManager*,AcquireStatus> &acquire_requests);
+      bool perform_acquires(MappingCallInfo *info,
+                            const std::vector<MappingInstance> &instances,
+                            std::vector<MappingInstance> &collectives,
+                            bool &has_collectives,
+                            std::set<unsigned> *unacquired = NULL);
     public:
       IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
                                     TypeTag type_tag);

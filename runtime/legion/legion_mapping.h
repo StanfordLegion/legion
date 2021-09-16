@@ -2199,17 +2199,22 @@ namespace Legion {
       // as might be expected if a mapper opts to attempt to map a different
       // instance, but this is an optional performance improvement.
       bool acquire_instance(MapperContext ctx, 
-                                      const PhysicalInstance &instance) const;
+                                      const PhysicalInstance &instance,
+                                      size_t collective_tag = 0) const;
       bool acquire_instances(MapperContext ctx,
-                          const std::vector<PhysicalInstance> &instances) const;
+                             const std::vector<PhysicalInstance> &instances,
+                             size_t collective_tag = 0) const;
       bool acquire_and_filter_instances(MapperContext ctx,
                                 std::vector<PhysicalInstance> &instances,
-                                bool filter_acquired_instance = false) const;
+                                bool filter_acquired_instance = false,
+                                size_t collective_tag = 0) const;
       bool acquire_instances(MapperContext ctx,
-            const std::vector<std::vector<PhysicalInstance> > &instances) const;
+            const std::vector<std::vector<PhysicalInstance> > &instances,
+            size_t collective_tag = 0) const;
       bool acquire_and_filter_instances(MapperContext ctx,
                   std::vector<std::vector<PhysicalInstance> > &instances,
-                  bool filter_acquired_instances = false) const;
+                  bool filter_acquired_instances = false,
+                  size_t collective_tag = 0) const;
       void release_instance(MapperContext ctx, 
                                         const PhysicalInstance &instance) const;
       void release_instances(MapperContext ctx,

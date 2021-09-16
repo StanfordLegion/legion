@@ -2385,6 +2385,8 @@ namespace Legion {
               "instances.", get_mapper_call_name(ctx->kind),
               ctx->operation->get_logging_name(), 
               ctx->operation->get_unique_op_id(), get_mapper_name())
+        DomainPoint collective_point =
+          ctx->operation->get_collective_instance_point();
         // For collective instances, we first get allocation privileges on
         // all the memories in which we're going to try to do this find-or-create
         // operation. We do this in a global order across all memories in the
@@ -2401,8 +2403,8 @@ namespace Legion {
         // Now we can do an atomic find across the point operations
         // Get all the instances that match this point
         std::vector<MappingInstance> found_instances;
-        runtime->find_physical_instances(target_memory, constraints,
-            regions, found_instances, acquire, tight_region_bounds);
+        runtime->find_physical_instances(target_memory, constraints, regions,
+            collective_point, found_instances, acquire, tight_region_bounds);
         if (!found_instances.empty() && acquire)
         {
           for (unsigned idx = 0; idx < found_instances.size(); idx++)
@@ -2425,7 +2427,6 @@ namespace Legion {
                 ctx->kind, collective_index, collective_tag,
                 constraints, regions, target_memory.address_space(),
                 bad_constraint, bad_index, bad_regions);
-          DomainPoint point;
           if (collective == NULL)
           {
 #ifdef DEBUG_LEGION
@@ -2458,13 +2459,11 @@ namespace Legion {
                   ctx->operation->get_logging_name(),
                   ctx->operation->get_unique_op_id(), get_mapper_name())
           }
-          else
-            point = ctx->operation->get_collective_instance_point();
           success = runtime->create_physical_instance(target_memory, 
             constraints, regions, result, mapper_id, processor, acquire,
             priority, tight_region_bounds, unsat, footprint,
             (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id(),
-            collective, (collective == NULL) ? NULL : &point);
+            collective, (collective == NULL) ? NULL : &collective_point);
           if (collective != NULL)
           {
             success = ctx->operation->finalize_pending_collective_instance(
@@ -2587,6 +2586,8 @@ namespace Legion {
               "instances.", get_mapper_call_name(ctx->kind),
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
+        const DomainPoint collective_point =
+                ctx->operation->get_collective_instance_point();
         // For collective instances, we first get allocation privileges on
         // all the memories in which we're going to try to do this find-or-create
         // operation. We do this in a global order across all memories in the
@@ -2603,8 +2604,8 @@ namespace Legion {
         // Now we can do an atomic find across the point operations
         // Get all the instances that match this point
         std::vector<MappingInstance> found_instances;
-        runtime->find_physical_instances(target_memory, *cons,
-            regions, found_instances, acquire, tight_region_bounds);
+        runtime->find_physical_instances(target_memory, *cons, regions,
+            collective_point, found_instances, acquire, tight_region_bounds);
         if (!found_instances.empty() && acquire)
         {
           for (unsigned idx = 0; idx < found_instances.size(); idx++)
@@ -2625,7 +2626,6 @@ namespace Legion {
                 ctx->kind, collective_index, collective_tag,
                 *cons, regions, target_memory.address_space(),
                 bad_constraint, bad_index, bad_regions);
-          DomainPoint point;
           if (collective == NULL)
           {
 #ifdef DEBUG_LEGION
@@ -2658,14 +2658,12 @@ namespace Legion {
                   ctx->operation->get_logging_name(),
                   ctx->operation->get_unique_op_id(), get_mapper_name())
           }
-          else
-            point = ctx->operation->get_collective_instance_point();
           success = runtime->create_physical_instance(target_memory, cons,
                         regions, result, mapper_id, processor, acquire, 
                         priority, tight_region_bounds, unsat, footprint,
                         (ctx->operation == NULL) ? 0 : 
                           ctx->operation->get_unique_op_id(), collective,
-                          (collective == NULL) ? NULL : &point);
+                          (collective == NULL) ? NULL : &collective_point);
           if (collective != NULL)
           {
             success = ctx->operation->finalize_pending_collective_instance(
@@ -2785,8 +2783,10 @@ namespace Legion {
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
         std::vector<MappingInstance> found_instances;
-        runtime->find_physical_instances(target_memory, constraints,
-            regions, found_instances, acquire, tight_region_bounds);
+        const DomainPoint collective_point =
+          ctx->operation->get_collective_instance_point();
+        runtime->find_physical_instances(target_memory, constraints, regions,
+            collective_point, found_instances, acquire, tight_region_bounds);
         if (!found_instances.empty() && acquire)
         {
           for (unsigned idx = 0; idx < found_instances.size(); idx++)
@@ -2805,8 +2805,9 @@ namespace Legion {
       }
       else
       {
+        const DomainPoint dummy_point;
         success = runtime->find_physical_instance(target_memory, constraints,
-                               regions, result, acquire, tight_region_bounds);
+                  regions, dummy_point, result, acquire, tight_region_bounds);
         if (success && acquire)
           record_acquired_instance(ctx, result.impl, false/*created*/);
       }
@@ -2876,8 +2877,10 @@ namespace Legion {
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
         std::vector<MappingInstance> found_instances;
-        runtime->find_physical_instances(target_memory, *cons,
-            regions, found_instances, acquire, tight_region_bounds);
+        const DomainPoint collective_point =
+          ctx->operation->get_collective_instance_point();
+        runtime->find_physical_instances(target_memory, *cons, regions,
+            collective_point, found_instances, acquire, tight_region_bounds);
         if (!found_instances.empty() && acquire)
         {
           for (unsigned idx = 0; idx < found_instances.size(); idx++)
@@ -2896,8 +2899,9 @@ namespace Legion {
       }
       else
       {
-        success = runtime->find_physical_instance(target_memory, cons,
-                       regions, result, acquire, tight_region_bounds);
+        const DomainPoint dummy_point;
+        success = runtime->find_physical_instance(target_memory, cons, regions,
+                            dummy_point, result, acquire, tight_region_bounds);
         if (success && acquire)
           record_acquired_instance(ctx, result.impl, false/*created*/);
       }
@@ -2966,8 +2970,10 @@ namespace Legion {
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
         std::vector<MappingInstance> found_instances;
-        runtime->find_physical_instances(target_memory, constraints,
-            regions, found_instances, acquire, tight_region_bounds);
+        const DomainPoint collective_point =
+          ctx->operation->get_collective_instance_point();
+        runtime->find_physical_instances(target_memory, constraints, regions,
+            collective_point, found_instances, acquire, tight_region_bounds);
         if (!found_instances.empty() && acquire)
         {
           for (unsigned idx = 0; idx < results.size(); idx++)
@@ -2984,9 +2990,10 @@ namespace Legion {
       }
       else
       {
+        const DomainPoint dummy_point;
         const size_t initial_size = results.size();
         runtime->find_physical_instances(target_memory, constraints, regions, 
-                                         results, acquire, tight_region_bounds);
+                         dummy_point, results, acquire, tight_region_bounds);
         if ((initial_size < results.size()) && acquire)
         {
           for (unsigned idx = initial_size; idx < results.size(); idx++)
@@ -3058,8 +3065,10 @@ namespace Legion {
               ctx->operation->get_logging_name(),
               ctx->operation->get_unique_op_id(), get_mapper_name())
         std::vector<MappingInstance> found_instances;
-        runtime->find_physical_instances(target_memory, *cons,
-            regions, found_instances, acquire, tight_region_bounds);
+        const DomainPoint collective_point =
+          ctx->operation->get_collective_instance_point();
+        runtime->find_physical_instances(target_memory, *cons, regions,
+            collective_point, found_instances, acquire, tight_region_bounds);
         if (!found_instances.empty() && acquire)
         {
           for (unsigned idx = 0; idx < results.size(); idx++)
@@ -3076,9 +3085,10 @@ namespace Legion {
       }
       else
       {
+        const DomainPoint dummy_point;
         const size_t initial_size = results.size();
         runtime->find_physical_instances(target_memory, cons, regions, 
-                                    results, acquire, tight_region_bounds);
+                  dummy_point, results, acquire, tight_region_bounds);
         if ((initial_size < results.size()) && acquire)
         {
           for (unsigned idx = initial_size; idx < results.size(); idx++)
@@ -3099,18 +3109,45 @@ namespace Legion {
       pause_mapper_call(ctx);
       PhysicalManager *manager = man->as_physical_manager();
       // Ignore garbage collection priorities on external instances
-      if (manager->is_external_instance())
+      if (!manager->is_external_instance())
+      {
+        DomainPoint collective_point;
+        if (manager->is_collective_manager())
+        {
+          if (!ctx->operation->supports_collective_instances())
+            REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
+                "Illegal call to set garbage collection priority for a "
+                "collective instance in mapper call %s for %s (UID %lld) by "
+                "mapper %s. Collective instances can only have their garbage "
+                "collection priority set by index space tasks/operations.",
+                get_mapper_call_name(ctx->kind),
+                ctx->operation->get_logging_name(), 
+                ctx->operation->get_unique_op_id(), get_mapper_name())
+          collective_point = ctx->operation->get_collective_instance_point();
+          CollectiveManager *collective = manager->as_collective_manager();
+          if (!collective->contains_point(collective_point))
+            REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_BAD_POINT,
+                "Illegal call to set garbage collection priority on a "
+                "collective instance in mapper call %s for %s (UID %lld) by "
+                "mapper %s because the collective instance does not contain "
+                "the index point for the operation.",
+                get_mapper_call_name(ctx->kind),
+                ctx->operation->get_logging_name(),
+                ctx->operation->get_unique_op_id(), get_mapper_name())
+        }
+        manager->set_garbage_collection_priority(mapper_id, processor,
+                                                 priority, collective_point);
+      }
+      else
         REPORT_LEGION_WARNING(LEGION_WARNING_EXTERNAL_GARBAGE_PRIORITY,
             "Ignoring request for mapper %s to set garbage collection "
             "priority on an external instance", get_mapper_name())
-      else
-        manager->set_garbage_collection_priority(mapper_id,processor,priority);
       resume_mapper_call(ctx);
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_instance(MappingCallInfo *ctx,
-                                         const MappingInstance &instance)
+                         const MappingInstance &instance, size_t collective_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3122,44 +3159,73 @@ namespace Legion {
         return false;
       }
       InstanceManager *man = instance.impl;
+      if (man == NULL)
+        return false;
       // virtual instances are easy
       if (man->is_virtual_manager())
         return true;
       PhysicalManager *manager = man->as_physical_manager();
+      const bool is_collective = manager->is_collective_manager();
+      const bool already_acquired = (ctx->acquired_instances->find(manager) !=
+                                      ctx->acquired_instances->end());
       // See if we already acquired it
-      if (ctx->acquired_instances->find(manager) !=
-          ctx->acquired_instances->end())
+      if (already_acquired && !is_collective)
         return true;
       pause_mapper_call(ctx);
-      if (manager->acquire_instance(MAPPING_ACQUIRE_REF, ctx->operation))
+      std::vector<MappingInstance> collectives;
+      std::vector<MappingInstance> instances(1, instance);
+      // Perform the local acquire if we haven't already done so
+      bool success = true, has_collectives = false;
+      if (!already_acquired)
+        success = perform_acquires(ctx, instances, collectives,has_collectives);
+      if (has_collectives)
       {
-        record_acquired_instance(ctx, manager, false/*created*/);
-        resume_mapper_call(ctx);
-        return true;
+        if (!ctx->operation->supports_collective_instances())
+          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
+              "Illegal call to acquire a collective instance in mapper "
+              "call %s for %s (UID %lld) by mapper %s. Collective instances "
+              "can only be acquired by index space tasks/operations.",
+              get_mapper_call_name(ctx->kind),
+              ctx->operation->get_logging_name(), 
+              ctx->operation->get_unique_op_id(), get_mapper_name())
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to acquire a collective instance for the %d-"
+                "st/nd/rd/th call to acquire instance in mapper call %s in "
+                "mapper %s because this kind of mapper call does not "
+                "support the acquiring of collective instances.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
+        if (mapper->get_mapper_sync_model() ==
+            Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
+          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
+              "Illegal request to acquire a collective instance in "
+              "mapper call %s for %s (UID %lld) by mapper %s. This mapper was "
+              "configured to use the SERIALIZED_NON_REENTRANT synchronization "
+              "model which is incompatible with the acquiring of "
+              "collective instances. Please select a different mapper "
+              "synchronization model to support acquiring collective "
+              "instances.", get_mapper_call_name(ctx->kind),
+              ctx->operation->get_logging_name(), 
+              ctx->operation->get_unique_op_id(), get_mapper_name())
+        if (!success)
+          collectives.clear();
+        // Perform the match to confirm that all participants acquired
+        ctx->operation->match_collective_instances(
+            ctx->kind, ctx->collective_count++, collective_tag, collectives);
+        success = !collectives.empty();
       }
-      else if (manager->is_collective_manager() || manager->is_owner())
-      {
-        resume_mapper_call(ctx);
-        return false;
-      }
-      std::set<PhysicalManager*> instances; 
-      instances.insert(manager);
-      std::vector<bool> results;
-      IndividualManager *individual = manager->as_individual_manager();
-      RtEvent wait_on = 
-        individual->memory_manager->acquire_instances(instances, results);
-      if (wait_on.exists())
-        wait_on.wait(); // wait for the results to be ready
-      bool success = results[0];
-      if (success)
-        record_acquired_instance(ctx, manager, false/*created*/);
       resume_mapper_call(ctx);
       return success;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_instances(MappingCallInfo *ctx,
-                                  const std::vector<MappingInstance> &instances)
+           const std::vector<MappingInstance> &instances, size_t collective_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3170,28 +3236,68 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
+      if (instances.empty())
+        return false;
       // Quick fast path
       if (instances.size() == 1)
-        return acquire_instance(ctx, instances[0]);
+        return acquire_instance(ctx, instances[0], collective_tag);
       pause_mapper_call(ctx);
-      // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
-      bool local_acquired = perform_local_acquires(ctx, instances,
-                                                   acquire_requests, NULL);
-      if (acquire_requests.empty())
+      std::vector<MappingInstance> collectives;
+      bool has_collectives = false;
+      bool success =
+        perform_acquires(ctx, instances, collectives, has_collectives);
+      if (has_collectives)
       {
-        resume_mapper_call(ctx);
-        return local_acquired;
+        if (!ctx->operation->supports_collective_instances())
+          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
+              "Illegal call to acquire collective instances in mapper "
+              "call %s for %s (UID %lld) by mapper %s. Collective instances "
+              "can only be acquired by index space tasks/operations.",
+              get_mapper_call_name(ctx->kind),
+              ctx->operation->get_logging_name(), 
+              ctx->operation->get_unique_op_id(), get_mapper_name())
+        if (!ctx->supports_collectives)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to acquire collective instances for the %d-"
+                "st/nd/rd/th call to acquire instance in mapper call %s in "
+                "mapper %s because this kind of mapper call does not "
+                "support the acquiring of collective instances.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
+        if (mapper->get_mapper_sync_model() ==
+            Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
+          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
+              "Illegal request to acquire collective instances in "
+              "mapper call %s for %s (UID %lld) by mapper %s. This mapper was "
+              "configured to use the SERIALIZED_NON_REENTRANT synchronization "
+              "model which is incompatible with the acquiring of "
+              "collective instances. Please select a different mapper "
+              "synchronization model to support acquiring collective "
+              "instances.", get_mapper_call_name(ctx->kind),
+              ctx->operation->get_logging_name(), 
+              ctx->operation->get_unique_op_id(), get_mapper_name())
+        if (!success)
+          collectives.clear();
+        const size_t previous_size = collectives.size();
+        // Do the match
+        ctx->operation->match_collective_instances(
+            ctx->kind, ctx->collective_count++, collective_tag, collectives);
+        if (success)
+          success = (previous_size == collectives.size());
       }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return success;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
                                         std::vector<MappingInstance> &instances,
-                                        const bool filter_acquired_instances)
+                                        const bool filter_acquired_instances,
+                                        size_t collective_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3202,10 +3308,12 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
+      if (instances.empty())
+        return false;
       // Quick fast path
       if (instances.size() == 1)
       {
-        bool result = acquire_instance(ctx, instances[0]);
+        bool result = acquire_instance(ctx, instances[0], collective_tag);
         if (result)
         {
           if (filter_acquired_instances)
@@ -3219,63 +3327,111 @@ namespace Legion {
         return result;
       }
       pause_mapper_call(ctx); 
-      // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
-      std::vector<unsigned> to_erase;
-      bool local_acquired = perform_local_acquires(ctx, instances,
-          acquire_requests, &to_erase, filter_acquired_instances);
-      // Filter any invalid local instances
-      if (!to_erase.empty())
+      std::set<unsigned> unacquired;
+      std::vector<MappingInstance> collectives;
+      bool has_collectives = false;
+      bool success = perform_acquires(ctx, instances, collectives,
+                                      has_collectives, &unacquired);
+      if (has_collectives)
       {
-        // Erase from the back
-        for (std::vector<unsigned>::const_reverse_iterator it = 
-              to_erase.rbegin(); it != to_erase.rend(); it++)
-          instances.erase(instances.begin()+(*it)); 
-        to_erase.clear();
-      }
-      if (acquire_requests.empty())
-      {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
-      if (!remote_acquired)
-      {
-        std::map<PhysicalManager*,unsigned> &already_acquired =
-          *(ctx->acquired_instances);
-        // Figure out which instances weren't deleted yet
-        for (unsigned idx = 0; idx < instances.size(); idx++)
+        if (!ctx->operation->supports_collective_instances())
+          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
+              "Illegal call to acquire collective instances in mapper "
+              "call %s for %s (UID %lld) by mapper %s. Collective instances "
+              "can only be acquired by index space tasks/operations.",
+              get_mapper_call_name(ctx->kind),
+              ctx->operation->get_logging_name(), 
+              ctx->operation->get_unique_op_id(), get_mapper_name())
+        if (!ctx->supports_collectives)
         {
-          InstanceManager *manager = instances[idx].impl;
-          if (manager->is_virtual_manager())
-            continue;
-          if (already_acquired.find(manager->as_physical_manager()) ==
-              already_acquired.end())
+          REPORT_LEGION_WARNING(LEGION_WARNING_COLLECTIVE_INSTANCE_VIOLATION,
+                "Ignoring call to acquire collective instances for the %d-"
+                "st/nd/rd/th call to acquire instance in mapper call %s in "
+                "mapper %s because this kind of mapper call does not "
+                "support the acquiring of collective instances.",
+                ctx->collective_count++, get_mapper_call_name(ctx->kind),
+                get_mapper_name())
+          resume_mapper_call(ctx);
+          return false;
+        }
+        if (mapper->get_mapper_sync_model() ==
+            Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL)
+          REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_SYNC_MODEL,
+              "Illegal request to acquire collective instances in "
+              "mapper call %s for %s (UID %lld) by mapper %s. This mapper was "
+              "configured to use the SERIALIZED_NON_REENTRANT synchronization "
+              "model which is incompatible with the acquiring of "
+              "collective instances. Please select a different mapper "
+              "synchronization model to support acquiring collective "
+              "instances.", get_mapper_call_name(ctx->kind),
+              ctx->operation->get_logging_name(), 
+              ctx->operation->get_unique_op_id(), get_mapper_name())
+        if (!success)
+          collectives.clear();
+        const size_t previous_size = collectives.size();
+        // Perform the match
+        ctx->operation->match_collective_instances(
+            ctx->kind, ctx->collective_count++, collective_tag, collectives);
+        if (success)
+          success = (previous_size == collectives.size());
+        if (!success)
+        {
+          // See which collectives were not matched
+          for (unsigned idx = 0; idx < instances.size(); idx++)
           {
-            if (!filter_acquired_instances)
-              to_erase.push_back(idx);
-          }
-          else
-          {
-            if (filter_acquired_instances)
-              to_erase.push_back(idx);
+            if (unacquired.find(idx) != unacquired.end())
+              continue;
+            if (!instances[idx].is_collective_instance())
+              continue;
+            bool found = false;
+            const MappingInstance &inst = instances[idx];
+            for (std::vector<MappingInstance>::const_iterator it =
+                  collectives.begin(); it != collectives.end(); it++)
+            {
+              if (inst != (*it))
+                continue;
+              found = true;
+              break;
+            }
+            if (!found)
+              unacquired.insert(idx);
           }
         }
-        if (!to_erase.empty())
+      }
+      if (filter_acquired_instances)
+      {
+        if (!unacquired.empty())
+        {
+          std::vector<MappingInstance> unacquired_instances(unacquired.size());
+          unsigned offset = 0;
+          for (std::set<unsigned>::const_iterator it =
+                unacquired.begin(); it != unacquired.end(); it++)
+            unacquired_instances[offset++] = instances[*it];
+          instances.swap(unacquired_instances);
+        }
+        else
+          instances.clear();
+      }
+      else
+      {
+        if (unacquired.size() < instances.size())
         {
           // Erase from the back
-          for (std::vector<unsigned>::const_reverse_iterator it = 
-                to_erase.rbegin(); it != to_erase.rend(); it++)
+          for (std::set<unsigned>::const_reverse_iterator it = 
+                unacquired.rbegin(); it != unacquired.rend(); it++)
             instances.erase(instances.begin()+(*it));
         }
+        else
+          instances.clear();
       }
       resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return success;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_instances(MappingCallInfo *ctx,
-                    const std::vector<std::vector<MappingInstance> > &instances)
+                    const std::vector<std::vector<MappingInstance> > &instances,
+                    size_t collective_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3286,30 +3442,25 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      pause_mapper_call(ctx); 
-      // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
-      bool local_acquired = true;
-      for (std::vector<std::vector<MappingInstance> >::const_iterator it = 
-            instances.begin(); it != instances.end(); it++)
-      {
-        if (!perform_local_acquires(ctx, *it, acquire_requests, NULL))
-          local_acquired = false;
-      }
-      if (acquire_requests.empty())
-      {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
-      resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      // This is just a convenience method
+      size_t total_instances = 0;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+        total_instances += instances[idx].size();
+      std::vector<MappingInstance> linearized;
+      linearized.reserve(total_instances);
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+        for (std::vector<MappingInstance>::const_iterator it =
+              instances[idx].begin(); it != instances[idx].end(); it++)
+          if (!it->is_virtual_instance())
+            linearized.push_back(*it);
+      return acquire_instances(ctx, linearized, collective_tag);
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
                           std::vector<std::vector<MappingInstance> > &instances,
-                          const bool filter_acquired_instances)
+                          const bool filter_acquired_instances,
+                          size_t collective_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx->acquired_instances == NULL)
@@ -3320,82 +3471,93 @@ namespace Legion {
                         get_mapper_name());
         return false;
       }
-      pause_mapper_call(ctx);
-      // Figure out which instances we need to acquire and sort by memories
-      std::map<MemoryManager*,AcquireStatus> acquire_requests;
-      std::vector<unsigned> to_erase;
-      bool local_acquired = true;
-      for (std::vector<std::vector<MappingInstance> >::iterator it = 
-            instances.begin(); it != instances.end(); it++)
-      {
-        if (!perform_local_acquires(ctx, *it, acquire_requests, 
-                          &to_erase, filter_acquired_instances))
+      // This is another convenience method, so figure out the unique
+      // set of instances that we need and ask for the acquired set
+      std::map<unsigned long,std::pair<unsigned,unsigned> > unique;
+      for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
+        for (unsigned idx2 = 0; idx2 < instances[idx1].size(); idx2++)
         {
-          local_acquired = false;
-          // Erase from the back
-          for (std::vector<unsigned>::const_reverse_iterator rit = 
-                to_erase.rbegin(); rit != to_erase.rend(); rit++)
-            it->erase(it->begin()+(*rit));
-          to_erase.clear();
+          const MappingInstance &inst = instances[idx1][idx2];
+          if (inst.is_virtual_instance())
+            continue;
+          const unsigned long inst_id = instances[idx1][idx2].get_instance_id();
+          if (unique.find(inst_id) != unique.end())
+            continue;
+          unique[inst_id] = std::make_pair(idx1, idx2);
+        }
+      std::vector<MappingInstance> unique_instances;
+      unique_instances.reserve(unique.size());
+      for (std::map<unsigned long,std::pair<unsigned,unsigned> >::const_iterator
+            it = unique.begin(); it != unique.end(); it++)
+        unique_instances.push_back(
+            instances[it->second.first][it->second.second]);
+      bool success = acquire_and_filter_instances(ctx, unique_instances,
+                              false/*filter acquired*/, collective_tag);
+      // Now we need to do the filtering
+      if (filter_acquired_instances)
+      {
+        if (!unique_instances.empty())
+        {
+          for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
+          {
+            for (std::vector<MappingInstance>::iterator it =
+                  instances[idx1].begin(); it != 
+                  instances[idx1].end(); /*nothing*/)
+            {
+              bool found = false;
+              for (unsigned idx2 = 0; idx2 < unique_instances.size(); idx2++)
+              {
+                if ((*it) != unique_instances[idx2])
+                  continue;
+                found = true;
+                break;
+              }
+              if (found)
+                it = unique_instances.erase(it);
+              else
+                it++;
+            }
+          }
         }
       }
-      if (acquire_requests.empty())
+      else if (!success)
       {
-        resume_mapper_call(ctx);
-        return local_acquired;
-      }
-      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
-      if (!remote_acquired)
-      {
-        std::map<PhysicalManager*,unsigned> &already_acquired =
-          *(ctx->acquired_instances); 
-        std::vector<unsigned> to_erase;
-        for (std::vector<std::vector<MappingInstance> >::iterator it = 
-              instances.begin(); it != instances.end(); it++)
+        for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
         {
-          std::vector<MappingInstance> &current = *it;
-          for (unsigned idx = 0; idx < current.size(); idx++)
+          for (std::vector<MappingInstance>::iterator it =
+                instances[idx1].begin(); it != 
+                instances[idx1].end(); /*nothing*/)
           {
-            InstanceManager *manager = current[idx].impl;
-            if (manager->is_virtual_manager())
-              continue;
-            if (already_acquired.find(manager->as_physical_manager()) ==
-                already_acquired.end())
+            bool found = false;
+            for (unsigned idx2 = 0; idx2 < unique_instances.size(); idx2++)
             {
-              if (!filter_acquired_instances)
-                to_erase.push_back(idx);
+              if ((*it) != unique_instances[idx2])
+                continue;
+              found = true;
+              break;
             }
+            if (!found)
+              it = unique_instances.erase(it);
             else
-            {
-              if (filter_acquired_instances)
-                to_erase.push_back(idx);
-            }
-          }
-          if (!to_erase.empty())
-          {
-            // Erase from the back
-            for (std::vector<unsigned>::const_reverse_iterator rit = 
-                  to_erase.rbegin(); rit != to_erase.rend(); rit++)
-              current.erase(current.begin()+(*rit));
-            to_erase.clear();
+              it++;
           }
         }
       }
-      resume_mapper_call(ctx);
-      return (local_acquired && remote_acquired);
+      return success;
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::perform_local_acquires(MappingCallInfo *info,
-                      const std::vector<MappingInstance> &instances,
-                      std::map<MemoryManager*,AcquireStatus> &acquire_requests,
-                      std::vector<unsigned> *to_erase,
-                      const bool filter_acquired_instances)
+    bool MapperManager::perform_acquires(MappingCallInfo *info,
+                          const std::vector<MappingInstance> &instances,
+                          std::vector<MappingInstance> &collectives,
+                          bool &has_collectives, std::set<unsigned> *unacquired)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalManager*,unsigned> &already_acquired = 
         *(info->acquired_instances);
-      bool local_acquired = true;
+      bool acquire_successful = true;
+      DomainPoint collective_point;
+      std::map<AddressSpaceID,std::vector<unsigned> > remote_acquires;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         const MappingInstance &inst = instances[idx];
@@ -3405,76 +3567,118 @@ namespace Legion {
         if (man->is_virtual_manager())
           continue;
         PhysicalManager *manager = man->as_physical_manager();
+        const bool is_collective = manager->is_collective_manager();
+        if (is_collective)
+        {
+          if (!has_collectives)
+          {
+            if (!info->operation->supports_collective_instances())
+              REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_NON_POINT,
+                  "Illegal call to acquire a collective instance in mapper "
+                  "call %s for %s (UID %lld) by mapper %s. Collective instances "
+                  "can only be acquired by index space tasks/operations.",
+                  get_mapper_call_name(info->kind),
+                  info->operation->get_logging_name(), 
+                  info->operation->get_unique_op_id(), get_mapper_name())
+            collective_point = info->operation->get_collective_instance_point();
+            has_collectives = true;
+          }
+          CollectiveManager *collective = manager->as_collective_manager();
+          if (!collective->contains_point(collective_point))
+            REPORT_LEGION_ERROR(ERROR_MAPPER_COLLECTIVE_INSTANCE_BAD_POINT,
+                "Illegal call to acquire a collective instance in mapper call "
+                "%s for %s (UID %lld) by mapper %s because the collective "
+                "instance does not contain the index point for the operation.",
+                get_mapper_call_name(info->kind),
+                info->operation->get_logging_name(),
+                info->operation->get_unique_op_id(), get_mapper_name())
+        }
         if (already_acquired.find(manager) != already_acquired.end())
         {
-          if ((to_erase != NULL) && filter_acquired_instances)
-            to_erase->push_back(idx);
+          if (is_collective)
+            collectives.push_back(inst);
           continue;
         }
+        AddressSpaceID remote_target = runtime->address_space;
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
-        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation))
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation,
+                                      collective_point, &remote_target))
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
-          if ((to_erase != NULL) && filter_acquired_instances)
-            to_erase->push_back(idx);
+          if (is_collective)
+            collectives.push_back(inst);
           continue;
         }
-        // if we failed on the owner node, it will never work
-        else if (manager->is_collective_manager() || manager->is_owner()) 
+        if (remote_target == runtime->address_space)
         {
-          if ((to_erase != NULL) && !filter_acquired_instances)
-            to_erase->push_back(idx);
-          local_acquired = false;
-          continue; 
+          // Unable to record it
+          if (unacquired != NULL)
+            unacquired->insert(idx);
+          acquire_successful = false;
         }
-        IndividualManager *individual = manager->as_individual_manager();
-        acquire_requests[individual->memory_manager].instances.insert(manager);
+        else // try again on the remote node
+          remote_acquires[remote_target].push_back(idx);
       }
-      return local_acquired;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MapperManager::perform_remote_acquires(MappingCallInfo *info,
-                       std::map<MemoryManager*,AcquireStatus> &acquire_requests)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> done_events;
-      // Issue the requests and see what we need to wait on
-      for (std::map<MemoryManager*,AcquireStatus>::iterator it = 
-            acquire_requests.begin(); it != acquire_requests.end(); it++)
+      if (!remote_acquires.empty() && acquire_successful)
       {
-        RtEvent wait_on = it->first->acquire_instances(it->second.instances,
-                                                       it->second.results);
-        if (wait_on.exists())
-          done_events.insert(wait_on);          
-      }
-      // See if we have to wait for our results to be done
-      if (!done_events.empty())
-      {
-        RtEvent ready = Runtime::merge_events(done_events);
-        ready.wait();
-      }
-      // Now find out which ones we acquired and which ones didn't
-      bool all_acquired = true;
-      for (std::map<MemoryManager*,AcquireStatus>::const_iterator req_it = 
-            acquire_requests.begin(); req_it != acquire_requests.end();req_it++)
-      {
-        unsigned idx = 0;
-        for (std::set<PhysicalManager*>::const_iterator it =  
-              req_it->second.instances.begin(); it != 
-              req_it->second.instances.end(); it++, idx++)
+        std::set<RtEvent> ready_events;
+        std::map<AddressSpaceID,std::vector<bool> > remote_results;
+        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
+              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
         {
-          if (req_it->second.results[idx])
-            // record that we acquired it
-            record_acquired_instance(info, *it, false/*created*/); 
-          else
-            all_acquired = false;
+          std::vector<bool> &results = remote_results[it->first];
+          // Assume everything will fail since we have to send
+          // back references in the success case anyway
+          results.resize(it->second.size(), false);
+          // Send a message to the remote node asking to do the acquires
+          const RtUserEvent ready = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(collective_point);
+            rez.serialize<size_t>(it->second.size());
+            for (unsigned idx = 0; idx < it->second.size(); idx++)
+            {
+              const MappingInstance &inst = instances[it->second[idx]];
+              PhysicalManager *manager = inst.impl->as_physical_manager();
+              rez.serialize(manager->did);
+              rez.serialize(manager);
+            }
+            rez.serialize(&results);
+            rez.serialize(ready);
+          }
+          runtime->send_acquire_request(it->first, rez);
+          ready_events.insert(ready);
+        }
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+        // Now we can see which instances were acquired remotely
+        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
+              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
+        {
+          const std::vector<bool> &results = remote_results[it->first];
+          for (unsigned idx = 0; idx < results.size(); idx++)
+          {
+            if (!results[idx])
+            {
+              if (unacquired != NULL)
+                unacquired->insert(it->second[idx]);
+              acquire_successful = false;
+              continue;
+            }
+            const MappingInstance &inst = instances[it->second[idx]];
+            PhysicalManager *manager = inst.impl->as_physical_manager();
+            already_acquired[manager] = 1;
+            if (inst.is_collective_instance())
+              collectives.push_back(inst);
+          }
         }
       }
-      return all_acquired;
+      return acquire_successful;
     }
 
     //--------------------------------------------------------------------------

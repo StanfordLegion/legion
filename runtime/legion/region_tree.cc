@@ -3532,7 +3532,7 @@ namespace Legion {
       }
       if (!unacquired.empty())
       {
-        perform_missing_acquires(op, *acquired, unacquired);
+        perform_missing_acquires(op, req, *acquired, unacquired);
         unsigned unacquired_index = 0;
         for (std::vector<PhysicalManager*>::iterator it = 
               result.begin(); it != result.end(); /*nothing*/)
@@ -3642,7 +3642,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(acquired != NULL);
 #endif
-        perform_missing_acquires(op, *acquired, unacquired); 
+        perform_missing_acquires(op, req, *acquired, unacquired); 
       }
       return -1; // no composite index
     }
@@ -3699,7 +3699,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(acquired != NULL);
 #endif
-        perform_missing_acquires(op, *acquired, unacquired);
+        perform_missing_acquires(op, req, *acquired, unacquired);
       }
       return has_composite;
     }
@@ -3741,58 +3741,123 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_missing_acquires(Operation *op,
+                                const RegionRequirement &req,
                                 std::map<PhysicalManager*,unsigned> &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
     {
-      // This code is very similar to what we see in the memory managers
-      std::map<MemoryManager*,MapperManager::AcquireStatus> remote_acquires;
-      // Try and do the acquires for any instances that weren't acquired
-      for (std::vector<PhysicalManager*>::const_iterator it = 
-            unacquired.begin(); it != unacquired.end(); it++)
+      // This code is very similar to what we see in the MapperManager
+      bool acquire_successful = true;
+      bool has_collectives = false;
+      DomainPoint collective_point;
+      std::vector<MappingInstance> collectives;
+      std::map<AddressSpaceID,std::vector<unsigned> > remote_acquires;
+      for (unsigned idx = 0; idx < unacquired.size(); idx++)
       {
-        if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF, op))
+        PhysicalManager *manager = unacquired[idx];
+        const bool is_collective = manager->is_collective_manager();
+        if (is_collective && !has_collectives)
         {
-          acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
+          has_collectives = true;
+          collective_point = op->get_collective_instance_point();
+        }
+        AddressSpaceID remote_target = runtime->address_space;
+        // Try to add an acquired reference immediately
+        // If we're remote it has to be valid already to be sound, but if
+        // we're local whatever works
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, op,
+                                      collective_point, &remote_target))
+        {
+          // We already know it wasn't there before
+          acquired[manager] = 1;
+          if (is_collective)
+            collectives.push_back(MappingInstance(manager));
           continue;
         }
-        // If we failed on the owner node, it will never work
-        // otherwise, we want to try to do a remote acquire
-        // If it is a collective manager and we failed then it never works
-        else if ((*it)->is_collective_manager() || (*it)->is_owner())
-          continue;
-        IndividualManager *manager = (*it)->as_individual_manager();
-        remote_acquires[manager->memory_manager].instances.insert(*it);
+        if (remote_target == runtime->address_space)
+          acquire_successful = false;
+        else // try again on the remote node
+          remote_acquires[remote_target].push_back(idx);
       }
-      if (!remote_acquires.empty())
+      // Next try to do the remote requires
+      if (!remote_acquires.empty() && acquire_successful)
       {
-        std::set<RtEvent> done_events;
-        for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
+        std::set<RtEvent> ready_events;
+        std::map<AddressSpaceID,std::vector<bool> > remote_results;
+        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
               it = remote_acquires.begin(); it != remote_acquires.end(); it++)
         {
-          RtEvent wait_on = it->first->acquire_instances(it->second.instances,
-                                                         it->second.results);
-          if (wait_on.exists())
-            done_events.insert(wait_on);
-        }
-        if (!done_events.empty())
-        {
-          RtEvent ready = Runtime::merge_events(done_events);
-          ready.wait();
-        }
-        // Now figure out which ones we successfully acquired and which 
-        // ones failed to be acquired
-        for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
-              req_it = remote_acquires.begin(); 
-              req_it != remote_acquires.end(); req_it++)
-        {
-          unsigned idx = 0;
-          for (std::set<PhysicalManager*>::const_iterator it = 
-                req_it->second.instances.begin(); it !=
-                req_it->second.instances.end(); it++, idx++)
+          std::vector<bool> &results = remote_results[it->first];
+          // Assume everything will fail since we have to send
+          // back references in the success case anyway
+          results.resize(it->second.size(), false);
+          // Send a message to the remote node asking to do the acquires
+          const RtUserEvent ready = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            if (req_it->second.results[idx])
-              acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
+            RezCheck z(rez);
+            rez.serialize(collective_point);
+            rez.serialize<size_t>(it->second.size());
+            for (unsigned idx = 0; idx < it->second.size(); idx++)
+            {
+              PhysicalManager *manager = unacquired[idx];
+              rez.serialize(manager->did);
+              rez.serialize(manager);
+            }
+            rez.serialize(&results);
+            rez.serialize(ready);
+          }
+          runtime->send_acquire_request(it->first, rez);
+          ready_events.insert(ready);
+        }
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+        // Now we can see which instances were acquired remotely
+        for (std::map<AddressSpaceID,std::vector<unsigned> >::const_iterator
+              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
+        {
+          const std::vector<bool> &results = remote_results[it->first];
+          for (unsigned idx = 0; idx < results.size(); idx++)
+          {
+            if (!results[idx])
+            {
+              acquire_successful = false;
+              continue;
+            }
+            PhysicalManager *manager = unacquired[it->second[idx]];
+            acquired[manager] = 1;
+            if (manager->is_collective_manager())
+              collectives.push_back(MappingInstance(manager));
+          }
+        }
+      }
+      if (has_collectives)
+      {
+        // Finally, if we have any collectives then we need to do the
+        // parallel rendezvous to see if all the other points picked
+        // the same thing as the other points in this operation
+        const std::vector<MappingInstance> copy_collectives = collectives;
+        // Use some dummy values here that will never be used by
+        // the MapperManager so we will never conflict
+        op->match_collective_instances(LAST_MAPPER_CALL, 0/*index*/,
+              req.region.index_space.get_id()/*tag*/, collectives);
+        // Add all the ones we acquired to the instances
+        for (std::vector<MappingInstance>::const_iterator it =
+              collectives.begin(); it != collectives.end(); it++)
+          acquired[it->impl->as_collective_manager()] = 1;
+        if (collectives.size() < copy_collectives.size())
+        {
+          // If we filtered some because we couldn't match across all 
+          // the point tasks then remove the valid references on them
+          for (unsigned idx = 0; idx < copy_collectives.size(); idx++)
+          {
+            CollectiveManager *manager =
+              copy_collectives[idx].impl->as_collective_manager();
+            // If we can't find it that is because it was filterd by the match
+            if ((acquired.find(manager) == acquired.end()) &&
+                manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+              delete manager;
           }
         }
       }

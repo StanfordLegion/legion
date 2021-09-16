@@ -706,7 +706,7 @@ namespace Legion {
                                 const InstanceSet &targets,
                                 bool postmapping = false);
     public: // helper method for the above two methods
-      void perform_missing_acquires(Operation *op,
+      void perform_missing_acquires(Operation *op, const RegionRequirement &req,
                                std::map<PhysicalManager*,unsigned> &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:

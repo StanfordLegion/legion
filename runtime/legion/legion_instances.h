@@ -314,11 +314,13 @@ namespace Legion {
                           Runtime *runtime, AddressSpaceID source);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator) = 0;
+                                    ReferenceMutator *mutator,
+                                    const DomainPoint &collective_point,
+                                    AddressSpaceID *remote_target = NULL) = 0;
       virtual void perform_deletion(RtEvent deferred_event) = 0;
       virtual void force_deletion(void) = 0;
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                Processor p, GCPriority priority) = 0; 
+                Processor p, GCPriority priority, const DomainPoint &point) = 0;
       virtual RtEvent get_instance_ready_event(void) const = 0;
       virtual RtEvent attach_external_instance(void) = 0;
       virtual RtEvent detach_external_instance(void) = 0;
@@ -556,11 +558,13 @@ namespace Legion {
           InstanceKind kind, ReductionOpID redop, bool shadow_instance);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator);
+                                    ReferenceMutator *mutator,
+                                    const DomainPoint &collective_point,
+                                    AddressSpaceID *remote_target = NULL);
       virtual void perform_deletion(RtEvent deferred_event);
       virtual void force_deletion(void);
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                Processor p, GCPriority priority); 
+                Processor p, GCPriority priority, const DomainPoint &point); 
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
@@ -620,7 +624,6 @@ namespace Legion {
         COLLECTIVE_INVALIDATE_MESSAGE,
         COLLECTIVE_PERFORM_DELETE_MESSAGE,
         COLLECTIVE_FORCE_DELETE_MESSAGE,
-        COLLECTIVE_SET_GC_PRIORITY_MESSAGE,
         COLLECTIVE_FINALIZE_MESSAGE,
         COLLECTIVE_REMOTE_INSTANCE_REQUEST,
         COLLECTIVE_REMOTE_INSTANCE_RESPONSE,
@@ -705,11 +708,13 @@ namespace Legion {
       void invalidate_collective(ReferenceMutator *mutator);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
-                                    ReferenceMutator *mutator);
+                                    ReferenceMutator *mutator,
+                                    const DomainPoint &collective_point,
+                                    AddressSpaceID *remote_target = NULL);
       virtual void perform_deletion(RtEvent deferred_event);
       virtual void force_deletion(void);
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
-                                    Processor p, GCPriority priority); 
+                Processor p, GCPriority priority, const DomainPoint &point); 
       virtual RtEvent attach_external_instance(void);
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
@@ -717,14 +722,10 @@ namespace Legion {
     protected:
       void perform_delete(RtEvent deferred_event, bool left); 
       void force_delete(bool left);
-      void set_gc_priority(MapperID mapper_id, Processor p, 
-                           GCPriority priority, bool left);
       bool finalize_message(void);
     protected:
       void collective_deletion(RtEvent deferred_event);
       void collective_force(void);
-      void collective_set_gc_priority(MapperID mapper_id, Processor proc,
-                                      GCPriority priority);
       void collective_detach(std::set<RtEvent> &detach_events);
       void find_or_forward_physical_instance(const DomainPoint &point,
                         AddressSpaceID origin, RtUserEvent to_trigger);
@@ -883,8 +884,8 @@ namespace Legion {
     public:
       void initialize(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
-                        PendingCollectiveManager *collective,
-                        DomainPoint *point, LayoutConstraintKind *unsat_kind,
+            PendingCollectiveManager *collective, const DomainPoint *point,
+            LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL);
     public:
       virtual void handle_profiling_response(const ProfilingResponseBase *base,

@@ -1455,7 +1455,7 @@ namespace Legion {
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
                                     PendingCollectiveManager *target,
-                                    DomainPoint *p, UniqueID creator_id,
+                                    const DomainPoint *p, UniqueID creator_id,
                                     bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1465,7 +1465,7 @@ namespace Legion {
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
                                     PendingCollectiveManager *target,
-                                    DomainPoint *p, UniqueID creator_id,
+                                    const DomainPoint *p, UniqueID creator_id,
                                     bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -1489,19 +1489,23 @@ namespace Legion {
                                     UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire,
                                     bool tight_bounds, bool remote = false);
       bool find_physical_instance(  LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire,
                                     bool tight_bounds, bool remote = false);
       void find_physical_instances( const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_bounds, 
                                     bool remote = false);
       void find_physical_instances( LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_bounds, 
                                     bool remote = false);
@@ -1524,33 +1528,37 @@ namespace Legion {
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
       void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
       void process_never_gc_response(Deserializer &derez);
-      void process_acquire_request(Deserializer &derez, AddressSpaceID source);
-      void process_acquire_response(Deserializer &derez, AddressSpaceID src);
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
       bool find_satisfying_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
       void find_satisfying_instances(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_region_bounds, 
                                     bool remote);
       void find_satisfying_instances(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_region_bounds, 
                                     bool remote);
       bool find_valid_instance(     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
       bool find_valid_instance(     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
       void release_candidate_references(const std::deque<PhysicalManager*>
@@ -1574,7 +1582,7 @@ namespace Legion {
                                           unsigned *unsat_index,
                                           PendingCollectiveManager*
                                                              collective = NULL,
-                                          DomainPoint *collective_point = NULL); 
+                                          const DomainPoint *point = NULL); 
     public:
       bool acquire_collective_allocation_privileges(
           std::vector<Memory> &targets, unsigned index, RtUserEvent to_trigger);
@@ -3660,7 +3668,7 @@ namespace Legion {
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
                                     PendingCollectiveManager *target,
-                                    DomainPoint *p);
+                                    const DomainPoint *p);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3670,7 +3678,7 @@ namespace Legion {
                                     const LayoutConstraint **unsat,
                                     size_t *footprint, UniqueID creator_id,
                                     PendingCollectiveManager *target,
-                                    DomainPoint *p);
+                                    const DomainPoint *p);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3692,21 +3700,25 @@ namespace Legion {
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire,
                                     bool tight_region_bounds);
       bool find_physical_instance(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     MappingInstance &result, bool acquire,
                                     bool tight_region_bounds);
       void find_physical_instances(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     std::vector<MappingInstance> &results, 
                                     bool acquire, bool tight_region_bounds);
       void find_physical_instances(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const DomainPoint &collective_point,
                                     std::vector<MappingInstance> &result, 
                                     bool acquire, bool tight_region_bounds);
       void release_tree_instances(RegionTreeID tid);

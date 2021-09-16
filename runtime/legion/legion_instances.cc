@@ -1990,7 +1990,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndividualManager::acquire_instance(ReferenceSource source,
-                                             ReferenceMutator *mutator)
+                                             ReferenceMutator *mutator,
+                                             const DomainPoint &point,
+                                             AddressSpaceID *remote_target)
     //--------------------------------------------------------------------------
     {
       // Do an atomic operation to check to see if we are already valid
@@ -2006,7 +2008,11 @@ namespace Legion {
       // since we aren't on the same node as where the instance lives
       // which is where the point of serialization is for garbage collection
       if (!is_owner())
+      {
+        if (remote_target != NULL)
+          *remote_target = owner_space;
         return false;
+      }
       // Tell our manager, we're attempting an acquire, if it tells
       // us false then we are not allowed to proceed
       if (!memory_manager->attempt_acquire(this))
@@ -2154,7 +2160,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualManager::set_garbage_collection_priority(MapperID mapper_id,
-                                            Processor proc, GCPriority priority)
+                  Processor proc, GCPriority priority, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       memory_manager->set_garbage_collection_priority(this, mapper_id,
@@ -2898,7 +2904,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool CollectiveManager::acquire_instance(ReferenceSource source, 
-                                             ReferenceMutator *mutator)
+                                            ReferenceMutator *mutator,
+                                            const DomainPoint &collective_point,
+                                            AddressSpaceID *remote_space)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -2922,10 +2930,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveManager::set_garbage_collection_priority(MapperID mapper_id, 
-                                               Processor p, GCPriority priority)
+                  Processor proc, GCPriority priority, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      set_gc_priority(mapper_id, p, priority, true/*left*/);
+      const PhysicalInstance inst = get_instance(point);
+      MemoryManager *memory_manager =
+        runtime->find_memory_manager(inst.get_location());
+      memory_manager->set_garbage_collection_priority(this, mapper_id,
+                                                      proc, priority);
     }
 
     //--------------------------------------------------------------------------
@@ -3240,93 +3252,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::set_gc_priority(MapperID mapper_id, Processor proc, 
-                                            GCPriority priority, bool left)
-    //--------------------------------------------------------------------------
-    {
-      const AddressSpaceID left_space =
-        collective_mapping->get_parent(owner_space, local_space);
-      if (left)
-      {
-        if (local_space == left_space)
-        {
-          // See if we can do the update
-          {
-            AutoLock i_lock(inst_lock);
-            if (deleted_or_detached)
-              return;
-          }
-          // If we make it here we are the first ones so so the deletion
-          collective_set_gc_priority(mapper_id, proc, priority);
-          std::vector<AddressSpaceID> right_spaces;
-          collective_mapping->get_children(owner_space, local_space,
-                                           right_spaces);
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                right_spaces.begin(); it != right_spaces.end(); it++)
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(COLLECTIVE_SET_GC_PRIORITY_MESSAGE);
-              rez.serialize(mapper_id);
-              rez.serialize(proc);
-              rez.serialize(priority);
-              rez.serialize<bool>(false/*left*/);
-            }
-            runtime->send_collective_instance_message(*it, rez);
-          }
-        }
-        else
-        {
-          // Forward this on to the left space
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(COLLECTIVE_SET_GC_PRIORITY_MESSAGE);
-            rez.serialize(mapper_id);
-            rez.serialize(proc);
-            rez.serialize(priority);
-            rez.serialize<bool>(true/*left*/);
-          }
-          AutoLock i_lock(inst_lock);
-          if (!deleted_or_detached)
-            runtime->send_collective_instance_message(left_space, rez);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(local_space != left_space);
-#endif
-        // Do the deletion
-        collective_set_gc_priority(mapper_id, proc, priority); 
-        std::vector<AddressSpaceID> right_spaces;
-        collective_mapping->get_children(owner_space, local_space,right_spaces);
-        // If we have no right users send back messages
-        if (!right_spaces.empty())
-        {
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                right_spaces.begin(); it != right_spaces.end(); it++)
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(COLLECTIVE_SET_GC_PRIORITY_MESSAGE);
-              rez.serialize(mapper_id);
-              rez.serialize(proc);
-              rez.serialize(priority);
-              rez.serialize(false/*left*/);
-            }
-            runtime->send_collective_instance_message(*it, rez);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     bool CollectiveManager::finalize_message(void)
     //--------------------------------------------------------------------------
     {
@@ -3417,29 +3342,6 @@ namespace Legion {
           it->destroy();
       }
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::collective_set_gc_priority(MapperID mapper_id, 
-                                            Processor proc, GCPriority priority)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-        (*it)->set_garbage_collection_priority(this, mapper_id, proc, priority);
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::collective_detach(std::set<RtEvent> &detach_events)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            memories.begin(); it != memories.end(); it++)
-      {
-        const RtEvent detach = (*it)->detach_external_instance(this);
-        if (detach.exists())
-          detach_events.insert(detach);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -3759,19 +3661,6 @@ namespace Legion {
             manager->force_delete(left);
             break;
           }
-        case COLLECTIVE_SET_GC_PRIORITY_MESSAGE:
-          {
-            MapperID mapper_id;
-            derez.deserialize(mapper_id);
-            Processor proc;
-            derez.deserialize(proc);
-            GCPriority priority;
-            derez.deserialize(priority);
-            bool left;
-            derez.deserialize(left);
-            manager->set_gc_priority(mapper_id, proc, priority, left);
-            break;
-          }
         case COLLECTIVE_FINALIZE_MESSAGE:
           {
             if (manager->finalize_message() &&
@@ -4084,7 +3973,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
         RegionTreeForest *forest, PendingCollectiveManager *pending_collective,
-        DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
+        const DomainPoint *collective_point, LayoutConstraintKind *unsat_kind,
         unsigned *unsat_index, size_t *footprint)
     //--------------------------------------------------------------------------
     {

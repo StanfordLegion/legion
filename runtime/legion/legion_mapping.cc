@@ -780,45 +780,49 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_instance(MapperContext ctx, 
-                                         const PhysicalInstance &instance) const
+                                         const PhysicalInstance &instance,
+                                         size_t collective_tag) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_instance(ctx, instance);
+      return ctx->manager->acquire_instance(ctx, instance, collective_tag);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_instances(MapperContext ctx,
-                          const std::vector<PhysicalInstance> &instances) const
+                          const std::vector<PhysicalInstance> &instances,
+                          size_t collective_tag) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_instances(ctx, instances);
+      return ctx->manager->acquire_instances(ctx, instances, collective_tag);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
-           std::vector<PhysicalInstance> &instances, bool filter_acquired) const
+           std::vector<PhysicalInstance> &instances,
+           bool filter_acquired, size_t collective_tag) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->acquire_and_filter_instances(ctx, instances,
-                                                        filter_acquired);
+                                      filter_acquired, collective_tag);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_instances(MapperContext ctx,
-            const std::vector<std::vector<PhysicalInstance> > &instances) const
+            const std::vector<std::vector<PhysicalInstance> > &instances,
+            size_t collective_tag) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->acquire_instances(ctx, instances);
+      return ctx->manager->acquire_instances(ctx, instances, collective_tag);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
                   std::vector<std::vector<PhysicalInstance> > &instances,
-                  bool filter_acquired_instances) const
+                  bool filter_acquired_instances, size_t collective_tag) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->acquire_and_filter_instances(ctx, instances,
-                                            filter_acquired_instances);
+                            filter_acquired_instances, collective_tag);
     }
 
     //--------------------------------------------------------------------------
