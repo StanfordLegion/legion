@@ -2288,7 +2288,7 @@ namespace Legion {
         assert(it->first->is_instance_view());
 #endif
         InstanceView *inst_view = it->first->as_instance_view();
-        restricted_instances[inst_index++] = 
+        restricted_instances[inst_index] = 
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, index, term_event, collect_event,
@@ -2372,7 +2372,7 @@ namespace Legion {
         assert(it->first->is_instance_view());
 #endif
         InstanceView *inst_view = it->first->as_instance_view();
-        restricted_instances[inst_index++] = 
+        restricted_instances[inst_index] = 
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, index, term_event, collect_event,
