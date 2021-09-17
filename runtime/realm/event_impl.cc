@@ -1528,9 +1528,10 @@ namespace Realm {
 	// always updated before the generation - the load_acquire above makes
 	// sure we read in the correct order
 	int npg_cached = impl->num_poisoned_generations.load_acquire();
-	ActiveMessage<EventUpdateMessage> amsg(sender, npg_cached*sizeof(EventImpl::gen_t));
+	ActiveMessage<EventUpdateMessage> amsg(sender,
+                                               impl->poisoned_generations,
+                                               npg_cached*sizeof(EventImpl::gen_t));
 	amsg->event = triggered;
-	amsg.add_payload(impl->poisoned_generations, npg_cached*sizeof(EventImpl::gen_t), PAYLOAD_KEEP);
 	amsg.commit();
       }
     } 
@@ -1587,6 +1588,11 @@ namespace Realm {
     {
       AutoLock<> a(mutex);
 
+      // this might be old news (due to packet reordering or if we had
+      //  subscribed to an event and then triggered it ourselves)
+      if(current_gen <= generation.load())
+	return;
+
 #define CHECK_POISONED_GENS
 #ifdef CHECK_POISONED_GENS
       if(new_poisoned_count > 0) {
@@ -1601,10 +1607,6 @@ namespace Realm {
 	assert(num_poisoned_generations.load() == 0);
       }
 #endif
-
-      // this might be old news if we had subscribed to an event and then triggered it ourselves
-      if(current_gen <= generation.load())
-	return;
 
       // first thing - update the poisoned generation list
       if(new_poisoned_count > 0) {

@@ -1124,13 +1124,28 @@ namespace Realm {
       metadata.mark_valid(early_reqs);
       if(!early_reqs.empty()) {
 	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
-	Serialization::ByteCountSerializer bcs;
-	metadata.serialize_msg(bcs);
-	size_t resp_size = bcs.bytes_used();
-	ActiveMessage<MetadataResponseMessage> amsg(early_reqs, resp_size);
-	amsg->id = ID(me).id;
-	metadata.serialize_msg(amsg);
-	amsg.commit();
+	Serialization::DynamicBufferSerializer dbs(4096);
+	metadata.serialize_msg(dbs);
+
+        // fragment serialized metadata if needed
+        size_t offset = 0;
+        size_t total_bytes = dbs.bytes_used();
+
+        while(offset < total_bytes) {
+          size_t to_send = std::min(total_bytes - offset,
+                                    ActiveMessage<MetadataResponseMessage>::recommended_max_payload(early_reqs,
+                                                                                                    false /*without congestion*/));
+
+          ActiveMessage<MetadataResponseMessage> amsg(early_reqs, to_send);
+          amsg->id = ID(me).id;
+          amsg->offset = offset;
+          amsg->total_bytes = total_bytes;
+          amsg.add_payload(static_cast<const char *>(dbs.get_buffer()) + offset,
+                           to_send);
+          amsg.commit();
+
+          offset += to_send;
+        }
       }
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {

@@ -118,6 +118,7 @@ namespace Realm {
       PKTTYPE_LONG,
       PKTTYPE_RGET,
       PKTTYPE_CANCELLED,
+      PKTTYPE_COPY_IN_PROGRESS,
     };
 
     static const int MAX_PACKETS = 256;
@@ -671,6 +672,7 @@ namespace Realm {
 			    uintptr_t src_ptr, uintptr_t tgt_ptr,
 			    size_t payload_bytes);
     size_t handle_batch(gex_Rank_t srcrank, gex_AM_Arg_t arg0,
+                        gex_AM_Arg_t cksum,
 			const void *data, size_t data_bytes,
 			gex_AM_Arg_t *comps);
     void handle_completion_reply(gex_Rank_t srcrank,
