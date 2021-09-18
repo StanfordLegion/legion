@@ -13660,6 +13660,19 @@ namespace Legion {
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
+      restricted_region = launcher.physical_region;
+      if (restricted_region.impl != NULL)
+      {
+        const RegionRequirement &region_req =
+          restricted_region.impl->get_requirement();
+        if (region_req.privilege_fields != launcher.fields)
+          REPORT_LEGION_ERROR(ERROR_BAD_FIELD_PRIVILEGES,
+              "The privilege fields for release operation %lld in "
+              "task %s (UID %lld) do not match the fields for the "
+              "PhysicalRegion object being used for establishing "
+              "restricted coherence. The field sets must match exactly.",
+              get_unique_op_id(), ctx->get_task_name(), ctx->get_unique_id())
+      }
       parent_region = launcher.parent_region;
       fields = launcher.fields; 
       grants = launcher.grants;
@@ -13704,6 +13717,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();
+      restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       fields.clear();
@@ -13883,6 +13897,8 @@ namespace Legion {
       std::vector<PhysicalManager*> source_instances;
       invoke_mapper(source_instances);
       InstanceSet restricted_instances;
+      if (restricted_region.impl != NULL)
+        restricted_region.impl->get_references(restricted_instances); 
       ApEvent init_precondition = compute_init_precondition(trace_info); 
       ApEvent release_complete = 
         runtime->forest->release_restrictions(requirement, version_info,

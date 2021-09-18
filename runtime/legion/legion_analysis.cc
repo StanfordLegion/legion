@@ -8157,12 +8157,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, Operation *o, unsigned idx, 
                                      ApEvent pre, IndexSpaceExpression *expr,
+                                     const InstanceSet &target_insts,
+                                     std::vector<InstanceView*> &target_vws,
                                      std::vector<InstanceView*> &source_vws, 
                                      const PhysicalTraceInfo &t_info,
                                      CollectiveMapping *mapping)
       : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, mapping), 
-        precondition(pre), target_analysis(this), source_views(source_vws),
-        trace_info(t_info), release_aggregator(NULL)
+        precondition(pre), target_analysis(this), 
+        target_instances(target_insts), target_views(target_vws),
+        source_views(source_vws), trace_info(t_info), release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8171,10 +8174,12 @@ namespace Legion {
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, AddressSpaceID src, 
           AddressSpaceID prev, Operation *o, unsigned idx, 
           IndexSpaceExpression *expr, ApEvent pre, ReleaseAnalysis *t, 
+          InstanceSet &target_insts, std::vector<InstanceView*> &target_vws,
           std::vector<InstanceView*> &source_vws, const PhysicalTraceInfo &info)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
-        precondition(pre), target_analysis(t), source_views(source_vws),
-        trace_info(info), release_aggregator(NULL)
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+        precondition(pre), target_analysis(t), target_instances(target_insts),
+        target_views(target_vws), source_views(source_vws), trace_info(info),
+        release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8182,6 +8187,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(const ReleaseAnalysis &rhs)
       : PhysicalAnalysis(rhs), target_analysis(rhs.target_analysis), 
+        target_instances(rhs.target_instances), target_views(rhs.target_views),
         source_views(rhs.source_views), trace_info(rhs.trace_info)
     //--------------------------------------------------------------------------
     {
@@ -8258,6 +8264,14 @@ namespace Legion {
           {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
+          }
+          rez.serialize<size_t>(target_instances.size());
+          for (unsigned idx = 0; idx < target_instances.size(); idx++)
+          {
+            const InstanceRef &ref = target_instances[idx];
+            rez.serialize(ref.get_manager()->did);
+            rez.serialize(target_views[idx]->did);
+            rez.serialize(ref.get_valid_fields());
           }
           rez.serialize<size_t>(source_views.size());
           for (std::vector<InstanceView*>::const_iterator it =
@@ -8375,15 +8389,37 @@ namespace Legion {
           ready_events.insert(ready);
         derez.deserialize(eq_masks[idx]);
       }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      InstanceSet target_instances(num_targets);
+      std::vector<InstanceView*> target_views(num_targets, NULL);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        InstanceManager *manager = 
+          runtime->find_or_request_instance_manager(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        derez.deserialize(did);
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        target_views[idx] = static_cast<InstanceView*>(view);
+        if (ready.exists())
+          ready_events.insert(ready);
+        FieldMask valid_fields;
+        derez.deserialize(valid_fields);
+        target_instances[idx] = InstanceRef(manager, valid_fields);
+      }
       size_t num_sources;
       derez.deserialize(num_sources);
-      std::vector<InstanceView*> sources(num_sources);
+      std::vector<InstanceView*> source_views(num_sources);
       for (unsigned idx = 0; idx < num_sources; idx++)
       {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        sources[idx] = static_cast<InstanceView*>(
+        source_views[idx] = static_cast<InstanceView*>(
             runtime->find_or_request_logical_view(did, ready));
         if (ready.exists())
           ready_events.insert(ready);
@@ -8406,7 +8442,8 @@ namespace Legion {
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
 
       ReleaseAnalysis *analysis = new ReleaseAnalysis(runtime, original_source,
-          previous, op, index, expr, precondition, target, sources, trace_info);
+          previous, op, index, expr, precondition, target, target_instances,
+          target_views, source_views, trace_info);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       RtEvent ready_event;
@@ -14268,149 +14305,175 @@ namespace Legion {
       // Should only be here if we're the owner
       assert(is_logical_owner() || has_replicated_fields(release_mask));
 #endif
-      std::vector<IndexSpaceExpression*> to_delete;
       WrapperReferenceMutator mutator(applied_events);
-      std::map<IndexSpaceExpression*,IndexSpaceExpression*> to_add;
       LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned to_update;
       // We need to lock the analysis at this point
       AutoLock a_lock(analysis);
-      for (LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<InstanceView> >::aligned::iterator eit = 
-            released_instances.begin(); eit != 
-            released_instances.end(); eit++)
+      // If the target views are empty then we are just restoring the
+      // existing released instances, if we have target views then we
+      // know what the restricted instaces are going to be but we still
+      // need to filter out any previously released instances
+      if (analysis.target_views.empty())
       {
-        FieldMask overlap = eit->second.get_valid_mask() & release_mask;
-        if (!overlap)
-          continue;
-        IndexSpaceExpression *overlap_expr = NULL;
-        if (!expr_covers && (eit->first != expr))
+        std::vector<IndexSpaceExpression*> to_delete;
+        std::map<IndexSpaceExpression*,IndexSpaceExpression*> to_add;
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::aligned::iterator eit = 
+              released_instances.begin(); eit != 
+              released_instances.end(); eit++)
         {
-          overlap_expr = 
-            runtime->forest->intersect_index_spaces(eit->first, expr);
-          const size_t overlap_size = overlap_expr->get_volume();
-          if (overlap_size == 0)
+          FieldMask overlap = eit->second.get_valid_mask() & release_mask;
+          if (!overlap)
             continue;
-          if (overlap_size == eit->first->get_volume())
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (!expr_covers && (eit->first != expr))
+          {
+            overlap_expr = 
+              runtime->forest->intersect_index_spaces(eit->first, expr);
+            const size_t overlap_size = overlap_expr->get_volume();
+            if (overlap_size == 0)
+              continue;
+            if (overlap_size == eit->first->get_volume())
+              overlap_expr = eit->first;
+            else if (overlap_size == expr->get_volume())
+              overlap_expr = expr;
+          }
+          else
             overlap_expr = eit->first;
-          else if (overlap_size == expr->get_volume())
-            overlap_expr = expr;
-        }
-        else
-          overlap_expr = eit->first;
-        const bool overlap_covers = 
-          (overlap_expr->get_volume() == set_expr->get_volume());
-        if (overlap_expr == eit->first)
-        {
-          // Total covering of expressions
-          // so move all instances back to being restricted
-          std::vector<InstanceView*> to_erase;
-          FieldMaskSet<InstanceView> &updates = to_update[eit->first];
-          for (FieldMaskSet<InstanceView>::iterator it = 
-                eit->second.begin(); it != eit->second.end(); it++)
+          const bool overlap_covers = 
+            (overlap_expr->get_volume() == set_expr->get_volume());
+          if (overlap_expr == eit->first)
           {
-            const FieldMask inst_overlap = overlap & it->second;
-            if (!inst_overlap)
-              continue;
-            analysis.record_instance(it->first, inst_overlap);
-            updates.insert(it->first, inst_overlap);
-            // Record this as a restricted instance
-            record_restriction(overlap_expr, overlap_covers, inst_overlap,
-                               it->first, mutator);
-            // Remove it from here
-            it.filter(inst_overlap);
-            if (!it->second)
-              to_erase.push_back(it->first);
-            // Each field should only be represented by one instance
-            overlap -= inst_overlap;
-            if (!overlap)
-              break;
+            // Total covering of expressions
+            // so move all instances back to being restricted
+            std::vector<InstanceView*> to_erase;
+            FieldMaskSet<InstanceView> &updates = to_update[eit->first];
+            for (FieldMaskSet<InstanceView>::iterator it = 
+                  eit->second.begin(); it != eit->second.end(); it++)
+            {
+              const FieldMask inst_overlap = overlap & it->second;
+              if (!inst_overlap)
+                continue;
+              analysis.record_instance(it->first, inst_overlap);
+              updates.insert(it->first, inst_overlap);
+              // Record this as a restricted instance
+              record_restriction(overlap_expr, overlap_covers, inst_overlap,
+                                 it->first, mutator);
+              // Remove it from here
+              it.filter(inst_overlap);
+              if (!it->second)
+                to_erase.push_back(it->first);
+              // Each field should only be represented by one instance
+              overlap -= inst_overlap;
+              if (!overlap)
+                break;
+            }
+            for (std::vector<InstanceView*>::const_iterator it =
+                  to_erase.begin(); it != to_erase.end(); it++)
+            {
+              eit->second.erase(*it);
+              if ((*it)->remove_nested_valid_ref(did))
+                delete (*it);
+            }
+            if (!eit->second.empty())
+              eit->second.tighten_valid_mask();
+            else
+              to_delete.push_back(eit->first);
           }
-          for (std::vector<InstanceView*>::const_iterator it =
-                to_erase.begin(); it != to_erase.end(); it++)
-          {
-            eit->second.erase(*it);
-            if ((*it)->remove_nested_valid_ref(did))
-              delete (*it);
-          }
-          if (!eit->second.empty())
-            eit->second.tighten_valid_mask();
           else
-            to_delete.push_back(eit->first);
-        }
-        else
-        {
-          // Only partial covering, so compute the difference
-          // and record that we'll pull valid instances from here
-          to_add[eit->first] = 
-            runtime->forest->subtract_index_spaces(eit->first, expr);
-          FieldMaskSet<InstanceView> &updates = to_update[overlap_expr];
-          // The intersection gets merged back into relased sets
-          for (FieldMaskSet<InstanceView>::const_iterator it =
-                eit->second.begin(); it != eit->second.end(); it++)
           {
-            const FieldMask inst_overlap = overlap & it->second;
-            if (!inst_overlap)
-              continue;
-            analysis.record_instance(it->first, inst_overlap);
-            updates.insert(it->first, inst_overlap);
-            // Record this as a restricted instance
-            record_restriction(overlap_expr, overlap_covers, inst_overlap,
-                               it->first, mutator);
-            // Each field should only be represented by one instance
-            overlap -= inst_overlap;
-            if (!overlap)
-              break;
+            // Only partial covering, so compute the difference
+            // and record that we'll pull valid instances from here
+            to_add[eit->first] = 
+              runtime->forest->subtract_index_spaces(eit->first, expr);
+            FieldMaskSet<InstanceView> &updates = to_update[overlap_expr];
+            // The intersection gets merged back into relased sets
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                  eit->second.begin(); it != eit->second.end(); it++)
+            {
+              const FieldMask inst_overlap = overlap & it->second;
+              if (!inst_overlap)
+                continue;
+              analysis.record_instance(it->first, inst_overlap);
+              updates.insert(it->first, inst_overlap);
+              // Record this as a restricted instance
+              record_restriction(overlap_expr, overlap_covers, inst_overlap,
+                                 it->first, mutator);
+              // Each field should only be represented by one instance
+              overlap -= inst_overlap;
+              if (!overlap)
+                break;
+            }
           }
+        }
+        // Record updates to the released sets
+        for (std::map<IndexSpaceExpression*,IndexSpaceExpression*>::const_iterator
+              eit = to_add.begin(); eit != to_add.end(); eit++)
+        {
+          if (released_instances.find(eit->first) == released_instances.end())
+            eit->first->add_expression_reference();
+          FieldMaskSet<InstanceView> &new_insts = released_instances[eit->first];
+          FieldMaskSet<InstanceView> &old_insts = released_instances[eit->second];
+          if (!new_insts.empty() || !!(old_insts.get_valid_mask() & release_mask))
+          {
+            std::vector<InstanceView*> to_erase;
+            for (FieldMaskSet<InstanceView>::iterator it =
+                  old_insts.begin(); it != old_insts.end(); it++)
+            {
+              const FieldMask overlap = it->second & release_mask;
+              if (!overlap)
+                continue;
+              if (new_insts.insert(it->first, overlap))
+                it->first->add_nested_valid_ref(did, &mutator);
+              it.filter(overlap);
+              if (!it->second)
+                to_erase.push_back(it->first);
+            }
+            for (std::vector<InstanceView*>::const_iterator it =
+                  to_erase.begin(); it != to_erase.end(); it++)
+            {
+              old_insts.erase(*it);
+              if ((*it)->remove_nested_valid_ref(did))
+                delete (*it);
+            }
+            if (old_insts.empty())
+              to_delete.push_back(eit->first);
+            else
+              old_insts.tighten_valid_mask();
+          }
+          else
+          {
+            new_insts.swap(old_insts); 
+            to_delete.push_back(eit->first);
+          }
+        }
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          released_instances.erase(*it);
+          if ((*it)->remove_expression_reference())
+            delete (*it);
         }
       }
-      // Record updates to the released sets
-      for (std::map<IndexSpaceExpression*,IndexSpaceExpression*>::const_iterator
-            eit = to_add.begin(); eit != to_add.end(); eit++)
+      else
       {
-        if (released_instances.find(eit->first) == released_instances.end())
-          eit->first->add_expression_reference();
-        FieldMaskSet<InstanceView> &new_insts = released_instances[eit->first];
-        FieldMaskSet<InstanceView> &old_insts = released_instances[eit->second];
-        if (!new_insts.empty() || !!(old_insts.get_valid_mask() & release_mask))
+        // If we're not restoring the released instance then we should
+        // record the actual instances that we are making restricted
+        // Make sure that we don't have any overlapping restrictions
+        filter_restricted_instances(expr, expr_covers, release_mask);
+        // Make sure that we remove any old released instances
+        filter_released_instances(expr, expr_covers, release_mask);
+        FieldMaskSet<InstanceView> &updates = to_update[expr];
+        for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
-          std::vector<InstanceView*> to_erase;
-          for (FieldMaskSet<InstanceView>::iterator it =
-                old_insts.begin(); it != old_insts.end(); it++)
-          {
-            const FieldMask overlap = it->second & release_mask;
-            if (!overlap)
-              continue;
-            if (new_insts.insert(it->first, overlap))
-              it->first->add_nested_valid_ref(did, &mutator);
-            it.filter(overlap);
-            if (!it->second)
-              to_erase.push_back(it->first);
-          }
-          for (std::vector<InstanceView*>::const_iterator it =
-                to_erase.begin(); it != to_erase.end(); it++)
-          {
-            old_insts.erase(*it);
-            if ((*it)->remove_nested_valid_ref(did))
-              delete (*it);
-          }
-          if (old_insts.empty())
-            to_delete.push_back(eit->first);
-          else
-            old_insts.tighten_valid_mask();
+          InstanceView *view = analysis.target_views[idx];
+          const FieldMask &mask = 
+            analysis.target_instances[idx].get_valid_fields();
+          updates.insert(view, mask);
+          // Record this as a restricted instance
+          record_restriction(expr, expr_covers, mask, view, mutator);
         }
-        else
-        {
-          new_insts.swap(old_insts); 
-          to_delete.push_back(eit->first);
-        }
-      }
-      for (std::vector<IndexSpaceExpression*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        released_instances.erase(*it);
-        if ((*it)->remove_expression_reference())
-          delete (*it);
       }
       // Now generate the copies for any updates to the restricted instances
       if (analysis.release_aggregator != NULL)

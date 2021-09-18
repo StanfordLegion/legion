@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2021 Stanford University
+# Copyright 2021 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,31 +15,17 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionTest_perf_realm_event_latency)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+set(CPU_SOURCES event_latency.cc)
+add_executable(event_latency ${CPU_SOURCES})
 
-add_subdirectory(attach_file_mini)
-add_subdirectory(legion_stl)
-add_subdirectory(output_requirements)
-add_subdirectory(rendering)
-add_subdirectory(realm)
-add_subdirectory(gather_perf)
-add_subdirectory(performance/realm/event_latency)
-add_subdirectory(performance/realm/task_throughput)
-
-if(Legion_USE_HDF5)
-  add_subdirectory(hdf_attach_subregion_parallel)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_bindings)
-endif()
-
-if(Legion_NETWORKS)
-  add_subdirectory(bug954)
+target_link_libraries(event_latency Legion::Realm)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME event_latency COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:event_latency> ${Legion_TEST_ARGS})
 endif()

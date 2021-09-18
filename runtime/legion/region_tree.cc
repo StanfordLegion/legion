@@ -2364,7 +2364,7 @@ namespace Legion {
         assert(it->first->is_instance_view());
 #endif
         InstanceView *inst_view = it->first->as_instance_view();
-        restricted_instances[inst_index++] = 
+        restricted_instances[inst_index] = 
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
             local_expr, op_id, index, term_event, collect_event,
@@ -2400,8 +2400,16 @@ namespace Legion {
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
       assert(IS_EXCLUSIVE(req));
 #endif
-      std::vector<InstanceView*> source_views;
-      if (!sources.empty())
+      const bool known_targets = !restricted_instances.empty();
+      std::vector<InstanceView*> target_views, source_views;
+      if (known_targets)
+      {
+        InnerContext *context = op->find_physical_context(index);
+        context->convert_target_views(restricted_instances, target_views);
+        if (!sources.empty())
+          context->convert_source_views(sources, source_views);
+      }
+      else if (!sources.empty())
       {
         InnerContext *context = op->find_physical_context(index);
         context->convert_source_views(sources, source_views);
@@ -2412,7 +2420,8 @@ namespace Legion {
       std::set<RtEvent> deferral_events;
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       ReleaseAnalysis analysis(runtime, op, index, precondition, local_expr,
-                               source_views, trace_info, collective_mapping);
+                           restricted_instances, target_views, source_views,
+                           trace_info, collective_mapping);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
@@ -2426,36 +2435,61 @@ namespace Legion {
       // Issue any release copies/fills that need to be done
       const RtEvent updates_done = 
         analysis.perform_updates(traversal_done, map_applied_events);
-      // Wait for any remote releases to come back to us before we 
-      // attempt to get the set of valid instances
-      if (remote_ready.exists() && !remote_ready.has_triggered())
-        remote_ready.wait();
-      FieldMaskSet<LogicalView> instances;
-      analysis.report_instances(instances);
-      // Now we can register our users
-      std::set<ApEvent> released_events;
-      restricted_instances.resize(instances.size());
-      unsigned inst_index = 0;
+      // There are two cases here: one where we have the target intances
+      // already from the operation and we know where to put the users
+      // and the second case where we need to wait for the analysis to
+      // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      // Make sure we're done applying our updates before we do our registration
-      if (updates_done.exists() && !updates_done.has_triggered())
-        updates_done.wait();
       const RtEvent collect_event = trace_info.get_collect_event();
-      for (FieldMaskSet<LogicalView>::const_iterator it = 
-            instances.begin(); it != instances.end(); it++, inst_index++)
+      std::set<ApEvent> released_events;
+      if (known_targets)
       {
+        // Wait for all the local and remote updates to be done
+        if (updates_done.exists() && !updates_done.has_triggered())
+          updates_done.wait();
+        if (remote_ready.exists() && !remote_ready.has_triggered())
+          remote_ready.wait();
+        // Now we can register our users
+        for (unsigned idx = 0; idx < restricted_instances.size(); idx++)
+        {
+          const FieldMask &mask = restricted_instances[idx].get_valid_fields();
+          ApEvent ready = target_views[idx]->register_user(usage, mask,
+              local_expr, op_id, index, term_event, collect_event,
+              map_applied_events, trace_info, runtime->address_space);
+          if (ready.exists())
+            released_events.insert(ready);
+        }
+      }
+      else
+      {
+        // Wait for any remote releases to come back to us before we 
+        // attempt to get the set of valid instances
+        if (remote_ready.exists() && !remote_ready.has_triggered())
+          remote_ready.wait();
+        FieldMaskSet<LogicalView> instances;
+        analysis.report_instances(instances);
+        // Now we can register our users
+        restricted_instances.resize(instances.size());
+        unsigned inst_index = 0;
+        // Make sure we're done applying updates before we do our registration
+        if (updates_done.exists() && !updates_done.has_triggered())
+          updates_done.wait();
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              instances.begin(); it != instances.end(); it++, inst_index++)
+        {
 #ifdef DEBUG_LEGION
-        assert(it->first->is_instance_view());
+          assert(it->first->is_instance_view());
 #endif
-        InstanceView *inst_view = it->first->as_instance_view();
-        restricted_instances[inst_index++] = 
-          InstanceRef(inst_view->get_manager(), it->second);
-        ApEvent ready = inst_view->register_user(usage, it->second,
-            local_expr, op_id, index, term_event, collect_event,
-            map_applied_events, trace_info, runtime->address_space);
-        if (ready.exists())
-          released_events.insert(ready);
+          InstanceView *inst_view = it->first->as_instance_view();
+          restricted_instances[inst_index] = 
+            InstanceRef(inst_view->get_manager(), it->second);
+          ApEvent ready = inst_view->register_user(usage, it->second,
+              local_expr, op_id, index, term_event, collect_event,
+              map_applied_events, trace_info, runtime->address_space);
+          if (ready.exists())
+            released_events.insert(ready);
+        }
       }
       if (!released_events.empty())
         return Runtime::merge_events(&trace_info, released_events);

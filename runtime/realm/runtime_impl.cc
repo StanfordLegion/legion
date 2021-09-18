@@ -1153,8 +1153,9 @@ namespace Realm {
       if(size > max_frag_size) {
         // send the data that we had before this object
         assert(prev_size > 0);
-        ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.get_buffer(), prev_size);
+        ActiveMessage<NodeAnnounceMessage> amsg(targets, prev_size);
         amsg->num_fragments = 0; // count not known yet
+        amsg.add_payload(dbs.get_buffer(), prev_size); // copy now
         amsg.commit();
         dbs.reset();
         // re-serialize this object
@@ -1809,8 +1810,9 @@ namespace Realm {
 
         // have to send one final message with the remaining data and a valid
         //  fragment count
-	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.get_buffer(), dbs.bytes_used());
+	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
         amsg->num_fragments = num_fragments + 1;
+        amsg.add_payload(dbs.get_buffer(), dbs.bytes_used()); // copy now
 	amsg.commit();
       }
 

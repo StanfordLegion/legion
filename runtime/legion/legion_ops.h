@@ -2587,6 +2587,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const;
     protected:
       RegionRequirement requirement;
+      PhysicalRegion    restricted_region;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;

@@ -1175,9 +1175,15 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           if not passed then
             if emit_dynamic_check then
               for _, failure in pairs(failures_i) do
-                if get_partition_symbol(arg) == get_partition_symbol(args[failure]) then
-                  table.insert(args_need_dynamic_check, { i, failure })
+                if not (arg:is(ast.typed.expr.IndexAccess) and
+                        args[failure]:is(ast.typed.expr.IndexAccess) and
+                        get_partition_symbol(arg) == get_partition_symbol(args[failure]))
+                then
+                  report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
+                       " interferes with argument " .. tostring(failure))
+                  return
                 end
+                table.insert(args_need_dynamic_check, { i, failure })
               end
             else
               report_fail(call, "loop optimization failed: argument " .. tostring(i) ..

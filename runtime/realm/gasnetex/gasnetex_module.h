@@ -133,6 +133,7 @@ namespace Realm {
     bool cfg_use_immediate;
     bool cfg_use_negotiated;
     long long cfg_crit_timeout;
+    size_t cfg_max_medium;
     size_t cfg_max_long;
     bool cfg_bind_hostmem;
 #ifdef REALM_USE_CUDA

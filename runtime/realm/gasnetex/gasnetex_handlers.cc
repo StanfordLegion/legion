@@ -1602,7 +1602,7 @@ namespace Realm {
       //  nonconst?
       void *ncdata = const_cast<void *>(data);
 
-      unsigned nargs = 1;
+      unsigned nargs = 2;
 
       return gex_AM_PrepareRequestMedium(pair, tgt_rank,
 					 ncdata,
@@ -1611,18 +1611,18 @@ namespace Realm {
     }
 
     void commit_request_batch(gex_AM_SrcDesc_t srcdesc,
-			      gex_AM_Arg_t arg0,
+			      gex_AM_Arg_t arg0, gex_AM_Arg_t cksum,
 			      size_t data_bytes)
     {
-      gex_AM_CommitRequestMedium1(srcdesc, HIDX_BATCHREQ,
-				  data_bytes, arg0);
+      gex_AM_CommitRequestMedium2(srcdesc, HIDX_BATCHREQ,
+				  data_bytes, arg0, cksum);
     }
 
   };
 
   void handle_request_batch(gex_Token_t token,
 			    const void *buf, size_t nbytes,
-			    gex_AM_Arg_t arg0)
+			    gex_AM_Arg_t arg0, gex_AM_Arg_t cksum)
   {
     gex_Token_Info_t info;
     // ask for srcrank and ep - both are required, so no need to check result
@@ -1636,7 +1636,7 @@ namespace Realm {
     assert(arg0 <= MAX_BATCH_SIZE);
     gex_AM_Arg_t comps[MAX_BATCH_SIZE];
 
-    size_t ncomp = internal->handle_batch(info.gex_srcrank, arg0,
+    size_t ncomp = internal->handle_batch(info.gex_srcrank, arg0, cksum,
 					  buf, nbytes, comps);
 
     switch(ncomp) {
@@ -1827,7 +1827,7 @@ namespace Realm {
 
       { HIDX_BATCHREQ,
 	reinterpret_cast<void(*)()>(handle_request_batch),
-	GEX_FLAG_AM_REQUEST|GEX_FLAG_AM_MEDIUM, 1,
+	GEX_FLAG_AM_REQUEST|GEX_FLAG_AM_MEDIUM, 2,
 	nullptr, "handle_request_batch" }
     };
 
