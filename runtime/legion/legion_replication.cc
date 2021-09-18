@@ -7510,9 +7510,8 @@ namespace Legion {
         if (did_broadcast->is_origin() &&
             ((resource != LEGION_EXTERNAL_INSTANCE) || contains_individual))
           did_broadcast->broadcast(runtime->get_available_distributed_id());
-        single_broadcast =
-          new ValueBroadcast<std::pair<PhysicalInstance,ApEvent> >(
-              ctx, owner_shard, COLLECTIVE_LOC_75);
+        single_broadcast = new ValueBroadcast<InstanceEventPair>(
+                                ctx, owner_shard, COLLECTIVE_LOC_75);
       }
     }
 
@@ -7729,8 +7728,7 @@ namespace Legion {
                 instance = node->row_source->create_file_instance(file_name,
                             field_ids, field_sizes, file_mode, ready_event);
                 if (!collective_instance)
-                  single_broadcast->broadcast(
-                      std::make_pair(instance, ready_event));
+                  single_broadcast->broadcast({instance, ready_event});
               }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);
@@ -7765,8 +7763,7 @@ namespace Legion {
                                       (file_mode == LEGION_FILE_READ_ONLY),
                                       ready_event);
                 if (!collective_instance)
-                  single_broadcast->broadcast(
-                      std::make_pair(instance, ready_event));
+                  single_broadcast->broadcast({instance, ready_event});
               }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
@@ -7794,8 +7791,7 @@ namespace Legion {
                 instance = node->row_source->create_external_instance(
                         pointer.memory, pointer.ptr, ilg, ready_event);
                 if (!collective_instance)
-                  single_broadcast->broadcast(
-                      std::make_pair(instance, ready_event));
+                  single_broadcast->broadcast({instance, ready_event});
               }
               constraints = layout_constraint_set;
               constraints.specialized_constraint = 
@@ -7810,8 +7806,7 @@ namespace Legion {
       if ((single_broadcast != NULL) && !single_broadcast->is_origin())
       {
         // If we're making a single instance get the name
-        const std::pair<PhysicalInstance,ApEvent> result =
-          single_broadcast->get_value();
+        const InstanceEventPair result = single_broadcast->get_value();
         instance = result.first;
         ready_event = result.second;
       }

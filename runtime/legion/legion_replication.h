@@ -2187,7 +2187,13 @@ namespace Legion {
     protected:
       RtBarrier resource_barrier;
       ValueBroadcast<DistributedID> *did_broadcast;
-      ValueBroadcast<std::pair<PhysicalInstance,ApEvent> > *single_broadcast;
+      // Need this because std::pair<PhysicalInstance,ApEvent> is not
+      // trivially copyable for reasons passing understanding
+      struct InstanceEventPair {
+        PhysicalInstance first;
+        ApEvent second;
+      };
+      ValueBroadcast<InstanceEventPair> *single_broadcast;
     };
 
     /**
