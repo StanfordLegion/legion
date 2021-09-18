@@ -2280,6 +2280,63 @@ namespace Legion {
     };
 
     /**
+     * \class ReplAcquireOp
+     * An acquire op that is aware that it is
+     * executing in a control replicated context
+     */
+    class ReplAcquireOp : public AcquireOp {
+    public:
+      ReplAcquireOp(Runtime *rt);
+      ReplAcquireOp(const ReplAcquireOp &rhs);
+      virtual ~ReplAcquireOp(void);
+    public:
+      ReplAcquireOp& operator=(const ReplAcquireOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *context,
+                                  bool first_local_shard);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void resolve_false(bool speculated, bool launched);
+      virtual CollectiveMapping* get_collective_mapping(void);
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
+    protected:
+      RtBarrier collective_map_barrier;
+      bool is_first_local_shard;
+    };
+
+    /**
+     * \class ReplReleaseOp
+     * A release op that is aware that it 
+     */
+    class ReplReleaseOp : public ReleaseOp {
+    public:
+      ReplReleaseOp(Runtime *rt);
+      ReplReleaseOp(const ReplReleaseOp &rhs);
+      virtual ~ReplReleaseOp(void);
+    public:
+      ReplReleaseOp& operator=(const ReplReleaseOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *context,
+                                  bool first_local_shard);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void resolve_false(bool speculated, bool launched);
+      virtual CollectiveMapping* get_collective_mapping(void);
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    protected:
+      RtBarrier collective_map_barrier;
+      bool is_first_local_shard;
+    };
+
+    /**
      * \class ReplTraceOp
      * Base class for all replicated trace operations
      */

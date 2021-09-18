@@ -2458,7 +2458,13 @@ namespace Legion {
       virtual void complete_replay(ApEvent acquire_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
+    public:
+      // These are helper methods for ReplAcquireOp
+      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
+      void activate_acquire(void);
+      void deactivate_acquire(void);
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
@@ -2572,7 +2578,13 @@ namespace Legion {
       virtual void complete_replay(ApEvent release_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
+    public:
+      // These are helper methods for ReplReleaseOp
+      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
+      void activate_release(void);
+      void deactivate_release(void);
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(std::vector<PhysicalManager*> &source_instances);

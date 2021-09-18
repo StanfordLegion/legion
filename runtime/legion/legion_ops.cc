@@ -12805,6 +12805,13 @@ namespace Legion {
     void AcquireOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_acquire(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::activate_acquire(void)
+    //--------------------------------------------------------------------------
+    {
       activate_speculative(); 
       activate_memoizable();
       mapper = NULL;
@@ -12816,6 +12823,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AcquireOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_acquire(); 
+      // Return this operation to the runtime
+      runtime->free_acquire_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::deactivate_acquire(void)
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();  
@@ -12841,8 +12857,6 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-      // Return this operation to the runtime
-      runtime->free_acquire_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12998,7 +13012,7 @@ namespace Legion {
                                               this, 0/*idx*/, completion_event,
                                               restricted_instances,
                                               trace_info, 
-                                              NULL/*no collective mapping*/,
+                                              get_collective_mapping(),
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -13049,7 +13063,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(finalize_complete_mapping(mapping_applied));
       if (!request_early_complete(acquire_complete))
         complete_execution(Runtime::protect_event(acquire_complete));
       else
@@ -13703,6 +13717,13 @@ namespace Legion {
     void ReleaseOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_release(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::activate_release(void)
+    //--------------------------------------------------------------------------
+    {
       activate_speculative(); 
       activate_memoizable();
       mapper = NULL;
@@ -13714,6 +13735,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReleaseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_release(); 
+      // Return this operation to the runtime
+      runtime->free_release_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::deactivate_release(void)
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();
@@ -13740,8 +13770,6 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-      // Return this operation to the runtime
-      runtime->free_release_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -13906,7 +13934,7 @@ namespace Legion {
                                               completion_event,
                                               restricted_instances, 
                                               source_instances, trace_info,
-                                              NULL/*no collective mapping*/,
+                                              get_collective_mapping(),
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -13956,7 +13984,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(finalize_complete_mapping(mapping_applied));
       if (!request_early_complete(release_complete))
         complete_execution(Runtime::protect_event(release_complete));
       else

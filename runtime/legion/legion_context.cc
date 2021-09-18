@@ -17554,22 +17554,124 @@ namespace Legion {
     void ReplicateContext::issue_acquire(const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
-                    "Acquire operations are not currently supported in control "
-                    "replication contexts for task %s (UID %lld). It may be "
-                    "supported in the future.",
-                    get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_ACQUIRE);
+        hasher.hash(launcher.logical_region);
+        hasher.hash(launcher.parent_region);
+        for (std::set<FieldID>::const_iterator it =
+              launcher.fields.begin(); it != launcher.fields.end(); it++)
+          hasher.hash(*it);
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        if (launcher.physical_region.impl != NULL)
+        {
+          Serializer rez;
+          ExternalMappable::pack_region_requirement(
+              launcher.physical_region.impl->get_requirement(), rez);
+          hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+          hasher.hash<bool>(launcher.physical_region.is_mapped());
+        }
+        verify_replicable(hasher, "issue_acquire");
+      }
+      ReplAcquireOp *acquire_op = runtime->get_available_repl_acquire_op();
+      acquire_op->initialize(this, launcher);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      acquire_op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this acquire operation.
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!runtime->unsafe_launch)
+        find_conflicting_regions(acquire_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
+            "Runtime is unmapping and remapping "
+              "physical regions around issue_acquire call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        }
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the acquire operation
+      add_to_dependence_queue(acquire_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::issue_release(const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
-                    "Release operations are not currently supported in control "
-                    "replication contexts for task %s (UID %lld). It may be "
-                    "supported in the future.",
-                    get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      if (runtime->safe_control_replication &&
+          ((current_trace == NULL) || !current_trace->is_fixed()))
+      {
+        Murmur3Hasher hasher;
+        hasher.hash(REPLICATE_RELEASE);
+        hasher.hash(launcher.logical_region);
+        hasher.hash(launcher.parent_region);
+        for (std::set<FieldID>::const_iterator it =
+              launcher.fields.begin(); it != launcher.fields.end(); it++)
+          hasher.hash(*it);
+        hash_grants(hasher, launcher.grants);
+        hash_phase_barriers(hasher, launcher.wait_barriers);
+        hash_phase_barriers(hasher, launcher.arrive_barriers);
+        hasher.hash(launcher.map_id);
+        hasher.hash(launcher.tag);
+        if (launcher.physical_region.impl != NULL)
+        {
+          Serializer rez;
+          ExternalMappable::pack_region_requirement(
+              launcher.physical_region.impl->get_requirement(), rez);
+          hasher.hash(rez.get_buffer(), rez.get_used_bytes());
+          hasher.hash<bool>(launcher.physical_region.is_mapped());
+        }
+        verify_replicable(hasher, "issue_release");
+      }
+      ReplReleaseOp *release_op = runtime->get_available_repl_release_op();
+      release_op->initialize(this, launcher);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a release operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      release_op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue the release operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!runtime->unsafe_launch)
+        find_conflicting_regions(release_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (runtime->runtime_warnings && !launcher.silence_warnings)
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
+            "Runtime is unmapping and remapping "
+              "physical regions around issue_release call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        }
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the release operation
+      add_to_dependence_queue(release_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------

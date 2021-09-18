@@ -8673,6 +8673,346 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Acquire Op
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplAcquireOp::ReplAcquireOp(Runtime *rt)
+      : AcquireOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAcquireOp::ReplAcquireOp(const ReplAcquireOp &rhs)
+      : AcquireOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAcquireOp::~ReplAcquireOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAcquireOp& ReplAcquireOp::operator=(const ReplAcquireOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::initialize_replication(ReplicateContext *context,
+                                               bool first_local_shard)
+    //--------------------------------------------------------------------------
+    {
+      is_first_local_shard = first_local_shard;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_acquire();
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      is_first_local_shard = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Make sure we didn't leak our barrier
+      assert(!collective_map_barrier.exists());
+#endif
+      deactivate_acquire();
+      runtime->free_repl_acquire_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // If we get here then we're not doing a physical trace replay
+      // so we're going to need a collective fill barrier to sync
+      // execution of our physical analysis before and after
+      collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      // Then do the base class analysis
+      AcquireOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      // Signal that all of our mapping dependences are satisfied
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Only the first local shard on each node should actually go through
+      // and do the physical analysis for satisfying the collective mapping
+      if (!is_first_local_shard)
+      {
+        // Make sure we register ourselves for tracing if we are doing that
+        const PhysicalTraceInfo trace_info(this, 0/*index*/,true/*initialize*/);
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // Arrive on both generations of the barrier since we're using them
+        Runtime::advance_barrier(collective_map_barrier);
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+        complete_mapping(collective_map_barrier);
+#ifdef DEBUG_LEGION
+        collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
+        complete_execution();
+      }
+      else
+      {
+        std::set<RtEvent> preconditions;
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions);
+        if (!collective_map_barrier.has_triggered())
+          preconditions.insert(collective_map_barrier);
+        Runtime::advance_barrier(collective_map_barrier);
+        if (!preconditions.empty())
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+        else
+          enqueue_ready_operation();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAcquireOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      assert(!collective_map_barrier.exists());
+#endif
+      AcquireOp::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* ReplAcquireOp::get_collective_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return &(repl_ctx->shard_manager->get_collective_mapping()); 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplAcquireOp::finalize_complete_mapping(RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+#ifdef DEBUG_LEGION
+      const RtEvent result = collective_map_barrier;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      return result;
+#else
+      return collective_map_barrier;
+#endif
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Release Op
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplReleaseOp::ReplReleaseOp(Runtime *rt)
+      : ReleaseOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReleaseOp::ReplReleaseOp(const ReplReleaseOp &rhs)
+      : ReleaseOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReleaseOp::~ReplReleaseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReleaseOp& ReplReleaseOp::operator=(const ReplReleaseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::initialize_replication(ReplicateContext *context,
+                                               bool first_local_shard)
+    //--------------------------------------------------------------------------
+    {
+      is_first_local_shard = first_local_shard;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_release();
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      is_first_local_shard = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Make sure we didn't leak our barrier
+      assert(!collective_map_barrier.exists());
+#endif
+      deactivate_release();
+      runtime->free_repl_release_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // If we get here then we're not doing a physical trace replay
+      // so we're going to need a collective fill barrier to sync
+      // execution of our physical analysis before and after
+      collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      // Then do the base class analysis
+      ReleaseOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      // Signal that all of our mapping dependences are satisfied
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Only the first local shard on each node should actually go through
+      // and do the physical analysis for satisfying the collective mapping
+      if (!is_first_local_shard)
+      {
+        // Make sure we register ourselves for tracing if we are doing that
+        const PhysicalTraceInfo trace_info(this, 0/*index*/,true/*initialize*/);
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // Arrive on both generations of the barrier since we're using them
+        Runtime::advance_barrier(collective_map_barrier);
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+        complete_mapping(collective_map_barrier);
+#ifdef DEBUG_LEGION
+        collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
+        complete_execution();
+      }
+      else
+      {
+        std::set<RtEvent> preconditions;
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions);
+        if (!collective_map_barrier.has_triggered())
+          preconditions.insert(collective_map_barrier);
+        Runtime::advance_barrier(collective_map_barrier);
+        if (!preconditions.empty())
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+        else
+          enqueue_ready_operation();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      if (launched)
+        return;
+#ifdef DEBUG_LEGION
+      assert(!collective_map_barrier.exists());
+#endif
+      ReleaseOp::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* ReplReleaseOp::get_collective_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return &(repl_ctx->shard_manager->get_collective_mapping()); 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplReleaseOp::finalize_complete_mapping(RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+#ifdef DEBUG_LEGION
+      const RtEvent result = collective_map_barrier;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      return result;
+#else
+      return collective_map_barrier;
+#endif
+    }
+
+    /////////////////////////////////////////////////////////////
     // ReplTraceOp 
     /////////////////////////////////////////////////////////////
 

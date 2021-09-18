@@ -17008,6 +17008,20 @@ namespace Legion {
         delete (*it);
       }
       available_repl_index_detach_ops.clear();
+      for (std::deque<ReplAcquireOp*>::const_iterator it =
+            available_repl_acquire_ops.begin(); it !=
+            available_repl_acquire_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_acquire_ops.clear();
+      for (std::deque<ReplReleaseOp*>::const_iterator it =
+            available_repl_release_ops.begin(); it !=
+            available_repl_release_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_release_ops.clear();
       for (std::deque<ReplTraceCaptureOp*>::const_iterator it = 
             available_repl_capture_ops.begin(); it !=
             available_repl_capture_ops.end(); it++)
@@ -27293,6 +27307,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplAcquireOp* Runtime::get_available_repl_acquire_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(acquire_op_lock, available_repl_acquire_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplReleaseOp* Runtime::get_available_repl_release_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(release_op_lock, available_repl_release_ops);
+    }
+
+    //--------------------------------------------------------------------------
     ReplTraceCaptureOp* Runtime::get_available_repl_capture_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27857,6 +27885,22 @@ namespace Legion {
     {
       AutoLock d_lock(detach_op_lock);
       release_operation<false>(available_repl_index_detach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_acquire_op(ReplAcquireOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(acquire_op_lock);
+      release_operation<false>(available_repl_acquire_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_release_op(ReplReleaseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(release_op_lock);
+      release_operation<false>(available_repl_release_ops, op);
     }
 
     //--------------------------------------------------------------------------

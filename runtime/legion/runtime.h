@@ -3888,6 +3888,8 @@ namespace Legion {
       ReplIndexAttachOp*    get_available_repl_index_attach_op(void);
       ReplDetachOp*         get_available_repl_detach_op(void);
       ReplIndexDetachOp*    get_available_repl_index_detach_op(void);
+      ReplAcquireOp*        get_available_repl_acquire_op(void);
+      ReplReleaseOp*        get_available_repl_release_op(void);
       ReplTraceCaptureOp*   get_available_repl_capture_op(void);
       ReplTraceCompleteOp*  get_available_repl_trace_op(void);
       ReplTraceReplayOp*    get_available_repl_replay_op(void);
@@ -3961,6 +3963,8 @@ namespace Legion {
       void free_repl_index_attach_op(ReplIndexAttachOp *op);
       void free_repl_detach_op(ReplDetachOp *op);
       void free_repl_index_detach_op(ReplIndexDetachOp *op);
+      void free_repl_acquire_op(ReplAcquireOp *op);
+      void free_repl_release_op(ReplReleaseOp *op);
       void free_repl_capture_op(ReplTraceCaptureOp *op);
       void free_repl_trace_op(ReplTraceCompleteOp *op);
       void free_repl_replay_op(ReplTraceReplayOp *op);
@@ -4414,6 +4418,8 @@ namespace Legion {
       std::deque<ReplIndexAttachOp*>    available_repl_index_attach_ops;
       std::deque<ReplDetachOp*>         available_repl_detach_ops;
       std::deque<ReplIndexDetachOp*>    available_repl_index_detach_ops;
+      std::deque<ReplAcquireOp*>        available_repl_acquire_ops;
+      std::deque<ReplReleaseOp*>        available_repl_release_ops;
       std::deque<ReplTraceCaptureOp*>   available_repl_capture_ops;
       std::deque<ReplTraceCompleteOp*>  available_repl_trace_ops;
       std::deque<ReplTraceReplayOp*>    available_repl_replay_ops;

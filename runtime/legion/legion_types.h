@@ -1921,6 +1921,8 @@ namespace Legion {
     class ReplIndexAttachOp;
     class ReplDetachOp;
     class ReplIndexDetachOp;
+    class ReplAcquireOp;
+    class ReplReleaseOp;
     class ReplTraceOp;
     class ReplTraceCaptureOp;
     class ReplTraceCompleteOp;
