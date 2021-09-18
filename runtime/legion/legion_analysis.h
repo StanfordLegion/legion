@@ -1964,11 +1964,15 @@ namespace Legion {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
                       ApEvent precondition, IndexSpaceExpression *expr,
+                      const InstanceSet &target_instances,
+                      std::vector<InstanceView*> &target_views,
                       std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &trace_info);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
+                      InstanceSet &target_instances,
+                      std::vector<InstanceView*> &target_views,
                       std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &info);
       ReleaseAnalysis(const ReleaseAnalysis &rhs);
@@ -1995,6 +1999,8 @@ namespace Legion {
     public:
       const ApEvent precondition;
       ReleaseAnalysis *const target_analysis;
+      const InstanceSet target_instances;
+      const std::vector<InstanceView*> target_views;
       const std::vector<InstanceView*> source_views;
       const PhysicalTraceInfo trace_info;
     public:
