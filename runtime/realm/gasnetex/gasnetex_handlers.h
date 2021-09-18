@@ -102,7 +102,7 @@ namespace Realm {
 					   gex_Flags_t flags);
 
     void commit_request_batch(gex_AM_SrcDesc_t srcdesc,
-			      gex_AM_Arg_t arg0,
+			      gex_AM_Arg_t arg0, gex_AM_Arg_t cksum,
 			      size_t data_bytes);
 
     int send_completion_reply(gex_EP_t src_ep,

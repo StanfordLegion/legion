@@ -393,6 +393,7 @@ namespace Realm {
     , cfg_use_immediate(true)
     , cfg_use_negotiated(true)
     , cfg_crit_timeout(50000 /* 50us */)
+    , cfg_max_medium(0 /* use GASNet limit */)
     , cfg_max_long(4 << 20 /* 4 MB */)
     , cfg_bind_hostmem(true)
 #ifdef REALM_USE_CUDA
@@ -467,6 +468,7 @@ namespace Realm {
     CommandLineParser cp;
     cp.add_option_int("-gex:immediate", cfg_use_immediate)
       .add_option_int("-gex:negotiated", cfg_use_negotiated)
+      .add_option_int_units("-gex:maxmed", cfg_max_medium)
       .add_option_int_units("-gex:maxlong", cfg_max_long, 'm')
       .add_option_int("-gex:crittime", cfg_crit_timeout)
       .add_option_int("-gex:bindhost", cfg_bind_hostmem)
@@ -734,6 +736,9 @@ namespace Realm {
 						 bool with_congestion,
 						 size_t header_size)
   {
+    if(cfg_do_checksums)
+      header_size += sizeof(gex_AM_Arg_t);
+
     return internal->recommended_max_payload(target, 0 /*ep_index*/,
 					     with_congestion,
 					     header_size,
@@ -744,6 +749,9 @@ namespace Realm {
 						 bool with_congestion,
 						 size_t header_size)
   {
+    if(cfg_do_checksums)
+      header_size += sizeof(gex_AM_Arg_t);
+
     if(targets.size() == 1) {
       // optimization - if there's exactly 1 target, redirect to the unicast mode
       NodeID target = *(targets.begin());
@@ -763,6 +771,9 @@ namespace Realm {
 						 bool with_congestion,
 						 size_t header_size)
   {
+    if(cfg_do_checksums)
+      header_size += sizeof(gex_AM_Arg_t);
+
     return internal->recommended_max_payload(target,
 					     dest_payload_addr.extra,
 					     with_congestion,

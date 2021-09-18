@@ -525,22 +525,26 @@ namespace Realm {
 	  for(int i = 0; i < num_pkts; i++) {
 	    OutbufMetadata::PktType pkttype = ovbuf->pktbuf_pkt_types[i].load_acquire();
 	    if(pkttype != OutbufMetadata::PKTTYPE_INVALID) {
-	      if(pkttype != OutbufMetadata::PKTTYPE_CANCELLED) {
-		// copy the packet contents now
-		uintptr_t pktstart = ((i > 0) ?
-				        ovbuf->pktbuf_pkt_ends[i - 1] :
-				        0);
-		uintptr_t pktend = ovbuf->pktbuf_pkt_ends[i];
-		log_gex_obmgr.debug() << "resolve copy: " << realbuf
-				      << " " << pktstart << " " << pktend;
-		memcpy(reinterpret_cast<void *>(realbuf->baseptr + pktstart),
-		       reinterpret_cast<const void *>(ovbuf->baseptr + pktstart),
-		       pktend - pktstart);
-	      }
-	      realbuf->pktbuf_pkt_types[i].store_release(pkttype);
-	      // we don't update realbuf->pktbuf_ready_packets - the ovbuf
-	      //  remains authoritative on which packets are actually ready
-	    }
+              // try to copy the packet contents now
+              OutbufMetadata::PktType expected = OutbufMetadata::PKTTYPE_INVALID;
+              if(realbuf->pktbuf_pkt_types[i].compare_exchange(expected,
+                                                               OutbufMetadata::PKTTYPE_COPY_IN_PROGRESS)) {
+                if(pkttype != OutbufMetadata::PKTTYPE_CANCELLED) {
+                  uintptr_t pktstart = ((i > 0) ?
+				          ovbuf->pktbuf_pkt_ends[i - 1] :
+				          0);
+                  uintptr_t pktend = ovbuf->pktbuf_pkt_ends[i];
+                  log_gex_obmgr.debug() << "resolve copy: " << realbuf
+                                        << " " << pktstart << " " << pktend;
+                  memcpy(reinterpret_cast<void *>(realbuf->baseptr + pktstart),
+                         reinterpret_cast<const void *>(ovbuf->baseptr + pktstart),
+                         pktend - pktstart);
+                }
+                realbuf->pktbuf_pkt_types[i].store_release(pkttype);
+                // we don't update realbuf->pktbuf_ready_packets - the ovbuf
+                //  remains authoritative on which packets are actually ready
+              }
+            }
 	  }
 	  break;
 	}
@@ -1621,6 +1625,8 @@ namespace Realm {
 	// TODO: safely put this xpair to sleep?
 	if(!realbuf) {
 	  log_gex_xpair.debug() << "re-enqueue (overflow stall) " << this;
+	  if(first_fail_time < 0)
+	    first_fail_time = Clock::current_time_in_nanoseconds();
 	  internal->poller.add_critical_xpair(this);
 	  return;
 	}
@@ -1673,34 +1679,47 @@ namespace Realm {
 	    int pktidx = head->pktbuf_sent_packets + i;
 	    OutbufMetadata::PktType realtype = realbuf->pktbuf_pkt_types[pktidx].load_acquire();
 	    if(realtype == OutbufMetadata::PKTTYPE_INVALID) {
-	      uintptr_t pktstart = ((head->pktbuf_sent_packets > 0) ?
-				      head->pktbuf_pkt_ends[pktidx - 1] :
-				      0);
-	      uintptr_t pktend = head->pktbuf_pkt_ends[pktidx];
-	      log_gex_obmgr.debug() << "late copy: " << realbuf
-				    << " " << pktstart << " " << pktend;
-	      memcpy(reinterpret_cast<void *>(realbuf->baseptr + pktstart),
-		     reinterpret_cast<const void *>(head->baseptr + pktstart),
-		     pktend - pktstart);
-	      OutbufMetadata::PktType pkttype2 = head->pktbuf_pkt_types[pktidx].load();
-	      realbuf->pktbuf_pkt_types[pktidx].store_release(pkttype2);
-	    } else {
+              // attempt to perform late copy - use CAS to avoid race with
+              //  resolve copy
+              if(realbuf->pktbuf_pkt_types[pktidx].compare_exchange(realtype,
+                                                                    OutbufMetadata::PKTTYPE_COPY_IN_PROGRESS)) {
+                uintptr_t pktstart = ((head->pktbuf_sent_packets > 0) ?
+				        head->pktbuf_pkt_ends[pktidx - 1] :
+				        0);
+                uintptr_t pktend = head->pktbuf_pkt_ends[pktidx];
+                log_gex_obmgr.debug() << "late copy: " << realbuf
+                                      << " " << pktstart << " " << pktend;
+                memcpy(reinterpret_cast<void *>(realbuf->baseptr + pktstart),
+                       reinterpret_cast<const void *>(head->baseptr + pktstart),
+                       pktend - pktstart);
+                OutbufMetadata::PktType pkttype2 = head->pktbuf_pkt_types[pktidx].load();
+                realbuf->pktbuf_pkt_types[pktidx].store_release(pkttype2);
+                realtype = pkttype2;
+              }
+            }
+	    if(realtype == OutbufMetadata::PKTTYPE_COPY_IN_PROGRESS) {
+              // stop batch here because we don't want to wait for the
+              //  already-started copy
+              log_gex_obmgr.debug() << "batch shortened due to copy in progress: pktidx=" << pktidx;
+              batch_size = i;
+              break;
+            }
 #ifdef DEBUG_REALM
+            {
 	      OutbufMetadata::PktType pkttype2 = head->pktbuf_pkt_types[pktidx].load();
 	      assert(realtype == pkttype2);
-#endif
 	    }
+#endif
 	  }
 	}
 
         bool batch_attempted = false;
 	if(batch_size > 1) {
-	  // the minimum size we want is to send one packet - max is all
-	  //  of them (watch out for INLINE_SHORT at end)
+	  // the minimum size we want is to send TWO packets (if one, why batch?)
+          //  - max is all of them (watch out for INLINE_SHORT at end)
 	  uintptr_t batch_startofs = head->pktbuf_sent_offset;
 	  int first_idx = head->pktbuf_sent_packets;
 	  int last_idx = head->pktbuf_sent_packets + batch_size - 1;
-	  size_t min_size = head->pktbuf_pkt_ends[first_idx] - batch_startofs;
 	  size_t max_size;
 	  if(head->pktbuf_pkt_types[last_idx].load() != OutbufMetadata::PKTTYPE_INLINE_SHORT) {
 	    // simple - just get from pkt_ends
@@ -1718,6 +1737,10 @@ namespace Realm {
 				     2*sizeof(gex_AM_Arg_t), 16) +
 			roundup_pow2(payload_bytes, 16)) - batch_startofs;
 	  }
+          // clamp to max_size if it was shortened due to an INLINE_SHORT
+	  size_t min_size = std::min((head->pktbuf_pkt_ends[first_idx + 1] -
+                                      batch_startofs),
+                                     max_size);
 
 	  const void *payload_data =
 	    reinterpret_cast<const void *>(realbuf->baseptr + batch_startofs);
@@ -1729,14 +1752,14 @@ namespace Realm {
 	  if(immediate_mode) flags |= GEX_FLAG_IMMEDIATE;
 
 	  gex_AM_SrcDesc_t sd = GEX_AM_SRCDESC_NO_OP;
-	  // double-check that our size is acceptable for a GASNet-allocated
+	  // double-check that our size is acceptable for a client-allocated
 	  //  message - messages on the very limit of fitting into a medium
           //  payload may not work as a batch
 	  size_t max_payload =
 	    GASNetEXHandlers::max_request_medium(internal->eps[src_ep_index],
 						 tgt_rank,
 						 tgt_ep_index,
-						 sizeof(gex_AM_Arg_t), /*header_size*/
+						 2 * sizeof(gex_AM_Arg_t), /* header_size */
 						 lc_opt,
 						 GEX_FLAG_AM_PREPARE_LEAST_CLIENT);
 	  if(min_size <= max_payload) {
@@ -1762,11 +1785,25 @@ namespace Realm {
                   reduced_count++;
                   assert(reduced_count < batch_size);
                 }
+                // should always be at least two messages and smaller than the
+                //  the overall batch size (which means no INLINE_SHORTs to worry
+                //  about)
+                assert((reduced_count >= 2) && (reduced_count < batch_size));
                 last_idx = first_idx + reduced_count - 1;
                 max_size = (head->pktbuf_pkt_ends[last_idx] - batch_startofs);
                 batch_size = reduced_count;
               }
-              GASNetEXHandlers::commit_request_batch(sd, batch_size, max_size);
+
+              uint32_t cksum = 0;
+              if(internal->module->cfg_do_checksums) {
+                uint32_t accum = 0xFFFFFFFF;
+                accum = crc32c_accumulate(accum, &batch_size, sizeof(batch_size));
+                accum = crc32c_accumulate(accum, &max_size, sizeof(max_size));
+                accum = crc32c_accumulate(accum, payload_data, max_size);
+                cksum = ~accum;
+              }
+              GASNetEXHandlers::commit_request_batch(sd, batch_size, cksum,
+                                                     max_size);
 
               pkt_sent = true;
               for(int i = 0; i < batch_size; i++)
@@ -1789,7 +1826,7 @@ namespace Realm {
 
         // if we didn't have multiple packets to batch up, or they couldn't
         //  fit in a batch, try sending just the first packet
-        if(!batch_attempted) {
+        if((batch_size > 0) && !batch_attempted) {
 	  switch(pkttype) {
 	  case OutbufMetadata::PKTTYPE_INLINE:
 	  case OutbufMetadata::PKTTYPE_INLINE_SHORT:
@@ -2430,6 +2467,11 @@ namespace Realm {
 	immediate_mode = (xpair->time_since_failure() <
 			  internal->module->cfg_crit_timeout);
 
+      // if we're not in immediate mode, do some polling to hopefully free up
+      //  resources
+      if(!immediate_mode)
+        gasnet_AMPoll();
+
       // ask the pair to push packets, it'll requeue itself if needed
       xpair->push_packets(immediate_mode, work_until);
 
@@ -3020,12 +3062,22 @@ namespace Realm {
 
     if(dest_payload_addr == 0) {
       // medium message
-      return GASNetEXHandlers::max_request_medium(eps[0],
-						  target,
-						  target_ep_index,
-						  header_size,
-						  GEX_EVENT_NOW,
-						  0 /*flags*/);
+      size_t limit = GASNetEXHandlers::max_request_medium(eps[0],
+                                                          target,
+                                                          target_ep_index,
+                                                          header_size,
+                                                          GEX_EVENT_NOW,
+                                                          0 /*flags*/);
+
+      // message goes inline into pktbuf, so limit to that size as well
+      size_t pad_hdr_bytes = roundup_pow2(header_size + 2*sizeof(gex_AM_Arg_t), 16);
+      limit = std::min(limit, module->cfg_outbuf_size - pad_hdr_bytes);
+
+      // also use a hard limit from the command line, if present
+      if(module->cfg_max_medium)
+        limit = std::min(limit, module->cfg_max_medium);
+
+      return limit;
     } else {
       // long message
       size_t limit = GASNetEXHandlers::max_request_long(eps[0],
@@ -3060,12 +3112,22 @@ namespace Realm {
 
     if(dest_payload_addr == 0) {
       // medium message
-      return GASNetEXHandlers::max_request_medium(eps[0],
-						  target,
-						  target_ep_index,
-						  header_size,
-						  GEX_EVENT_NOW,
-						  0 /*flags*/);
+      size_t limit = GASNetEXHandlers::max_request_medium(eps[0],
+                                                          target,
+                                                          target_ep_index,
+                                                          header_size,
+                                                          GEX_EVENT_NOW,
+                                                          0 /*flags*/);
+
+      // message goes inline into pktbuf, so limit to that size as well
+      size_t pad_hdr_bytes = roundup_pow2(header_size + 2*sizeof(gex_AM_Arg_t), 16);
+      limit = std::min(limit, module->cfg_outbuf_size - pad_hdr_bytes);
+
+      // also use a hard limit from the command line, if present
+      if(module->cfg_max_medium)
+        limit = std::min(limit, module->cfg_max_medium);
+
+      return limit;
     } else {
       // long message
       size_t limit = GASNetEXHandlers::max_request_long(eps[0],
@@ -3107,7 +3169,17 @@ namespace Realm {
     if(with_congestion && compmgr.over_pending_completion_soft_limit())
       return 0;
 
-    return gex_AM_LUBRequestMedium();
+    size_t limit = gex_AM_LUBRequestMedium();
+
+    // message goes inline into pktbuf, so limit to that size as well
+    size_t pad_hdr_bytes = roundup_pow2(header_size + 2*sizeof(gex_AM_Arg_t), 16);
+    limit = std::min(limit, module->cfg_outbuf_size - pad_hdr_bytes);
+
+    // also use a hard limit from the command line, if present
+    if(module->cfg_max_medium)
+      limit = std::min(limit, module->cfg_max_medium);
+
+    return limit;
   }
 
   PreparedMessage *GASNetEXInternal::prepare_message(gex_Rank_t target,
@@ -4464,18 +4536,34 @@ namespace Realm {
   }
 
   size_t GASNetEXInternal::handle_batch(gex_Rank_t srcrank, gex_AM_Arg_t arg0,
+                                        gex_AM_Arg_t cksum,
 					const void *data, size_t data_bytes,
 					gex_AM_Arg_t *comps)
   {
     log_gex_msg.info() << "got batch: " << srcrank << " "
 		       << arg0 << " " << data_bytes;
 
-    size_t npkts = arg0;
+    int npkts = arg0;
     size_t ncomps = 0;
     uintptr_t baseptr = reinterpret_cast<uintptr_t>(data);
     uintptr_t ofs = 0;
 
-    for(size_t i = 0; i < npkts; i++) {
+    if(module->cfg_do_checksums) {
+      uint32_t accum = 0xFFFFFFFF;
+      accum = crc32c_accumulate(accum, &npkts, sizeof(npkts));
+      accum = crc32c_accumulate(accum, &data_bytes, sizeof(data_bytes));
+      accum = crc32c_accumulate(accum, data, data_bytes);
+      gex_AM_Arg_t act_cksum = ~accum;
+      if(act_cksum != cksum) {
+        log_gex.fatal() << "CRC MISMATCH: batch_size=" << npkts
+                        << " payload_size=" << data_bytes
+                        << " exp=" << std::hex << cksum
+                        << " act=" << act_cksum << std::dec;
+        abort();
+      }
+    }
+
+    for(int i = 0; i < npkts; i++) {
       assert((ofs + 2*sizeof(gex_AM_Arg_t)) <= data_bytes);
       const gex_AM_Arg_t *info =
 	reinterpret_cast<const gex_AM_Arg_t *>(baseptr + ofs);
