@@ -2409,6 +2409,7 @@ namespace Legion {
       ApBarrier get_next_execution_fence_barrier(void);
       RtBarrier get_next_resource_return_barrier(void);
       RtBarrier get_next_refinement_barrier(void);
+      RtBarrier get_next_collective_map_barriers(void);
       RtBarrier get_next_trace_recording_barrier(void);
       RtBarrier get_next_summary_fence_barrier(void);
       RtBarrier get_next_deletion_ready_barrier(void);
@@ -2506,6 +2507,10 @@ namespace Legion {
       // These barriers are used for signaling when future maps can be reclaimed
       std::vector<RtBarrier>  future_map_barriers;
       unsigned                next_future_map_bar_index;
+      // These barriers are used to identify pre and post conditions for
+      // exclusive collective mapping operations 
+      std::vector<RtBarrier>  collective_map_barriers;
+      unsigned                next_collective_map_bar_index;
     protected:
       std::map<std::pair<size_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
     protected:

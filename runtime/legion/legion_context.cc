@@ -11144,12 +11144,13 @@ namespace Legion {
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
         next_refinement_mapped_bar_index(0), next_indirection_bar_index(0), 
-        next_future_map_bar_index(0), index_space_allocator_shard(0), 
-        index_partition_allocator_shard(0), field_space_allocator_shard(0), 
-        field_allocator_shard(0), logical_region_allocator_shard(0), 
-        dynamic_id_allocator_shard(0), equivalence_set_allocator_shard(0), 
-        attach_did_allocator_shard(0), next_available_collective_index(0),
-        next_logical_collective_index(1), next_physical_template_index(0), 
+        next_future_map_bar_index(0), next_collective_map_bar_index(0),
+        index_space_allocator_shard(0), index_partition_allocator_shard(0),
+        field_space_allocator_shard(0), field_allocator_shard(0),
+        logical_region_allocator_shard(0), dynamic_id_allocator_shard(0),
+        equivalence_set_allocator_shard(0), attach_did_allocator_shard(0),
+        next_available_collective_index(0), next_logical_collective_index(1),
+        next_physical_template_index(0), 
         sharding_launch_space(IndexSpace::NO_SPACE),
         collective_map_launch_space(IndexSpace::NO_SPACE),
         next_replicate_bar_index(0), next_logical_bar_index(0),
@@ -11229,6 +11230,12 @@ namespace Legion {
       }
       for (unsigned idx = owner_shard->shard_id;
             idx < future_map_barriers.size(); idx += total_shards)
+      {
+        Realm::Barrier bar = future_map_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id;
+            idx < collective_map_barriers.size(); idx += total_shards)
       {
         Realm::Barrier bar = future_map_barriers[idx];
         bar.destroy_barrier();
@@ -17278,10 +17285,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       log_run.debug("Registering a fill operation in task %s (ID %lld)",
                      get_task_name(), get_unique_id());
-      fill_op->set_sharding_collective(new ShardingGatherCollective(this, 
-                                       0/*owner shard*/, COLLECTIVE_LOC_51));
 #endif
-      fill_op->initialize_replication(this);
+      fill_op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
@@ -18766,12 +18772,16 @@ namespace Legion {
       BarrierExchangeCollective<RtBarrier> future_map_collective(this,
           num_barriers, future_map_barriers, COLLECTIVE_LOC_90);
       future_map_collective.exchange_barriers_async();
+      BarrierExchangeCollective<RtBarrier> collective_map_collective(this,
+          num_barriers, collective_map_barriers, COLLECTIVE_LOC_51);
+      collective_map_collective.exchange_barriers_async();
       // Wait for everything to be done
       mapped_collective.wait_for_barrier_exchange();
       refinement_ready_collective.wait_for_barrier_exchange();
       refinement_collective.wait_for_barrier_exchange();
       indirect_collective.wait_for_barrier_exchange();
       future_map_collective.wait_for_barrier_exchange();
+      collective_map_collective.wait_for_barrier_exchange();
     }
 
     //--------------------------------------------------------------------------
@@ -20371,6 +20381,23 @@ namespace Legion {
       advance_logical_barrier(refinement_bar, total_shards);
       return result;
     } 
+
+    //--------------------------------------------------------------------------
+    RtBarrier ReplicateContext::get_next_collective_map_barriers(void)
+    //--------------------------------------------------------------------------
+    {
+      const unsigned collective_index = next_collective_map_bar_index++;
+      if (next_collective_map_bar_index == collective_map_barriers.size())
+        next_collective_map_bar_index = 0;
+      RtBarrier &collective_map_bar = collective_map_barriers[collective_index];
+      const RtBarrier result = collective_map_bar;
+      // Need to advance this twice since we're giving back two generations
+      // There is an implicit assumption here the number of generations in 
+      // the barrier is a multiple of 2, but that seems to be a safe bet :)
+      advance_logical_barrier(collective_map_bar, total_shards);
+      advance_logical_barrier(collective_map_bar, total_shards);
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     RtBarrier ReplicateContext::get_next_trace_recording_barrier(void)

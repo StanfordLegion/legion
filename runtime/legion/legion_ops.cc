@@ -19267,9 +19267,10 @@ namespace Legion {
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping();
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
       resolve_speculation();
     } 
 
@@ -19332,7 +19333,7 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info, 
                                        init_precondition, true_guard,
-                                       trace_info, NULL/*no collective map*/,
+                                       trace_info, get_collective_mapping(),
                                        map_applied_conditions);
         if (runtime->legion_spy_enabled)
         {
@@ -19346,9 +19347,10 @@ namespace Legion {
 #endif
         
         if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
+          complete_mapping(finalize_complete_mapping(
+                Runtime::merge_events(map_applied_conditions)));
         else
-          complete_mapping();
+          complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
         // See if we have any arrivals to trigger
         if (!arrive_barriers.empty())
         {
@@ -19417,7 +19419,7 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info,
                                        init_precondition, true_guard,
-                                       trace_info, NULL/*no collective map*/,
+                                       trace_info, get_collective_mapping(),
                                        map_applied_conditions);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event,
@@ -19427,9 +19429,10 @@ namespace Legion {
       dump_physical_state(&requirement, 0);
 #endif
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping();
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
       // See if we have any arrivals to trigger
       if (!arrive_barriers.empty())
       {

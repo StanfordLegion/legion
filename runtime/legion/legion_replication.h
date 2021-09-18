@@ -1550,29 +1550,20 @@ namespace Legion {
     public:
       ReplFillOp& operator=(const ReplFillOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx,
+                                  bool is_first_local);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
-    protected:
-      ShardingID sharding_functor;
-      ShardingFunction *sharding_function;
-      MapperManager *mapper;
+      virtual CollectiveMapping* get_collective_mapping(void);
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
     public:
-      CollectiveID mapped_collective_id;
-      ShardEventTree *mapped_collective;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
+      RtBarrier collective_map_barrier;
+      bool is_first_local_shard;
     };
 
     /**
@@ -2126,6 +2117,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual DomainPoint get_shard_point(void) const;
       virtual DomainPoint get_collective_instance_point(void) const;
@@ -2137,6 +2129,7 @@ namespace Legion {
       CollectiveID collective_check;
       IndexSpace shard_space;
       ShardingFunction *shard_fn;
+      RtBarrier collective_map_barrier; 
       bool is_first_local_shard;
     };
 
@@ -2164,6 +2157,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual DomainPoint get_collective_instance_point(void) const;
     public:
@@ -2177,6 +2171,7 @@ namespace Legion {
       IndexSpace shard_space;
       IndexSpace point_space;
       ApBarrier attach_barrier;
+      RtBarrier collective_map_barrier;
       ShardingFunction *shard_fn;
       size_t exchange_index;
       bool collective_instance;
@@ -2245,6 +2240,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void select_sources(const unsigned index,
                                   const InstanceRef &target,
@@ -2258,6 +2254,7 @@ namespace Legion {
     protected:
       IndexSpace shard_space;
       ShardingFunction *shard_fn;
+      RtBarrier collective_map_barrier;
       bool is_first_local_shard;
     };
 

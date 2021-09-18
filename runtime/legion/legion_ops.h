@@ -3798,6 +3798,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
     public:
+      // These are helper methods for ReplFillOp
+      virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+    public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
       virtual void resolve_false(bool speculated, bool launched);

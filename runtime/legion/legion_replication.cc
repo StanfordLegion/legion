@@ -3066,11 +3066,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFillOp::initialize_replication(ReplicateContext *ctx)
+    void ReplFillOp::initialize_replication(ReplicateContext *ctx,bool is_first)
     //--------------------------------------------------------------------------
     {
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_2);
+      is_first_local_shard = is_first;
     }
 
     //--------------------------------------------------------------------------
@@ -3078,14 +3077,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_fill();
-      sharding_functor = UINT_MAX;
-      sharding_function = NULL;
-      mapper = NULL;
-#ifdef DEBUG_LEGION
-      sharding_collective = NULL;
-#endif
-      mapped_collective_id = UINT_MAX;
-      mapped_collective = NULL;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      is_first_local_shard = false;
     }
 
     //--------------------------------------------------------------------------
@@ -3093,17 +3086,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        delete sharding_collective;
+      // Make sure we didn't leak our barrier
+      assert(!collective_map_barrier.exists());
 #endif
-      if (mapped_collective != NULL)
-        delete mapped_collective;
       deactivate_fill();
       runtime->free_repl_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
-    void ReplFillOp::trigger_prepipeline_stage(void)
+    void ReplFillOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3112,35 +3103,12 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Do the mapper call to get the sharding function to use
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(
-            parent_ctx->get_executing_processor(), map_id); 
-      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
-      Mapper::SelectShardingFunctorOutput output;
-      output.chosen_functor = UINT_MAX; 
-      mapper->invoke_fill_select_sharding_functor(this, input, &output);
-      if (output.chosen_functor == UINT_MAX)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Mapper %s failed to pick a valid sharding functor for "
-                      "fill in task %s (UID %lld)", mapper->get_mapper_name(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-      this->sharding_functor = output.chosen_functor;
-      sharding_function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
-#ifdef DEBUG_LEGION
-      assert(sharding_collective != NULL);
-      sharding_collective->contribute(this->sharding_functor);
-      if (sharding_collective->is_target() &&
-          !sharding_collective->validate(this->sharding_functor))
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Mapper %s chose different sharding functions "
-                      "for fill in task %s (UID %lld)", 
-                      mapper->get_mapper_name(), parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id())
-#endif
-      // Now we can do the normal prepipeline stage
-      FillOp::trigger_prepipeline_stage();
+      // If we get here then we're not doing a physical trace replay
+      // so we're going to need a collective fill barrier to sync
+      // execution of our physical analysis before and after
+      collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      // Then do the base class analysis
+      FillOp::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -3148,93 +3116,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+      assert(collective_map_barrier.exists());
 #endif
-      // Figure out whether this shard owns this point
-      ShardID owner_shard;
-      if (sharding_space.exists())
+      // Signal that all of our mapping dependences are satisfied
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Only the first local shard on each node should actually go through
+      // and do the physical analysis for satisfying the collective mapping
+      if (!is_first_local_shard)
       {
-        Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
-        owner_shard = sharding_function->find_owner(index_point, shard_domain);
+        // Make sure we register ourselves for tracing if we are doing that
+        const PhysicalTraceInfo trace_info(this, 0/*index*/,true/*initialize*/);
+#ifdef LEGION_SPY
+        // Still have to do this for legion spy
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+#endif
+        // Arrive on both generations of the barrier since we're using them
+        Runtime::advance_barrier(collective_map_barrier);
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+        complete_mapping(collective_map_barrier);
+#ifdef DEBUG_LEGION
+        collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
+        complete_execution();
       }
       else
-        owner_shard = sharding_function->find_owner(index_point, index_domain); 
-      // If we're recording then record the owner shard
-      if (is_recording())
       {
-#ifdef DEBUG_LEGION
-        assert((tpl != NULL) && tpl->is_recording());
-#endif
-        tpl->record_owner_shard(trace_local_id, owner_shard);
+        std::set<RtEvent> preconditions;
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions);
+        if (!collective_map_barrier.has_triggered())
+          preconditions.insert(collective_map_barrier);
+        Runtime::advance_barrier(collective_map_barrier);
+        if (!preconditions.empty())
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+        else
+          enqueue_ready_operation();
       }
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
-#ifdef DEBUG_LEGION
-      assert(mapped_collective == NULL);
-#endif
-      mapped_collective = 
-        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
-      // If we own it we go on the queue, otherwise we complete early
-      if (owner_shard != repl_ctx->owner_shard->shard_id)
-      {
-#ifdef LEGION_SPY
-        // Still have to do this for legion spy
-        LegionSpy::log_operation_events(unique_op_id, 
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-        // We don't own it, so we can pretend like we
-        // mapped and executed this fill already
-        // Before we do this though we have to get the version state
-        // names for any writes so we can update our local state
-        RtEvent local_done = mapped_collective->get_local_event();
-        complete_mapping(local_done);
-        complete_execution();
-      }
-      else // We own it, so do the base call
-      {
-        // Signal the tree when we are done our mapping
-        mapped_collective->signal_tree(mapped_event);
-        // Perform the base operation 
-        FillOp::trigger_ready();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplFillOp::trigger_replay(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tpl != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-      assert(sharding_collective != NULL);
-      sharding_collective->elide_collective();
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      const ShardID owner_shard = tpl->find_owner_shard(trace_local_id);
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
-      if (owner_shard != repl_ctx->owner_shard->shard_id)
-      {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-          log_fill_requirement();
-#ifdef LEGION_SPY
-        LegionSpy::log_replay_operation(unique_op_id);
-        LegionSpy::log_operation_events(unique_op_id, 
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-        complete_mapping();
-        complete_execution();
-        resolve_speculation();
-      }
-      else // We own it, so do the base call
-        FillOp::trigger_replay();
     }
 
     //--------------------------------------------------------------------------
@@ -3244,10 +3164,39 @@ namespace Legion {
       if (launched)
         return;
 #ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
+      assert(!collective_map_barrier.exists());
 #endif
       FillOp::resolve_false(speculated, launched);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping* ReplFillOp::get_collective_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return &(repl_ctx->shard_manager->get_collective_mapping()); 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplFillOp::finalize_complete_mapping(RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+#ifdef DEBUG_LEGION
+      const RtEvent result = collective_map_barrier;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      return result;
+#else
+      return collective_map_barrier;
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -7117,6 +7066,47 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path, tracker,
                                                    map_applied_conditions);
+      // If this a write requirement then we need to perform syncs on the
+      // way in and the way out of the physical analysis across the shards
+      // to ensure we don't do any exclusive updates out of order
+      if (IS_WRITE(requirement))
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+        assert(!collective_map_barrier.exists());
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMapOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;
+      // Signal that all our mapping dependences have been met
+      if (collective_map_barrier.exists())
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Only need to do versioning computation if we're the first local shard
+      if (is_first_local_shard)
+        // Compute the version numbers for this mapping operation
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement, 
+                                                     version_info,
+                                                     preconditions);
+      if (collective_map_barrier.exists())
+      {
+        if (!collective_map_barrier.has_triggered())
+          preconditions.insert(collective_map_barrier);
+        Runtime::advance_barrier(collective_map_barrier);
+      }
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7283,7 +7273,17 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      if (collective_map_barrier.exists())
+      {
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
+                                      mapping_applied);
+        complete_mapping(collective_map_barrier);
+#ifdef DEBUG_LEGION
+        collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
+      }
+      else
+        complete_mapping(mapping_applied);
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -7343,6 +7343,7 @@ namespace Legion {
       collective_check = 0;
       shard_space = IndexSpace::NO_SPACE;
       shard_fn = NULL;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       is_first_local_shard = false;
     }
 
@@ -7350,6 +7351,10 @@ namespace Legion {
     void ReplMapOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Make sure that we consumed this if we had one
+      assert(!collective_map_barrier.exists());
+#endif
       deactivate_collective_instance_creator();
       deactivate_map_op();
       runtime->free_repl_map_op(this);
@@ -7523,6 +7528,7 @@ namespace Legion {
       shard_space = IndexSpace::NO_SPACE;
       point_space = IndexSpace::NO_SPACE;
       attach_barrier = ApBarrier::NO_AP_BARRIER;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       shard_fn = NULL;
       exchange_index = 0;
       collective_instance = false;
@@ -7538,6 +7544,9 @@ namespace Legion {
     void ReplAttachOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!collective_map_barrier.exists());
+#endif
       deactivate_attach_op();
       if (did_broadcast != NULL)
         delete did_broadcast;
@@ -7574,6 +7583,40 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path, tracker,
                                                    map_applied_conditions);
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(!collective_map_barrier.exists());
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // We need collective attach barriers for synchronizing the collective
+      // updates to the equivalence sets across the shards
+      collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAttachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;  
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      // Signal that all our mapping dependences are met
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      if (is_first_local_shard)
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions);
+      if (!collective_map_barrier.has_triggered())
+        preconditions.insert(collective_map_barrier);
+      Runtime::advance_barrier(collective_map_barrier);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7670,9 +7713,14 @@ namespace Legion {
       region.impl->set_reference(external_instance);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
+                          Runtime::merge_events(map_applied_conditions));
       else
-        complete_mapping();
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      complete_mapping(collective_map_barrier);
+#ifdef DEBUG_LEGION
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
       if (!request_early_complete(attach_event))
         complete_execution(Runtime::protect_event(attach_event));
       else
@@ -8098,6 +8146,7 @@ namespace Legion {
       activate_detach_op();
       shard_space = IndexSpace::NO_SPACE;
       shard_fn = NULL;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       is_first_local_shard = false;
     }
 
@@ -8105,6 +8154,9 @@ namespace Legion {
     void ReplDetachOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!collective_map_barrier.exists());
+#endif
       deactivate_detach_op();
       runtime->free_repl_detach_op(this);
     }
@@ -8135,6 +8187,38 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path, tracker,
                                                    map_applied_conditions);
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+      assert(!collective_map_barrier.exists());
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      collective_map_barrier = repl_ctx->get_next_collective_map_barriers(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;  
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      // Signal that all our mapping dependences are met
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      if (is_first_local_shard)
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions);
+      if (!collective_map_barrier.has_triggered())
+        preconditions.insert(collective_map_barrier);
+      Runtime::advance_barrier(collective_map_barrier);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -8249,11 +8333,18 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
+                          Runtime::merge_events(map_applied_conditions));
       else
-        complete_mapping(); 
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      complete_mapping(collective_map_barrier); 
+#ifdef DEBUG_LEGION
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+#endif
       if (!request_early_complete(detach_event))
         complete_execution(Runtime::protect_event(detach_event));
       else
