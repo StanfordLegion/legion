@@ -674,7 +674,7 @@ namespace Realm {
       (void) pair;
       (void) nargs;
 #endif
-      return gex_AM_MaxRequestMedium(pair, tgt_ep_index,
+      return gex_AM_MaxRequestMedium(pair, tgt_rank,
 				     lc_opt, flags, nargs);
     }
 
@@ -1158,7 +1158,7 @@ namespace Realm {
       (void) pair;
       (void) nargs;
 #endif
-      return gex_AM_MaxRequestLong(pair, tgt_ep_index,
+      return gex_AM_MaxRequestLong(pair, tgt_rank,
 				   lc_opt, flags, nargs);
     }
 
