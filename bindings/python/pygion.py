@@ -778,6 +778,31 @@ file_read_only = FileMode('read_only', 0)
 file_read_write = FileMode('read_write', 1)
 file_create = FileMode('create', 2)
 
+class DimOrder(object):
+    __slots__ = ['kind', 'order']
+
+    def __init__(self, kind, order):
+        self.kind = kind
+        self.order = order
+
+    def __str__(self):
+        return self.kind
+
+SOA_F = DimOrder('SOA_F', lambda dim: list(range(dim)) + ['F'])
+SOA_C = DimOrder('SOA_C', lambda dim: list(reversed(range(dim))) + ['F'])
+AOS_F = DimOrder('AOS_F', lambda dim: ['F'] + list(range(dim)))
+AOS_C = DimOrder('AOS_C', lambda dim: ['F'] + list(reversed(range(dim))))
+
+class LayoutConstraint(object):
+    __slots__ = ['dim', 'order']
+
+    def __init__(self, dim, order):
+        self.dim = dim
+        self.order = order
+
+    def __str__(self):
+        return '%s(dim=%s)' % (self.order, self.dim)
+
 # Hack: Can't pickle static methods.
 def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
     handle = ffi.new('legion_index_space_t *')
@@ -1683,16 +1708,17 @@ def _postprocess(arg, point):
     return arg
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'return_type',
+    __slots__ = ['body', 'privileges', 'layout', 'return_type',
                  'leaf', 'inner', 'idempotent', 'replicable',
                  'calling_convention', 'argument_struct',
                  'task_id', 'registered']
 
-    def __init__(self, body, privileges=None, return_type=None,
+    def __init__(self, body, privileges=None, layout=None, return_type=None,
                  leaf=False, inner=False, idempotent=False, replicable=False,
                  register=True, task_id=None, top_level=False):
         self.body = body
         self.privileges = privileges
+        self.layout = layout
         self.return_type = return_type
         self.leaf = bool(leaf)
         self.inner = bool(inner)
@@ -1832,7 +1858,30 @@ class Task (object):
             execution_constraints, c.PY_PROC)
 
         layout_constraints = c.legion_task_layout_constraint_set_create()
-        # FIXME: Add layout constraints
+        if self.layout is not None:
+            for i, constraint in enumerate(self.layout):
+                layout = c.legion_layout_constraint_set_create()
+                dim = constraint.dim
+                dims = ffi.new('legion_dimension_kind_t [%s]' % (dim + 1))
+                for d_idx, d in enumerate(constraint.order.order(dim)):
+                    if d == 'F':
+                        d = 9 # DIM_F
+                    dims[d_idx] = d
+                c.legion_layout_constraint_set_add_ordering_constraint(
+                    layout,
+                    dims,
+                    dim + 1,
+                    True)
+                layout_id = c.legion_layout_constraint_set_register(
+                    c.legion_runtime_get_runtime(),
+                    c.legion_field_space_no_space(),
+                    layout,
+                    str(constraint).encode('utf-8'))
+                c.legion_layout_constraint_set_destroy(layout)
+                c.legion_task_layout_constraint_set_add_layout_constraint(
+                    layout_constraints,
+                    i,
+                    layout_id)
 
         options = ffi.new('legion_task_config_options_t *')
         options[0].leaf = self.leaf

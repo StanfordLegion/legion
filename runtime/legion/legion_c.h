@@ -1657,6 +1657,12 @@ extern "C" {
                                          legion_custom_serdez_id_t serdez);
 
   /**
+   * @see Legion::FieldSpace::NO_SPACE
+   */
+  legion_field_space_t
+  legion_field_space_no_space();
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Runtime::create_shared_ownership

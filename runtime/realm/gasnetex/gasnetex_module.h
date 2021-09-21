@@ -139,6 +139,9 @@ namespace Realm {
 #ifdef REALM_USE_CUDA
     bool cfg_bind_cudamem;
 #endif
+#ifdef REALM_USE_HIP
+    bool cfg_bind_hipmem;
+#endif
     bool cfg_do_checksums;
     bool cfg_batch_messages;
     // number and size of "outbufs", used to put pkt header and/or data in

@@ -28,6 +28,11 @@
 #include "realm/cuda/cuda_internal.h"
 #endif
 
+#ifdef REALM_USE_HIP
+#include "realm/hip/hip_module.h"
+#include "realm/hip/hip_internal.h"
+#endif
+
 #include <gasnet_coll.h>
 #include <gasnet_mk.h>
 
@@ -2777,6 +2782,29 @@ namespace Realm {
 	args.gex_flags = 0;
 	args.gex_class = GEX_MK_CLASS_CUDA_UVA;
 	args.gex_args.gex_class_cuda_uva.gex_CUdevice = gpu->info->device;
+	int ret = gex_MK_Create(&mk,
+				client,
+				&args,
+				0 /*flags*/);
+	if(ret != GASNET_OK) {
+	  log_gex_bind.info() << "mk_create failed?  ret=" << ret
+                              << " mtype=" << memtype << " extra=" << memextra
+                              << " gpu_index=" << gpu->info->index;
+	  return false;
+	}
+	break;
+      }
+#endif
+
+#if defined(GASNET_HAVE_MK_CLASS_HIP) && defined(REALM_USE_HIP) && defined(__HIP_PLATFORM_HCC__)
+      // create a gex_MK_t for the GPU that owns this memory, it only supports building HIP for AMD GPU (__HIP_PLATFORM_HCC_) 
+      if(module->cfg_bind_hipmem &&
+	 (memtype == NetworkSegmentInfo::HipDeviceMem)) {
+	const Hip::GPU *gpu = reinterpret_cast<Hip::GPU *>(memextra);
+	gex_MK_Create_args_t args;
+	args.gex_flags = 0;
+	args.gex_class = GEX_MK_CLASS_HIP;
+	args.gex_args.gex_class_hip.gex_hipDevice = gpu->info->device;
 	int ret = gex_MK_Create(&mk,
 				client,
 				&args,

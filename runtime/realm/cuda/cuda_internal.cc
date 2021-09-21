@@ -436,7 +436,7 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
-    // class GPUTransfercompletion
+    // class GPUTransferCompletion
 
     GPUTransferCompletion::GPUTransferCompletion(XferDes *_xd,
                                                  int _read_port_idx,
@@ -461,6 +461,7 @@ namespace Realm {
       if(write_port_idx >= 0)
         xd->update_bytes_write(write_port_idx, write_offset, write_size);
       xd->remove_reference();
+      delete this;  // TODO: recycle these!
     }
 
 
