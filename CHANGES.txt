@@ -14,6 +14,8 @@ Version 21.09.0 (September ??, 2021)
      - Extensive fixes for separate compilation. This mode has now
          been verified to work with large-scale applications
      - Removed long-obsolete support for `__demand(__external)`
+   * Pygion
+     - Add support for layout constraints
 
 Version 21.06.0 (June 24, 2021)
   * Build
