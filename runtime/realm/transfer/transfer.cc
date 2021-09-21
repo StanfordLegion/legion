@@ -465,7 +465,10 @@ namespace Realm {
 	assert((cur_field_offset + cur_field_size) <= size_t(it->second.size_in_bytes));
 	const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
 	layout_piece = piece_list.find_piece(cur_point);
-	assert(layout_piece != 0);
+        if(REALM_UNLIKELY(layout_piece == 0)) {
+          log_dma.fatal() << "no piece found for " << cur_point << " in instance " << inst_impl->me << " (list: " << piece_list << ")";
+          abort();
+        }
 	field_rel_offset = it->second.rel_offset + cur_field_offset;
       }
 
