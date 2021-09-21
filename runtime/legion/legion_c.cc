@@ -1941,6 +1941,12 @@ legion_field_space_create_shared_ownership(legion_runtime_t runtime_,
   runtime->create_shared_ownership(ctx, handle);
 }
 
+legion_field_space_t
+legion_field_space_no_space()
+{
+  return CObjectWrapper::wrap(FieldSpace::NO_SPACE);
+}
+
 void
 legion_field_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
