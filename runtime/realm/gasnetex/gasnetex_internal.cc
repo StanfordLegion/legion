@@ -782,7 +782,7 @@ namespace Realm {
 
   PendingCompletionManager::~PendingCompletionManager()
   {
-    size_t i = num_groups.load();
+    int i = num_groups.load();
     while(i > 0)
       delete groups[--i].load();
   }
@@ -814,7 +814,7 @@ namespace Realm {
     // allocate a new group and then add it to the list, playing nice with
     //  any other threads that are doing the same
     PendingCompletionGroup *newgrp = new PendingCompletionGroup;
-    size_t grp_index = num_groups.load();
+    int grp_index = num_groups.load();
     while(true) {
       PendingCompletionGroup *expected = 0;
       if(groups[grp_index].compare_exchange(expected, newgrp)) {
@@ -871,7 +871,11 @@ namespace Realm {
   PendingCompletion *PendingCompletionManager::lookup_completion(int index)
   {
     int grp_index = index >> PendingCompletionGroup::LOG2_GROUPSIZE;
-    assert((grp_index >= 0) && (grp_index < (1 << LOG2_MAXGROUPS)));
+    if(REALM_UNLIKELY((grp_index < 0) || (grp_index >= num_groups.load()))) {
+      log_gex_comp.fatal() << "completion index out of range: index=" << index
+                           << " num_groups=" << num_groups.load();
+      abort();
+    }
     PendingCompletionGroup *grp = groups[grp_index].load();
     assert(grp != 0);
     int sub_index = index & ((1 << PendingCompletionGroup::LOG2_GROUPSIZE) - 1);
