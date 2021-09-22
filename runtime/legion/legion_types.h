@@ -116,7 +116,7 @@ namespace Legion {
   template<int DIM, typename T> class LogicalPartitionT;
   class IndexAllocator;
   class FieldAllocator;
-  class TaskArgument;
+  class UntypedBuffer;
   class ArgumentMap;
   class Lock;
   struct LockRequest;

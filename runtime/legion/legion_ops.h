@@ -3293,26 +3293,32 @@ namespace Legion {
     public:
       void initialize_by_field(InnerContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag); 
+                               FieldID fid, MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg); 
       void initialize_by_image(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
+                               MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg);
       void initialize_by_image_range(InnerContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
+                               MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg);
       void initialize_by_preimage(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
+                               MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg);
       void initialize_by_preimage_range(InnerContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
+                               MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg);
       void initialize_by_association(InnerContext *ctx, LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
-                               IndexSpace range, MapperID id, MappingTagID tag);
+                               IndexSpace range, MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg);
       void perform_logging(void) const;
       void log_requirement(void) const;
       const RegionRequirement& get_requirement(void) const;

@@ -198,7 +198,8 @@ namespace Legion {
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
-                                            MapperID id, MappingTagID tag) = 0;
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg) = 0;
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -230,7 +231,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            PartitionKind part_kind) = 0;
+                                            PartitionKind part_kind,
+                                            const UntypedBuffer &marg) = 0;
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -239,7 +241,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag) = 0;
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg) = 0;
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -248,7 +251,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag) = 0;
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg) = 0;
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -257,7 +261,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag) = 0;
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg) = 0;
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -266,7 +271,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag) = 0;
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg) = 0;
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -377,11 +383,11 @@ namespace Legion {
                                    ReductionOpID redop, bool deterministic,
                                    MapperID map_id, MappingTagID tag) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
-                               const std::map<DomainPoint,TaskArgument> &data,
+                               const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
-                                 const std::map<DomainPoint,TaskArgument> &data,
+                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
@@ -1079,7 +1085,8 @@ namespace Legion {
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1111,7 +1118,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            PartitionKind part_kind);
+                                            PartitionKind part_kind,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -1120,7 +1128,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -1129,7 +1138,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -1138,7 +1148,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -1147,7 +1158,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -1247,11 +1259,11 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(IndexSpace domain,
-                               const std::map<DomainPoint,TaskArgument> &data,
+                               const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
-                                 const std::map<DomainPoint,TaskArgument> &data,
+                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(IndexSpace domain,
@@ -2081,7 +2093,8 @@ namespace Legion {
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -2113,7 +2126,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            PartitionKind part_kind);
+                                            PartitionKind part_kind,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2122,7 +2136,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2131,7 +2146,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2140,7 +2156,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2149,7 +2166,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -2248,7 +2266,7 @@ namespace Legion {
                                        MapperID map_id, MappingTagID tag);
       using InnerContext::construct_future_map;
       virtual FutureMap construct_future_map(IndexSpace space,
-                                 const std::map<DomainPoint,TaskArgument> &data,
+                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(IndexSpace space,
@@ -2465,7 +2483,7 @@ namespace Legion {
       static void hash_phase_barriers(Murmur3Hasher &hasher,
           const std::vector<PhaseBarrier> &phase_barriers);
       static void hash_argument(Murmur3Hasher &hasher, 
-                           const unsigned safe_level, const TaskArgument &arg);
+                          const unsigned safe_level, const UntypedBuffer &arg);
       static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred);
       static void hash_static_dependences(Murmur3Hasher &hasher,
           const std::vector<StaticDependence> *dependences);
@@ -2856,7 +2874,8 @@ namespace Legion {
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             IndexSpace range,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_restricted_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -2888,7 +2907,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             Color color,
                                             MapperID id, MappingTagID tag,
-                                            PartitionKind part_kind);
+                                            PartitionKind part_kind,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_image(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2897,7 +2917,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_image_range(
                                             IndexSpace handle,
                                             LogicalPartition projection,
@@ -2906,7 +2927,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_preimage(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2915,7 +2937,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_partition_by_preimage_range(
                                             IndexPartition projection,
                                             LogicalRegion handle,
@@ -2924,7 +2947,8 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
                                             Color color,
-                                            MapperID id, MappingTagID tag);
+                                            MapperID id, MappingTagID tag,
+                                            const UntypedBuffer &marg);
       virtual IndexPartition create_pending_partition(
                                             IndexSpace parent,
                                             IndexSpace color_space,
@@ -3017,11 +3041,11 @@ namespace Legion {
                                        ReductionOpID redop, bool deterministic,
                                        MapperID map_id, MappingTagID tag);
       virtual FutureMap construct_future_map(IndexSpace domain,
-                               const std::map<DomainPoint,TaskArgument> &data,
+                               const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(const Domain &domain,
-                                 const std::map<DomainPoint,TaskArgument> &data,
+                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
                                              ShardingID sid = 0);
       virtual FutureMap construct_future_map(IndexSpace domain,

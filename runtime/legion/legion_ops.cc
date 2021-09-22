@@ -3252,6 +3252,15 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag;
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       layout_constraint_id = launcher.layout_constraint_id;
       
       if (runtime->legion_spy_enabled)
@@ -4553,7 +4562,16 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag;
-      index_point = launcher.point;
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
+      index_point = launcher.point; 
       index_domain = Domain(index_point, index_point);
       sharding_space = launcher.sharding_space;
       if (runtime->legion_spy_enabled)
@@ -6968,6 +6986,15 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag; 
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       if (runtime->legion_spy_enabled)
       {
         const unsigned copy_kind = (src_indirect_requirements.empty() ? 0 : 1) +
@@ -7765,6 +7792,15 @@ namespace Legion {
       parent_task               = owner->parent_task;
       map_id                    = owner->map_id;
       tag                       = owner->tag;
+      mapper_data_size          = owner->mapper_data_size;
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, owner->mapper_data, mapper_data_size);
+      }
       // From CopyOp
       src_parent_indexes        = owner->src_parent_indexes;
       dst_parent_indexes        = owner->dst_parent_indexes;
@@ -11407,6 +11443,15 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag; 
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
                                          unique_op_id, context_index);
@@ -12304,6 +12349,15 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag; 
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
                                          unique_op_id, context_index);
@@ -15728,7 +15782,8 @@ namespace Legion {
                                                    LogicalRegion handle, 
                                                    LogicalRegion parent,
                                                    FieldID fid,
-                                                   MapperID id, MappingTagID t)
+                                                   MapperID id, MappingTagID t,
+                                                   const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15752,6 +15807,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -15765,7 +15829,8 @@ namespace Legion {
                                                    IndexPartition pid,
                                           LogicalPartition projection,
                                           LogicalRegion parent, FieldID fid,
-                                          MapperID id, MappingTagID t) 
+                                          MapperID id, MappingTagID t,
+                                          const UntypedBuffer &marg) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15790,6 +15855,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -15804,7 +15878,8 @@ namespace Legion {
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
-                                                MappingTagID t) 
+                                                MappingTagID t,
+                                                const UntypedBuffer &marg) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15829,6 +15904,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -15841,7 +15925,8 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_preimage(InnerContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t)
+                                    FieldID fid, MapperID id, MappingTagID t,
+                                    const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15864,6 +15949,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -15876,7 +15970,8 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_preimage_range(InnerContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t)
+                                    FieldID fid, MapperID id, MappingTagID t,
+                                    const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15899,6 +15994,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -15911,7 +16015,7 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_association(InnerContext *ctx,
                         LogicalRegion domain, LogicalRegion domain_parent, 
                         FieldID fid, IndexSpace range, 
-                        MapperID id, MappingTagID t)
+                        MapperID id, MappingTagID t, const UntypedBuffer &marg)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15933,6 +16037,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -16733,12 +16846,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_dependent_op(); 
-      if (mapper_data != NULL)
-      {
-        free(mapper_data);
-        mapper_data = NULL;
-        mapper_data_size = 0;
-      }
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       runtime->free_dependent_partition_op(this);
@@ -16773,6 +16880,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < profiling_info.size(); idx++)
           free(profiling_info[idx].buffer);
         profiling_info.clear();
+      }
+      if (mapper_data != NULL)
+      {
+        free(mapper_data);
+        mapper_data = NULL;
+        mapper_data_size = 0;
       }
     }
 
@@ -17207,6 +17320,15 @@ namespace Legion {
       parent_task  = owner->parent_task;
       map_id       = owner->map_id;
       tag          = owner->tag;
+      mapper_data_size = owner->mapper_data_size;
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, owner->mapper_data, mapper_data_size);
+      }
       version_info = owner->version_info;
       parent_req_index = owner->parent_req_index;
       if (runtime->legion_spy_enabled)
@@ -17479,6 +17601,15 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
       map_id = launcher.map_id;
       tag = launcher.tag;
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       index_point = launcher.point;
       index_domain = Domain(index_point, index_point);
       sharding_space = launcher.sharding_space;
@@ -18243,6 +18374,15 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
       map_id = launcher.map_id;
       tag = launcher.tag; 
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
@@ -18622,6 +18762,15 @@ namespace Legion {
       parent_task        = owner->parent_task;
       map_id             = owner->map_id;
       tag                = owner->tag;
+      mapper_data_size   = owner->mapper_data_size;
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, owner->mapper_data, mapper_data_size);
+      }
       // From FillOp
       parent_req_index   = owner->parent_req_index;
       true_guard         = owner->true_guard;

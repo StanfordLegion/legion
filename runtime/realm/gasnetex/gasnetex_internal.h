@@ -271,7 +271,7 @@ namespace Realm {
     // protects pops from the free list (to avoid A-B-A problem), but NOT pushes
     Realm::Mutex mutex;
     Realm::atomic<PendingCompletion *> first_free;
-    Realm::atomic<size_t> num_groups; // number of groups currently allocated
+    Realm::atomic<int> num_groups; // number of groups currently allocated
     Realm::atomic<PendingCompletionGroup *> groups[1 << LOG2_MAXGROUPS];
     atomic<size_t> num_pending;
     size_t pending_soft_limit;  // try to stall traffic above this threshold

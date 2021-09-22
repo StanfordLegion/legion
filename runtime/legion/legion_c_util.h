@@ -421,19 +421,19 @@ namespace Legion {
         return r;
       }
 
-      static legion_task_argument_t
-      wrap(TaskArgument arg)
+      static legion_untyped_buffer_t
+      wrap(UntypedBuffer arg)
       {
-        legion_task_argument_t arg_;
+        legion_untyped_buffer_t arg_;
         arg_.args = arg.get_ptr();
         arg_.arglen = arg.get_size();
         return arg_;
       }
 
-      static TaskArgument
-      unwrap(legion_task_argument_t arg_)
+      static UntypedBuffer 
+      unwrap(legion_untyped_buffer_t arg_)
       {
-        return TaskArgument(arg_.args, arg_.arglen);
+        return UntypedBuffer(arg_.args, arg_.arglen);
       }
 
       static const legion_byte_offset_t

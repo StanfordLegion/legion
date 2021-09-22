@@ -291,7 +291,7 @@ module legion_fortran_types
     logical(c_bool) :: replicable
   end type legion_task_config_options_f_t
 
-  ! Legion::TaskArgument
+  ! Legion::UntypedBuffer
   type, bind(C) :: legion_task_argument_f_t
     type(c_ptr)         :: args
     integer(c_size_t)   :: arglen

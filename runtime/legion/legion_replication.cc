@@ -3909,6 +3909,7 @@ namespace Legion {
                                                        FieldID fid,
                                                        MapperID id, 
                                                        MappingTagID t,
+                                                       const UntypedBuffer &arg,
                                                        RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
@@ -3933,6 +3934,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, arg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -3954,6 +3964,7 @@ namespace Legion {
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
                                                    MapperID id, MappingTagID t,
+                                                   const UntypedBuffer &marg,
                                                    ShardID shard, size_t total,
                                                         RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
@@ -3980,6 +3991,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -4009,7 +4029,9 @@ namespace Legion {
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
                                                 FieldID fid, MapperID id,
-                                                MappingTagID t, ShardID shard, 
+                                                MappingTagID t,  
+                                                const UntypedBuffer &marg,
+                                                ShardID shard, 
                                                 size_t total_shards,
                                                 RtBarrier &deppart_bar) 
     //--------------------------------------------------------------------------
@@ -4036,6 +4058,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -4057,11 +4088,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_preimage(ReplicateContext *ctx,
-                                    ShardID target_shard, ApEvent ready_event,
-                                    IndexPartition pid, IndexPartition proj,
-                                    LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t,
-                                    RtBarrier &deppart_bar)
+                              ShardID target_shard, ApEvent ready_event,
+                              IndexPartition pid, IndexPartition proj,
+                              LogicalRegion handle, LogicalRegion parent,
+                              FieldID fid, MapperID id, MappingTagID t,
+                              const UntypedBuffer &marg, RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4084,6 +4115,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -4097,12 +4137,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_preimage_range(
-                                    ReplicateContext *ctx, ShardID target_shard,
-                                    ApEvent ready_event,
-                                    IndexPartition pid, IndexPartition proj,
-                                    LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, MapperID id, MappingTagID t,
-                                    RtBarrier &deppart_bar)
+                              ReplicateContext *ctx, ShardID target_shard,
+                              ApEvent ready_event,
+                              IndexPartition pid, IndexPartition proj,
+                              LogicalRegion handle, LogicalRegion parent,
+                              FieldID fid, MapperID id, MappingTagID t,
+                              const UntypedBuffer &marg, RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4125,6 +4165,15 @@ namespace Legion {
       requirement.add_field(fid);
       map_id = id;
       tag = t;
+      mapper_data_size = marg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
+      }
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -4138,16 +4187,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_association(
-                               ReplicateContext *ctx, LogicalRegion domain,
-                               LogicalRegion domain_parent, FieldID fid,
-                               IndexSpace range, MapperID id, MappingTagID tag,
-                               RtBarrier &deppart_bar)
+                              ReplicateContext *ctx, LogicalRegion domain,
+                              LogicalRegion domain_parent, FieldID fid,
+                              IndexSpace range, MapperID id, MappingTagID tag,
+                              const UntypedBuffer &marg, RtBarrier &deppart_bar)
     //--------------------------------------------------------------------------
     {
       mapping_barrier = deppart_bar;
       ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
       DependentPartitionOp::initialize_by_association(ctx, domain, 
-                                domain_parent, fid, range, id, tag);
+                          domain_parent, fid, range, id, tag, marg);
     }
 
     //--------------------------------------------------------------------------

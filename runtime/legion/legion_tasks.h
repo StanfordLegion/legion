@@ -1088,7 +1088,7 @@ namespace Legion {
                              bool track = true,
                              std::vector<OutputRequirement> *outputs = NULL);
       void initialize_predicate(const Future &pred_future,
-                                const TaskArgument &pred_arg);
+                                const UntypedBuffer &pred_arg);
       void perform_base_dependence_analysis(void);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs,
