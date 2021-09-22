@@ -4158,8 +4158,9 @@ extern "C" {
   /**
    * @see Legion::IndexCopyLauncher::map_arg
    */
-  void legion_index_copy_launcher_set_sharding_space(legion_index_copy_launcher_t launcher,
-                                                     legion_index_space_t space);
+  void
+  legion_index_copy_launcher_set_mapper_arg(legion_index_copy_launcher_t launcher,
+                                            legion_untyped_buffer_t arg);
 
   // -----------------------------------------------------------------------
   // Acquire Operations
