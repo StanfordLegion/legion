@@ -17601,6 +17601,8 @@ namespace Legion {
         hash_phase_barriers(hasher, launcher.arrive_barriers);
         hasher.hash(launcher.map_id);
         hasher.hash(launcher.tag);
+        hash_argument(hasher,
+            runtime->safe_control_replication, launcher.map_arg);
         if (launcher.physical_region.impl != NULL)
         {
           Serializer rez;
@@ -17663,6 +17665,8 @@ namespace Legion {
         hash_phase_barriers(hasher, launcher.arrive_barriers);
         hasher.hash(launcher.map_id);
         hasher.hash(launcher.tag);
+        hash_argument(hasher,
+            runtime->safe_control_replication, launcher.map_arg);
         if (launcher.physical_region.impl != NULL)
         {
           Serializer rez;
