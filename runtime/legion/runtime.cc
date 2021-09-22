@@ -140,8 +140,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ArgumentMapImpl::set_point(const DomainPoint &point, 
-                                const TaskArgument &arg,
-                                bool replace)
+                                    const UntypedBuffer &arg, bool replace)
     //--------------------------------------------------------------------------
     {
       if (future_map.impl != NULL)
@@ -247,16 +246,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskArgument ArgumentMapImpl::get_point(const DomainPoint &point)
+    UntypedBuffer ArgumentMapImpl::get_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       if (future_map.impl != NULL)
         unfreeze();
       std::map<DomainPoint,Future>::const_iterator finder=arguments.find(point);
       if ((finder == arguments.end()) || (finder->second.impl == NULL))
-        return TaskArgument();
-      return TaskArgument(finder->second.impl->get_untyped_result(),
-                          finder->second.impl->get_untyped_size());
+        return UntypedBuffer();
+      return UntypedBuffer(finder->second.impl->get_untyped_result(),
+                           finder->second.impl->get_untyped_size());
     }
 
     //--------------------------------------------------------------------------
@@ -12757,7 +12756,7 @@ namespace Legion {
         if (legion_main_set)
         {
           TaskLauncher launcher(Runtime::legion_main_id, 
-                                TaskArgument(&input_args, sizeof(InputArgs)),
+                                UntypedBuffer(&input_args, sizeof(InputArgs)),
                                 Predicate::TRUE_PRED, legion_main_mapper_id);
           launch_top_level_task(launcher); 
         }
@@ -12786,7 +12785,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ApEvent Runtime::launch_mapper_task(Mapper *mapper, Processor proc, 
-                                        TaskID tid, const TaskArgument &arg,
+                                        TaskID tid, const UntypedBuffer &arg,
                                         MapperID map_id)
     //--------------------------------------------------------------------------
     {
@@ -22988,7 +22987,7 @@ namespace Legion {
       assert(proxy.exists());
 #endif
       top_context->set_executing_processor(proxy);
-      TaskLauncher launcher(top_task_id, TaskArgument(),
+      TaskLauncher launcher(top_task_id, UntypedBuffer(),
                             Predicate::TRUE_PRED, top_mapper_id);
       // Mark that this task is the top-level task
       top_task->initialize_task(top_context, launcher, false/*track parent*/,
