@@ -1996,8 +1996,8 @@ namespace Legion {
       // Methods for managing the execution of mapper tasks 
       //------------------------------------------------------------------------
       //MapperEvent launch_mapper_task(MapperContext ctx, 
-      //                                         Processor::TaskFuncID tid,
-      //                                         const TaskArgument &arg) const;
+      //                               Processor::TaskFuncID tid,
+      //                               const UntypedBuffer &arg) const;
 
       //void defer_mapper_call(MapperContext ctx, 
       //                                 MapperEvent event) const;

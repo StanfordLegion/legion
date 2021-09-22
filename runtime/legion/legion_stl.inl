@@ -101,9 +101,9 @@ namespace Legion {
     }
 
     template<typename ... Ts>
-    inline TypedArgument<Ts ...>::operator TaskArgument() const
+    inline TypedArgument<Ts ...>::operator UntypedBuffer() const
     {
-      return TaskArgument(buffer, buf_size);
+      return UntypedBuffer(buffer, buf_size);
     }
 
     template<typename ... Ts>

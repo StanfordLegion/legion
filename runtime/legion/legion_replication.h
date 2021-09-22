@@ -1861,6 +1861,7 @@ namespace Legion {
                                ApEvent ready_event, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
                                FieldID fid, MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg,
                                RtBarrier &dependent_partition_bar);
       void initialize_by_image(ReplicateContext *ctx,
 #ifndef SHARD_BY_IMAGE
@@ -1870,6 +1871,7 @@ namespace Legion {
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg,
                                ShardID shard, size_t total_shards,
                                RtBarrier &dependent_partition_bar);
       void initialize_by_image_range(ReplicateContext *ctx,
@@ -1880,6 +1882,7 @@ namespace Legion {
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg,
                                ShardID shard, size_t total_shards,
                                RtBarrier &dependent_partition_bar);
       void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
@@ -1887,16 +1890,19 @@ namespace Legion {
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg,
                                RtBarrier &dependent_partition_bar);
       void initialize_by_preimage_range(ReplicateContext *ctx, ShardID target, 
                                ApEvent ready_event, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg,
                                RtBarrier &dependent_partition_bar);
       void initialize_by_association(ReplicateContext *ctx,LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range, MapperID id, MappingTagID tag,
+                               const UntypedBuffer &marg,
                                RtBarrier &dependent_partition_bar);
     public:
       virtual void activate(void);

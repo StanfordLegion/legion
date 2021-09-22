@@ -399,6 +399,9 @@ namespace Realm {
 #ifdef REALM_USE_CUDA
     , cfg_bind_cudamem(true)
 #endif
+#ifdef REALM_USE_HIP
+    , cfg_bind_hipmem(true)
+#endif
     , cfg_do_checksums(true) // TODO
     , cfg_batch_messages(true)
     , cfg_outbuf_count(64)
@@ -474,6 +477,9 @@ namespace Realm {
       .add_option_int("-gex:bindhost", cfg_bind_hostmem)
 #ifdef REALM_USE_CUDA
       .add_option_int("-gex:bindcuda", cfg_bind_cudamem)
+#endif
+#ifdef REALM_USE_HIP
+      .add_option_int("-gex:bindhip", cfg_bind_hipmem)
 #endif
       .add_option_int("-gex:cksum", cfg_do_checksums)
       .add_option_int("-gex:batch", cfg_batch_messages)

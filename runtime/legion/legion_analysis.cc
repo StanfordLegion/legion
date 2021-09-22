@@ -15817,6 +15817,15 @@ namespace Legion {
           }
           else
             part_finder->second.tighten_valid_mask();
+          // Rebuild the partial valid fields
+          partial_valid_fields.clear();
+          if (!partial_valid_instances.empty())
+          {
+            for (LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
+                  aligned::const_iterator it = partial_valid_instances.begin();
+                  it != partial_valid_instances.end(); it++)
+              partial_valid_fields |= it->second.get_valid_mask();
+          }
         }
       }
       FieldMaskSet<LogicalView>::iterator total_finder = 

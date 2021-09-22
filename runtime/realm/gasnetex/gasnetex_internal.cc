@@ -28,6 +28,11 @@
 #include "realm/cuda/cuda_internal.h"
 #endif
 
+#ifdef REALM_USE_HIP
+#include "realm/hip/hip_module.h"
+#include "realm/hip/hip_internal.h"
+#endif
+
 #include <gasnet_coll.h>
 #include <gasnet_mk.h>
 
@@ -777,7 +782,7 @@ namespace Realm {
 
   PendingCompletionManager::~PendingCompletionManager()
   {
-    size_t i = num_groups.load();
+    int i = num_groups.load();
     while(i > 0)
       delete groups[--i].load();
   }
@@ -809,7 +814,7 @@ namespace Realm {
     // allocate a new group and then add it to the list, playing nice with
     //  any other threads that are doing the same
     PendingCompletionGroup *newgrp = new PendingCompletionGroup;
-    size_t grp_index = num_groups.load();
+    int grp_index = num_groups.load();
     while(true) {
       PendingCompletionGroup *expected = 0;
       if(groups[grp_index].compare_exchange(expected, newgrp)) {
@@ -866,7 +871,11 @@ namespace Realm {
   PendingCompletion *PendingCompletionManager::lookup_completion(int index)
   {
     int grp_index = index >> PendingCompletionGroup::LOG2_GROUPSIZE;
-    assert((grp_index >= 0) && (grp_index < (1 << LOG2_MAXGROUPS)));
+    if(REALM_UNLIKELY((grp_index < 0) || (grp_index >= num_groups.load()))) {
+      log_gex_comp.fatal() << "completion index out of range: index=" << index
+                           << " num_groups=" << num_groups.load();
+      abort();
+    }
     PendingCompletionGroup *grp = groups[grp_index].load();
     assert(grp != 0);
     int sub_index = index & ((1 << PendingCompletionGroup::LOG2_GROUPSIZE) - 1);
@@ -1683,7 +1692,7 @@ namespace Realm {
               //  resolve copy
               if(realbuf->pktbuf_pkt_types[pktidx].compare_exchange(realtype,
                                                                     OutbufMetadata::PKTTYPE_COPY_IN_PROGRESS)) {
-                uintptr_t pktstart = ((head->pktbuf_sent_packets > 0) ?
+                uintptr_t pktstart = ((pktidx > 0) ?
 				        head->pktbuf_pkt_ends[pktidx - 1] :
 				        0);
                 uintptr_t pktend = head->pktbuf_pkt_ends[pktidx];
@@ -1801,6 +1810,69 @@ namespace Realm {
                 accum = crc32c_accumulate(accum, &max_size, sizeof(max_size));
                 accum = crc32c_accumulate(accum, payload_data, max_size);
                 cksum = ~accum;
+
+#ifdef VERIFY_BATCH_CONTENTS_CRCS
+                // sanity-check the checksums of individual packets in the batch
+                const char *baseptr = static_cast<const char *>(payload_data);
+                for(int i = 0; i < batch_size; i++) {
+                  gex_AM_Arg_t info[2];
+                  memcpy(info, baseptr, 2*sizeof(gex_AM_Arg_t));
+
+                  size_t hdr_bytes = (info[0] & 0x3f) << 2;
+                  size_t payload_bytes = info[0] >> 6;
+                  gex_AM_Arg_t msg_arg0 = info[1];
+
+                  size_t pad_hdr_bytes = roundup_pow2(hdr_bytes + 2*sizeof(gex_AM_Arg_t),
+                                                      16);
+
+                  uint32_t expcrc;
+                  memcpy(&expcrc, baseptr + 2*sizeof(gex_AM_Arg_t) + hdr_bytes - sizeof(uint32_t), sizeof(uint32_t));
+
+                  if(payload_bytes == 0) {
+                    uint32_t actcrc = compute_packet_crc(msg_arg0,
+                                                         baseptr + 2*sizeof(gex_AM_Arg_t),
+                                                         hdr_bytes - sizeof(uint32_t),
+                                                         0, 0);
+                    if(expcrc != actcrc) {
+                      log_gex.fatal() << "CRC SHORT " << i << " " << static_cast<const void *>(baseptr)
+                                      << " " << head << " " << realbuf
+                                      << " " << std::hex << expcrc << " " << actcrc << std::dec;
+                      abort();
+                    }
+                    baseptr += pad_hdr_bytes;
+                  } else if(payload_bytes < ((1U << 22) - 1)) {
+                    // medium message
+                    uint32_t actcrc = compute_packet_crc(msg_arg0,
+                                                         baseptr + 2*sizeof(gex_AM_Arg_t),
+                                                         hdr_bytes - sizeof(uint32_t),
+                                                         baseptr + pad_hdr_bytes,
+                                                         payload_bytes);
+                    if(expcrc != actcrc) {
+                      log_gex.fatal() << "CRC MEDIUM " << i << " " << static_cast<const void *>(baseptr)
+                                      << " " << head << " " << realbuf
+                                      << " " << std::hex << expcrc << " " << actcrc << std::dec;
+                      abort();
+                    }
+                    baseptr += pad_hdr_bytes + roundup_pow2(payload_bytes, 16);
+                  } else {
+                    // reverse get
+                    XmitSrcDestPair::LongRgetData extra;
+                    memcpy(&extra, baseptr + pad_hdr_bytes, sizeof(XmitSrcDestPair::LongRgetData));
+                    uint32_t actcrc = compute_packet_crc(msg_arg0,
+                                                         baseptr + 2*sizeof(gex_AM_Arg_t),
+                                                         hdr_bytes - sizeof(uint32_t),
+                                                         0,
+                                                         extra.payload_bytes);
+                    if(expcrc != actcrc) {
+                      log_gex.fatal() << "CRC RGET " << i << " " << static_cast<const void *>(baseptr)
+                                      << " " << head << " " << realbuf
+                                      << " " << std::hex << expcrc << " " << actcrc << std::dec;
+                      abort();
+                    }
+                    baseptr += pad_hdr_bytes + roundup_pow2(sizeof(XmitSrcDestPair::LongRgetData), 16);
+                  }
+                }
+#endif
               }
               GASNetEXHandlers::commit_request_batch(sd, batch_size, cksum,
                                                      max_size);
@@ -2777,6 +2849,29 @@ namespace Realm {
 	args.gex_flags = 0;
 	args.gex_class = GEX_MK_CLASS_CUDA_UVA;
 	args.gex_args.gex_class_cuda_uva.gex_CUdevice = gpu->info->device;
+	int ret = gex_MK_Create(&mk,
+				client,
+				&args,
+				0 /*flags*/);
+	if(ret != GASNET_OK) {
+	  log_gex_bind.info() << "mk_create failed?  ret=" << ret
+                              << " mtype=" << memtype << " extra=" << memextra
+                              << " gpu_index=" << gpu->info->index;
+	  return false;
+	}
+	break;
+      }
+#endif
+
+#if defined(GASNET_HAVE_MK_CLASS_HIP) && defined(REALM_USE_HIP) && defined(__HIP_PLATFORM_HCC__)
+      // create a gex_MK_t for the GPU that owns this memory, it only supports building HIP for AMD GPU (__HIP_PLATFORM_HCC_) 
+      if(module->cfg_bind_hipmem &&
+	 (memtype == NetworkSegmentInfo::HipDeviceMem)) {
+	const Hip::GPU *gpu = reinterpret_cast<Hip::GPU *>(memextra);
+	gex_MK_Create_args_t args;
+	args.gex_flags = 0;
+	args.gex_class = GEX_MK_CLASS_HIP;
+	args.gex_args.gex_class_hip.gex_hipDevice = gpu->info->device;
 	int ret = gex_MK_Create(&mk,
 				client,
 				&args,

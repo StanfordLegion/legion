@@ -464,7 +464,7 @@ module legion_fortran
   end type FFutureMap
 
   ! ===============================================================================
-  ! TaskArgument
+  ! UntypedBuffer
   ! ===============================================================================
   type FTaskArgument
     type(legion_task_argument_f_t) :: task_arg

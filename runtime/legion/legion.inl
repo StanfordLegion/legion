@@ -19047,7 +19047,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename PT, unsigned DIM>
     inline void ArgumentMap::set_point_arg(const PT point[DIM], 
-                                           const TaskArgument &arg, 
+                                           const UntypedBuffer &arg, 
                                            bool replace/*= false*/)
     //--------------------------------------------------------------------------
     {
@@ -19287,7 +19287,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::set_predicate_false_result(TaskArgument arg)
+    inline void TaskLauncher::set_predicate_false_result(UntypedBuffer arg)
     //--------------------------------------------------------------------------
     {
       predicate_false_result = arg;
@@ -19381,7 +19381,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexTaskLauncher::set_predicate_false_result(TaskArgument arg)
+    inline void IndexTaskLauncher::set_predicate_false_result(UntypedBuffer arg)
     //--------------------------------------------------------------------------
     {
       predicate_false_result = arg;
@@ -19755,7 +19755,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void FillLauncher::set_argument(TaskArgument arg)
+    inline void FillLauncher::set_argument(UntypedBuffer arg)
     //--------------------------------------------------------------------------
     {
       argument = arg;
@@ -19813,7 +19813,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexFillLauncher::set_argument(TaskArgument arg)
+    inline void IndexFillLauncher::set_argument(UntypedBuffer arg)
     //--------------------------------------------------------------------------
     {
       argument = arg;
@@ -21350,11 +21350,12 @@ namespace Legion {
                                      LogicalRegionT<DIM1,T1> domain_parent,
                                      FieldID domain_fid,
                                      IndexSpaceT<DIM2,T2> range,
-                                     MapperID id, MappingTagID tag)
+                                     MapperID id, MappingTagID tag,
+                                     UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       create_association(ctx, LogicalRegion(domain), 
-          LogicalRegion(domain_parent), domain_fid, IndexSpace(range), id, tag);
+         LogicalRegion(domain_parent),domain_fid,IndexSpace(range),id,tag,marg);
     }
 
     //--------------------------------------------------------------------------
@@ -21366,14 +21367,15 @@ namespace Legion {
                                       LogicalRegionT<DIM2,T2> range,
                                       LogicalRegionT<DIM2,T2> range_parent,
                                       FieldID range_fid,
-                                      MapperID id, MappingTagID tag)
+                                      MapperID id, MappingTagID tag,
+                                      UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       create_bidirectional_association(ctx, LogicalRegion(domain),
                                        LogicalRegion(domain_parent), domain_fid,
                                        LogicalRegion(range),
                                        LogicalRegion(range_parent), 
-                                       range_fid, id, tag);
+                                       range_fid, id, tag, marg);
     }
 
     //--------------------------------------------------------------------------
@@ -21493,12 +21495,12 @@ namespace Legion {
                                     FieldID fid,
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     Color color, MapperID id, MappingTagID tag,
-                                    PartitionKind part_kind)
+                                    PartitionKind part_kind, UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
             LogicalRegion(handle), LogicalRegion(parent), fid, 
-            IndexSpace(color_space), color, id, tag, part_kind));
+            IndexSpace(color_space), color, id, tag, part_kind, marg));
     }
 
     //--------------------------------------------------------------------------
@@ -21511,13 +21513,13 @@ namespace Legion {
                               FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
-                              MapperID id, MappingTagID tag)
+                              MapperID id, MappingTagID tag, UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM2,T2>(create_partition_by_image(ctx,
         IndexSpace(handle), LogicalPartition(projection),
         LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
-        color, id, tag));
+        color, id, tag, marg));
     }
 
     //--------------------------------------------------------------------------
@@ -21531,13 +21533,13 @@ namespace Legion {
                               FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
-                              MapperID id, MappingTagID tag)
+                              MapperID id, MappingTagID tag, UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM2,T2>(create_partition_by_image_range(ctx,
         IndexSpace(handle), LogicalPartition(projection),
         LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
-        color, id, tag));
+        color, id, tag, marg));
     }
 
     //--------------------------------------------------------------------------
@@ -21550,13 +21552,13 @@ namespace Legion {
                               FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
-                              MapperID id, MappingTagID tag)
+                              MapperID id, MappingTagID tag, UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM1,T1>(create_partition_by_preimage(ctx, 
         IndexPartition(projection), LogicalRegion(handle),
         LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
-        color, id, tag));
+        color, id, tag, marg));
     }
 
     //--------------------------------------------------------------------------
@@ -21570,13 +21572,13 @@ namespace Legion {
                               FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
-                              MapperID id, MappingTagID tag)
+                              MapperID id, MappingTagID tag, UntypedBuffer marg)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM1,T1>(create_partition_by_preimage_range(ctx,
         IndexPartition(projection), LogicalRegion(handle), 
         LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
-        color, id, tag));
+        color, id, tag, marg));
     } 
 
     //--------------------------------------------------------------------------
@@ -23092,7 +23094,7 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldAllocator FieldAllocator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::TaskArgument TaskArgument;
+    typedef Legion::UntypedBuffer TaskArgument;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ArgumentMap ArgumentMap;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

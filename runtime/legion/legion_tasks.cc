@@ -5775,6 +5775,15 @@ namespace Legion {
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       index_point = launcher.point;
       index_domain = Domain(index_point, index_point);
       sharding_space = launcher.sharding_space;
@@ -8456,6 +8465,15 @@ namespace Legion {
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       is_index_space = true;
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
@@ -8571,6 +8589,15 @@ namespace Legion {
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
+      mapper_data_size = launcher.map_arg.get_size();
+      if (mapper_data_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(mapper_data == NULL);
+#endif
+        mapper_data = malloc(mapper_data_size);
+        memcpy(mapper_data, launcher.map_arg.get_ptr(), mapper_data_size);
+      }
       is_index_space = true;
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
@@ -8641,7 +8668,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::initialize_predicate(const Future &pred_future,
-                                         const TaskArgument &pred_arg)
+                                         const UntypedBuffer &pred_arg)
     //--------------------------------------------------------------------------
     {
       if (pred_future.impl != NULL)
