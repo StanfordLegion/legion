@@ -112,11 +112,11 @@ namespace Legion {
       ArgumentMapImpl& operator=(const ArgumentMapImpl &rhs);
     public:
       bool has_point(const DomainPoint &point);
-      void set_point(const DomainPoint &point, const TaskArgument &arg,
+      void set_point(const DomainPoint &point, const UntypedBuffer &arg,
                      bool replace);
       void set_point(const DomainPoint &point, const Future &f, bool replace);
       bool remove_point(const DomainPoint &point);
-      TaskArgument get_point(const DomainPoint &point);
+      UntypedBuffer get_point(const DomainPoint &point);
     public:
       FutureMap freeze(TaskContext *ctx);
       void unfreeze(void);
@@ -1877,7 +1877,7 @@ namespace Legion {
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  TaskID tid,
-                                 const TaskArgument &arg, MapperID map_id);
+                                 const UntypedBuffer &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
       void create_shared_ownership(IndexSpace handle);

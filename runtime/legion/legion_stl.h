@@ -40,7 +40,7 @@ namespace Legion {
     std::tuple<Ts ...> deserialize(const void *buffer);
 
     /*
-     * A helper for building a typed TaskArgument.
+     * A helper for building a typed argument.
      */
     template<typename ... Ts>
     class TypedArgument
@@ -49,7 +49,7 @@ namespace Legion {
       TypedArgument(const Ts& ... ts);
       ~TypedArgument();
 
-      operator TaskArgument() const;
+      operator UntypedBuffer() const;
 
       size_t get_size() const;
       void *get_ptr() const;

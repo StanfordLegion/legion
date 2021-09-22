@@ -281,12 +281,15 @@ extern "C" {
   } legion_logical_partition_t;
 
   /**
-   * @see Legion::TaskArgument
+   * @see Legion::UntypedBuffer
    */
-  typedef struct legion_task_argument_t {
+  typedef struct legion_untyped_buffer_t {
     void *args;
     size_t arglen;
-  } legion_task_argument_t;
+  } legion_untyped_buffer_t;
+  // This is for backwards compatibility when we used
+  // to call legion_untyped_buffer_t as legion_task_argument_t
+  typedef legion_untyped_buffer_t legion_task_argument_t;
 
   typedef struct legion_byte_offset_t {
     int offset;
@@ -2356,7 +2359,7 @@ extern "C" {
   void
   legion_argument_map_set_point(legion_argument_map_t map,
                                 legion_domain_point_t dp,
-                                legion_task_argument_t arg,
+                                legion_untyped_buffer_t arg,
                                 bool replace /* = true */);
 
   /**
@@ -2684,7 +2687,7 @@ extern "C" {
                               legion_context_t ctx,
                               legion_domain_t domain,
                               legion_domain_point_t *points,
-                              legion_task_argument_t *buffers,
+                              legion_untyped_buffer_t *buffers,
                               size_t num_points,
                               bool collective);
 
@@ -2753,7 +2756,7 @@ extern "C" {
   legion_task_launcher_t
   legion_task_launcher_create(
     legion_task_id_t tid,
-    legion_task_argument_t arg,
+    legion_untyped_buffer_t arg,
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
@@ -2923,7 +2926,7 @@ extern "C" {
    */
   void
   legion_task_launcher_set_argument(legion_task_launcher_t launcher,
-                                    legion_task_argument_t arg);
+                                    legion_untyped_buffer_t arg);
 
   /**
    * @see Legion::TaskLauncher::point
@@ -2951,7 +2954,7 @@ extern "C" {
    */
   void
   legion_task_launcher_set_predicate_false_result(legion_task_launcher_t launcher,
-                                                  legion_task_argument_t arg);
+                                                  legion_untyped_buffer_t arg);
 
   /**
    * @see Legion::TaskLauncher::map_id
@@ -2966,6 +2969,13 @@ extern "C" {
   void
   legion_task_launcher_set_mapping_tag(legion_task_launcher_t launcher,
                                        legion_mapping_tag_id_t tag);
+
+  /**
+   * @see Legion::TaskLauncher::map_arg
+   */
+  void
+  legion_task_launcher_set_mapper_arg(legion_task_launcher_t launcher,
+                                      legion_untyped_buffer_t arg);
 
   /**
    * @see Legion::TaskLauncher::enable_inlining
@@ -2997,7 +3007,7 @@ extern "C" {
   legion_index_launcher_create(
     legion_task_id_t tid,
     legion_domain_t domain,
-    legion_task_argument_t global_arg,
+    legion_untyped_buffer_t global_arg,
     legion_argument_map_t map,
     legion_predicate_t pred /* = legion_predicate_true() */,
     bool must /* = false */,
@@ -3247,7 +3257,7 @@ extern "C" {
    */
   void
   legion_index_launcher_set_global_arg(legion_index_launcher_t launcher,
-                                       legion_task_argument_t global_arg);
+                                       legion_untyped_buffer_t global_arg);
 
   /**
    * @see Legion::IndexTaskLauncher::sharding_space
@@ -3269,6 +3279,13 @@ extern "C" {
   void
   legion_index_launcher_set_mapping_tag(legion_index_launcher_t launcher,
                                         legion_mapping_tag_id_t tag);
+
+  /**
+   * @see Legion::IndexTaskLauncher::map_arg
+   */
+  void
+  legion_index_launcher_set_mapper_arg(legion_index_launcher_t launcher,
+                                       legion_untyped_buffer_t map_arg);
 
   /**
    * @see Legion::IndexTaskLauncher::elide_future_return
@@ -3324,6 +3341,13 @@ extern "C" {
                                    bool inst /* = true */);
 
   /**
+   * @see Legion::InlineLauncher::map_arg
+   */
+  void
+  legion_inline_launcher_set_mapper_arg(legion_inline_launcher_t launcher,
+                                        legion_untyped_buffer_t arg);
+
+  /**
    * @see Legion::Runtime::remap_region()
    */
   void
@@ -3344,7 +3368,7 @@ extern "C" {
    */
   void
   legion_runtime_unmap_all_regions(legion_runtime_t runtime,
-                                   legion_context_t ctx);
+                                   legion_context_t ctx); 
 
   // -----------------------------------------------------------------------
   // Fill Field Operations
@@ -3443,6 +3467,13 @@ extern "C" {
    */
   void legion_fill_launcher_set_sharding_space(legion_fill_launcher_t launcher,
                                                legion_index_space_t space);
+
+  /**
+   * @see Legion::FillLauncher::map_arg
+   */
+  void
+  legion_fill_launcher_set_mapper_arg(legion_fill_launcher_t launcher,
+                                      legion_untyped_buffer_t arg);
 
   // -----------------------------------------------------------------------
   // Index Fill Field Operations
@@ -3651,10 +3682,17 @@ extern "C" {
                                      legion_index_fill_launcher_t launcher);
 
   /**
-   * @see Legion::FillLauncher::sharding_space
+   * @see Legion::IndexFillLauncher::sharding_space
    */
   void legion_index_fill_launcher_set_sharding_space(legion_index_fill_launcher_t launcher,
                                                      legion_index_space_t space);
+
+  /**
+   * @see Legion::IndexFillLauncher::map_arg
+   */
+  void
+  legion_index_fill_launcher_set_mapper_arg(legion_index_fill_launcher_t launcher,
+                                            legion_untyped_buffer_t arg);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -3867,6 +3905,13 @@ extern "C" {
    */
   void legion_copy_launcher_set_sharding_space(legion_copy_launcher_t launcher,
                                                legion_index_space_t space);
+
+  /**
+   * @see Legion::CopyLauncher::map_arg
+   */
+  void
+  legion_copy_launcher_set_mapper_arg(legion_copy_launcher_t launcher,
+                                      legion_untyped_buffer_t arg);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -4110,6 +4155,12 @@ extern "C" {
   legion_index_copy_launcher_set_sharding_space(legion_index_copy_launcher_t launcher,
                                                 legion_index_space_t is);
 
+  /**
+   * @see Legion::IndexCopyLauncher::map_arg
+   */
+  void legion_index_copy_launcher_set_sharding_space(legion_index_copy_launcher_t launcher,
+                                                     legion_index_space_t space);
+
   // -----------------------------------------------------------------------
   // Acquire Operations
   // -----------------------------------------------------------------------
@@ -4167,6 +4218,20 @@ extern "C" {
     legion_acquire_launcher_t launcher,
     legion_phase_barrier_t bar);
 
+  /**
+   * @see Legion::AcquireLauncher::sharding_space
+   */
+  void 
+  legion_acquire_launcher_set_sharding_space(legion_acquire_launcher_t launcher,
+                                             legion_index_space_t space);
+
+  /**
+   * @see Legion::AcquireLauncher::map_arg
+   */
+  void
+  legion_acquire_launcher_set_mapper_arg(legion_acquire_launcher_t launcher,
+                                         legion_untyped_buffer_t arg);
+
   // -----------------------------------------------------------------------
   // Release Operations
   // -----------------------------------------------------------------------
@@ -4223,6 +4288,20 @@ extern "C" {
   legion_release_launcher_add_arrival_barrier(
     legion_release_launcher_t launcher,
     legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::ReleaseLauncher::sharding_space
+   */
+  void
+  legion_release_launcher_set_sharding_space(legion_release_launcher_t launcher,
+                                             legion_index_space_t space);
+
+  /**
+   * @see Legion::ReleaseLauncher::map_arg
+   */
+  void
+  legion_release_launcher_set_mapper_arg(legion_release_launcher_t launcher,
+                                         legion_untyped_buffer_t arg);
 
   // -----------------------------------------------------------------------
   // Attach/Detach Operations

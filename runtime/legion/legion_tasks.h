@@ -955,7 +955,7 @@ namespace Legion {
                              bool deterministic,
                              bool track = true);
       void initialize_predicate(const Future &pred_future,
-                                const TaskArgument &pred_arg);
+                                const UntypedBuffer &pred_arg);
       void initialize_must_epoch(MustEpochOp *epoch, unsigned index,
                                  bool do_registration);
     public:
