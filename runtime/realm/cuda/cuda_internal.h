@@ -332,7 +332,7 @@ namespace Realm {
     //  with when async work needs doing
     class GPUStream {
     public:
-      GPUStream(GPU *_gpu, GPUWorker *_worker);
+      GPUStream(GPU *_gpu, GPUWorker *_worker, int rel_priority = 0);
       ~GPUStream(void);
 
       GPU *get_gpu(void) const;
@@ -493,8 +493,7 @@ namespace Realm {
     class GPU {
     public:
       GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
-	  CUcontext _context,
-	  int num_streams);
+	  CUcontext _context);
       ~GPU(void);
 
       void push_context(void);
@@ -601,6 +600,7 @@ namespace Realm {
       GPUStream *find_stream(CUstream stream) const;
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
+      GPUStream *get_next_d2d_stream();
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -628,11 +628,16 @@ namespace Realm {
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
+      std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_stream;
+      atomic<unsigned> next_task_stream, next_d2d_stream;
 
       GPUEventPool event_pool;
+
+      // this can technically be different in each context (but probably isn't
+      //  in practice)
+      int least_stream_priority, greatest_stream_priority;
 
 #ifdef REALM_USE_CUDART_HIJACK
       std::map<const FatBin *, CUmodule> device_modules;
@@ -1018,6 +1023,7 @@ namespace Realm {
   #define CUDA_DRIVER_APIS(__op__) \
     __op__(cuCtxEnablePeerAccess); \
     __op__(cuCtxGetFlags); \
+    __op__(cuCtxGetStreamPriorityRange); \
     __op__(cuCtxPopCurrent); \
     __op__(cuCtxPushCurrent); \
     __op__(cuCtxSynchronize); \
@@ -1062,6 +1068,7 @@ namespace Realm {
     __op__(cuModuleLoadDataEx); \
     __op__(cuStreamAddCallback); \
     __op__(cuStreamCreate); \
+    __op__(cuStreamCreateWithPriority); \
     __op__(cuStreamDestroy); \
     __op__(cuStreamSynchronize); \
     __op__(cuStreamWaitEvent)

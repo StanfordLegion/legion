@@ -101,12 +101,23 @@ namespace Realm {
   //
   // class GPUStream
 
-    GPUStream::GPUStream(GPU *_gpu, GPUWorker *_worker)
+    GPUStream::GPUStream(GPU *_gpu, GPUWorker *_worker,
+                         int rel_priority /*= 0*/)
       : gpu(_gpu), worker(_worker), issuing_copies(false)
     {
       assert(worker != 0);
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamCreate)(&stream, CU_STREAM_NON_BLOCKING) );
-      log_stream.info() << "CUDA stream " << stream << " created for GPU " << gpu;
+      // the math here is designed to balance the context's priority range
+      //  around a relative priority of 0, favoring an extra negative (higher
+      //  priority) option
+      int abs_priority = (gpu->greatest_stream_priority +
+                          rel_priority +
+                          ((gpu->least_stream_priority -
+                            gpu->greatest_stream_priority + 1) / 2));
+      // CUDA promises to clamp to the actual range, so we don't have to
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamCreateWithPriority)
+                (&stream, CU_STREAM_NON_BLOCKING, abs_priority) );
+      log_stream.info() << "stream created: gpu=" << gpu
+                        << " stream=" << stream << " priority=" << abs_priority;
     }
 
     GPUStream::~GPUStream(void)
@@ -1994,12 +2005,19 @@ namespace Realm {
         ThreadLocal::created_gpu_streams->insert(ThreadLocal::current_gpu_stream);
         return ThreadLocal::current_gpu_stream;
       }
-      unsigned index = next_stream.fetch_add(1) % task_streams.size();
+      unsigned index = next_task_stream.fetch_add(1) % task_streams.size();
       GPUStream *result = task_streams[index];
       if (create)
         ThreadLocal::created_gpu_streams->insert(result);
       return result;
-    } 
+    }
+
+    GPUStream *GPU::get_next_d2d_stream()
+    {
+      unsigned d2d_stream_index = (next_d2d_stream.fetch_add(1) %
+                                   module->cfg_d2d_streams);
+      return device_to_device_streams[d2d_stream_index];
+    }
 
     void GPUProcessor::shutdown(void)
     {
@@ -2773,20 +2791,26 @@ namespace Realm {
     // class GPU
 
     GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker,
-	     CUcontext _context,
-	     int num_streams)
+	     CUcontext _context)
       : module(_module), info(_info), worker(_worker)
       , proc(0), fbmem(0), fb_ibmem(0)
       , context(_context), fbmem_base(0), fb_ibmem_base(0)
-      , next_stream(0)
+      , next_task_stream(0), next_d2d_stream(0)
     {
       push_context();
+
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxGetStreamPriorityRange)
+                (&least_stream_priority, &greatest_stream_priority) );
 
       event_pool.init_pool();
 
       host_to_device_stream = new GPUStream(this, worker);
       device_to_host_stream = new GPUStream(this, worker);
-      device_to_device_stream = new GPUStream(this, worker);
+
+      device_to_device_streams.resize(module->cfg_d2d_streams, 0);
+      for(unsigned i = 0; i < module->cfg_d2d_streams; i++)
+        device_to_device_streams[i] = new GPUStream(this, worker,
+                                                    module->cfg_d2d_stream_priority);
 
       // only create p2p streams for devices we can talk to
       peer_to_peer_streams.resize(module->gpu_info.size(), 0);
@@ -2796,9 +2820,9 @@ namespace Realm {
 	if(info->peers.count((*it)->device) != 0)
 	  peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
 
-      task_streams.resize(num_streams);
-      for(int idx = 0; idx < num_streams; idx++)
-	task_streams[idx] = new GPUStream(this, worker);
+      task_streams.resize(module->cfg_task_streams);
+      for(unsigned i = 0; i < module->cfg_task_streams; i++)
+	task_streams[i] = new GPUStream(this, worker);
 
       pop_context();
 
@@ -2817,7 +2841,8 @@ namespace Realm {
       // destroy streams
       delete host_to_device_stream;
       delete device_to_host_stream;
-      delete device_to_device_stream;
+
+      delete_container_contents(device_to_device_streams);
 
       for(std::vector<GPUStream *>::iterator it = peer_to_peer_streams.begin();
 	  it != peer_to_peer_streams.end();
@@ -2825,10 +2850,7 @@ namespace Realm {
 	if(*it)
 	  delete *it;
 
-      while(!task_streams.empty()) {
-	delete task_streams.back();
-	task_streams.pop_back();
-      }
+      delete_container_contents(task_streams);
 
       // free memory
       if(fbmem_base)
@@ -3226,7 +3248,8 @@ namespace Realm {
       , cfg_fb_ib_size(128 << 20)
       , cfg_uvm_mem_size(0)
       , cfg_num_gpus(0)
-      , cfg_gpu_streams(12)
+      , cfg_task_streams(12)
+      , cfg_d2d_streams(4)
       , cfg_use_worker_threads(false)
       , cfg_use_shared_worker(true)
       , cfg_pin_sysmem(true)
@@ -3239,6 +3262,7 @@ namespace Realm {
       , cfg_lmem_resize_to_max(false)
       , cfg_multithread_dma(false)
       , cfg_hostreg_limit(1 << 30)
+      , cfg_d2d_stream_priority(-1)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
       , uvm_base(0), uvmmem(0)
@@ -3382,7 +3406,9 @@ namespace Realm {
 	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
           .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
-	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
+	  .add_option_int("-ll:streams", m->cfg_task_streams)
+          .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
+          .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
 	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
 	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
@@ -3652,7 +3678,7 @@ namespace Realm {
 	    worker->add_to_manager(&(runtime->bgwork));
 	}
 
-	GPU *g = new GPU(this, gpu_info[i], worker, context, cfg_gpu_streams);
+	GPU *g = new GPU(this, gpu_info[i], worker, context);
 
 	if(!cfg_use_shared_worker)
 	  dedicated_workers[g] = worker;

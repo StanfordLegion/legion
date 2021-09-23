@@ -111,7 +111,7 @@ namespace Realm {
             GPUStream *stream;
             if(in_gpu) {
               if(out_gpu == in_gpu)
-                stream = in_gpu->device_to_device_stream;
+                stream = in_gpu->get_next_d2d_stream();
               else if(!out_gpu)
                 stream = in_gpu->device_to_host_stream;
               else {
@@ -732,7 +732,7 @@ namespace Realm {
           uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
 
           AutoGPUContext agc(channel->gpu);
-          GPUStream *stream = channel->gpu->device_to_device_stream;
+          GPUStream *stream = channel->gpu->get_next_d2d_stream();
 
           while(total_bytes < max_bytes) {
             AddressListCursor& out_alc = out_port->addrcursor;
@@ -1141,7 +1141,7 @@ namespace Realm {
   #endif
 #endif
 
-      stream = gpu->device_to_device_stream;
+      stream = gpu->get_next_d2d_stream();
     }
 
     long GPUreduceXferDes::get_requests(Request** requests, long nr)
