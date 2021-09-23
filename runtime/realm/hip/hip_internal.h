@@ -323,7 +323,7 @@ namespace Realm {
     //  with when async work needs doing
     class GPUStream {
     public:
-      GPUStream(GPU *_gpu, GPUWorker *_worker);
+      GPUStream(GPU *_gpu, GPUWorker *_worker, int rel_priority = 0);
       ~GPUStream(void);
 
       GPU *get_gpu(void) const;
@@ -485,8 +485,7 @@ namespace Realm {
     class GPU {
     public:
       GPU(HipModule *_module, GPUInfo *_info, GPUWorker *worker,
-	        int _device_id,
-          int num_streams);
+	  int _device_id);
       ~GPU(void);
 
       void push_context(void);
@@ -593,6 +592,7 @@ namespace Realm {
       GPUStream *find_stream(hipStream_t stream) const;
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
+      GPUStream *get_next_d2d_stream();
     protected:
       hipModule_t load_hip_module(const void *data);
 
@@ -618,11 +618,16 @@ namespace Realm {
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
+      std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_stream;
+      atomic<unsigned> next_task_stream, next_d2d_stream;
 
       GPUEventPool event_pool;
+
+      // this can technically be different in each context (but probably isn't
+      //  in practice)
+      int least_stream_priority, greatest_stream_priority;
 
 #ifdef REALM_USE_HIP_HIJACK
       std::map<const FatBin *, hipModule_t> device_modules;
