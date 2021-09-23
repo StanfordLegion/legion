@@ -18,6 +18,8 @@
 // Useful for IDEs 
 #include "legion.h"
 
+#include <limits>
+
 namespace Legion {
 
     /**
