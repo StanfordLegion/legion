@@ -44,6 +44,10 @@ variables:
   CC:  "gcc-10"
   CXX: "g++-10"
   F90: "gfortran-10"
+.gcc11: &gcc11
+  CC:  "gcc-11"
+  CXX: "g++-11"
+  F90: "gfortran-11"
 
 .clang38: &clang38
   CC:  "clang-3.8"
@@ -507,7 +511,7 @@ before_script:
 .image_clang: &image_clang
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-16.04-clang:210610
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210609
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
 .image_hpcsdk: &image_hpcsdk
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
 .image_icc: &image_icc
@@ -1146,10 +1150,6 @@ gcc9_cxx17_release_regent_pretty:
     <<: [*gcc9, *terra9, *release, *cxx17_normal, *regent_pretty]
 
 # GCC 10
-gcc10_cxx17_debug_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc10, *terra9, *debug, *cxx17_normal, *legion]
 gcc10_cxx17_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
@@ -1158,14 +1158,20 @@ gcc10_cxx17_debug_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc10, *terra9, *debug, *cxx17_normal, *regent]
-gcc10_cxx17_release_regent:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc10, *terra9, *release, *cxx17_normal, *regent]
 gcc10_cxx20_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc10, *terra9, *release, *cxx20_normal, *legion, *short]
+
+# GCC 11
+gcc11_cxx17_debug_legion:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc11, *terra9, *debug, *cxx17_normal, *legion]
+gcc11_cxx20_release_regent:
+  <<: [*linux, *image_2004, *tests]
+  variables:
+    <<: [*gcc11, *terra9, *release, *cxx20_normal, *regent, *short]
 
 # Clang 9
 clang9_cxx17_debug_legion:
