@@ -4029,7 +4029,14 @@ namespace Legion {
       WrapperReferenceMutator mutator(exchange_events);
       AutoLock f_lock(future_map_lock);
       if (!collective_performed)
-      {
+      { 
+        if (runtime->safe_control_replication)
+        {
+          Murmur3Hasher hasher;
+          hasher.hash(ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES);
+          repl_ctx->hash_future_map(hasher, FutureMap(this));
+          repl_ctx->verify_replicable(hasher, "FutureMap::get_all_futures");
+        }
         FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
         collective.exchange_future_names(futures);
         // When the collective is done we can mark that we've done it
