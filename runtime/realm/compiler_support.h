@@ -22,6 +22,28 @@
 #ifndef REALM_COMPILER_SUPPORT_H
 #define REALM_COMPILER_SUPPORT_H
 
+// REALM_COMPILER_IS_GCC   - defined if compiler is really gcc
+// REALM_COMPILER_IS_CLANG - defined if compiler is clang
+// REALM_COMPILER_IS_ICC   - defined if compiler is icc
+// REALM_COMPILER_IS_MSVC  - defined if compiler is MSVC
+// REALM_COMPILER_IS_NVCC  - defined if compiler is really nvcc
+// REALM_COMPILER_IS_HIPCC - defined if compiler is hipcc
+#if defined(__HIPCC__)
+  #define REALM_COMPILER_IS_HIPCC
+#elif defined(__CUDACC__)
+  #define REALM_COMPILER_IS_NVCC
+#elif defined(__ICC)
+  #define REALM_COMPILER_IS_ICC
+#elif defined(__clang__)
+  #define REALM_COMPILER_IS_CLANG
+#elif defined(_MSC_VER)
+  #define REALM_COMPILER_IS_MSVC
+#elif defined(__GNUC__)
+  #define REALM_COMPILER_IS_GCC
+#else
+  // unknown compiler?
+#endif
+
 // REALM_CXX_STANDARD - one of: 0(c++98), 11, 14, 17
 //                      if set from outside, remap 98->0 to allow comparisons
 //                      if not set from outside, autodetect
