@@ -891,7 +891,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     assert(DIM == dim);
-#ifndef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
     if (is_id != 0)
       fprintf(stderr,"ERROR: Cannot implicitly convert sparse Domain to Rect");
 #endif

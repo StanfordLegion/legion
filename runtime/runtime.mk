@@ -448,7 +448,7 @@ ifeq ($(strip $(USE_HIP)),1)
     REALM_CC_FLAGS	+= -DREALM_USE_HIP
     LEGION_CC_FLAGS	+= -DLEGION_USE_HIP
     CC_FLAGS        	+= -D__HIP_PLATFORM_HCC__
-    HIPCC_FLAGS      	+= -D__CUDA_ARCH__=600 -fno-strict-aliasing
+    HIPCC_FLAGS      	+= -fno-strict-aliasing
     INC_FLAGS		+= -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g
