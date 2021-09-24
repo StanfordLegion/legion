@@ -1,4 +1,5 @@
 #include "realm.h"
+#include "realm/cmdline.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -38,7 +39,7 @@ struct TransposeExperiment {
 template <int N>
 void create_permutations(std::vector<LayoutPermutation<N> >& perms,
 			 LayoutPermutation<N>& scratch,
-			 int pos)
+			 int pos, size_t narrow_size)
 {
   static const char *dim_names = "XYZW";
 
@@ -49,12 +50,14 @@ void create_permutations(std::vector<LayoutPermutation<N> >& perms,
     if(found) continue;
     
     scratch.dim_order[pos] = i;
-    scratch.name[pos] = dim_names[i];
+    scratch.name[pos] = (((i == 0) && (narrow_size > 0)) ?
+                           tolower(dim_names[i]):
+                           dim_names[i]);
 
     if(pos == (N - 1))
       perms.push_back(scratch);
     else
-      create_permutations<N>(perms, scratch, pos+1);
+      create_permutations<N>(perms, scratch, pos+1, narrow_size);
   }
 }
 
@@ -80,79 +83,85 @@ void copy_profiling_task(const void *args, size_t arglen,
   }
 }
 
-static size_t log2_buffer_size = 20; // should be bigger than any cache in system
+namespace TestConfig {
+  size_t buffer_size = 64 << 20; // should be bigger than any cache in system
+  size_t narrow_dim = 0;  // should one dimension be a fixed (narrow) size?
+  unsigned dim_mask = 7; // i.e. 1-D, 2-D, 3-D
+  bool all_mems = false;
+};
 
 template <int N, typename FT>
 void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
+                   size_t narrow_size,
 		   Processor prof_proc, int pad = 0)
 {
   std::vector<LayoutPermutation<N> > perms;
   LayoutPermutation<N> scratch;
   memset(&scratch, 0, sizeof(scratch));
-  create_permutations<N>(perms, scratch, 0);
+  create_permutations<N>(perms, scratch, 0, narrow_size);
 
   Rect<N> bounds;
   for(int i = 0; i < N; i++) {
     bounds.lo[i] = 0;
-    bounds.hi[i] = (1 << (log2_size / N)) - 1;
+    if((N > 1) && (narrow_size > 0)) {
+      if(i == 0)
+        bounds.hi[i] = narrow_size - 1;
+      else {
+        // max is for compilers that don't see this code is unreachable for N==1
+        bounds.hi[i] = (1 << (log2_size / std::max(1, N - 1))) - 1;
+      }
+    } else
+      bounds.hi[i] = (1 << (log2_size / N)) - 1;
   }
   IndexSpace<N> is(bounds);
 
   Rect<N> bounds_pad;
   for(int i = 0; i < N; i++) {
     bounds_pad.lo[i] = 0;
-    bounds_pad.hi[i] = (1 << (log2_size / N)) - 1 + 32;
+    bounds_pad.hi[i] = bounds.hi[i] + (((narrow_size > 0) && (narrow_size < 32)) ? narrow_size : 32);
   }
   IndexSpace<N> is_pad(bounds_pad);
-
-  std::vector<RegionInstance> src_insts, dst_insts;
 
   std::map<FieldID, size_t> field_sizes;
   field_sizes[0] = sizeof(FT);
   InstanceLayoutConstraints ilc(field_sizes, 1);
 
-  for(typename std::vector<LayoutPermutation<N> >::const_iterator it = perms.begin();
-      it != perms.end();
-      ++it) {
-    // src mem
+  std::vector<TransposeExperiment<N> *> experiments;
+
+  Event wait_for = Event::NO_EVENT;
+  std::vector<Event> done_events;
+  for(unsigned i = 0; i < perms.size(); i++) {
+    RegionInstance src_inst;
     {
-      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is_pad, ilc, it->dim_order);
-      RegionInstance s_inst;
-      Event e = RegionInstance::create_instance(s_inst, src_mem, ilg,
-						ProfilingRequestSet());
+      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is_pad, ilc, perms[i].dim_order);
+      wait_for = RegionInstance::create_instance(src_inst, src_mem, ilg,
+                                                 ProfilingRequestSet(),
+                                                 wait_for);
       std::vector<CopySrcDstField> tgt(1);
-      tgt[0].inst = s_inst;
+      tgt[0].inst = src_inst;
       tgt[0].field_id = 0;
       tgt[0].size = field_sizes[0];
       FT fill_value = 77;
-      e = is.fill(tgt, ProfilingRequestSet(), &fill_value, sizeof(fill_value), e);
-      e.wait();
-      src_insts.push_back(s_inst);
+      wait_for = is.fill(tgt, ProfilingRequestSet(),
+                         &fill_value, sizeof(fill_value), wait_for);
     }
 
-    // dst mem
-    {
-      InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is, ilc, it->dim_order);
-      RegionInstance d_inst;
-      Event e = RegionInstance::create_instance(d_inst, dst_mem, ilg,
-						ProfilingRequestSet());
-      std::vector<CopySrcDstField> tgt(1);
-      tgt[0].inst = d_inst;
-      tgt[0].field_id = 0;
-      tgt[0].size = field_sizes[0];
-      FT fill_value = 88;
-      e = is.fill(tgt, ProfilingRequestSet(), &fill_value, sizeof(fill_value), e);
-      e.wait();
-      dst_insts.push_back(d_inst);
-    }
-  }
-
-  std::vector<TransposeExperiment<N> *> experiments;
-  std::set<Event> done_events;
-
-  Event prev_copy = Event::NO_EVENT;
-  for(unsigned i = 0; i < perms.size(); i++)
     for(unsigned j = 0; j < perms.size(); j++) {
+      RegionInstance dst_inst;
+      {
+        InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is_pad, ilc, perms[j].dim_order);
+        wait_for = RegionInstance::create_instance(dst_inst, dst_mem, ilg,
+                                                   ProfilingRequestSet(),
+                                                   wait_for);
+        std::vector<CopySrcDstField> tgt(1);
+        tgt[0].inst = dst_inst;
+        tgt[0].field_id = 0;
+        tgt[0].size = field_sizes[0];
+        FT fill_value = 88;
+        wait_for = is.fill(tgt, ProfilingRequestSet(),
+                           &fill_value, sizeof(fill_value), wait_for);
+      }
+
       TransposeExperiment<N> *exp = new TransposeExperiment<N>;
       exp->src_perm = &perms[i];
       exp->dst_perm = &perms[j];
@@ -160,7 +169,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       experiments.push_back(exp);
 
       UserEvent done = UserEvent::create_user_event();
-      done_events.insert(done);
+      done_events.push_back(done);
 
       CopyProfResult cpr;
       cpr.nanoseconds = &(exp->nanoseconds);
@@ -170,17 +179,22 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       prs.add_request(prof_proc, COPYPROF_TASK, &cpr, sizeof(CopyProfResult))
 	.add_measurement<ProfilingMeasurements::OperationTimeline>();
       std::vector<CopySrcDstField> srcs(1), dsts(1);
-      srcs[0].inst = src_insts[i];
+      srcs[0].inst = src_inst;
       srcs[0].field_id = 0;
       srcs[0].size = field_sizes[0];
-      dsts[0].inst = dst_insts[j];
+      dsts[0].inst = dst_inst;
       dsts[0].field_id = 0;
       dsts[0].size = field_sizes[0];
-      prev_copy = is.copy(srcs, dsts, prs, prev_copy);
+      wait_for = is.copy(srcs, dsts, prs, wait_for);
+
+      dst_inst.destroy(wait_for);
     }
 
+    src_inst.destroy(wait_for);
+  }
+
   // wait for copies to finish
-  done_events.insert(prev_copy);
+  done_events.push_back(wait_for);
   Event::merge_events(done_events).wait();
 
   for(typename std::vector<TransposeExperiment<N> *>::const_iterator it = experiments.begin();
@@ -193,17 +207,6 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
 		    << " bw=" << bw;
     delete *it;
   }
-
-  // cleanup
-  for(typename std::vector<RegionInstance>::const_iterator it = src_insts.begin();
-      it != src_insts.end();
-      ++it)
-    it->destroy();
-
-  for(typename std::vector<RegionInstance>::const_iterator it = dst_insts.begin();
-      it != dst_insts.end();
-      ++it)
-    it->destroy();
 }
 
 std::set<Processor::Kind> supported_proc_kinds;
@@ -213,15 +216,57 @@ void top_level_task(const void *args, size_t arglen,
 {
   log_app.print() << "Copy/transpose test";
 
-  // just sysmem for now
-  Machine machine = Machine::get_machine();
-  Memory m = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
-  assert(m.exists());
+  size_t log2_buffer_size = 0;
+  {
+    size_t v = TestConfig::buffer_size / sizeof(int);
+    if(TestConfig::narrow_dim > 0)
+      v /= TestConfig::narrow_dim;
+    while(v > 1) {
+      v >>= 1;
+      log2_buffer_size++;
+    }
+  }
 
-  typedef int FT;
-  do_single_dim<1, FT>(m, m, log2_buffer_size, p);
-  do_single_dim<2, FT>(m, m, log2_buffer_size, p);
-  do_single_dim<3, FT>(m, m, log2_buffer_size, p);
+  std::vector<Memory> src_mems, dst_mems;
+  Machine::MemoryQuery mq(Machine::get_machine());
+  for(Machine::MemoryQuery::iterator it = mq.begin(); it != mq.end(); ++it) {
+    // skip small memories
+    if((*it).capacity() < (3 * TestConfig::buffer_size)) continue;
+
+    // only sysmem if were not doing all combinations
+    if(((*it).kind() != Memory::SYSTEM_MEM) && !TestConfig::all_mems)
+      continue;
+
+    src_mems.push_back(*it);
+  }
+  assert(!src_mems.empty());
+
+  if(TestConfig::all_mems) {
+    dst_mems = src_mems;
+  } else {
+    // just use first as source and last as dest (gives you inter-node
+    //  copies when multiple nodes are present)
+    dst_mems.push_back(src_mems[src_mems.size() - 1]);
+    src_mems.resize(1);
+  }
+
+  for(std::vector<Memory>::const_iterator src_it = src_mems.begin();
+      src_it != src_mems.end();
+      ++src_it)
+    for(std::vector<Memory>::const_iterator dst_it = dst_mems.begin();
+        dst_it != dst_mems.end();
+        ++dst_it) {
+      log_app.print() << "srcmem=" << *src_it << " dstmem=" << *dst_it;
+      typedef int FT;
+      if((TestConfig::dim_mask & 1) != 0)
+        do_single_dim<1, FT>(*src_it, *dst_it, log2_buffer_size, 0, p);
+      if((TestConfig::dim_mask & 2) != 0)
+        do_single_dim<2, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+      if((TestConfig::dim_mask & 4) != 0)
+        do_single_dim<3, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+    }
 }
 
 int main(int argc, char **argv)
@@ -230,13 +275,13 @@ int main(int argc, char **argv)
 
   rt.init(&argc, &argv);
 
-  for(int i = 1; i < argc; i++) {
-    if(!strcmp(argv[i], "-b")) {
-      log2_buffer_size = strtoll(argv[++i], 0, 10);
-      continue;
-    }
-
-  }
+  CommandLineParser cp;
+  cp.add_option_int_units("-b", TestConfig::buffer_size, 'M')
+    .add_option_int("-narrow", TestConfig::narrow_dim)
+    .add_option_int("-dims", TestConfig::dim_mask)
+    .add_option_int("-all", TestConfig::all_mems);
+  bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
+  assert(ok);
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
 

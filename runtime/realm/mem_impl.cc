@@ -949,7 +949,7 @@ namespace Realm {
 	      inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
 	      result = ALLOC_INSTANT_SUCCESS;
 	    } else {
-	      log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *res;
+	      log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
 	      result = ALLOC_INSTANT_FAILURE;
 	    }
 	  } else {

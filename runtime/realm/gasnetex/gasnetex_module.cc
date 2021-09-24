@@ -406,6 +406,14 @@ namespace Realm {
     , cfg_batch_messages(true)
     , cfg_outbuf_count(64)
     , cfg_outbuf_size(256 << 10 /* 256 KB*/)
+    , cfg_force_rma(false)
+      // in GASNet releases before 2021.8.3, bugs 4148 and 4150 made RMA puts
+      // unsafe to use for ibv + CUDA_UVA memory, so disable them by default
+#if REALM_GEX_RELEASE < 20210803
+    , cfg_use_rma_put(false)
+#else
+    , cfg_use_rma_put(true)
+#endif
     , internal(nullptr)
   {}
 
@@ -484,7 +492,9 @@ namespace Realm {
       .add_option_int("-gex:cksum", cfg_do_checksums)
       .add_option_int("-gex:batch", cfg_batch_messages)
       .add_option_int("-gex:obcount", cfg_outbuf_count)
-      .add_option_int_units("-gex:obsize", cfg_outbuf_size);
+      .add_option_int_units("-gex:obsize", cfg_outbuf_size)
+      .add_option_int("-gex:forcerma", cfg_force_rma)
+      .add_option_int("-gex:rmaput", cfg_use_rma_put);
     size_t deprecated_gsize = 0;
     cp.add_option_int_units("-ll:gsize", deprecated_gsize, 'm');
 

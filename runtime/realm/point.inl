@@ -743,6 +743,14 @@ namespace Realm {
   inline bool PointInRectIterator<N,T>::step(void)
   {
     assert(valid);  // can't step an iterator that's already done
+    if(!valid) return false;
+    // despite the check above, g++ 11.1 in c++20 mode complains that `rect`
+    //  might be uninitialized even though the only way `valid` can become
+    //  true is with an initialization of `rect`
+#ifdef REALM_COMPILER_IS_GCC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
     if(N == 1) {
       // 1-D doesn't care about fortran/C order
       if(p.x < rect.hi.x) {
@@ -770,6 +778,9 @@ namespace Realm {
 	}
       }
     }
+#ifdef REALM_COMPILER_IS_GCC
+#pragma GCC diagnostic pop
+#endif
     // if we fall through, we're out of points
     valid = false;
     return false;
