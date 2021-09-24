@@ -664,7 +664,7 @@ namespace Legion {
         __CUDA_HD__
         AffineRefHelper(FT &r,FieldID fid,const DomainPoint &pt,PrivilegeMode p)
           : ref(r),
-#ifndef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
             point(pt), field(fid), 
 #endif
             privilege(p) { }
@@ -673,7 +673,7 @@ namespace Legion {
         __CUDA_HD__
         inline operator const FT&(void) const
           {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
             assert(privilege & LEGION_READ_PRIV);
 #else
             if ((privilege & LEGION_READ_PRIV) == 0)
@@ -685,7 +685,7 @@ namespace Legion {
         __CUDA_HD__
         inline AffineRefHelper<FT>& operator=(const FT &newval)
           { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
             assert(privilege & LEGION_WRITE_PRIV);
 #else
             if ((privilege & LEGION_WRITE_PRIV) == 0)
@@ -697,7 +697,7 @@ namespace Legion {
         __CUDA_HD__
         inline AffineRefHelper<FT>& operator=(const AffineRefHelper<FT> &rhs)
           {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
             assert(privilege & LEGION_WRITE_PRIV);
 #else
             if ((privilege & LEGION_WRITE_PRIV) == 0)
@@ -708,7 +708,7 @@ namespace Legion {
           }
       protected:
         FT &ref;
-#ifndef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
         DomainPoint point;
         FieldID field;
 #endif
@@ -2149,7 +2149,7 @@ namespace Legion {
         {
           if (has_source && !source.contains(p))
             return false;
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           check_gpu_warning();
           // Note that in CUDA this function is likely being inlined
           // everywhere and we can't afford to instantiate templates
@@ -2191,7 +2191,7 @@ namespace Legion {
         {
           if (has_source && !source.contains(r))
             return false;
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           check_gpu_warning();
           // Note that in CUDA this function is likely being inlined
           // everywhere and we can't afford to instantiate templates
@@ -2242,7 +2242,7 @@ namespace Legion {
         inline void check_gpu_warning(void) const
         {
 #if 0
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           bool need_warning = !bounds.dense();
           if (need_warning)
             printf("WARNING: GPU bounds check is imprecise!\n");
@@ -2795,7 +2795,7 @@ namespace Legion {
       inline const FT* ptr(const Rect<N,T>& r, 
                            size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -2967,7 +2967,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -2979,7 +2979,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -2992,7 +2992,7 @@ namespace Legion {
       inline const FT* ptr(const Rect<N,T>& r, 
                            size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -3016,7 +3016,7 @@ namespace Legion {
       inline const FT* ptr(const Rect<N,T>& r, size_t strides[N],
                            size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -3030,7 +3030,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3187,7 +3187,7 @@ namespace Legion {
       inline const FT* ptr(const Rect<1,T>& r, 
                            size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -3347,7 +3347,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3359,7 +3359,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3372,7 +3372,7 @@ namespace Legion {
       inline const FT* ptr(const Rect<1,T>& r,
                            size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -3396,7 +3396,7 @@ namespace Legion {
       inline const FT* ptr(const Rect<1,T>& r, size_t strides[1],
                            size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -3409,7 +3409,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3558,7 +3558,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -3736,7 +3736,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3748,7 +3748,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3760,7 +3760,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3772,7 +3772,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -3796,7 +3796,7 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -3810,7 +3810,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3834,7 +3834,7 @@ namespace Legion {
       inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -3984,7 +3984,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -4150,7 +4150,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4162,7 +4162,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4174,7 +4174,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4186,7 +4186,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -4210,7 +4210,7 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -4223,7 +4223,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4236,7 +4236,7 @@ namespace Legion {
       inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4385,7 +4385,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -4557,7 +4557,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4569,7 +4569,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4581,7 +4581,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4593,7 +4593,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -4617,7 +4617,7 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const 
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -4631,7 +4631,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4792,7 +4792,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -4952,7 +4952,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4964,7 +4964,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4976,7 +4976,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -4988,7 +4988,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -5012,7 +5012,7 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -5025,7 +5025,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -5169,7 +5169,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -5338,7 +5338,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -5350,7 +5350,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -5362,7 +5362,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -5386,7 +5386,7 @@ namespace Legion {
       inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
                      size_t field_size = sizeof(FT)) const 
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -5400,7 +5400,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -5556,7 +5556,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -5716,7 +5716,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -5728,7 +5728,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -5740,7 +5740,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -5764,7 +5764,7 @@ namespace Legion {
       inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
                      size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -5777,7 +5777,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -6231,7 +6231,7 @@ namespace Legion {
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -6395,7 +6395,7 @@ namespace Legion {
       inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -6407,7 +6407,7 @@ namespace Legion {
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -6420,7 +6420,7 @@ namespace Legion {
       inline typename REDOP::RHS* ptr(const Rect<N,T>& r,
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -6445,7 +6445,7 @@ namespace Legion {
               size_t strides[N],
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -6602,7 +6602,7 @@ namespace Legion {
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -6756,7 +6756,7 @@ namespace Legion {
       inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -6768,7 +6768,7 @@ namespace Legion {
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -6781,7 +6781,7 @@ namespace Legion {
       inline typename REDOP::RHS* ptr(const Rect<1,T>& r,
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
@@ -6805,7 +6805,7 @@ namespace Legion {
               size_t strides[1],
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
 #else
           if (!bounds.contains_all(r)) 
@@ -6911,7 +6911,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -6943,7 +6943,7 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -7050,7 +7050,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7062,7 +7062,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7077,7 +7077,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -7113,7 +7113,7 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.prt(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -7138,7 +7138,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7242,7 +7242,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -7274,7 +7274,7 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -7369,7 +7369,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7381,7 +7381,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7396,7 +7396,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -7432,7 +7432,7 @@ namespace Legion {
                            size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -7456,7 +7456,7 @@ namespace Legion {
       __CUDA_HD__
       inline const FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7552,7 +7552,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -7584,7 +7584,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -7697,7 +7697,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7709,7 +7709,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7721,7 +7721,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7735,7 +7735,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -7771,7 +7771,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -7796,7 +7796,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7820,7 +7820,7 @@ namespace Legion {
       inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -7917,7 +7917,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -7949,7 +7949,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -8050,7 +8050,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8062,7 +8062,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8074,7 +8074,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8088,7 +8088,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -8124,7 +8124,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -8148,7 +8148,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8161,7 +8161,7 @@ namespace Legion {
       inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8257,7 +8257,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -8289,7 +8289,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -8396,7 +8396,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8408,7 +8408,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8420,7 +8420,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8434,7 +8434,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -8470,7 +8470,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const 
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -8495,7 +8495,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8603,7 +8603,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -8635,7 +8635,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -8730,7 +8730,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8742,7 +8742,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8754,7 +8754,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8768,7 +8768,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -8804,7 +8804,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -8828,7 +8828,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -8919,7 +8919,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -8951,7 +8951,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -9058,7 +9058,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9070,7 +9070,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9084,7 +9084,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -9120,7 +9120,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const 
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -9145,7 +9145,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9248,7 +9248,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -9280,7 +9280,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -9375,7 +9375,7 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9387,7 +9387,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9401,7 +9401,7 @@ namespace Legion {
         {
           size_t strides[1];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -9437,7 +9437,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -9461,7 +9461,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9549,7 +9549,7 @@ namespace Legion {
         {
           size_t strides[N];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -9582,7 +9582,7 @@ namespace Legion {
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -9689,7 +9689,7 @@ namespace Legion {
       inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9701,7 +9701,7 @@ namespace Legion {
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Point<N,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -9716,7 +9716,7 @@ namespace Legion {
         {
           size_t strides[N];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -9753,7 +9753,7 @@ namespace Legion {
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -9876,7 +9876,7 @@ namespace Legion {
         {
           size_t strides[1];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -9909,7 +9909,7 @@ namespace Legion {
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -10005,7 +10005,7 @@ namespace Legion {
       inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -10017,7 +10017,7 @@ namespace Legion {
       __CUDA_HD__
       inline typename REDOP::RHS* ptr(const Point<1,T>& p) const
         { 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains(p));
 #else
           if (!bounds.contains(p)) 
@@ -10032,7 +10032,7 @@ namespace Legion {
         {
           size_t strides[1];
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
@@ -10068,7 +10068,7 @@ namespace Legion {
               size_t field_size = sizeof(typename REDOP::RHS)) const
         {
           typename REDOP::RHS *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(bounds.contains_all(r));
           assert(result != NULL);
 #else
@@ -11379,7 +11379,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -11391,7 +11391,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -11410,7 +11410,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -11422,7 +11422,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -11443,7 +11443,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -11473,7 +11473,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -11485,7 +11485,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -11889,7 +11889,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -11901,7 +11901,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -11920,7 +11920,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -11932,7 +11932,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -11953,7 +11953,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -11974,7 +11974,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -11986,7 +11986,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -12392,7 +12392,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -12412,7 +12412,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -12432,7 +12432,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -12463,7 +12463,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -12869,7 +12869,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -12889,7 +12889,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -12909,7 +12909,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -12930,7 +12930,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -13883,7 +13883,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -13895,7 +13895,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -13914,7 +13914,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -13926,7 +13926,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -13947,7 +13947,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -13977,7 +13977,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -13989,7 +13989,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14211,7 +14211,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_READ_ONLY) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -14223,7 +14223,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14242,7 +14242,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_WRITE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -14254,7 +14254,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14275,7 +14275,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -14296,7 +14296,7 @@ namespace Legion {
               continue;
             if ((region_privileges[idx] & LEGION_REDUCE_PRIV) == 0)
             {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
               // bounds checks are not precise for CUDA so keep going to 
               // see if there is another region that has it with the privileges
               continue;
@@ -14308,7 +14308,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14534,7 +14534,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14554,7 +14554,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14574,7 +14574,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -14605,7 +14605,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14827,7 +14827,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14847,7 +14847,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -14867,7 +14867,7 @@ namespace Legion {
             index = idx;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(index >= 0);
 #else
           if (index < 0)
@@ -14888,7 +14888,7 @@ namespace Legion {
             found = true;
             break;
           }
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(found);
 #else
           if (!found)
@@ -15522,7 +15522,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -15669,7 +15669,7 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T> &r, size_t field_size = sizeof(FT)) const
         {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(Internal::is_dense_layout(r, accessor.strides, field_size));
 #else
           if (!Internal::is_dense_layout(r, accessor.strides, field_size))
@@ -15769,7 +15769,7 @@ namespace Legion {
         {
           size_t strides[N];
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
           assert(Internal::is_dense_layout(r, strides, field_size));
 #else
@@ -15801,7 +15801,7 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           FT *result = accessor.ptr(r, strides);
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
           assert(result != NULL);
 #else
           if (result == NULL)
@@ -17090,7 +17090,7 @@ namespace Legion {
               >::ptr(const Rect<N,T> &r) const
     //--------------------------------------------------------------------------
     {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(Internal::is_dense_layout(r, accessor.strides, sizeof(FT)));
 #else
       if (!Internal::is_dense_layout(r, accessor.strides, sizeof(FT)))
@@ -17723,7 +17723,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(bounds.bounds.contains(p));
 #else
       assert(bounds.contains(p));
@@ -17747,7 +17747,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(bounds.bounds.contains(p));
 #else
       assert(bounds.contains(p));
@@ -17771,7 +17771,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(bounds.bounds.contains(p));
 #else
       assert(bounds.contains(p));
@@ -17795,7 +17795,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(bounds.bounds.contains(r));
       assert(Internal::is_dense_layout(r, accessor.strides, sizeof(FT)));
 #else
@@ -17830,7 +17830,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(bounds.bounds.contains(r));
 #else
       assert(bounds.contains_all(r));
@@ -17856,7 +17856,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(instance.exists());
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(bounds.bounds.contains(p));
 #else
       assert(bounds.contains(p));

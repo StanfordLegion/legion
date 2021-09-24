@@ -372,7 +372,7 @@ namespace Legion {
   protected:
   public:
     IDType is_id;
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     // Work around an internal nvcc bug by marking this volatile 
     volatile
 #endif

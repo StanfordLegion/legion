@@ -371,7 +371,7 @@ if(Legion_USE_HIP)
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
-    set(HIPCC_FLAGS "-D__CUDA_ARCH__=600 -fno-strict-aliasing")
+    set(HIPCC_FLAGS "-fno-strict-aliasing")
     if("${Legion_HIP_ARCH}" STREQUAL "")
       set(HIP_GENCODE "")
     else()
