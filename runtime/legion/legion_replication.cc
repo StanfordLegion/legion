@@ -11638,9 +11638,23 @@ namespace Legion {
       // eager allocation, so we need to just call malloc and make an
       // external allocation. This should only be happening for small 
       // instances in system memory so it should not be a problem.
+#ifdef __GNUC__
+#if __GNUC__ >= 11
+          // GCC is dumb and thinks we need to initialize this buffer
+          // before we pass it into the create local call, which we
+          // obviously don't need to do, so tell the compiler to shut up
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
       void *buffer = malloc(instance->size);
       shadow_instance = FutureInstance::create_local(buffer,
               instance->size, true/*own*/, context->runtime);
+#ifdef __GNUC__
+#if __GNUC__ >= 11
+#pragma GCC diagnostic pop
+#endif
+#endif
     }
     
     //--------------------------------------------------------------------------
