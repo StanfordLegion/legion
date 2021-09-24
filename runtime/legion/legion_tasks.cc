@@ -5585,7 +5585,7 @@ namespace Legion {
         FutureInstance *bounce_instance = NULL;
         if (!instance->is_meta_visible)
         {
-#ifdef __GNUC__ >= 11
+#if __GNUC__ >= 11
           // GCC is dumb and thinks we need to initialize this buffer
           // before we pass it into the create local call, which we
           // obviously don't need to do, so tell the compiler to shut up
@@ -5595,7 +5595,7 @@ namespace Legion {
           void *bounce_buffer = malloc(instance->size);
           bounce_instance = FutureInstance::create_local(bounce_buffer,
                                   instance->size, true/*own*/, runtime);
-#ifdef __GNUC__ >= 11
+#if __GNUC__ >= 11
 #pragma GCC diagnostic pop
 #endif
           // Wait for the data here to be ready
