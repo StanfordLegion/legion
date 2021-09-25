@@ -4426,9 +4426,9 @@ namespace Legion {
           for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
             runtime->forest->invalidate_fields(this, idx, 
                 deletion_requirements[idx], version_infos[idx],
-                PhysicalTraceInfo(trace_info, idx),
+                PhysicalTraceInfo(trace_info, idx), map_applied_conditions,
                 &repl_ctx->shard_manager->get_collective_mapping(),
-                map_applied_conditions); 
+                is_first_local_shard);
         }
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
@@ -7746,7 +7746,8 @@ namespace Legion {
                                                          version_info,
                                                          trace_info, mapping,
                                                          map_applied_conditions,
-                                                         restricted);
+                                                         restricted,
+                                                         true/*first local*/);
         shard_manager->exchange_shard_local_op_data(context_index,
                                   exchange_index++, attach_event);
       }
@@ -8351,8 +8352,8 @@ namespace Legion {
         CollectiveMapping *mapping = &shard_manager->get_collective_mapping(); 
         detach_event = runtime->forest->detach_external(requirement, this,
                                           0/*idx*/, version_info, ext_view, 
-                                          trace_info, mapping,
-                                          map_applied_conditions);
+                                          trace_info, map_applied_conditions,
+                                          mapping, true/*first local shard*/);
         if (detach_event.exists() && effects_done.exists())
           detach_event = 
             Runtime::merge_events(&trace_info, detach_event, effects_done);

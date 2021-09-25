@@ -2054,17 +2054,28 @@ namespace Legion {
       {
         CollectiveManager *collective =
           targets[0].get_manager()->as_collective_manager();
+        // It's crucial that all the point mappings be using the same
+        // collective manager for picking the first local shard, so 
+        // select the one with the smallest distributed ID if there
+        // is more than one collective manager
+        for (unsigned idx = 1; idx < targets.size(); idx++)
+        {
+          InstanceManager *man = targets[idx].get_manager();
+          if (man->did < collective->did)
+            collective = man->as_collective_manager();
+        }
+        const DomainPoint local_point = op->get_collective_instance_point();
+        const bool first_local = collective->is_first_local_point(local_point);
         CollectiveMapping *collective_mapping = collective->collective_mapping;
         analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
                                       targets, target_views, source_views, 
                                       trace_info, collective_mapping, 
                                       precondition,term_event,check_initialized,
-                                      record_valid, skip_output);
+                                      record_valid, skip_output, first_local);
         analysis->add_reference();
         // For collective instances, we need to make sure that we are on the
         // right node for the first pass of the traversal
         FieldMask local_mask;
-        const DomainPoint local_point = op->get_collective_instance_point();
         const AddressSpace local_space = runtime->address_space;
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
@@ -2316,6 +2327,7 @@ namespace Legion {
                                          InstanceSet &restricted_instances,
                                          const PhysicalTraceInfo &trace_info,
                                          CollectiveMapping *collective_mapping,
+                                         const bool collective_first_local,
                                          std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                          , const char *log_name
@@ -2333,7 +2345,8 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      AcquireAnalysis analysis(runtime, op,index,local_expr,collective_mapping);
+      AcquireAnalysis analysis(runtime, op, index, local_expr,
+                               collective_mapping, collective_first_local);
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
@@ -2388,6 +2401,7 @@ namespace Legion {
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
                                    CollectiveMapping *collective_mapping,
+                                   const bool collective_first_local,
                                    std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                    , const char *log_name
@@ -2420,8 +2434,8 @@ namespace Legion {
       std::set<RtEvent> deferral_events;
       IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
       ReleaseAnalysis analysis(runtime, op, index, precondition, local_expr,
-                           restricted_instances, target_views, source_views,
-                           trace_info, collective_mapping);
+                       restricted_instances, target_views, source_views,
+                       trace_info, collective_mapping, collective_first_local);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         analysis.traverse(it->first, it->second, deferral_events,
@@ -3269,8 +3283,9 @@ namespace Legion {
                                           ApEvent precondition,
                                           PredEvent true_guard, 
                                           const PhysicalTraceInfo &trace_info,
+                                          std::set<RtEvent> &map_applied_events,
                                           CollectiveMapping *collective_mapping,
-                                          std::set<RtEvent> &map_applied_events)
+                                          const bool collective_first_local)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -3283,7 +3298,8 @@ namespace Legion {
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), region_node->row_source, fill_view, 
           eq_sets.get_valid_mask(), trace_info, collective_mapping,precondition,
-          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
+          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/,
+          false/*add restriction*/, collective_first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3317,7 +3333,8 @@ namespace Legion {
                                           CollectiveMapping *collective_mapping,
                                           const ApEvent precondition,
                                           std::set<RtEvent> &map_applied_events,
-                                          const bool add_restriction)
+                                          const bool add_restriction,
+                                          const bool collective_first_local)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3333,7 +3350,8 @@ namespace Legion {
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           req, region_node->row_source, view, overwrite_mask, trace_info, 
           collective_mapping, precondition, RtEvent::NO_RT_EVENT,
-          PredEvent::NO_PRED_EVENT, true/*track effects*/, add_restriction);
+          PredEvent::NO_PRED_EVENT, true/*track effects*/, add_restriction,
+          collective_first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
@@ -3381,7 +3399,8 @@ namespace Legion {
                                           const PhysicalTraceInfo &trace_info,
                                           CollectiveMapping *collective_mapping,
                                           std::set<RtEvent> &map_applied_events,
-                                          const bool restricted)
+                                          const bool restricted,
+                                          const bool collective_first_local)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
@@ -3412,7 +3431,7 @@ namespace Legion {
             index, RegionUsage(req), region_node->row_source, instance_view,
             ext_mask, trace_info, collective_mapping, ApEvent::NO_AP_EVENT, 
             guard_event, PredEvent::NO_PRED_EVENT, false/*track effects*/, 
-            restricted);
+            restricted, collective_first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -3437,8 +3456,9 @@ namespace Legion {
                                           VersionInfo &version_info,
                                           InstanceView *local_view,
                                           const PhysicalTraceInfo &trace_info,
-                                          CollectiveMapping *collective_mapping,
                                           std::set<RtEvent> &map_applied_events,
+                                          CollectiveMapping *collective_mapping,
+                                          const bool collective_first_local,
                                           LogicalView *registration_view)
     //--------------------------------------------------------------------------
     {
@@ -3460,34 +3480,12 @@ namespace Legion {
                                                      map_applied_events, 
                                                      trace_info,
                                                      runtime->address_space);
-      FilterAnalysis *analysis = NULL; 
-      if (local_view->get_manager()->is_collective_manager())
-      {
-        CollectiveManager *collective =
-          local_view->get_manager()->as_collective_manager();
-#ifdef DEBUG_LEGION
-        // Should always be local
-        const DomainPoint local_point =
-          detach_op->get_collective_instance_point();
-        PhysicalInstance instance = collective->get_instance(local_point);
-        assert(instance.address_space() == runtime->address_space);
-#endif
-        analysis = new FilterAnalysis(runtime, detach_op, index,
-                                      collective->collective_mapping, 
-                                      region_node->row_source, local_view,
-                                      registration_view,
-                                      true/*remove restriction*/);
-        analysis->add_reference();
-      }
-      else
-      {
-        analysis = new FilterAnalysis(runtime, detach_op, index,
-                                      NULL/*no collective_mapping*/, 
-                                      region_node->row_source, local_view,
-                                      registration_view,
-                                      true/*remove restriction*/);
-        analysis->add_reference();
-      }
+      FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
+                                  collective_mapping, region_node->row_source,
+                                  local_view, registration_view,
+                                  true/*remove restriction*/,
+                                  collective_first_local);
+      analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();
@@ -3509,8 +3507,9 @@ namespace Legion {
                                              const RegionRequirement &req,
                                              VersionInfo &version_info,
                                             const PhysicalTraceInfo &trace_info,
+                                          std::set<RtEvent> &map_applied_events,
                                           CollectiveMapping *collective_mapping,
-                                          std::set<RtEvent> &map_applied_events)
+                                              const bool collective_first_local)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3523,7 +3522,9 @@ namespace Legion {
       IndexSpaceExpression *local_expr = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
           usage, local_expr, NULL/*view*/, eq_sets.get_valid_mask(), 
-          trace_info, collective_mapping, ApEvent::NO_AP_EVENT);
+          trace_info, collective_mapping, ApEvent::NO_AP_EVENT,
+          RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT,false/*track effects*/,
+          false/*add restriction*/, collective_first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 

@@ -545,6 +545,7 @@ namespace Legion {
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
                                    CollectiveMapping *collective_mapping,
+                                   const bool collective_first_local,
                                    std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                    , const char *log_name
@@ -559,6 +560,7 @@ namespace Legion {
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
                                    CollectiveMapping *collective_mapping,
+                                   const bool collective_first_local,
                                    std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                    , const char *log_name
@@ -636,15 +638,15 @@ namespace Legion {
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing);
-      // This takes ownership of the value buffer
       ApEvent fill_fields(FillOp *op,
                           const RegionRequirement &req,
                           const unsigned index, FillView *fill_view,
                           VersionInfo &version_info, ApEvent precondition,
                           PredEvent true_guard,
                           const PhysicalTraceInfo &trace_info,
+                          std::set<RtEvent> &map_applied_events,
                           CollectiveMapping *collective_mapping,
-                          std::set<RtEvent> &map_applied_events);
+                          const bool collective_first_local);
       ApEvent overwrite_sharded(Operation *op, const unsigned index,
                                 const RegionRequirement &req,
                                 ShardedView *view, VersionInfo &version_info,
@@ -652,7 +654,8 @@ namespace Legion {
                                 CollectiveMapping *collective_mapping,
                                 const ApEvent precondition,
                                 std::set<RtEvent> &map_applied_events,
-                                const bool add_restriction);
+                                const bool add_restriction,
+                                const bool collective_first_local);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);
@@ -664,20 +667,23 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               CollectiveMapping *collective_mapping,
                               std::set<RtEvent> &map_applied_events,
-                              const bool restricted);
+                              const bool restricted,
+                              const bool collective_first_local);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               InstanceView *local_view,
                               const PhysicalTraceInfo &trace_info,
-                              CollectiveMapping *collective_mapping,
                               std::set<RtEvent> &map_applied_events,
+                              CollectiveMapping *collective_mapping,
+                              const bool collective_first_local,
                               LogicalView *registration_view = NULL);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,
                              VersionInfo &version_info,
                              const PhysicalTraceInfo &trace_info,
+                             std::set<RtEvent> &map_applied_events,
                              CollectiveMapping *collective_mapping,
-                             std::set<RtEvent> &map_applied_events);
+                             const bool collective_first_local);
     public:
       void physical_convert_sources(Operation *op,
                                const RegionRequirement &req,

@@ -1560,6 +1560,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual CollectiveMapping* get_collective_mapping(void);
+      virtual bool is_collective_first_local_shard(void) const
+        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     public:
       RtBarrier collective_map_barrier;
@@ -2308,6 +2310,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual CollectiveMapping* get_collective_mapping(void);
+      virtual bool is_collective_first_local_shard(void) const 
+        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     protected:
       RtBarrier collective_map_barrier;
@@ -2333,6 +2337,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual CollectiveMapping* get_collective_mapping(void);
+      virtual bool is_collective_first_local_shard(void) const 
+        { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
     public:
       virtual void activate(void);

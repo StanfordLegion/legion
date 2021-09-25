@@ -2461,6 +2461,7 @@ namespace Legion {
     public:
       // These are helper methods for ReplAcquireOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual bool is_collective_first_local_shard(void) const { return false; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
       void activate_acquire(void);
@@ -2581,6 +2582,7 @@ namespace Legion {
     public:
       // These are helper methods for ReplReleaseOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual bool is_collective_first_local_shard(void) const { return false; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
       void activate_release(void);
@@ -3818,6 +3820,7 @@ namespace Legion {
     public:
       // These are helper methods for ReplFillOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
+      virtual bool is_collective_first_local_shard(void) const { return false; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);

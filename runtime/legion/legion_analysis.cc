@@ -6214,11 +6214,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, unsigned idx, 
-                    IndexSpaceExpression *e, bool h, CollectiveMapping *m)
+                                      IndexSpaceExpression *e, bool h, bool im,
+                                      CollectiveMapping *m, bool ex, bool first)
       : previous(rt->address_space), original_source(rt->address_space),
         runtime(rt), analysis_expr(e), collective_mapping(m), op(o), index(idx),
-        owns_op(false), on_heap(h), recorded_instances(NULL), restricted(false), 
-        parallel_traversals(false)
+        owns_op(false), on_heap(h), exclusive(ex), immutable(im),
+        collective_first_local(first), parallel_traversals(false),
+        restricted(false), recorded_instances(NULL)
     //--------------------------------------------------------------------------
     {
       if (collective_mapping != NULL)
@@ -6228,12 +6230,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, AddressSpaceID source, 
                                AddressSpaceID prev, Operation *o, unsigned idx,
-                               IndexSpaceExpression *e, bool h,
-                               CollectiveMapping *mapping) 
+                               IndexSpaceExpression *e, bool h, bool im,
+                               CollectiveMapping *mapping, bool ex, bool first)
       : previous(prev), original_source(source), runtime(rt), analysis_expr(e),
         collective_mapping(mapping), op(o), index(idx), owns_op(true), 
-        on_heap(h), recorded_instances(NULL), restricted(false), 
-        parallel_traversals(false)
+        on_heap(h), exclusive(ex), immutable(im), collective_first_local(first),
+        parallel_traversals(false), restricted(false), recorded_instances(NULL)
     //--------------------------------------------------------------------------
     {
       if (collective_mapping != NULL)
@@ -6244,7 +6246,8 @@ namespace Legion {
     PhysicalAnalysis::PhysicalAnalysis(const PhysicalAnalysis &rhs)
       : previous(0), original_source(0), runtime(NULL), analysis_expr(NULL),
         collective_mapping(NULL), op(NULL), index(0), owns_op(false), 
-        on_heap(false)
+        on_heap(false), exclusive(false), immutable(false),
+        collective_first_local(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6276,7 +6279,7 @@ namespace Legion {
       if (!precondition.exists() || precondition.has_triggered())
       {
         if (set->set_expr == analysis_expr)
-          perform_traversal(set, analysis_expr, true/*covers*/, mask, 
+          set->traverse_set(*this, analysis_expr, true/*covers*/, mask,
                             deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
@@ -6287,14 +6290,14 @@ namespace Legion {
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
           if (expr->get_volume() == set->set_expr->get_volume())
-            perform_traversal(set, set->set_expr, true/*covers*/, mask, 
+            set->traverse_set(*this, set->set_expr, true/*covers*/, mask,
                               deferral_events, applied_events,already_deferred);
           else
-            perform_traversal(set, expr, false/*covers*/, mask, deferral_events,
-                              applied_events, already_deferred);
+            set->traverse_set(*this, expr, false/*covers*/, mask,
+                              deferral_events, applied_events,already_deferred);
         }
         else
-          perform_traversal(set, set->set_expr, true/*covers*/, mask,
+          set->traverse_set(*this, set->set_expr, true/*covers*/, mask,
                             deferral_events, applied_events, already_deferred);
       }
       else
@@ -6325,7 +6328,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalAnalysis::perform_traversal(EquivalenceSet *set,
+    bool PhysicalAnalysis::perform_traversal(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -6336,6 +6339,7 @@ namespace Legion {
     {
       // only called by derived classes
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6697,8 +6701,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, Operation *o,unsigned idx, 
                                   IndexSpaceExpression *expr, ReductionOpID red)
-      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/), redop(red), 
-        target_analysis(this)
+      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, true/*immutable*/),
+        redop(red), target_analysis(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -6707,7 +6711,7 @@ namespace Legion {
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, AddressSpaceID src, 
             AddressSpaceID prev, Operation *o, unsigned idx,
             IndexSpaceExpression *expr, ValidInstAnalysis *t, ReductionOpID red)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         redop(red), target_analysis(t)
     //--------------------------------------------------------------------------
     {
@@ -6738,7 +6742,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ValidInstAnalysis::perform_traversal(EquivalenceSet *set,
+    bool ValidInstAnalysis::perform_traversal(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -6749,6 +6753,8 @@ namespace Legion {
     {
       set->find_valid_instances(*this, expr, expr_covers, mask, deferral_events, 
                                 applied_events, already_deferred);
+      // No migration check for reading
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6937,7 +6943,7 @@ namespace Legion {
     InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, Operation *o, 
                                   unsigned idx, IndexSpaceExpression *expr, 
                                   const FieldMaskSet<LogicalView> &valid_insts)
-      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, true/*immutable*/),
         valid_instances(valid_insts), target_analysis(this)
     //--------------------------------------------------------------------------
     {
@@ -6948,7 +6954,7 @@ namespace Legion {
                              AddressSpaceID prev, Operation *o, unsigned idx,
                              IndexSpaceExpression *expr, InvalidInstAnalysis *t,
                              const FieldMaskSet<LogicalView> &valid_insts)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         valid_instances(valid_insts), target_analysis(t)
     //--------------------------------------------------------------------------
     {
@@ -6981,7 +6987,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InvalidInstAnalysis::perform_traversal(EquivalenceSet *set,
+    bool InvalidInstAnalysis::perform_traversal(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -6992,6 +6998,8 @@ namespace Legion {
     {
       set->find_invalid_instances(*this, expr, expr_covers,mask,deferral_events,
                                   applied_events, already_deferred);
+      // No migration check for reading
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7198,7 +7206,7 @@ namespace Legion {
     AntivalidInstAnalysis::AntivalidInstAnalysis(Runtime *rt, Operation *o, 
                                   unsigned idx, IndexSpaceExpression *expr, 
                                   const FieldMaskSet<LogicalView> &anti_insts)
-      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, true/*immutable*/),
         antivalid_instances(anti_insts), target_analysis(this)
     //--------------------------------------------------------------------------
     {
@@ -7209,7 +7217,7 @@ namespace Legion {
                            AddressSpaceID prev, Operation *o, unsigned idx,
                            IndexSpaceExpression *expr, AntivalidInstAnalysis *a,
                            const FieldMaskSet<LogicalView> &anti_insts)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         antivalid_instances(anti_insts), target_analysis(a)
     //--------------------------------------------------------------------------
     {
@@ -7243,7 +7251,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AntivalidInstAnalysis::perform_traversal(EquivalenceSet *set,
+    bool AntivalidInstAnalysis::perform_traversal(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -7254,6 +7262,8 @@ namespace Legion {
     {
       set->find_antivalid_instances(*this,expr,expr_covers,mask,deferral_events,
                                     applied_events, already_deferred);
+      // No migration check for reading
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7466,8 +7476,10 @@ namespace Legion {
                      const PhysicalTraceInfo &t_info,
                      CollectiveMapping *mapping,
                      const ApEvent pre, const ApEvent term,
-                     const bool check, const bool record, const bool skip)
-      : PhysicalAnalysis(rt, o, idx, rn->row_source, true/*on heap*/, mapping),
+                     const bool check, const bool record,
+                     const bool skip, const bool first_local)
+      : PhysicalAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
+          false/*immutable*/, mapping, IS_WRITE(req), first_local),
         usage(req), node(rn), target_instances(target_insts), 
         target_views(target_vws), source_views(source_vws), trace_info(t_info),
         precondition(pre), term_event(term),
@@ -7487,9 +7499,9 @@ namespace Legion {
                      const PhysicalTraceInfo &info, CollectiveMapping *mapping,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool check, 
-                     const bool record, const bool skip)
-      : PhysicalAnalysis(rt, src, prev, o, idx, rn->row_source,
-                         true/*on heap*/, mapping),
+                     const bool record, const bool skip, const bool first_local)
+      : PhysicalAnalysis(rt, src, prev, o, idx, rn->row_source, true/*on heap*/,
+          false/*immutable*/, mapping, IS_WRITE(use), first_local),
         usage(use), node(rn), target_instances(target_insts), 
         target_views(target_vws), source_views(source_vws), trace_info(info), 
         precondition(pre), term_event(term),
@@ -7545,7 +7557,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UpdateAnalysis::perform_traversal(EquivalenceSet *set,
+    bool UpdateAnalysis::perform_traversal(EquivalenceSet *set,
                                            IndexSpaceExpression *expr,
                                            const bool expr_covers,
                                            const FieldMask &mask,
@@ -7556,6 +7568,8 @@ namespace Legion {
     {
       set->update_set(*this, expr, expr_covers, mask, deferral_events, 
                       applied_events, already_deferred);
+      // Perform a check for migration
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -7633,7 +7647,10 @@ namespace Legion {
           // from the origin space to the next space
           if ((collective_mapping != NULL) &&
               (original_source == runtime->address_space))
+          {
             collective_mapping->pack(rez);
+            rez.serialize<bool>(collective_first_local);
+          }
           else
             rez.serialize<size_t>(0);
           rez.serialize(precondition);
@@ -7837,10 +7854,13 @@ namespace Legion {
       }
       PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+      bool first_local = false;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *collective_mapping = ((collective_mapping_size) > 0) ?
         new CollectiveMapping(derez, collective_mapping_size) : NULL;
+      if (collective_mapping != NULL)
+        derez.deserialize<bool>(first_local);
       ApEvent precondition;
       derez.deserialize(precondition);
       ApEvent term_event;
@@ -7865,7 +7885,7 @@ namespace Legion {
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
           previous, op, index, usage, node, targets, target_views, source_views,
           trace_info, collective_mapping, remote_user_registered, precondition,
-          term_event, check_initialized, record_valid, skip_output);
+          term_event, check_initialized, record_valid, skip_output,first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready
@@ -7920,9 +7940,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, unsigned idx,
-                   IndexSpaceExpression *expr, CollectiveMapping *mapping)
-      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, mapping), 
-        target_analysis(this)
+       IndexSpaceExpression *expr, CollectiveMapping *mapping, bool first_local)
+      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, false/*immutable*/,
+          mapping, true/*exclusive*/, first_local), target_analysis(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -7962,7 +7982,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireAnalysis::perform_traversal(EquivalenceSet *set,
+    bool AcquireAnalysis::perform_traversal(EquivalenceSet *set,
                                             IndexSpaceExpression *expr,
                                             const bool expr_covers,
                                             const FieldMask &mask,
@@ -7973,6 +7993,8 @@ namespace Legion {
     {
       set->acquire_restrictions(*this, expr, expr_covers, mask, deferral_events,
                                 applied_events, already_deferred);
+      // Perform a check for migration after this
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8161,8 +8183,10 @@ namespace Legion {
                                      std::vector<InstanceView*> &target_vws,
                                      std::vector<InstanceView*> &source_vws, 
                                      const PhysicalTraceInfo &t_info,
-                                     CollectiveMapping *mapping)
-      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, mapping), 
+                                     CollectiveMapping *mapping,
+                                     const bool first_local)
+      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, false/*immutable*/,
+                         mapping, true/*exclusive*/, first_local), 
         precondition(pre), target_analysis(this), 
         target_instances(target_insts), target_views(target_vws),
         source_views(source_vws), trace_info(t_info), release_aggregator(NULL)
@@ -8176,7 +8200,7 @@ namespace Legion {
           IndexSpaceExpression *expr, ApEvent pre, ReleaseAnalysis *t, 
           InstanceSet &target_insts, std::vector<InstanceView*> &target_vws,
           std::vector<InstanceView*> &source_vws, const PhysicalTraceInfo &info)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
         precondition(pre), target_analysis(t), target_instances(target_insts),
         target_views(target_vws), source_views(source_vws), trace_info(info),
         release_aggregator(NULL)
@@ -8211,7 +8235,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseAnalysis::perform_traversal(EquivalenceSet *set,
+    bool ReleaseAnalysis::perform_traversal(EquivalenceSet *set,
                                             IndexSpaceExpression *expr,
                                             const bool expr_covers,
                                             const FieldMask &mask,
@@ -8222,6 +8246,8 @@ namespace Legion {
     {
       set->release_restrictions(*this, expr, expr_covers, mask, deferral_events,
                                 applied_events, already_deferred);
+      // Perform a check for migration after this
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8498,7 +8524,8 @@ namespace Legion {
         const std::vector<unsigned> &dst_idxes, 
         const PhysicalTraceInfo &t_info, const bool perf)
       : PhysicalAnalysis(rt, o, dst_idx, 
-          rt->forest->get_node(dst_req.region)->row_source, true/*on heap*/), 
+          rt->forest->get_node(dst_req.region)->row_source,
+          true/*on heap*/, false/*immutable*/),
         src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), src_usage(src_req), 
@@ -8618,7 +8645,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void CopyAcrossAnalysis::perform_traversal(EquivalenceSet *set,
+    bool CopyAcrossAnalysis::perform_traversal(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -8629,6 +8656,8 @@ namespace Legion {
     {
       set->issue_across_copies(*this, mask, expr, expr_covers, deferral_events,
                                applied_events, already_deferred);
+      // Perform a check for migration after this
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9048,8 +9077,10 @@ namespace Legion {
                         const FieldMask &mask, const PhysicalTraceInfo &t_info,
                         CollectiveMapping *mapping, const ApEvent pre,
                         const RtEvent guard, const PredEvent pred,
-                        const bool track, const bool restriction)
-      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, mapping),
+                        const bool track, const bool restriction,
+                        const bool first_local)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
+                         mapping, true/*exclusive*/, first_local),
         usage(use), trace_info(t_info), precondition(pre), guard_event(guard),
         pred_guard(pred), track_effects(track), add_restriction(restriction),
         output_aggregator(NULL)
@@ -9073,8 +9104,10 @@ namespace Legion {
                         CollectiveMapping *mapping,
                         const ApEvent pre, const RtEvent guard, 
                         const PredEvent pred, const bool track, 
-                        const bool restriction)
-      : PhysicalAnalysis(rt, o, idx, e, true/*on heap*/, mapping), usage(use),
+                        const bool restriction,
+                        const bool first_local)
+      : PhysicalAnalysis(rt, o, idx, e, true/*on heap*/, false/*immutable*/,
+                         mapping, true/*exclusive*/, first_local), usage(use),
         trace_info(t_info), precondition(pre), guard_event(guard),
         pred_guard(pred), track_effects(track), add_restriction(restriction),
         output_aggregator(NULL)
@@ -9138,7 +9171,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OverwriteAnalysis::perform_traversal(EquivalenceSet *set,
+    bool OverwriteAnalysis::perform_traversal(EquivalenceSet *set,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers,
                                              const FieldMask &mask,
@@ -9149,6 +9182,8 @@ namespace Legion {
     {
       set->overwrite_set(*this, expr, expr_covers, mask, deferral_events, 
                          applied_events, already_deferred);
+      // Perform a check for migration after this
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9425,8 +9460,10 @@ namespace Legion {
     FilterAnalysis::FilterAnalysis(Runtime *rt, Operation *o, unsigned idx,
                               CollectiveMapping *mapping,
                               IndexSpaceExpression *expr, InstanceView *view,
-                              LogicalView *reg_view, const bool remove_restrict)
-      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, mapping),
+                              LogicalView *reg_view, const bool remove_restrict,
+                              const bool first_local)
+      : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
+                         mapping, true/*exclusive*/, first_local),
         inst_view(view), registration_view(reg_view),
         remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
@@ -9472,7 +9509,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FilterAnalysis::perform_traversal(EquivalenceSet *set,
+    bool FilterAnalysis::perform_traversal(EquivalenceSet *set,
                                            IndexSpaceExpression *expr,
                                            const bool expr_covers,
                                            const FieldMask &mask,
@@ -9483,6 +9520,8 @@ namespace Legion {
     {
       set->filter_set(*this, expr, expr_covers, mask, deferral_events, 
                       applied_events, already_deferred);
+      // Perform a check for migration after this
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9647,7 +9686,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CloneAnalysis::CloneAnalysis(Runtime *rt, IndexSpaceExpression *expr,
                Operation *op, unsigned idx, FieldMaskSet<EquivalenceSet> &&srcs)
-      : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/),
+      : PhysicalAnalysis(rt, op, idx, expr, true/*on heap*/, false/*immutable*/,
+                         NULL/*mapping*/, true/*exclusive*/),
         sources(std::move(srcs))
     //--------------------------------------------------------------------------
     {
@@ -9689,7 +9729,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CloneAnalysis::perform_traversal(EquivalenceSet *set,
+    bool CloneAnalysis::perform_traversal(EquivalenceSet *set,
                                           IndexSpaceExpression *expr,
                                           const bool expr_covers,
                                           const FieldMask &mask,
@@ -9700,6 +9740,8 @@ namespace Legion {
     {
       set->clone_set(*this, expr, expr_covers, mask, deferral_events,
                      applied_events, already_deferred);
+      // No check for migration after this
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10223,6 +10265,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::traverse_set(PhysicalAnalysis &analysis,
+                                      IndexSpaceExpression *expr,
+                                      const bool expr_covers,
+                                      FieldMask traversal_mask,
+                                      std::set<RtEvent> &deferral_events,
+                                      std::set<RtEvent> &applied_events,
+                                      const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      // This block of code is the same across all traversals so we ensure
+      // that it is done before traversing the equivalence set for all analyses
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, traversal_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      if (is_remote_analysis(analysis, traversal_mask, deferral_events,
+                             applied_events, expr_covers))
+        return;
+#ifdef DEBUG_LEGION
+      // Should only be here if we're the owner
+      assert(is_logical_owner() || are_replicated_fields(traversal_mask));
+#endif
+      if (analysis.perform_traversal(this, expr, expr_covers, traversal_mask,
+                          deferral_events, applied_events, already_deferred) &&
+          !are_replicated_fields(traversal_mask))
+        check_for_migration(analysis, applied_events); 
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::find_valid_instances(ValidInstAnalysis &analysis,
                                              IndexSpaceExpression *expr,
                                              const bool expr_covers, 
@@ -10232,22 +10306,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, user_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      // This is a read-only analysis so we don't need to invalidate
-      // replicated state if we get a non-collective operation
-      if (is_remote_analysis(analysis, user_mask, deferral_events,
-            applied_events, false/*exclusive*/, true/*immutable*/))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(user_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       if (analysis.redop != 0)
@@ -10384,22 +10443,7 @@ namespace Legion {
                                     const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, user_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      // This is a read-only analysis so we don't need to invalidate
-      // replicated state if we get a non-collective operation
-      if (is_remote_analysis(analysis, user_mask, deferral_events,
-            applied_events, false/*exclusive*/, true/*immutable*/))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(user_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -10530,22 +10574,7 @@ namespace Legion {
                                             const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, user_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      // This is a read-only analysis so we don't need to invalidate
-      // replicated state if we get a non-collective operation
-      if (is_remote_analysis(analysis, user_mask, deferral_events,
-            applied_events, false/*exclusive*/, true/*immutable*/))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(user_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // Lock the analysis so we can perform updates here
       AutoLock a_lock(analysis);
       for (FieldMaskSet<LogicalView>::const_iterator ait = 
@@ -10649,20 +10678,7 @@ namespace Legion {
                                     const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, user_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, user_mask, deferral_events,
-            applied_events, expr_covers && IS_WRITE(analysis.usage)))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(user_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       WrapperReferenceMutator mutator(applied_events);
       // Now that we're ready to perform the analysis 
       // we need to lock the analysis 
@@ -11257,7 +11273,6 @@ namespace Legion {
               analysis.usage, mask, IS_WRITE(analysis.usage), applied_events);
         }
       }
-      check_for_migration(analysis, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -11266,8 +11281,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifndef DISABLE_EQUIVALENCE_SET_MIGRATION
-      // Never migrate when we are replicated
-      if (!replicated_states.empty())
+      // Never migrate when we are replicated or in the process of replicating
+      if (!replicated_states.empty() || !replication_changes.empty())
         return;
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
@@ -11489,25 +11504,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::ReplicationChange::ReplicationChange(
+        CollectiveMapping *map, unsigned expected_arrivals, bool ad)
+      : mapping(map), ready_event(Runtime::create_rt_user_event()),
+        applied_event(Runtime::create_rt_user_event()),
+        remaining_arrivals(expected_arrivals), add(ad)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapping != NULL);
+#endif
+      mapping->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::ReplicationChange::~ReplicationChange(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remaining_arrivals == 0);
+#endif
+      if (mapping->remove_reference())
+        delete mapping;
+      if (!remote_requests.empty())
+      {
+        for (FieldMaskSet<RemoteRequest>::iterator it =
+              remote_requests.begin(); it != remote_requests.end(); it++)
+          delete it->first;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::ReplicationChange::record_remote_request(
+        ReplicationChange *target, AddressSpaceID source, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      RemoteRequest *request = new RemoteRequest(target, source);
+      remote_requests.insert(request, mask);
+    }
+
+    //--------------------------------------------------------------------------
     bool EquivalenceSet::is_remote_analysis(PhysicalAnalysis &analysis,
-                      const FieldMask &mask, std::set<RtEvent> &deferral_events,
-                      std::set<RtEvent> &applied_events, const bool exclusive,
-                      const bool immutable)
+                      FieldMask &mask, std::set<RtEvent> &deferral_events,
+                      std::set<RtEvent> &applied_events, const bool expr_covers)
     //--------------------------------------------------------------------------
     {
       // Check to see if the analysis is replicated or not
       if (analysis.is_replicated())
       {
 #ifdef DEBUG_LEGION
-        assert(!immutable);
+        assert(!analysis.immutable);
 #endif
         CollectiveMapping *mapping = analysis.get_replicated_mapping();
         FieldMask replicated;
-        std::set<RtEvent> exclusive_deferral_events;
         // Scan through each of our replicated states and see if they align
         if (!replicated_states.empty() && 
             !(replicated_states.get_valid_mask() * mask))
         {
+          FieldMaskSet<CollectiveMapping> to_add;
           std::vector<CollectiveMapping*> to_delete;
           for (FieldMaskSet<CollectiveMapping>::iterator it =
                 replicated_states.begin(); it != replicated_states.end(); it++)
@@ -11520,24 +11574,31 @@ namespace Legion {
             // If they don't match then we need to deal with that
             if ((it->first != mapping) && ((*it->first) != (*mapping)))
             {
-              // Mappings are not the same so see if we can make them the same
-              // If we're exclusive we'll be able to modify them later
-              if (!exclusive)
+              // Check to see if we're a strict subset of the currently
+              // replicated states. If we are then we can do our invalidations
+              // collectively and update our own replicated states
+              if (it->first->contains(*mapping))
               {
-                // Not exclusive so we can't change them
-                // If we're the owner, we send out invalidations
-                if (is_logical_owner())
-                {
-                  broadcast_replicated_state_updates(overlap, NULL, local_space,
-                          applied_events, false/*need lock*/, false/*updates*/);
-                  it.filter(overlap);
-                  if (!it->second)
-                    to_delete.push_back(it->first);
-                }
-                else
-                  // record that we are being sent to the owner
-                  analysis.record_remote(this, overlap, logical_owner_space);
+                to_add.insert(mapping, overlap);
+                update_replicated_state(it->first, mapping, overlap,
+                                applied_events, false/*need lock*/);
+                it.filter(overlap);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+                // These fields are all still replicated
+                replicated |= overlap;
+                if (replicated == mask)
+                  break;
               }
+              // Else: there is no overlap here or a partial overlap which 
+              // means only some points can't see the replicated state 
+              // mapping, this prevents us from coming up with a coherent
+              // collective approach to intersecting the mapping, therefore
+              // we don't do anything. In the excluisve case we'll be able
+              // to change the mapping later, and in the non-exclusive case
+              // we'll deterministically pick one of the analyses to perform
+              // the mapping (and therefore also perform the invalidations)
+              // from the logical owner space
             }
             else
             {
@@ -11550,10 +11611,16 @@ namespace Legion {
           for (std::vector<CollectiveMapping*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
+            if (to_add.find(*it) != to_add.end())
+              continue;
             replicated_states.erase(*it);
             if ((*it)->remove_reference())
               delete (*it);
           }
+          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
+            if (replicated_states.insert(it->first, it->second))
+              it->first->add_reference();
           if (!replicated_states.empty())
             replicated_states.tighten_valid_mask();
         }
@@ -11561,44 +11628,160 @@ namespace Legion {
         {
           // If we have any unreplicated fields then check to see if
           // we can attempt to change the replicated mapping
-          if (!exclusive)
+          if (!analysis.exclusive || !expr_covers)
           {
-            // We can't change the mapping
-            if (!is_logical_owner())
+            // We're not exclusive, so we can't change the mapping,
+            // this means we need to pick one point to go through
+            // and update the mapping for the logical owner space of
+            // the equivalence set (which will also invalidate any
+            // of replicated copies of the equivalence set elsewhere)
+            // We can't rely on the logical_owner_space to be valid
+            // here in all cases because not all points in the 
+            // replicated analysis might be seeing an equivalence
+            // set with an up-to-date value after migration, therefore
+            // we need to pick one deterministically without consulting
+            // the logical_owner_space value
+            if (mapping->contains(owner_space))
             {
-              // Defer anything replicated
-              // Send to the logical owner anything else
-              if (!!replicated)
+              // Everyone can agree on the owner space, so use this
+              // as a special, but common, case where the owner space
+              // is in the collective mapping, then the first analysis
+              // on the owner space will do the analysis
+              if (is_owner() && analysis.collective_first_local)
               {
-                analysis.defer_traversal(RtEvent::NO_RT_EVENT, this,
-                    replicated, deferral_events, applied_events);
-                const FieldMask unreplicated = mask - replicated;
-                analysis.record_remote(this, unreplicated, logical_owner_space);
+                if (!is_logical_owner())
+                {
+                  const FieldMask unreplicated = mask - replicated;
+                  analysis.record_remote(this,unreplicated,logical_owner_space);
+                  if (!replicated)
+                    return true;
+                  mask &= replicated;
+                }
               }
-              else
-                analysis.record_remote(this, mask, logical_owner_space); 
-              return true;
+              else // not doing the work so filter ourselves out
+              {
+                if (!replicated)
+                  return true;
+                mask &= replicated;
+              }
             }
-            // Otherwise we're on the logical owner so it doesn't
-            // matter if we're replicated or not
+            else
+            {
+              // Mapping doesn't contain the owner space, so we'll
+              // just have the first local collective on the first
+              // address space in the mapping do the work
+              if ((local_space == (*mapping)[0]) &&
+                    analysis.collective_first_local)
+              {
+                if (!is_logical_owner())
+                {
+                  const FieldMask unreplicated = mask - replicated;
+                  analysis.record_remote(this,unreplicated,logical_owner_space);
+                  if (!replicated)
+                    return true;
+                  mask &= replicated;
+                }
+              }
+              else // not doing the work so filter ourselves out
+              {
+                if (!replicated)
+                  return true;
+                mask &= replicated;
+              }
+            }
           }
           else // we're exlcusive so we can change the mapping
           {
-            const FieldMask unreplicated = mask - replicated;
-            make_replicated_state(mapping, unreplicated, local_space,
-                                  exclusive_deferral_events);
+            // A very important note for this case: all the copies
+            // of the equivalence set need to ensure that their down-stream
+            // children have gotten the updates before any physical analysis
+            // can take place and modify the equivalence set. The only way
+            // to know we've seen all the children is to make sure every child
+            // sends a request to its parent, even if it doesn't actually
+            // need any fields. Therefore we always build the collective
+            // tree of messages so we know when it's safe to run physical
+            // analysis on each equivalence set.
+            FieldMask unreplicated = mask - replicated;
+            // See which fields are locally valid already and therefore
+            // do not need any kind of request to be performed
+            if (!is_logical_owner())
+            {
+              // Anything that has a replicated state is locally valid
+              // if we we're not on the owner nodes
+              if (!replicated_states.empty())
+                unreplicated -= replicated_states.get_valid_mask();
+            }
+            else
+              unreplicated.clear();
+            // Check to see if we already have a replication change
+            // for this request or not, if we don't then make it and
+            // send the request to the next node in the collective tree
+            for (FieldMaskSet<ReplicationChange>::iterator it =
+                  replication_changes.begin(); it != 
+                  replication_changes.end(); it++)
+            {
+              if (it->second * mask)
+                continue;
+#ifdef DEBUG_LEGION
+              // Should be the same fields if they overlap
+              assert(it->second == mask);
+              assert(it->first->remaining_arrivals > 0);
+#endif
+              applied_events.insert(it->first->applied_event);
+              if (--it->first->remaining_arrivals == 0)
+              {
+                // We're the last expected arrival so we can prune
+                // this out of the list of changes and run the traversal
+                finalize_replication_change(it->first, it->second);
+                replication_changes.erase(it);
+                return false;
+              }
+              else
+              {
+                // Defer the analysis until the change is ready
+                analysis.defer_traversal(it->first->ready_event, this, mask,
+                                            deferral_events, applied_events);
+                return true;
+              }
+            }
+            // If we get here then we need to send the state request
+            const AddressSpaceID origin = (*mapping)[0];
+            ReplicationChange *change = new ReplicationChange(mapping,
+                mapping->count_children(origin, local_space), true/*add*/);
+            applied_events.insert(change->applied_event);
+            // Send the message 
+            if ((origin != local_space) || !!unreplicated)
+            {
+              const AddressSpaceID target = (origin == local_space) ?
+                logical_owner_space : mapping->get_parent(origin, local_space);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                mapping->pack(rez);
+                rez.serialize(mask);
+                rez.serialize(unreplicated);
+                rez.serialize(change);
+                rez.serialize(local_space);
+                rez.serialize<bool>((origin == local_space));
+              }
+              runtime->send_equivalence_set_replication_request(target, rez);
+              // Increment the count for the expected arrivals for the response
+              // if we're actually expecting one
+              if (!!unreplicated)
+                change->remaining_arrivals++;
+              replication_changes.insert(change, mask);
+              analysis.defer_traversal(change->ready_event, this, mask,
+                                      deferral_events, applied_events);
+              return true;
+            }
+            else // owner that is already valid finalize the change
+              finalize_replication_change(change, mask);
           }
         }
-        // If we have any exclusive deferral events to defer the analysis
-        // until we've been made replicated then do that now
-        if (!exclusive_deferral_events.empty())
-        {
-          const RtEvent deferral_event = 
-            Runtime::merge_events(exclusive_deferral_events);
-          analysis.defer_traversal(deferral_event, this, mask,
-                              deferral_events, applied_events);
-          return true;
-        }
+#ifdef DEBUG_LEGION
+        assert(!!mask);
+#endif
         // We're all local at this point so continue the analysis
         return false;
       }
@@ -11608,7 +11791,7 @@ namespace Legion {
         if (is_logical_owner())
         {
           // See if we need to send any replicated invalidations
-          if (!immutable && !replicated_states.empty() && 
+          if (!analysis.immutable && !replicated_states.empty() && 
               !(replicated_states.get_valid_mask() * mask))
           {
             // Send invalidations and record effects for when they are done
@@ -11619,8 +11802,36 @@ namespace Legion {
               const FieldMask overlap = it->second & mask;
               if (!overlap)
                 continue;
-              broadcast_replicated_state_updates(overlap, NULL, local_space,
-                       applied_events, false/*need lock*/, false/*updates*/);
+              // Check to see if this owner is included in the replicated
+              // state, if it is then we can send the invalidations 
+              // asynchronously and have them complete in the background,
+              // otherwise we need to wait for an update to be flushed here
+              if (!it->first->contains(local_space))
+              {
+                // Make a replication change object for the change that
+                // we're going to perform and then request an update from
+                // the first space in the previous mapping
+                ReplicationChange *change =
+                 new ReplicationChange(it->first, 1/*arrivals*/, false/*add*/);
+                applied_events.insert(change->applied_event);
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(did);
+                  rez.serialize<size_t>(0); // no mapping
+                  rez.serialize(overlap);
+                  rez.serialize(overlap);
+                  rez.serialize(change);
+                  rez.serialize(local_space);
+                  rez.serialize<bool>(false); // not owner search
+                }
+                runtime->send_equivalence_set_replication_request(
+                                            (*(it->first))[0], rez);
+                replication_changes.insert(change, overlap);
+              }
+              else
+                update_replicated_state(it->first, NULL/*not collective*/,
+                              overlap, applied_events, false/*need lock*/);
               it.filter(overlap);
               if (!it->second)
                 to_delete.push_back(it->first);
@@ -11632,15 +11843,40 @@ namespace Legion {
               if ((*it)->remove_reference())
                 delete (*it);
             }
-            if (!replicated_states.empty())
-              replicated_states.tighten_valid_mask();
+            replicated_states.tighten_valid_mask();
+          }
+          // See if there are any outstanding replication changes that
+          // we need to wait for before we can actually run
+          if (!replication_changes.empty() &&
+              !(replication_changes.get_valid_mask() * mask))
+          {
+            std::vector<RtEvent> ready_events;
+            for (FieldMaskSet<ReplicationChange>::const_iterator it =
+                  replication_changes.begin(); it !=
+                  replication_changes.end(); it++)
+            {
+              if (it->second * mask)
+                continue;
+              ready_events.push_back(it->first->ready_event);
+            }
+            if (!ready_events.empty())
+            {
+              RtEvent deferral_event = Runtime::merge_events(ready_events);
+              // No need to check to see if it is triggered or not
+              // because the only way the events trigger is if this
+              // object has already been removed
+              // Defer running this analysis until it's ready
+              analysis.defer_traversal(deferral_event, this, mask,
+                                  deferral_events, applied_events);
+              return true;
+            }
           }
           // At this point everything is local and we're good to go
           return false;
         }
         else
         {
-          if (immutable && !replicated_states.empty() &&
+          if (analysis.immutable && !replicated_states.empty() &&
               !(replicated_states.get_valid_mask() * mask))
           {
             // We can do the traversal here for anything that's
@@ -11660,16 +11896,15 @@ namespace Legion {
             {
               if (replicated != mask)
               {
-                // Defer all the replicated fields 
-                analysis.defer_traversal(RtEvent::NO_RT_EVENT, this,
-                    replicated, deferral_events, applied_events);
-                // Send the unreplicated ones to the owner
+                // Record the unreplicated fields as remote
                 const FieldMask unreplicated = mask - replicated;
+                // Send the unreplicated ones to the owner
                 analysis.record_remote(this, unreplicated, logical_owner_space);
-                return true;
+                // Reduce the traversal mask down to just the replicated fields
+                mask = replicated;
               }
-              else // everything is local here, so we can traverse
-                return false;
+              // all remaining fields are local here, so we can traverse
+              return false;
             }
             // Otherwise fall through and send it remote
           }
@@ -11681,300 +11916,357 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::UpdateReplicatedFunctor::UpdateReplicatedFunctor(
-                                  DistributedID id, const FieldMask &m,
-                                  const CollectiveMapping *map,
-                                  AddressSpaceID orig, AddressSpaceID skip,
-                                  Runtime *rt, std::set<RtEvent> &ap)
-      : did(id), mask(m), origin(orig), to_skip(skip), mapping(map), 
-        runtime(rt), applied(ap)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::UpdateReplicatedFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (target == to_skip)
-        return;
-      const RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(mask);
-        if (mapping != NULL)
-          mapping->pack(rez);
-        else
-          rez.serialize<size_t>(0);
-        rez.serialize(origin);
-        rez.serialize(done_event);
-      }
-      runtime->send_equivalence_set_replication_update(target, rez);
-      applied.insert(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::broadcast_replicated_state_updates(
-                 const FieldMask &mask, CollectiveMapping *mapping,
-                 const AddressSpaceID origin, std::set<RtEvent> &applied_events,
-                 const bool need_lock, const bool perform_updates)
+    void EquivalenceSet::update_replicated_state(CollectiveMapping *oldstate,
+        CollectiveMapping *newstate, const FieldMask &update_mask,
+        std::set<RtEvent> &applied_events, bool need_lock)
     //--------------------------------------------------------------------------
     {
       if (need_lock)
       {
         AutoLock eq(eq_lock);
-        broadcast_replicated_state_updates(mask, mapping, origin, 
-            applied_events, false/*need lock*/, perform_updates);
+        update_replicated_state(oldstate, newstate, update_mask,
+                                applied_events, false/*need lock*/);
         return;
       }
-      // If we're the owner, send messages to all the remote instances
-      if (is_owner() && has_remote_instances())
+      if (newstate != NULL)
       {
-        UpdateReplicatedFunctor functor(did, mask, mapping, local_space, origin,
-                                        runtime, applied_events);
-        map_over_remote_instances(functor);
-      }
-      if (collective_mapping != NULL)
-      {
-        // Send it along to the other locations
-        std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(origin, local_space, children);
-        for (std::vector<AddressSpaceID>::const_iterator it =
-              children.begin(); it != children.end(); it++)
+        // This is the collective update case
+        if (newstate->contains(local_space))
         {
-          const RtUserEvent done_event = Runtime::create_rt_user_event();
-          Serializer rez;
+          // Find all the spaces not covered by mapping and then round-robin
+          // them amongst the spaces in the mapping
+          std::vector<AddressSpaceID> uncovered;
+          const CollectiveMapping &old_ref = *oldstate;
+          const CollectiveMapping &new_ref = *newstate;
+          unsigned old_index = 0;
+          for (unsigned idx = 0; idx < new_ref.size(); idx++, old_index++)
           {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(mask);
-            if (mapping != NULL)
-              mapping->pack(rez);
-            else
-              rez.serialize<size_t>(0);
-            rez.serialize(origin);
-            rez.serialize(done_event);
+            const AddressSpaceID newspace = new_ref[idx];
+            while ((old_index < old_ref.size()) &&
+                   (old_ref[old_index] < newspace))
+              uncovered.push_back(old_ref[old_index++]);
+            if (old_index == old_ref.size())
+              break;
           }
-          runtime->send_equivalence_set_replication_update(*it, rez);
-          applied_events.insert(done_event);
+          while (old_index < old_ref.size())
+            uncovered.push_back(old_ref[old_index++]);
+          for (unsigned idx = new_ref.find_index(local_space);
+                idx < uncovered.size(); idx += new_ref.size())
+          {
+            const RtUserEvent applied = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              oldstate->pack(rez);
+              newstate->pack(rez);
+              rez.serialize(update_mask);
+              rez.serialize(applied);
+            }
+            runtime->send_equivalence_set_replication_update(
+                                         uncovered[idx], rez);
+            applied_events.insert(applied);
+          }
+          // Also perform a check to see if the new mapping contains
+          // the logical owner space, if it doesn't then we need to 
+          // send an invalidation to the owner as well
+          if (!newstate->contains(logical_owner_space) &&
+              (local_space == ((*newstate)[0])))
+          {
+            const RtUserEvent applied = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              oldstate->pack(rez);
+              newstate->pack(rez);
+              rez.serialize(update_mask);
+              rez.serialize(applied);
+            }
+            runtime->send_equivalence_set_replication_update(
+                                    logical_owner_space, rez);
+            applied_events.insert(applied);
+          }
         }
       }
-      else if (origin != owner_space)
+      else
       {
-#ifdef DEBUG_LEGION
-        assert(origin == local_space);
-#endif
-        // If the origin is not the owner space, send a message to it
-        const RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
+        // This is the tree broadcast case from the logical owner space
+        if (oldstate->contains(logical_owner_space))
         {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(mask);
-          if (mapping != NULL)
-            mapping->pack(rez);
-          else
-            rez.serialize<size_t>(0);
-          rez.serialize(origin);
-          rez.serialize(done_event);
-        }
-        runtime->send_equivalence_set_replication_update(owner_space, rez);
-        applied_events.insert(done_event);
-      }
-      // Once we get down here then we can just do our local updates 
-      if (perform_updates)
-        update_replicated_state(mapping, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::update_replicated_state(CollectiveMapping *mapping,
-                                                 const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      // Remove any conflicting mappings and record any local invalidations
-      // we need to do here
-      FieldMask invalidate_mask;
-      if (!replicated_states.empty() && 
-          !(mask * replicated_states.get_valid_mask()))
-      {
-        std::vector<CollectiveMapping*> to_delete;
-        for (FieldMaskSet<CollectiveMapping>::iterator it =
-              replicated_states.begin(); it != replicated_states.end(); it++)
-        {
-          const FieldMask overlap = mask & it->second;
-          if (!overlap)
-            continue;
-          if (it->first->contains(local_space))
-            invalidate_mask |= overlap;
-          it.filter(overlap);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        for (std::vector<CollectiveMapping*>::const_iterator it =
-              to_delete.begin(); it != to_delete.end(); it++)
-        {
-          replicated_states.erase(*it);
-          if ((*it)->remove_reference())
-            delete (*it);
-        }
-        if (!replicated_states.empty())
-          replicated_states.tighten_valid_mask();
-      }
-      // If we're not included in the mapping then add it now, if we are 
-      // included then we'll be added automatically by the requesters
-      if (mapping != NULL)
-      {
-        if (mapping->contains(local_space))
-        {
-          // If the fields are still going to be valid in the new state
-          // then we don't need to invalidate them
-          if (!!invalidate_mask)
-            invalidate_mask.clear();
+          std::vector<AddressSpaceID> children;
+          oldstate->get_children(logical_owner_space, local_space, children);
+          // Send invalidations to any children
+          for (unsigned idx = 0; idx < children.size(); idx++)
+          {
+            const RtUserEvent applied = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              oldstate->pack(rez);
+              rez.serialize<size_t>(0); // no newstate
+              rez.serialize(update_mask);
+              rez.serialize(applied);
+            }
+            runtime->send_equivalence_set_replication_update(children[idx], rez);
+            applied_events.insert(applied);
+          }
         }
         else
         {
-          if (replicated_states.insert(mapping, mask))
-            mapping->add_reference();
+          // Old state does not contain the logical owner space, so if we're
+          // the logical owner space we send it to the origin and then start
+          // the tree broadcast from there
+          const AddressSpaceID origin = (*oldstate)[0];
+          if (!is_logical_owner())
+          {
+            std::vector<AddressSpaceID> children;
+            oldstate->get_children(origin, local_space, children);
+            // Send invalidations to any children
+            for (unsigned idx = 0; idx < children.size(); idx++)
+            {
+              const RtUserEvent applied = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                oldstate->pack(rez);
+                rez.serialize<size_t>(0); // no newstate
+                rez.serialize(update_mask);
+                rez.serialize(applied);
+              }
+              runtime->send_equivalence_set_replication_update(children[idx], rez);
+              applied_events.insert(applied);
+            }
+          }
+          else
+          {
+            const RtUserEvent applied = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              oldstate->pack(rez);
+              rez.serialize<size_t>(0); // no newstate
+              rez.serialize(update_mask);
+              rez.serialize(applied);
+            }
+            runtime->send_equivalence_set_replication_update(origin, rez);
+            applied_events.insert(applied);
+          }
         }
       }
-      // If we don't have any local fields to invalidate then return
-      if (!invalidate_mask)
-        return;
-      invalidate_state(set_expr, true/*covers*/, mask, RtEvent::NO_RT_EVENT);
-    }
+      // TODO: Now perform the local invalidation of the replicated state
 
-    //--------------------------------------------------------------------------
-    EquivalenceSet::PendingReplication::PendingReplication(CollectiveMapping *m,
-                                                         unsigned notifications)
-      : mapping(m), ready_event(Runtime::create_rt_user_event()),
-        remaining_notifications(notifications)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapping != NULL); 
-#endif
-      mapping->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet::PendingReplication::~PendingReplication(void)
-    //--------------------------------------------------------------------------
-    {
-      if (mapping->remove_reference())
-        delete mapping;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::make_replicated_state(CollectiveMapping *mapping,
-                                    FieldMask mask, const AddressSpaceID source,
-                                    std::set<RtEvent> &deferral_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapping->contains(source));
-#endif
-      if (is_logical_owner())
+      // When we're done find the replicated state and remove it
+      std::vector<CollectiveMapping*> to_delete;
+      for (FieldMaskSet<CollectiveMapping>::iterator it = 
+            replicated_states.begin(); it != replicated_states.end(); it++)
       {
-        // For the first notification, send any invalidations out to 
-        // instances which are not contained in the new set
-        std::vector<PendingReplication*> to_finalize;
-        for (FieldMaskSet<PendingReplication>::iterator it =
-              pending_states.begin(); it != pending_states.end(); it++)
-        {
-          if (mask * it->second)
-            continue;
+        const FieldMask overlap = update_mask & it->second;
+        if (!overlap)
+          continue;
 #ifdef DEBUG_LEGION
-          // should overlap on all fields
-          assert(!(it->second - mask));
-          assert((*it->first->mapping) == *mapping);
+        assert((it->first == oldstate) || ((*it->first) == (*oldstate)));
 #endif
-          deferral_events.insert(it->first->ready_event);
-          // Check to see if this is the last notification for this
-          // pending replication state, if so we can finalize it
-          if (--it->first->remaining_notifications == 0)
-            to_finalize.push_back(it->first);
-          mask -= it->second;
-          if (!mask)
-            break;
-        }
-        // Finalize any that are ready to be done
-        if (!to_finalize.empty())
+        it.filter(overlap);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<CollectiveMapping*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        replicated_states.erase(*it);
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      // Now we can add the new mapping if we are on one of the nodes that
+      // is part of the new replicated state
+      if ((newstate != NULL) &&
+          (newstate->contains(local_space) || is_logical_owner()))
+      {
+        if (replicated_states.insert(newstate, update_mask))
+          newstate->add_reference();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::finalize_replication_change(ReplicationChange *change,
+                                                   const FieldMask &change_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(change->remaining_arrivals == 0);
+#endif
+      if (!change->remote_requests.empty()) 
+      {
+#ifdef DEBUG_LEGION
+        assert(change->add);
+#endif
+        // TODO: Send out any replication responses from our state before 
+        // we go about changing anything
+
+      }
+      std::set<RtEvent> applied_events;
+      if (change->add)
+      {
+        if (!replicated_states.empty() && 
+            !(change_mask * replicated_states.get_valid_mask()))
         {
-          for (std::vector<PendingReplication*>::const_iterator it =
-                to_finalize.begin(); it != to_finalize.end(); it++)
+          FieldMask remainder = change_mask;
+          // Go through and issue updates to any replicated states
+          std::vector<CollectiveMapping*> to_delete;
+          for (FieldMaskSet<CollectiveMapping>::iterator it =
+                replicated_states.begin(); it != replicated_states.end(); it++)
           {
-            FieldMaskSet<PendingReplication>::iterator finder =
-              pending_states.find(*it);
-#ifdef DEBUG_LEGION
-            assert(finder != pending_states.end());
-#endif
-            finalize_pending_replication(finder->first, finder->second,
-                                         true/*first call*/);
-            pending_states.erase(finder);
+            const FieldMask overlap = change_mask & it->second;
+            if (!overlap)
+              continue;
+            update_replicated_state(it->first, change->mapping, overlap,
+                                    applied_events, false/*need lock*/);
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+            remainder -= overlap;
+            if (!remainder)
+              break;
           }
-          if (!pending_states.empty())
-            pending_states.tighten_valid_mask();
+          // Add it for any remainder fields
+          if (!!remainder && 
+              replicated_states.insert(change->mapping, remainder))
+            change->mapping->add_reference();
+          for (std::vector<CollectiveMapping*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            replicated_states.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
+          }
         }
-        // If we still have fields, then start a new pending request
-        if (!!mask)
+        else
         {
-          PendingReplication *pending = 
-            new PendingReplication(mapping, mapping->size() - 1);
-          // Send updates to all the nodes not in the mapping
-          broadcast_replicated_state_updates(mask, mapping, local_space,
-                                             pending->preconditions);
-          pending_states.insert(pending, mask);
-          deferral_events.insert(pending->ready_event);
+          // We can just add the new mapping to the replicated states
+          // since there is nothing that needs to be updated
+          if (replicated_states.insert(change->mapping, change_mask))
+            change->mapping->add_reference();
         }
       }
       else
       {
 #ifdef DEBUG_LEGION
-        assert(source == local_space);
+        assert(is_logical_owner());
 #endif
-        // First deduplicate requests
-        for (FieldMaskSet<PendingReplication>::const_iterator it =
-              pending_states.begin(); it != pending_states.end(); it++)
-        {
-          if (it->second * mask)
-            continue;
+        update_replicated_state(change->mapping, NULL/*not collective*/,
+                        change_mask, applied_events, false/*need lock*/);
+      }
+      // Trigger our events for when they are ready
+      Runtime::trigger_event(change->ready_event);
+      if (!applied_events.empty())
+        Runtime::trigger_event(change->applied_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(change->applied_event);
+      delete change;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::process_replication_request(CollectiveMapping *mapping,
+      const FieldMask &full_mask, const FieldMask &request_mask,
+      ReplicationChange *target, const AddressSpaceID source, bool owner_search)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      if (owner_search && !is_logical_owner())
+      {
 #ifdef DEBUG_LEGION
-          // should overlap on all fields
-          assert(!(it->second - mask));
-          assert((it->first->mapping == mapping) || 
-                  ((*it->first->mapping) == *mapping));
+        assert(mapping != NULL);
 #endif
-          deferral_events.insert(it->first->ready_event);
-          mask -= it->second;
-          if (!mask)
-            return;
-        }
-#ifdef DEBUG_LEGION
-        assert(!!mask);
-#endif
-        // Then sending a notification to the logical owner with a
-        // request for any valid fields that we need for this copy
-        PendingReplication *pending = 
-            new PendingReplication(mapping, 1/*notification from owner*/);
+        // Keep forwarding this on to the logical owner
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(mask);
           mapping->pack(rez);
-          rez.serialize(pending);
-          rez.serialize(local_space);
-          rez.serialize(pending->ready_event);
+          rez.serialize(full_mask);
+          rez.serialize(request_mask);
+          rez.serialize(target);
+          rez.serialize(source);
+          rez.serialize<bool>(owner_search);
         }
         runtime->send_equivalence_set_replication_request(logical_owner_space,
                                                           rez);
-        deferral_events.insert(pending->ready_event);
-        pending_states.insert(pending, mask);
+        return;
+      }
+      if ((mapping != NULL) && !owner_search)
+      {
+        // Find or create the local replication change object here
+        // and then record ourselves if we have a remote request
+        for (FieldMaskSet<ReplicationChange>::iterator it =
+              replication_changes.begin(); it !=
+              replication_changes.end(); it++)
+        {
+          if (full_mask * it->second)
+            continue;
+#ifdef DEBUG_LEGION
+          assert(full_mask == it->second);
+          assert(it->first->remaining_arrivals > 0);
+#endif
+          if (!!request_mask)
+            it->first->record_remote_request(target, source, request_mask);
+          if (--it->first->remaining_arrivals == 0)
+          {
+            finalize_replication_change(it->first, it->second);
+            replication_changes.erase(it);
+          }
+          return;
+        }
+        // If we get here then we need to make it
+        // Figure out what fields we need to request
+        FieldMask unreplicated;
+        if (!is_logical_owner())
+          // Any fields that are already replicated are good
+          unreplicated = full_mask - replicated_states.get_valid_mask();
+        // Create the replication change and record it
+        const AddressSpaceID origin = (*mapping)[0];
+        ReplicationChange *change = new ReplicationChange(mapping,
+            mapping->count_children(origin, local_space), true/*add*/);
+        if (!!request_mask)
+          change->record_remote_request(target, source, request_mask);
+        if ((origin != local_space) || !!unreplicated)
+        {
+          const AddressSpaceID target = (origin == local_space) ?
+            logical_owner_space : mapping->get_parent(origin, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            mapping->pack(rez);
+            rez.serialize(full_mask);
+            rez.serialize(unreplicated);
+            rez.serialize(change);
+            rez.serialize(local_space);
+            rez.serialize<bool>((origin == local_space));
+          }
+          runtime->send_equivalence_set_replication_request(target, rez);
+          // Increment the count for the expected arrivals for the response
+          // if we're actually expecting one
+          if (!!unreplicated)
+            change->remaining_arrivals++;
+          replication_changes.insert(change, full_mask);
+        }
+        else
+          finalize_replication_change(change, full_mask);
+      }
+      else
+      {
+        // In this case we should just package up the replication state
+        // and send it back to whichever node requested it
+
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void EquivalenceSet::process_replication_request(const FieldMask &mask,
                          CollectiveMapping *mapping, PendingReplication *target,
@@ -12121,6 +12413,7 @@ namespace Legion {
           false/*first*/, true/*need lock*/);
       delete (dargs->mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     template<typename T>
@@ -14077,20 +14370,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, acquire_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, acquire_mask, deferral_events,
-                             applied_events, expr_covers))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(acquire_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       std::vector<IndexSpaceExpression*> to_delete;
       WrapperReferenceMutator mutator(applied_events);
       std::map<IndexSpaceExpression*,IndexSpaceExpression*> to_add;
@@ -14278,7 +14558,6 @@ namespace Legion {
             FieldMaskSet<InstanceView> >::aligned::const_iterator it =
            restricted_instances.begin(); it != restricted_instances.end(); it++)
         restricted_fields |= it->second.get_valid_mask();
-      check_for_migration(analysis, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -14291,20 +14570,7 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, release_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, release_mask, deferral_events,
-                             applied_events, expr_covers))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(release_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       WrapperReferenceMutator mutator(applied_events);
       LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<InstanceView> >::aligned to_update;
@@ -14488,7 +14754,6 @@ namespace Legion {
                             it->second.get_valid_mask(), it->second,
                             analysis.source_views, analysis.trace_info,
                             applied_events, true/*record valid*/); 
-      check_for_migration(analysis, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -15433,23 +15698,10 @@ namespace Legion {
                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // While you might think this could a read-only lock since
       // we're just reading meta-data, that's not quite right because
       // we need exclusive access to data structures in check_for_migration
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, src_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, src_mask, deferral_events,
-                             applied_events, false/*exclusive*/))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(src_mask));
-#endif
       // We need to lock the analysis at this point
       AutoLock a_lock(analysis);
       check_for_uninitialized_data(analysis, expr, expr_covers, 
@@ -15586,7 +15838,6 @@ namespace Legion {
                 NULL/*no need to track applied exprs*/);
         }
       }
-      check_for_migration(analysis, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -15599,20 +15850,7 @@ namespace Legion {
                                        const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, overwrite_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, overwrite_mask, deferral_events,
-                             applied_events, expr_covers))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(overwrite_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       WrapperReferenceMutator mutator(applied_events);
       // Now that we're ready to perform the analysis 
       // we need to lock the analysis 
@@ -15713,7 +15951,6 @@ namespace Legion {
           update_tracing_valid_views(it->first, expr, usage,
              it->second, true/*invalidates*/, applied_events);
       }
-      check_for_migration(analysis, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -15726,20 +15963,7 @@ namespace Legion {
                                     const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, filter_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, filter_mask, deferral_events,
-                             applied_events, expr_covers))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(filter_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       // No need to lock the analysis here since we're not going to change it
       WrapperReferenceMutator mutator(applied_events);
       // Filter partial first since total could flow back here
@@ -16026,7 +16250,6 @@ namespace Legion {
         else // everything empty so filter the whole set
           filter_initialized_data(set_expr, true/*covers*/, filter_mask);
       }
-      check_for_migration(analysis, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -16039,20 +16262,7 @@ namespace Legion {
                                    const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoTryLock eq(eq_lock);
-      if (!eq.has_lock())
-      {
-        defer_traversal(eq, analysis, clone_mask, deferral_events,
-                        applied_events, already_deferred);
-        return;
-      }
-      if (is_remote_analysis(analysis, clone_mask, deferral_events,
-                             applied_events, expr_covers))
-        return;
-#ifdef DEBUG_LEGION
-      // Should only be here if we're the owner
-      assert(is_logical_owner() || has_replicated_fields(clone_mask));
-#endif
+      // Already holding the eq_lock from EquivalenceSet::traverse_set method
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             analysis.sources.begin(); it != analysis.sources.end(); it++)
       {
@@ -16604,24 +16814,33 @@ namespace Legion {
       RtEvent ready_event;
       EquivalenceSet *set = 
         runtime->find_or_request_equivalence_set(did, ready_event);
-      FieldMask mask;
-      derez.deserialize(mask);
-      CollectiveMapping *mapping = new CollectiveMapping(derez);
-      mapping->add_reference();
-      PendingReplication *target;
-      derez.deserialize(target);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = NULL;
+      if (num_spaces > 0)
+      {
+        mapping = new CollectiveMapping(derez, num_spaces);
+        mapping->add_reference();
+      }
+      FieldMask full_mask, request_mask;
+      derez.deserialize(full_mask);
+      derez.deserialize(request_mask);
+      ReplicationChange *change;
+      derez.deserialize(change);
       AddressSpaceID source;
       derez.deserialize(source);
-      RtEvent done_event;
-      derez.deserialize(done_event);
+      bool owner_search;
+      derez.deserialize(owner_search);
 
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->process_replication_request(mask, mapping, target,source,done_event);
-      if (mapping->remove_reference())
+      set->process_replication_request(mapping, full_mask, request_mask,
+                                       change, source, owner_search);
+      if ((mapping != NULL) && mapping->remove_reference())
         delete mapping;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_response(
                                           Deserializer &derez, Runtime *runtime)
@@ -16649,6 +16868,7 @@ namespace Legion {
       set->process_replication_response(target, mask, precondition, 
                                         update_mask, derez);
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_update(
@@ -16661,27 +16881,39 @@ namespace Legion {
       RtEvent ready_event;
       EquivalenceSet *set = 
         runtime->find_or_request_equivalence_set(did, ready_event);
-      FieldMask mask;
-      derez.deserialize(mask);
-      CollectiveMapping *mapping = new CollectiveMapping(derez);
-      mapping->add_reference();
-      AddressSpaceID origin;
-      derez.deserialize(origin);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
+      CollectiveMapping *oldstate = NULL, *newstate = NULL;
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      if (num_spaces > 0)
+      {
+        oldstate = new CollectiveMapping(derez, num_spaces);
+        oldstate->add_reference();
+      }
+      derez.deserialize(num_spaces);
+      if (num_spaces > 0)
+      {
+        newstate = new CollectiveMapping(derez, num_spaces);
+        newstate->add_reference();
+      }
+      FieldMask update_mask;
+      derez.deserialize(update_mask);
+      RtUserEvent applied_event;
+      derez.deserialize(applied_event);
 
       std::set<RtEvent> applied_events;
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->broadcast_replicated_state_updates(mask, (mapping->size() > 0) ? 
-          mapping : NULL, origin, applied_events, true/*need lock*/);
+      set->update_replicated_state(oldstate, newstate,
+          update_mask, applied_events, true/*need lock*/);
       if (!applied_events.empty())
-        Runtime::trigger_event(done_event, 
+        Runtime::trigger_event(applied_event, 
             Runtime::merge_events(applied_events));
       else
-        Runtime::trigger_event(done_event);
-      if (mapping->remove_reference())
-        delete mapping;
+        Runtime::trigger_event(applied_event);
+      if ((oldstate != NULL) && oldstate->remove_reference())
+        delete oldstate;
+      if ((newstate != NULL) && newstate->remove_reference())
+        delete newstate;
     }
 
     //--------------------------------------------------------------------------

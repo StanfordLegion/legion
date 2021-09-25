@@ -131,11 +131,12 @@ namespace Legion {
       void get_children(const AddressSpaceID origin, const AddressSpaceID local,
                         std::vector<AddressSpaceID> &children) const;
       bool contains(const AddressSpaceID space) const;
+      bool contains(const CollectiveMapping &rhs) const;
       CollectiveMapping* clone_with(AddressSpace space) const;
     public:
       void pack(Serializer &rez) const;
-    protected:
       unsigned find_index(const AddressSpaceID space) const;
+    protected:
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
     protected:
@@ -681,6 +682,8 @@ namespace Legion {
       bool contains_point(const DomainPoint &point) const;
       bool contains_isomorphic_points(IndexSpaceNode *points) const;
     public:
+      bool is_first_local_point(const DomainPoint &point) const;
+    public:
       void record_point_instance(const DomainPoint &point,
                                  PhysicalInstance instance);
     public:
@@ -730,7 +733,8 @@ namespace Legion {
       void find_or_forward_physical_instance(AddressSpaceID origin,
             std::set<DomainPoint> &points, RtUserEvent to_trigger);
       void record_remote_physical_instances(
-          const std::map<DomainPoint,PhysicalInstance> &instances);
+          const std::map<DomainPoint,
+                         std::pair<PhysicalInstance,unsigned> > &instances);
     public:
       virtual ApEvent fill_from(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -787,7 +791,8 @@ namespace Legion {
       std::vector<MemoryManager*> memories; // local memories
       std::vector<PhysicalInstance> instances; // local instances
       std::vector<DomainPoint> instance_points; // points for local instances
-      std::map<DomainPoint,PhysicalInstance> remote_instances;
+      std::map<DomainPoint,
+               std::pair<PhysicalInstance,unsigned/*index*/> > remote_instances;
     protected:
       ApBarrier collective_barrier;
       RtEvent detached;

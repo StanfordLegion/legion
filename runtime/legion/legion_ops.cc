@@ -10549,8 +10549,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, 
               deletion_requirements[idx], version_infos[idx],
-              PhysicalTraceInfo(trace_info, idx), NULL/*no collective map*/,
-              map_applied_conditions);
+              PhysicalTraceInfo(trace_info, idx), map_applied_conditions,
+              NULL/*no collective map*/, false/*not collective*/);
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
         if (allocator->ready_event.exists())
@@ -13058,6 +13058,7 @@ namespace Legion {
                                               restricted_instances,
                                               trace_info, 
                                               get_collective_mapping(),
+                                              is_collective_first_local_shard(),
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -13989,6 +13990,7 @@ namespace Legion {
                                               restricted_instances, 
                                               source_instances, trace_info,
                                               get_collective_mapping(),
+                                              is_collective_first_local_shard(),
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -19492,8 +19494,9 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info, 
                                        init_precondition, true_guard,
-                                       trace_info, get_collective_mapping(),
-                                       map_applied_conditions);
+                                       trace_info, map_applied_conditions,
+                                       get_collective_mapping(),
+                                       is_collective_first_local_shard());
         if (runtime->legion_spy_enabled)
         {
 #ifdef LEGION_SPY
@@ -19578,8 +19581,9 @@ namespace Legion {
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        fill_view, version_info,
                                        init_precondition, true_guard,
-                                       trace_info, get_collective_mapping(),
-                                       map_applied_conditions);
+                                       trace_info, map_applied_conditions,
+                                       get_collective_mapping(),
+                                       is_collective_first_local_shard());
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event,
                                       completion_event);
@@ -20918,7 +20922,8 @@ namespace Legion {
                                                         trace_info,
                                                         NULL/*not collective*/,
                                                         map_applied_conditions,
-                                                        restricted);
+                                                        restricted,
+                                                        false/*no collective*/);
 #ifdef DEBUG_LEGION
       assert(external_instance.has_ref());
 #endif
@@ -22315,8 +22320,9 @@ namespace Legion {
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
                                          version_info, ext_view, trace_info,
+                                         map_applied_conditions,
                                          NULL/*no collective map*/,
-                                         map_applied_conditions);
+                                         false/*no collective map*/);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
           Runtime::merge_events(&trace_info, detach_event, effects_done);
