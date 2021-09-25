@@ -10393,9 +10393,23 @@ namespace Legion {
       if ((size <= LEGION_MAX_RETURN_SIZE) &&
           (memory == runtime->runtime_system_memory))
       {
+#ifdef __GNUC__
+#if __GNUC__ >= 11
+          // GCC is dumb and thinks we need to initialize the malloc buffer
+          // before we pass it into the create local call, which we
+          // obviously don't need to do, so tell the compiler to shut up
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
         // Special case where we can just allocate the buffer locally
         return new FutureInstance(malloc(size), size, memory, ready_event,
             runtime, false/*eager*/, true/*external*/, true/*own allocation*/);
+#ifdef __GNUC__
+#if __GNUC__ >= 11
+#pragma GCC diagnostic pop
+#endif
+#endif
       }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
