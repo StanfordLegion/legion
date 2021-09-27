@@ -29222,13 +29222,61 @@ namespace Legion {
 #endif
         realm.network_init(argc, argv);
       assert(ok);
-
-      const int num_args = *argc;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
-      std::vector<std::string> cmdline((num_args > 0) ? num_args-1 : 0);
+      std::vector<std::string> cmdline;
+      // Check to see if there are any Legion default args from the environment
+      const char *e = getenv("LEGION_DEFAULT_ARGS");
+      if (e)
+      {
+        // This code is borrowed from Realm for parsing default arguments
+        // Prepend any default args so they can still be overridden 
+        // by actual flags on the command line
+        while (*e) 
+        {
+          if (isspace(*e)) 
+          { 
+            e++;
+            continue; 
+          }
+          const char *starts = NULL;
+          if (*e == '\'') 
+          {
+            // single quoted string
+            e++;
+            assert(*e);
+            starts = e;
+            // read until next single quote
+            while (*e && (*e != '\''))
+              e++;
+            cmdline.emplace_back(std::string(starts, size_t(e++ - starts))); 
+            assert(!*e || isspace(*e));
+            continue;
+          }
+          if (*e == '\"')
+          {
+            // double quoted string
+            e++;
+            assert(*e);
+            starts = e;
+            // read until next double quote
+            while (*e && (*e != '\"'))
+              e++;
+            cmdline.emplace_back(std::string(starts, size_t(e++ - starts)));
+            assert(!*e || isspace(*e));
+            continue;
+          }
+          // no quotes - just take until next whitespace
+          starts = e;
+          while (*e && !isspace(*e))
+            e++;
+          cmdline.emplace_back(std::string(starts, size_t(e - starts)));
+        }
+      }
+      size_t num_args = *argc;
+      cmdline.reserve(cmdline.size() + ((num_args > 0) ? num_args-1 : 0));
       for (int i = 1; i < num_args; i++)
-        cmdline[i-1] = (*argv)[i];
+        cmdline.emplace_back((*argv)[i]);
 #ifndef NDEBUG
       ok = 
 #endif
