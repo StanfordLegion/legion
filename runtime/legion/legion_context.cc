@@ -6307,8 +6307,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(
-            __sync_add_and_fetch(&outstanding_children_count,1), launcher);
+        return predicate_index_task_false(total_children_count++, launcher);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -6426,8 +6425,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-                      __sync_add_and_fetch(&outstanding_children_count, 1),
-                      runtime->address_space, RtEvent::NO_RT_EVENT);
+          total_children_count++, runtime->address_space, RtEvent::NO_RT_EVENT);
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -14015,8 +14013,8 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            __sync_add_and_fetch(&outstanding_children_count, 1),
-            runtime->address_space, RtEvent::NO_RT_EVENT, true/*reg now*/));
+                              total_children_count++, runtime->address_space,
+                              RtEvent::NO_RT_EVENT, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
       ShardID shard = 0;
@@ -16729,8 +16727,7 @@ namespace Legion {
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return predicate_index_task_false(
-            __sync_add_and_fetch(&outstanding_children_count,1), launcher);
+        return predicate_index_task_false(total_children_count++, launcher);
       IndexSpace launch_space = launcher.launch_space;
       if (!launch_space.exists())
         launch_space = find_index_launch_space(launcher.launch_domain);
@@ -16921,8 +16918,7 @@ namespace Legion {
           shard_manager->get_shard_space(dynamic_id_allocator_shard);
         ReplFutureMapImpl *repl_impl =
           new ReplFutureMapImpl(this, runtime, domain_node, domain_node, did,
-            __sync_add_and_fetch(&outstanding_children_count, 1),
-            owner_space, RtEvent::NO_RT_EVENT);
+            total_children_count++, owner_space, RtEvent::NO_RT_EVENT);
         ShardingFunction *function = shard_manager->find_sharding_function(sid);
         // Check that all the points abide by the sharding function 
         for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
@@ -16947,8 +16943,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         impl = new FutureMapImpl(this, runtime, domain_node, did,
-                      __sync_add_and_fetch(&outstanding_children_count, 1),
-                      runtime->address_space, RtEvent::NO_RT_EVENT);
+          total_children_count++, runtime->address_space, RtEvent::NO_RT_EVENT);
       }
       LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
