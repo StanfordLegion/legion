@@ -110,7 +110,7 @@ endif
 endif
 # shared libraries can link against other shared libraries
 SLIB_LEGION_DEPS = -L. -lrealm
-SLIB_REALM_DEPS  =
+SLIB_REALM_DEPS  = -lpthread -ldl -lrt
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
