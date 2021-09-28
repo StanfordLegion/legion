@@ -22832,7 +22832,7 @@ namespace Legion {
             }
             // Now that we've got it's original pointer we can move
             // it to the new location in the outputs
-            if (arg_index == int(idx+1))
+            if (arg_index == (idx+1))
               arg_index++; // already in the right place 
             else
               (*argv)[idx+1] = (*argv)[arg_index++];
