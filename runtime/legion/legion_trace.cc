@@ -1989,16 +1989,18 @@ namespace Legion {
       templates.push_back(tpl);
       if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
       {
+        InnerContext *ctx = logical_trace->ctx;
         REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
             "WARNING: The runtime has created %d new replayable templates "
-            "for trace %u without replaying any existing templates. This "
-            "may mean that your mapper is not making mapper decisions "
-            "conducive to replaying templates. Please check that your "
-            "mapper is making decisions that align with prior templates. "
-            "If you believe that this number of templates is reasonable "
-            "please adjust the settings for LEGION_NEW_TEMPLATE_WARNING_COUNT "
-            "in legion_config.h.", LEGION_NEW_TEMPLATE_WARNING_COUNT, 
-            logical_trace->get_trace_id())
+            "for trace %u in task %s (UID %lld) without replaying any "
+            "existing templates. This may mean that your mapper is not "
+            "making mapper decisions conducive to replaying templates. Please "
+            "check that your mapper is making decisions that align with prior "
+            "templates. If you believe that this number of templates is "
+            "reasonable please adjust the settings for "
+            "LEGION_NEW_TEMPLATE_WARNING_COUNT in legion_config.h.",
+            LEGION_NEW_TEMPLATE_WARNING_COUNT, logical_trace->get_trace_id(),
+            ctx->get_task_name(), ctx->get_unique_id())
         new_template_count = 0;
       }
       // Reset the nonreplayable count when we find a replayable template
@@ -2015,14 +2017,16 @@ namespace Legion {
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
+        InnerContext *ctx = logical_trace->ctx;
         REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
             "WARNING: The runtime has failed to memoize the trace more than "
             "%u times, due to the absence of a replayable template. It is "
-            "highly likely that trace %u will not be memoized for the rest "
-            "of execution. The most recent template was not replayable "
-            "for the following reason: %s. Please change the mapper to stop "
-            "making memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
-            logical_trace->get_trace_id(), message_buffer)
+            "highly likely that trace %u in task %s (UID %lld) will not be "
+            "memoized for the rest of execution. The most recent template was "
+            "not replayable for the following reason: %s. Please change the "
+            "mapper to stop making memoization requests.",
+            LEGION_NON_REPLAYABLE_WARNING, logical_trace->get_trace_id(),
+            ctx->get_task_name(), ctx->get_unique_id(), message_buffer)
         nonreplayable_count = 0;
       }
       current_template = NULL;
