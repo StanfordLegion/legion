@@ -29275,7 +29275,7 @@ namespace Legion {
       }
       size_t num_args = *argc;
       cmdline.reserve(cmdline.size() + ((num_args > 0) ? num_args-1 : 0));
-      for (int i = 1; i < num_args; i++)
+      for (unsigned i = 1; i < num_args; i++)
         cmdline.emplace_back((*argv)[i]);
 #ifndef NDEBUG
       ok = 
@@ -29389,7 +29389,7 @@ namespace Legion {
       {
         if (!cmdline.empty())
         {
-          int arg_index = 1;
+          unsigned arg_index = 1;
           for (unsigned idx = 0; idx < cmdline.size(); idx++)
           {
             const char *str = cmdline[idx].c_str();
