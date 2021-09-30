@@ -5690,7 +5690,10 @@ namespace Legion {
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
-      log_tracing.info() << "#### " << replayable << " " << this << " ####";
+      InnerContext *ctx = trace->logical_trace->ctx;
+      log_tracing.info() << "#### " << replayable << " " << this << " Trace "
+        << trace->logical_trace->tid << " for " << ctx->get_task_name()
+        << " (UID " << ctx->get_unique_id() << ") ####";
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
       {
         log_tracing.info() << "[Slice " << sidx << "]";
