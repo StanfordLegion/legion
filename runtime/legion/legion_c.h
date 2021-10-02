@@ -1939,7 +1939,6 @@ extern "C" {
    */
   legion_logical_partition_t
   legion_logical_partition_create(legion_runtime_t runtime,
-                                  legion_context_t ctx,
                                   legion_logical_region_t parent,
                                   legion_index_partition_t handle);
 

@@ -107,7 +107,6 @@ legion_terra_index_cross_product_get_partition(
 legion_index_partition_t
 legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
   legion_runtime_t runtime,
-  legion_context_t ctx,
   legion_terra_index_cross_product_t prod,
   legion_domain_point_t color_);
 

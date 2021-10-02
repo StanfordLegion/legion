@@ -621,17 +621,15 @@ legion_terra_index_cross_product_get_partition(
 legion_index_partition_t
 legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_terra_index_cross_product_t prod,
   legion_domain_point_t color_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition partition = CObjectWrapper::unwrap(prod.partition);
   DomainPoint color = CObjectWrapper::unwrap(color_);
 
-  IndexSpace is = runtime->get_index_subspace(ctx, partition, color);
-  IndexPartition ip = runtime->get_index_partition(ctx, is, prod.other_color);
+  IndexSpace is = runtime->get_index_subspace(partition, color);
+  IndexPartition ip = runtime->get_index_partition(is, prod.other_color);
   return CObjectWrapper::wrap(ip);
 }
 

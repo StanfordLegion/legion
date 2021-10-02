@@ -2372,6 +2372,38 @@ function codegen.expr_field_access(cx, node)
   end
 end
 
+function codegen.expr_index_access_partition_functor(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local index = codegen.expr(cx, node.index):read(cx)
+
+  local actions = quote
+    [value.actions];
+    [index.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local expr_type = std.as_read(node.expr_type)
+  local value_type = std.as_read(node.value.expr_type)
+
+  local r = terralib.newsymbol(expr_type, "r")
+  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
+
+  local color_type = value_type:colors().index_type
+  local color = std.implicit_cast(index_type, color_type, index.value)
+
+  actions = quote
+    [actions]
+    var dp = [color]:to_domain_point()
+    var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+      [cx.runtime], [value.value].impl, dp)
+    var [is] = [lr].index_space
+    var [r] = [expr_type] { impl = [lr] }
+  end
+
+  return values.value(node, expr.just(actions, r), expr_type)
+end
+
 function codegen.expr_index_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local index_type = std.as_read(node.index.expr_type)
@@ -2467,10 +2499,10 @@ function codegen.expr_index_access(cx, node)
       [actions]
       var dp = [color]:to_domain_point()
       var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
-        [cx.runtime], [cx.context],
+        [cx.runtime],
         [value.value].product, dp)
       var [lp] = c.legion_logical_partition_create(
-        [cx.runtime], [cx.context], [lr], [ip])
+        [cx.runtime], [lr], [ip])
     end
 
     if std.is_partition(expr_type) then
@@ -2929,6 +2961,18 @@ local function strip_casts(node)
   return node
 end
 
+local function wrap_partition(node, parent)
+  node.value = ast.typed.expr.Internal {
+    value = values.value(node.value,
+              expr.just(quote end, { impl = parent }),
+              node.value.expr_type),
+    expr_type = node.value.expr_type,
+    annotations = node.annotations,
+    span = node.span
+  }
+  return node
+end
+
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
                                                  free_vars, free_vars_setup, requirement)
   if expr:is(ast.typed.expr.Projection) then
@@ -2994,10 +3038,19 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       [value.actions];
     end)
 
+    local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
+    local index_access
+    if std.is_cross_product(std.as_read(ast.get_base_indexed_node(expr).expr_type)) then
+      index_access = codegen.expr_index_access_partition_functor(cx, expr):read(cx)
+    else
+      index_access = codegen.expr_index_access_partition_functor(
+                       cx, wrap_partition(expr, parent)):read(cx)
+    end
+
     local terra partition_functor([cx.runtime],
                                   mappable : c.legion_mappable_t,
                                   idx : uint,
-                                  parent : c.legion_logical_partition_t,
+                                  [parent],
                                   [point])
       var [requirement];
       var mappable_type = c.legion_mappable_get_type(mappable)
@@ -3020,10 +3073,8 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       end
       [symbol_setup];
       [free_vars_setup];
-      var index : index_type = [value.value];
-      var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-        [cx.runtime], parent, index)
-      return subregion
+      [index_access.actions];
+      return [index_access.value].impl
     end
 
     return std.register_projection_functor(false, false, 0, nil, partition_functor)
@@ -4915,7 +4966,7 @@ function codegen.expr_partition_equal(cx, node)
           c.AUTO_GENERATE_ID)
       end
       var [lp] = c.legion_logical_partition_create(
-        [cx.runtime], [cx.context], [region.value].impl, [ip])
+        [cx.runtime], [region.value].impl, [ip])
     end
   end
 
@@ -5165,7 +5216,7 @@ function codegen.expr_cross_product(cx, node)
       [cx.runtime], [cx.context], &(partitions[0]), &(colors[0]), [#args])
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], lr.impl, ip)
+      [cx.runtime], lr.impl, ip)
   end
 
   return values.value(
