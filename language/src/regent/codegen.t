@@ -2372,38 +2372,6 @@ function codegen.expr_field_access(cx, node)
   end
 end
 
-function codegen.expr_index_access_partition_functor(cx, node)
-  local value = codegen.expr(cx, node.value):read(cx)
-  local index = codegen.expr(cx, node.index):read(cx)
-
-  local actions = quote
-    [value.actions];
-    [index.actions];
-    [emit_debuginfo(node)]
-  end
-
-  local expr_type = std.as_read(node.expr_type)
-  local value_type = std.as_read(node.value.expr_type)
-
-  local r = terralib.newsymbol(expr_type, "r")
-  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
-  local is = terralib.newsymbol(c.legion_index_space_t, "is")
-
-  local color_type = value_type:colors().index_type
-  local color = std.implicit_cast(index_type, color_type, index.value)
-
-  actions = quote
-    [actions]
-    var dp = [color]:to_domain_point()
-    var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-      [cx.runtime], [value.value].impl, dp)
-    var [is] = [lr].index_space
-    var [r] = [expr_type] { impl = [lr] }
-  end
-
-  return values.value(node, expr.just(actions, r), expr_type)
-end
-
 function codegen.expr_index_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local index_type = std.as_read(node.index.expr_type)
@@ -3041,9 +3009,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
     local index_access
     if std.is_cross_product(std.as_read(ast.get_base_indexed_node(expr).expr_type)) then
-      index_access = codegen.expr_index_access_partition_functor(cx, expr):read(cx)
+      index_access = codegen.expr_index_access(cx, expr):read(cx)
     else
-      index_access = codegen.expr_index_access_partition_functor(
+      index_access = codegen.expr_index_access(
                        cx, wrap_partition(expr, parent)):read(cx)
     end
 
@@ -3076,6 +3044,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       [index_access.actions];
       return [index_access.value].impl
     end
+    -- partition_functor:printpretty()
 
     return std.register_projection_functor(false, false, 0, nil, partition_functor)
 
@@ -3438,7 +3407,7 @@ local function index_launch_free_var_setup(free_vars)
 end
 
 local function expr_call_setup_partition_arg(
-    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
+    outer_cx, cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
@@ -3503,7 +3472,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars, free_vars_setup, reg_requirement)
+    local projection_functor = make_partition_projection_functor(outer_cx, arg_value, loop_index, false, free_vars, free_vars_setup, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -9342,7 +9311,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       local partition = args_partitions[i]
       assert(partition)
       expr_call_setup_partition_arg(
-        loop_cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
+        cx, loop_cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
         args_setup, node.free_vars[i], loop_vars)
     end
   end
