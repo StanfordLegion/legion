@@ -2265,12 +2265,10 @@ legion_logical_region_retrieve_name(legion_runtime_t runtime_,
 
 legion_logical_partition_t
 legion_logical_partition_create(legion_runtime_t runtime_,
-                                // legion_context_t ctx_,
                                 legion_logical_region_t parent_,
                                 legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  // Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 

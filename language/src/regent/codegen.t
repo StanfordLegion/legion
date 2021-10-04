@@ -2929,7 +2929,7 @@ local function strip_casts(node)
   return node
 end
 
-local function wrap_partition(node, parent)
+local function wrap_partition_internal(node, parent)
   node.value = ast.typed.expr.Internal {
     value = values.value(node.value,
               expr.just(quote end, { impl = parent }),
@@ -2943,6 +2943,7 @@ end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
                                                  free_vars, free_vars_setup, requirement)
+  cx = cx:new_local_scope()
   if expr:is(ast.typed.expr.Projection) then
     expr = expr.region
   end
@@ -3012,7 +3013,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       index_access = codegen.expr_index_access(cx, expr):read(cx)
     else
       index_access = codegen.expr_index_access(
-                       cx, wrap_partition(expr, parent)):read(cx)
+                       cx, wrap_partition_internal(expr, parent)):read(cx)
     end
 
     local terra partition_functor([cx.runtime],
@@ -3044,7 +3045,6 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       [index_access.actions];
       return [index_access.value].impl
     end
-    -- partition_functor:printpretty()
 
     return std.register_projection_functor(false, false, 0, nil, partition_functor)
 
