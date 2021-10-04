@@ -339,7 +339,10 @@ before_script:
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
       # Kokkos requires cmake 3.16 - grab it here so the default can remain
       #  an older version
-      wget -nv https://cmake.org/files/v3.16/cmake-3.16.0-Linux-x86_64.tar.gz
+      # cmake.org serves up a certificate that old openssl can't verify, so
+      #  accept an insecure connection and verify the tarball hash directly
+      wget -nv --no-check-certificate https://cmake.org/files/v3.16/cmake-3.16.0-Linux-x86_64.tar.gz
+      echo "85f55f13c922c853049edcf37c828b02b9b2fc00729d0cbb56cf20181a39340b  cmake-3.16.0-Linux-x86_64.tar.gz" | shasum --check
       tar -zxf cmake-3.16.0-Linux-x86_64.tar.gz
       PATH=`pwd`/cmake-3.16.0-Linux-x86_64/bin:$PATH
 
