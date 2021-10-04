@@ -2929,6 +2929,26 @@ local function strip_casts(node)
   return node
 end
 
+local function is_identity_projection(expr, loop_index)
+  if expr:is(ast.typed.expr.Projection) then
+    expr = expr.region
+  end
+  assert(expr:is(ast.typed.expr.IndexAccess))
+
+  -- Strip the index for the purpose of checking if this is the
+  -- identity projection functor.
+  local stripped_index = strip_casts(expr.index)
+  return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
+end
+
+local function is_identity_projection_all(expr, loop_index)
+  if not expr:is(ast.typed.expr.IndexAccess) then
+    return true
+  end
+  return is_identity_projection(expr, loop_index) and
+         is_identity_projection_all(expr.value, loop_index)
+end
+
 local function wrap_partition_internal(node, parent)
   node.value = ast.typed.expr.Internal {
     value = values.value(node.value,
@@ -2944,21 +2964,19 @@ end
 local function make_partition_projection_functor(cx, expr, loop_index, color_space,
                                                  free_vars, free_vars_setup, requirement)
   cx = cx:new_local_scope()
+
   if expr:is(ast.typed.expr.Projection) then
     expr = expr.region
   end
   assert(expr:is(ast.typed.expr.IndexAccess))
 
-  -- Strip the index for the purpose of checking if this is the
-  -- identity projection functor.
-  local stripped_index = strip_casts(expr.index)
-  if stripped_index:is(ast.typed.expr.ID) and
-    stripped_index.value == loop_index
+  -- Never return 0 for cross products
+  if is_identity_projection_all(expr, loop_index) and
+     not std.is_cross_product(std.as_read(ast.get_base_indexed_node(expr).expr_type))
   then
-    return 0 -- Identity projection functor.
+    return 0
   end
 
-  -- But keep the unstripped index for all other purposes...
   local index = expr.index
   local index_type = std.as_read(index.expr_type)
 
@@ -3065,18 +3083,6 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
     return std.register_projection_functor(false, true, 0, nil, partition_functor)
   end
-end
-
-local function is_identity_projection(expr, loop_index)
-  if expr:is(ast.typed.expr.Projection) then
-    expr = expr.region
-  end
-  assert(expr:is(ast.typed.expr.IndexAccess))
-
-  -- Strip the index for the purpose of checking if this is the
-  -- identity projection functor.
-  local stripped_index = strip_casts(expr.index)
-  return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
 end
 
 local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
@@ -3420,7 +3426,9 @@ local function expr_call_setup_partition_arg(
 
   free_vars_setup:insertall(loop_vars_setup)
 
-  local needs_non_identity_functor = not is_identity_projection(arg_value, loop_index)
+  -- Cross products always need the full-blown partition_functor
+  local needs_non_identity_functor = (not is_identity_projection_all(arg_value, loop_index)) or
+                                     (std.is_cross_product(std.as_read(ast.get_base_indexed_node(arg_value).expr_type)))
   local proj_args_set = nil
   if needs_non_identity_functor and #free_vars > 0 then
     proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
