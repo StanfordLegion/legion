@@ -491,10 +491,6 @@ if(Legion_USE_LLVM)
   if(Legion_ALLOW_MISSING_LLVM_LIBS)
     set(REALM_ALLOW_MISSING_LLVM_LIBS ON)
   endif()
-  # just want REALM_LLVM_VERSION=<major><minor>
-  string(REPLACE "." ";" LLVM_VERSION_SPLIT ${LLVM_VERSION})
-  list(GET LLVM_VERSION_SPLIT 0 1 REALM_LLVM_VERSION_LIST)
-  string(REPLACE ";" "" REALM_LLVM_VERSION "${REALM_LLVM_VERSION_LIST}")
 endif()
 
 #------------------------------------------------------------------------------#

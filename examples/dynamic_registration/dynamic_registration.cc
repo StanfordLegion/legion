@@ -142,11 +142,7 @@ const char llvm_ir[] =
   "@.str = private unnamed_addr constant [31 x i8] c\"hello from llvm wrapped task!\\0A\\00\", align 1\n"
   "define void @body(%struct.legion_task_t %task, %struct.legion_physical_region_t* %regions, i32 %num_regions, %struct.legion_context_t %ctx, %struct.legion_runtime_t %runtime) {\n"
   "  %1 = bitcast [31 x i8]* @.str to i8*\n"
-#if REALM_LLVM_VERSION >= 37
   "  %2 = call i32 (i8*, ...) @printf(i8* %1)\n"
-#else
-  "  %2 = call i32 (i8*, ...)* @printf(i8* %1)\n"
-#endif
   "  ret void\n"
   "}\n"
   "define void @llvm_wrapper(i8* %data, i64 %datalen, i8* %userdata, i64 %userlen, i64 %proc_id) {\n"
@@ -156,19 +152,11 @@ const char llvm_ir[] =
   "  %ctx_ptr = alloca %struct.legion_context_t, align 8\n"
   "  %runtime_ptr = alloca %struct.legion_runtime_t, align 8\n"
   "  call void @legion_task_preamble(i8* %data, i64 %datalen, i64 %proc_id, %struct.legion_task_t* %task_ptr, %struct.legion_physical_region_t** %regions_ptr, i32* %num_regions_ptr, %struct.legion_context_t* %ctx_ptr, %struct.legion_runtime_t* %runtime_ptr)\n"
-#if REALM_LLVM_VERSION >= 37
   "  %task = load %struct.legion_task_t, %struct.legion_task_t* %task_ptr\n"
   "  %regions = load %struct.legion_physical_region_t*, %struct.legion_physical_region_t** %regions_ptr\n"
   "  %num_regions = load i32, i32* %num_regions_ptr\n"
   "  %ctx = load %struct.legion_context_t, %struct.legion_context_t* %ctx_ptr\n"
   "  %runtime = load %struct.legion_runtime_t, %struct.legion_runtime_t* %runtime_ptr\n"
-#else
-  "  %task = load %struct.legion_task_t* %task_ptr\n"
-  "  %regions = load %struct.legion_physical_region_t** %regions_ptr\n"
-  "  %num_regions = load i32* %num_regions_ptr\n"
-  "  %ctx = load %struct.legion_context_t* %ctx_ptr\n"
-  "  %runtime = load %struct.legion_runtime_t* %runtime_ptr\n"
-#endif
   "  call void @body(%struct.legion_task_t %task, %struct.legion_physical_region_t* %regions, i32 %num_regions, %struct.legion_context_t %ctx, %struct.legion_runtime_t %runtime)\n"
   "  call void @legion_task_postamble(%struct.legion_runtime_t %runtime, %struct.legion_context_t %ctx, i8* null, i64 0)\n"
   "  ret void\n"
