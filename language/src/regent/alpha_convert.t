@@ -283,6 +283,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.ImportIspace]               = pass_through,
   [ast.specialized.expr.ImportRegion]               = update_fspace_type,
   [ast.specialized.expr.ImportPartition]            = pass_through,
+  [ast.specialized.expr.ImportCrossProduct]         = pass_through,
   [ast.specialized.expr.Projection]                 = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)

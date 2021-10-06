@@ -3520,6 +3520,16 @@ function type_check.expr_import_partition(cx, node)
   }
 end
 
+function type_check.expr_import_cross_product(cx, node)
+  return ast.typed.expr.ImportCrossProduct {
+    value = type_check.expr(cx, node.value),
+    partitions = node.partitions:map(function(p) return type_check.expr(cx, p) end),
+    expr_type = std.cross_product(node.partitions[1].value, node.partitions[2].value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 local entry_tree = {}
 
 function entry_tree.new()
@@ -3927,6 +3937,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.ImportIspace]               = type_check.expr_import_ispace,
   [ast.specialized.expr.ImportRegion]               = type_check.expr_import_region,
   [ast.specialized.expr.ImportPartition]            = type_check.expr_import_partition,
+  [ast.specialized.expr.ImportCrossProduct]         = type_check.expr_import_cross_product,
   [ast.specialized.expr.Projection]                 = type_check.expr_projection,
 
   [ast.specialized.expr.LuaTable] = function(cx, node)

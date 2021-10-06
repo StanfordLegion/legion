@@ -757,6 +757,14 @@ function pretty.expr_import_partition(cx, node)
       ")"})
 end
 
+function pretty.expr_import_cross_product(cx, node)
+  return join({
+  -- TODO
+      "__import_cross_product(",
+      commas({pretty.expr(cx, node.partitions[1]), pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr_projection(cx, node)
   return join({
     pretty.expr(cx, node.region),
@@ -972,6 +980,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ImportPartition) then
     return pretty.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportCrossProduct) then
+    return pretty.expr_import_cross_product(cx, node)
 
   elseif node:is(ast.typed.expr.Projection) then
     return pretty.expr_projection(cx, node)

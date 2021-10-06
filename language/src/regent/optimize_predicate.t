@@ -130,6 +130,7 @@ local node_is_side_effect_free = {
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
   [ast.typed.expr.ImportPartition]            = always_false,
+  [ast.typed.expr.ImportCrossProduct]            = always_false,
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
