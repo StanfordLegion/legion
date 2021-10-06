@@ -1377,20 +1377,13 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("__import_cross_product") then
     local start = ast.save(p)
-    -- TODO
     local partitions = terralib.newlist()
     p:expect("(")
-    local p1 = p:expr()
-    partitions:insert(p1)
-    p:expect(",")
-    local p2 = p:expr()
-    partitions:insert(p2)
-    p:expect(",")
-    local value = p:expr()
+    local list = parser.expr_list(p)
     p:expect(")")
     return ast.unspecialized.expr.ImportCrossProduct {
-      partitions = partitions,
-      value = value,
+      partitions = list:sub(1, #list - 1),
+      value = list[#list],
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
       has_parens = false,

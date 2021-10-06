@@ -3521,10 +3521,30 @@ function type_check.expr_import_partition(cx, node)
 end
 
 function type_check.expr_import_cross_product(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_terra_index_cross_product_t then
+    report.error(node.value,
+      "type mismatch in argument " .. tostring(#node.partitions + 1) ..
+        " : expected a logical cross product handle but got " ..
+      tostring(value_type))
+  end
+
+  local partitions = node.partitions:map(function(p) return type_check.expr(cx, p) end)
+  local partition_type
+  for idx, p in pairs(partitions) do
+    partition_type = std.as_read(p.expr_type)
+    if not std.is_partition(partition_type) then
+      report.error(p,
+        "type mismatch in argument " .. tostring(idx) ..
+          " : expected a partition but got " ..  tostring(partition_type))
+    end
+  end
+
   return ast.typed.expr.ImportCrossProduct {
-    value = type_check.expr(cx, node.value),
-    partitions = node.partitions:map(function(p) return type_check.expr(cx, p) end),
-    expr_type = std.cross_product(node.partitions[1].value, node.partitions[2].value),
+    value = value,
+    partitions = partitions,
+    expr_type = std.cross_product(unpack(partitions:map(function(p) return p.value end))),
     annotations = node.annotations,
     span = node.span,
   }
