@@ -213,6 +213,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.ImportIspace]               = unreachable,
   [ast.typed.expr.ImportRegion]               = unreachable,
   [ast.typed.expr.ImportPartition]            = unreachable,
+  [ast.typed.expr.ImportCrossProduct]         = unreachable,
 }
 
 local normalize_access_expr = ast.make_single_dispatch(

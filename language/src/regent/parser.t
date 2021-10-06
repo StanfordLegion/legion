@@ -1375,6 +1375,25 @@ function parser.expr_prefix(p)
       has_parens = false,
     }
 
+  elseif p:nextif("__import_cross_product") then
+    local start = ast.save(p)
+    p:expect("(")
+    local list = parser.expr_list(p)
+    p:expect(")")
+
+    if #list < 4 then
+      p:error("__import_cross_product needs at least 4 arguments, got " .. #list)
+    end
+
+    return ast.unspecialized.expr.ImportCrossProduct {
+      partitions = list:sub(1, #list - 2),
+      colors = list[#list - 1],
+      value = list[#list],
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+      has_parens = false,
+    }
+
   else
     p:error("unexpected token in expression")
   end
