@@ -1236,10 +1236,10 @@ function optimize_futures.expr_import_partition(cx, node)
 end
 
 function optimize_futures.expr_import_cross_product(cx, node)
-  -- local partitions = concretize(cx, optimize_futures.expr(cx, node.colors))
+  local partitions = node.partitions:map(function(p) return concretize(cx, optimize_futures.expr(cx, p)) end)
   local value  = concretize(cx, optimize_futures.expr(cx, node.value))
   return node {
-    partitions = node.partitions,
+    partitions = partitions,
     value = value,
   }
 end
