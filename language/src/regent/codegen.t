@@ -8023,7 +8023,7 @@ function codegen.expr_import_cross_product(cx, node)
   local partitions = node.partitions:map(function(p) return codegen.expr(cx, p):read(cx) end)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = quote end
+  local actions = quote [value.actions]; end
   for _, p in pairs(partitions) do
     actions = quote
       [actions];
@@ -8031,12 +8031,7 @@ function codegen.expr_import_cross_product(cx, node)
     end
   end
 
-  actions = quote
-    [actions];
-    [value.actions];
-  end
-
-  local colors = terralib.newsymbol(c.legion_color_t[#node.partitions], "colors")
+  local colors = terralib.newsymbol(c.legion_color_t[#partitions], "colors")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
 
   local lr = cx:region(expr_type:parent_region()).logical_region
