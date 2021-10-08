@@ -3251,13 +3251,15 @@ legion_future_map_reduce(legion_runtime_t runtime_,
 }
 
 legion_future_map_t
-legion_construct_future_map(legion_runtime_t runtime_,
-                            legion_context_t ctx_,
-                            legion_domain_t domain_,
-                            legion_domain_point_t *points_,
-                            legion_untyped_buffer_t *data_,
-                            size_t num_points,
-                            bool collective)
+legion_future_map_construct_from_buffers(legion_runtime_t runtime_,
+                                         legion_context_t ctx_,
+                                         legion_domain_t domain_,
+                                         legion_domain_point_t *points_,
+                                         legion_untyped_buffer_t *data_,
+                                         size_t num_points,
+                                         bool collective,
+                                         legion_shard_id_t sid,
+                                         bool implicit_sharding)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -3269,17 +3271,20 @@ legion_construct_future_map(legion_runtime_t runtime_,
     data[point] = CObjectWrapper::unwrap(data_[idx]);
   }
   return CObjectWrapper::wrap(new FutureMap(
-        runtime->construct_future_map(ctx, domain, data, collective)));
+    runtime->construct_future_map(ctx, domain, data, collective, sid,
+                                  implicit_sharding)));
 }
 
 legion_future_map_t
-legion_future_map_construct(legion_runtime_t runtime_,
-                            legion_context_t ctx_,
-                            legion_domain_t domain_,
-                            legion_domain_point_t *points_,
-                            legion_future_t *futures_,
-                            size_t num_futures,
-                            bool collective)
+legion_future_map_construct_from_futures(legion_runtime_t runtime_,
+                                         legion_context_t ctx_,
+                                         legion_domain_t domain_,
+                                         legion_domain_point_t *points_,
+                                         legion_future_t *futures_,
+                                         size_t num_futures,
+                                         bool collective,
+                                         legion_shard_id_t sid,
+                                         bool implicit_sharding)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -3291,7 +3296,8 @@ legion_future_map_construct(legion_runtime_t runtime_,
     futures[point] = *(CObjectWrapper::unwrap(futures_[idx]));
   }
   return CObjectWrapper::wrap(new FutureMap(
-        runtime->construct_future_map(ctx, domain, futures, collective)));
+    runtime->construct_future_map(ctx, domain, futures, collective, sid,
+                                  implicit_sharding)));
 }
 
 // -----------------------------------------------------------------------
