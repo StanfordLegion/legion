@@ -2683,13 +2683,15 @@ extern "C" {
    * @see Legion::Runtime::construct_future_map
    */
   legion_future_map_t
-  legion_construct_future_map(legion_runtime_t runtime,
-                              legion_context_t ctx,
-                              legion_domain_t domain,
-                              legion_domain_point_t *points,
-                              legion_untyped_buffer_t *buffers,
-                              size_t num_points,
-                              bool collective);
+  legion_future_map_construct_from_buffers(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_domain_t domain,
+                                           legion_domain_point_t *points,
+                                           legion_untyped_buffer_t *buffers,
+                                           size_t num_points,
+                                           bool collective,
+                                           legion_shard_id_t sid,
+                                           bool implicit_sharding);
 
   /**
    * @return Caller takes ownership of return value
@@ -2697,13 +2699,15 @@ extern "C" {
    * @see Legion::Runtime::construct_future_map
    */
   legion_future_map_t
-  legion_future_map_construct(legion_runtime_t runtime,
-                              legion_context_t ctx,
-                              legion_domain_t domain,
-                              legion_domain_point_t *points,
-                              legion_future_t *futures,
-                              size_t num_futures,
-                              bool collective);
+  legion_future_map_construct_from_futures(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_domain_t domain,
+                                           legion_domain_point_t *points,
+                                           legion_future_t *futures,
+                                           size_t num_futures,
+                                           bool collective,
+                                           legion_shard_id_t sid,
+                                           bool implicit_sharding);
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
@@ -4497,7 +4501,7 @@ extern "C" {
   legion_external_resources_t
   legion_attach_external_resources(legion_runtime_t runtime,
                                    legion_context_t ctx,
-                                   legion_attach_launcher_t launcher);
+                                   legion_index_attach_launcher_t launcher);
 
   /**
    * @return Caller takes ownership of return value
