@@ -11366,8 +11366,12 @@ namespace Legion {
           && (int(local_shard) < int(manager->total_shards -
                                      shard_collective_participating_shards)))
         send_remainder_stage();
-      // Only after we send this message can we mark that we're done
-      Runtime::trigger_event(done_event);
+      // Pull this onto the stack in case post_complete_exchange ends up
+      // deleting the object
+      const RtUserEvent to_trigger = done_event;
+      post_complete_exchange();
+      // Only after we send the message and do the post can we signal we're done
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////
@@ -15135,6 +15139,101 @@ namespace Legion {
         spaces.insert(spaces.end(), it->second.begin(), it->second.end());
       }
       return local_size;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Implicit Sharding Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor::ImplicitShardingFunctor(ReplicateContext *ctx,
+                              CollectiveIndexLocation loc, ReplFutureMapImpl *m)
+      : AllGatherCollective<false>(loc, ctx), ShardingFunctor(), map(m)
+    //--------------------------------------------------------------------------
+    {
+      // Add this reference here, it will be removed after the exchange is
+      // complete and that will break the cycle on deleting things since
+      // technically the future map will have a reference to this as well
+      map->add_base_resource_ref(PENDING_UNBOUND_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor::ImplicitShardingFunctor(
+                                             const ImplicitShardingFunctor &rhs)
+      : AllGatherCollective<false>(rhs), map(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor::~ImplicitShardingFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor& ImplicitShardingFunctor::operator=(
+                                             const ImplicitShardingFunctor &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardingFunctor::pack_collective_stage(Serializer &rez, 
+                                                        int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(implicit_sharding.size());
+      for (std::map<DomainPoint,ShardID>::const_iterator it =
+            implicit_sharding.begin(); it != implicit_sharding.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardingFunctor::unpack_collective_stage(Deserializer &derez,
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points;
+      derez.deserialize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+        derez.deserialize(implicit_sharding[point]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ImplicitShardingFunctor::shard(const DomainPoint &point,
+                                           const Domain &full_space,
+                                           const size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      std::map<DomainPoint,ShardID>::const_iterator finder =
+        implicit_sharding.find(point);
+#ifdef DEBUG_LEGION
+      assert(finder != implicit_sharding.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardingFunctor::post_complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove our reference on the map
+      if (map->remove_base_resource_ref(PENDING_UNBOUND_REF))
+        delete map;
     }
 
     /////////////////////////////////////////////////////////////

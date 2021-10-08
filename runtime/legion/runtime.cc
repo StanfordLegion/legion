@@ -3833,8 +3833,8 @@ namespace Legion {
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
-        sharding_function(NULL), collective_performed(false), 
-        has_non_trivial_call(false)
+        sharding_function(NULL), own_sharding_function(false),
+        collective_performed(false), has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3859,8 +3859,8 @@ namespace Legion {
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         op_depth(repl_ctx->get_depth()), op_uid(repl_ctx->get_unique_id()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
-        sharding_function(NULL), collective_performed(false), 
-        has_non_trivial_call(false)
+        sharding_function(NULL), own_sharding_function(false),
+        collective_performed(false), has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3891,6 +3891,8 @@ namespace Legion {
         delete shard_domain;
       if (repl_ctx->remove_reference())
         delete repl_ctx;
+      if (own_sharding_function)
+        delete sharding_function;
     }
 
     //--------------------------------------------------------------------------
@@ -4110,7 +4112,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function)
+    void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function,
+                                                  bool own_function)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4120,6 +4123,7 @@ namespace Legion {
       {
         AutoLock fm_lock(future_map_lock);
         sharding_function = function;
+        own_sharding_function = own_function;
         if (!pending_future_map_requests.empty())
           to_perform.swap(pending_future_map_requests);
       }

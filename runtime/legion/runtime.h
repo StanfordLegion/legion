@@ -703,7 +703,7 @@ namespace Legion {
       virtual void get_shard_local_futures(
                                      std::map<DomainPoint,Future> &futures);
     public:
-      void set_sharding_function(ShardingFunction *function);
+      void set_sharding_function(ShardingFunction *function, bool own = false);
       void handle_future_map_request(Deserializer &derez);
     protected:
       void process_future_map_request(const DomainPoint &point,
@@ -730,6 +730,8 @@ namespace Legion {
       std::set<RtEvent> exchange_events;
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
+      // Whether the future map owns the sharding function
+      bool own_sharding_function;
       bool collective_performed;
       // For replicated future maps we track whether there have been any
       // non-triival calls to this shard of the future map. If there are
