@@ -6693,15 +6693,20 @@ namespace Legion {
        *                   should work collectively to construct the map
        * @param sid the sharding function ID that describes the sharding
        *                   pattern if collective=true
+       * @param implicit_sharding if collective=true this says whether the
+       *                   sharding should be implicitly handled by the
+       *                   runtime and the sharding function ID ignored
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain, 
                            const std::map<DomainPoint,UntypedBuffer> &data,
-                           bool collective = false, ShardingID sid = 0);
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,UntypedBuffer> &data,
-                           bool collective = false, ShardingID sid = 0);
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
 
       /**
        * Construct a future map from a collection of futures. The user must
@@ -6719,16 +6724,20 @@ namespace Legion {
        *                   should work collectively to construct the map
        * @param sid the sharding function ID that describes the sharding
        *                   pattern if collective=true
+       * @param implicit_sharding if collective=true this says whether the
+       *                   sharding should be implicitly handled by the
+       *                   runtime and the sharding function ID ignored
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain,
                            const std::map<DomainPoint,Future> &futures,
-                           bool collective = false, ShardingID sid = 0);
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
-                           bool collective = false, ShardingID sid = 0);
-      
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
 
       /**
        * Apply a transform to a FutureMap. All points that access the

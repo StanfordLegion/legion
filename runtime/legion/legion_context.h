@@ -385,20 +385,24 @@ namespace Legion {
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
-                                             ShardingID sid = 0) = 0;
+                                             ShardingID sid = 0,
+                                             bool implicit = false) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
-                                             ShardingID sid = 0) = 0;
+                                             ShardingID sid = 0,
+                                             bool implicit = false) = 0;
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
-                                             ShardingID sid = 0) = 0;
+                                             ShardingID sid = 0,
+                                             bool implicit = false) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
+<<<<<<< HEAD
                                              ShardingID sid = 0) = 0;
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain, 
@@ -407,6 +411,10 @@ namespace Legion {
                                              IndexSpace new_domain,
                                              PointTransformFunctor *functor,
                                              bool own_functor) = 0;
+=======
+                                             ShardingID sid = 0,
+                                             bool implicit = false) = 0;
+>>>>>>> master
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -1261,20 +1269,24 @@ namespace Legion {
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
-                                             ShardingID sid = 0);
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
-                                             ShardingID sid = 0);
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                    const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
-                                             ShardingID sid = 0);
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
+<<<<<<< HEAD
                                              ShardingID sid = 0);
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain, 
@@ -1283,6 +1295,10 @@ namespace Legion {
                                              IndexSpace new_domain,
                                              PointTransformFunctor *functor,
                                              bool own_functor);
+=======
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
+>>>>>>> master
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -3044,20 +3060,24 @@ namespace Legion {
       virtual FutureMap construct_future_map(IndexSpace domain,
                                const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
-                                             ShardingID sid = 0);
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
-                                             ShardingID sid = 0);
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
       virtual FutureMap construct_future_map(IndexSpace domain,
                                    const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
-                                             ShardingID sid = 0);
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
       virtual FutureMap construct_future_map(const Domain &domain,
                     const std::map<DomainPoint,Future> &futures,
                                              bool internal = false,
                                              bool collective = false,
+<<<<<<< HEAD
                                              ShardingID sid = 0);
       virtual FutureMap transform_future_map(const FutureMap &fm,
                                              IndexSpace new_domain, 
@@ -3066,6 +3086,10 @@ namespace Legion {
                                              IndexSpace new_domain,
                                              PointTransformFunctor *functor,
                                              bool own_functor);
+=======
+                                             ShardingID sid = 0,
+                                             bool implicit = false);
+>>>>>>> master
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);

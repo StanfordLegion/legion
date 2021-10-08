@@ -6410,12 +6410,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap InnerContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid)
+                                bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       Domain domain;
       runtime->forest->find_launch_space_domain(space, domain);
+<<<<<<< HEAD
+=======
+      return construct_future_map(domain, data, collective, sid, implicit);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::construct_future_map(const Domain &domain,
+                                const std::map<DomainPoint,UntypedBuffer> &data,
+                                bool collective, ShardingID sid, bool implicit)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+>>>>>>> master
       if (data.size() != domain.get_volume())
         REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
           "The number of buffers passed into a future map construction (%zd) "
@@ -6446,9 +6459,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+<<<<<<< HEAD
     FutureMap InnerContext::construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 bool collective, ShardingID sid)
+=======
+    FutureMap InnerContext::construct_future_map(IndexSpace space,
+                                    const std::map<DomainPoint,Future> &futures,
+                                    bool internal, bool collective, 
+                                    ShardingID sid, bool implicit)
+>>>>>>> master
     //--------------------------------------------------------------------------
     {
       return construct_future_map(find_index_launch_space(domain),
@@ -6456,9 +6476,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+<<<<<<< HEAD
     FutureMap InnerContext::construct_future_map(IndexSpace space,
                                  const std::map<DomainPoint,Future> &futures,
                                  bool internal, bool collective, ShardingID sid)
+=======
+    FutureMap InnerContext::construct_future_map(const Domain &domain,
+                                    const std::map<DomainPoint,Future> &futures,
+                                    bool internal, bool collective,
+                                    ShardingID sid, bool implicit)
+>>>>>>> master
     //--------------------------------------------------------------------------
     {
       if (!internal)
@@ -22362,7 +22389,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(IndexSpace domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid)
+                                bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -22374,7 +22401,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid)
+                                bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -22385,8 +22412,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(IndexSpace domain,
-                                 const std::map<DomainPoint,Future> &futures,
-                                 bool internal, bool collective, ShardingID sid)
+                                    const std::map<DomainPoint,Future> &futures,
+                                    bool internal, bool collective,
+                                    ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -22397,8 +22425,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap LeafContext::construct_future_map(const Domain &domain,
-                                 const std::map<DomainPoint,Future> &futures,
-                                 bool internal, bool collective, ShardingID sid)
+                                    const std::map<DomainPoint,Future> &futures,
+                                    bool internal, bool collective,
+                                    ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
