@@ -113,6 +113,7 @@ SLIB_LEGION_DEPS = -L. -lrealm
 SLIB_REALM_DEPS  =
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
+LD_FLAGS += -Wl,-all_load
 else
 SO_FLAGS += -shared
 endif
