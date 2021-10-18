@@ -6147,6 +6147,44 @@ legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
   return runtime->total_shards(ctx);
 }
 
+legion_shard_id_t
+legion_sharding_functor_shard(legion_sharding_id_t sid,
+                              legion_domain_point_t point_,
+                              legion_domain_t full_space_,
+                              size_t total_shards)
+{
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  Domain full_space = CObjectWrapper::unwrap(full_space_);
+  ShardingFunctor *functor = Runtime::get_sharding_functor(sid);
+  return functor->shard(point, full_space, total_shards);
+}
+
+legion_domain_point_t *
+legion_sharding_functor_invert(legion_sharding_id_t sid,
+                               legion_shard_id_t shard,
+                               legion_domain_t shard_domain_,
+                               legion_domain_t full_domain_,
+                               size_t total_shards,
+                               size_t *points_size)
+{
+  Domain shard_domain = CObjectWrapper::unwrap(shard_domain_);
+  Domain full_domain = CObjectWrapper::unwrap(full_domain_);
+  ShardingFunctor *functor = Runtime::get_sharding_functor(sid);
+#ifdef DEBUG_LEGION
+  assert(functor->is_invertible());
+#endif
+  std::vector<DomainPoint> points;
+  functor->invert(shard, shard_domain, full_domain, total_shards, points);
+  *points_size = points.size();
+  legion_domain_point_t *points_ =
+    static_cast<legion_domain_point_t *>(
+      malloc(points.size() * sizeof(legion_domain_point_t)));
+  for (size_t i = 0; i < points.size(); ++i) {
+    points_[i] = CObjectWrapper::wrap(points[i]);
+  }
+  return points_;
+}
+
 void
 legion_runtime_enable_scheduler_lock()
 {
