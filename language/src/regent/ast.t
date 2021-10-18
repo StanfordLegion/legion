@@ -666,11 +666,4 @@ function ast.mapreduce_stat_postorder(map_fn, reduce_fn, node, init)
     reduce_fn, node, init, is_stat_node)
 end
 
-function ast.get_base_indexed_node(node, previous_index)
-  if node:is(ast.typed.expr.IndexAccess) then
-    return ast.get_base_indexed_node(node.value, node.index)
-  end
-  return node, previous_index
-end
-
 return ast

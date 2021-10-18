@@ -38,7 +38,7 @@ local function get_base_partition_symbol(node)
   if node:is(ast.typed.expr.Projection) then
     return node.region.value.value
   end
-  node = ast.get_base_indexed_node(node)
+  node = util.get_base_indexed_node(node)
   if std.is_cross_product(std.as_read(node.expr_type)) then
     return std.as_read(node.expr_type).partition_symbols[1]
   end
@@ -503,7 +503,7 @@ local function analyze_noninterference_self(
       index = arg.region.index
     else
       local _
-      _, index = ast.get_base_indexed_node(arg)
+      _, index = util.get_base_indexed_node(arg)
     end
 
     if analyze_index_noninterference_self(index, cx, loop_vars)
@@ -1155,7 +1155,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
           if arg:is(ast.typed.expr.Projection) then
             partition_type = std.as_read(arg.region.value.expr_type)
           else
-            partition_type = std.as_read(ast.get_base_indexed_node(arg).expr_type):partition()
+            partition_type = std.as_read(util.get_base_indexed_node(arg).expr_type):partition()
           end
           assert(std.is_partition(partition_type))
           arg_projectable = true
@@ -1432,12 +1432,12 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
 
       local _, index_expr
       if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        _, index_expr = ast.get_base_indexed_node(call_args[arg]).arg
+        _, index_expr = util.get_base_indexed_node(call_args[arg]).arg
       else
         if call_args[arg]:is(ast.typed.expr.Projection) then
-          _, index_expr = ast.get_base_indexed_node(call_args[arg].region)
+          _, index_expr = util.get_base_indexed_node(call_args[arg].region)
         else
-          _, index_expr = ast.get_base_indexed_node(call_args[arg])
+          _, index_expr = util.get_base_indexed_node(call_args[arg])
         end
       end
 

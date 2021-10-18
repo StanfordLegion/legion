@@ -15,6 +15,7 @@
 -- Regent Code Generation
 
 local ast = require("regent/ast")
+local util = require("regent/ast_util")
 local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
@@ -2941,14 +2942,6 @@ local function is_identity_projection(expr, loop_index)
   return stripped_index:is(ast.typed.expr.ID) and stripped_index.value == loop_index
 end
 
-local function is_identity_projection_all(expr, loop_index)
-  if not expr:is(ast.typed.expr.IndexAccess) then
-    return true
-  end
-  return is_identity_projection(expr, loop_index) and
-         is_identity_projection_all(expr.value, loop_index)
-end
-
 local function wrap_partition_internal(node, parent)
   node.value = ast.typed.expr.Internal {
     value = values.value(node.value,
@@ -2971,8 +2964,8 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   assert(expr:is(ast.typed.expr.IndexAccess))
 
   -- Never return 0 for cross products
-  if is_identity_projection_all(expr, loop_index) and
-     not std.is_cross_product(std.as_read(ast.get_base_indexed_node(expr).expr_type))
+  if is_identity_projection(expr, loop_index) and
+     std.is_partition(std.as_read(expr.expr_type))
   then
     return 0
   end
@@ -3026,13 +3019,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end)
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
-    local index_access
-    if std.is_cross_product(std.as_read(ast.get_base_indexed_node(expr).expr_type)) then
-      index_access = codegen.expr_index_access(cx, expr):read(cx)
-    else
-      index_access = codegen.expr_index_access(
-                       cx, wrap_partition_internal(expr, parent)):read(cx)
+    if std.is_partition(std.as_read(expr.expr_type)) then
+      expr = wrap_partition_internal(expr, parent)
     end
+    local index_access = codegen.expr_index_access(cx, expr):read(cx)
 
     local terra partition_functor([cx.runtime],
                                   mappable : c.legion_mappable_t,
@@ -3427,8 +3417,8 @@ local function expr_call_setup_partition_arg(
   free_vars_setup:insertall(loop_vars_setup)
 
   -- Cross products always need the full-blown partition_functor
-  local needs_non_identity_functor = (not is_identity_projection_all(arg_value, loop_index)) or
-                                     (std.is_cross_product(std.as_read(ast.get_base_indexed_node(arg_value).expr_type)))
+  local needs_non_identity_functor = not (is_identity_projection(arg_value, loop_index) and
+                                          std.is_partition(std.as_read(arg_value.expr_type)))
   local proj_args_set = nil
   if needs_non_identity_functor and #free_vars > 0 then
     proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
@@ -9149,7 +9139,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       else
         region_arg = arg
       end
-      local partition_expr = ast.get_base_indexed_node(region_arg.value)
+      local partition_expr = util.get_base_indexed_node(region_arg.value)
       local partition_type = std.as_read(partition_expr.expr_type):partition()
       partition = codegen.expr(cx, partition_expr):read(cx)
 
