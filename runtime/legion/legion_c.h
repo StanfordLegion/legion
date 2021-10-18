@@ -2757,7 +2757,7 @@ extern "C" {
                                            legion_untyped_buffer_t *buffers,
                                            size_t num_points,
                                            bool collective,
-                                           legion_shard_id_t sid,
+                                           legion_sharding_id_t sid,
                                            bool implicit_sharding);
 
   /**
@@ -2773,7 +2773,7 @@ extern "C" {
                                            legion_future_t *futures,
                                            size_t num_futures,
                                            bool collective,
-                                           legion_shard_id_t sid,
+                                           legion_sharding_id_t sid,
                                            bool implicit_sharding);
 
   // -----------------------------------------------------------------------
