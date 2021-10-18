@@ -44,7 +44,7 @@ do
                                                           0,
                                                           0)
 
-  var raw_part = c.legion_logical_partition_create(__runtime(), __context(), __raw(mat), ip)
+  var raw_part = c.legion_logical_partition_create(__runtime(), __raw(mat), ip)
 
   return __import_partition(disjoint, mat, clusters.ispace, raw_part)
 end

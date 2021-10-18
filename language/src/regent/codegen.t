@@ -4837,7 +4837,7 @@ function codegen.expr_partition(cx, node)
     [actions]
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [cx.runtime], [region.value].impl, [ip])
   end
 
   return values.value(
@@ -4870,7 +4870,7 @@ function codegen.expr_partition_equal(cx, node)
         [cx.runtime], [cx.context], [region.value].impl.index_space,
         [colors.value].impl, 1 --[[ granularity ]], c.AUTO_GENERATE_ID)
       var [lp] = c.legion_logical_partition_create(
-        [cx.runtime], [cx.context], [region.value].impl, [ip])
+        [cx.runtime], [region.value].impl, [ip])
     end
   else
     local dim = region_type:ispace().dim
@@ -4976,7 +4976,7 @@ function codegen.expr_partition_by_field(cx, node)
       field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0,
       [partition_kind(std.disjoint, node.completeness)])
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [cx.runtime], [region.value].impl, [ip])
   end
 
   return values.value(
@@ -5017,7 +5017,7 @@ function codegen.expr_partition_by_restriction(cx, node)
       [partition_kind(node.disjointness, node.completeness)],
       c.AUTO_GENERATE_ID)
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [cx.runtime], [region.value].impl, [ip])
   end
 
   return values.value(
@@ -5082,7 +5082,7 @@ function codegen.expr_image(cx, node)
       [partition_kind(node.disjointness, node.completeness)],
       c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [parent.value].impl, [ip])
+      [cx.runtime], [parent.value].impl, [ip])
   end
 
   return values.value(
@@ -5146,7 +5146,7 @@ function codegen.expr_preimage(cx, node)
       [partition_kind(node.disjointness, node.completeness)],
       c.AUTO_GENERATE_ID, 0, 0)
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [cx.runtime], [region.value].impl, [ip])
   end
 
   return values.value(
@@ -5244,8 +5244,7 @@ function codegen.expr_cross_product_array(cx, node)
       var rhs_ip = c.legion_index_partition_create_coloring(
         [cx.runtime], [cx.context], lhs_subspace, [colorings.value] [color],
         [disjoint], other_color)
-      var rhs_lp = c.legion_logical_partition_create([cx.runtime], [cx.context],
-        lhs_subregion, rhs_ip)
+      var rhs_lp = c.legion_logical_partition_create([cx.runtime], lhs_subregion, rhs_ip)
       other_color =
         c.legion_index_partition_get_color([cx.runtime], rhs_ip)
     end
