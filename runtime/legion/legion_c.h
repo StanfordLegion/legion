@@ -4805,6 +4805,34 @@ extern "C" {
   size_t
   legion_runtime_total_shards(legion_runtime_t runtime, legion_context_t ctx);
 
+  /**
+   * @param sid Must correspond to a previously registered sharding functor.
+   *
+   * @see Legion::ShardingFunctor::shard()
+   */
+  legion_shard_id_t
+  legion_sharding_functor_shard(legion_sharding_id_t sid,
+                                legion_domain_point_t point,
+                                legion_domain_t full_space,
+                                size_t total_shards);
+
+  /**
+   * @param sid Must correspond to a previously registered sharding functor.
+   *            This functor must be invertible.
+   * @param points_size Number of returned points.
+   * @return Points returned from `invert` call. The caller takes ownership of
+   *         this memory, and must explicitly `free()` it when done.
+   *
+   * @see Legion::ShardingFunctor::invert()
+   */
+  legion_domain_point_t *
+  legion_sharding_functor_invert(legion_sharding_id_t sid,
+                                 legion_shard_id_t shard,
+                                 legion_domain_t shard_domain,
+                                 legion_domain_t full_domain,
+                                 size_t total_shards,
+                                 size_t *points_size);
+
   void
   legion_runtime_enable_scheduler_lock(void);
 
