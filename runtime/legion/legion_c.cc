@@ -3170,7 +3170,7 @@ legion_future_map_construct_from_buffers(legion_runtime_t runtime_,
                                          legion_untyped_buffer_t *data_,
                                          size_t num_points,
                                          bool collective,
-                                         legion_shard_id_t sid,
+                                         legion_sharding_id_t sid,
                                          bool implicit_sharding)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
@@ -3195,7 +3195,7 @@ legion_future_map_construct_from_futures(legion_runtime_t runtime_,
                                          legion_future_t *futures_,
                                          size_t num_futures,
                                          bool collective,
-                                         legion_shard_id_t sid,
+                                         legion_sharding_id_t sid,
                                          bool implicit_sharding)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
