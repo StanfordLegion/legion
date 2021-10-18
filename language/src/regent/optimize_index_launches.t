@@ -867,17 +867,6 @@ local function analyze_is_simple_index_expression(cx, node)
     node, true)
 end
 
--- `p` must be a partition or cross product
-local function analyze_is_loop_invariant_recursive(cx, p)
-  if not analyze_is_loop_invariant(cx, p) then
-    if std.is_cross_product(std.as_read(p.value.expr_type)) then
-      return analyze_is_loop_invariant_recursive(cx, p.value)
-    end
-    return false
-  end
-  return true
-end
-
 local function analyze_is_projectable(cx, arg)
   if arg:is(ast.typed.expr.Projection) then
     arg = arg.region
@@ -898,7 +887,7 @@ local function analyze_is_projectable(cx, arg)
 
   -- 3. And as long as `p` is loop-invariant (we have to index from
   -- the same partition or base cross product every time).
-  if not analyze_is_loop_invariant_recursive(cx, arg.value) then
+  if not analyze_is_loop_invariant(cx, util.get_base_indexed_node(arg)) then
     return false
   end
 

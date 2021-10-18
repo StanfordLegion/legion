@@ -2965,7 +2965,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- Never return 0 for cross products
   if is_identity_projection(expr, loop_index) and
-     std.is_partition(std.as_read(expr.expr_type))
+     std.is_partition(std.as_read(expr.value.expr_type))
   then
     return 0
   end
@@ -3019,7 +3019,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end)
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
-    if std.is_partition(std.as_read(expr.expr_type)) then
+    if std.is_partition(std.as_read(util.get_base_indexed_node(expr).expr_type)) then
       expr = wrap_partition_internal(expr, parent)
     end
     local index_access = codegen.expr_index_access(cx, expr):read(cx)
@@ -3418,7 +3418,8 @@ local function expr_call_setup_partition_arg(
 
   -- Cross products always need the full-blown partition_functor
   local needs_non_identity_functor = not (is_identity_projection(arg_value, loop_index) and
-                                          std.is_partition(std.as_read(arg_value.expr_type)))
+                                          std.is_partition(std.as_read(
+                                            util.get_base_indexed_node(arg_value).expr_type)))
   local proj_args_set = nil
   if needs_non_identity_functor and #free_vars > 0 then
     proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
