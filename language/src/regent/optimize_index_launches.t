@@ -1420,14 +1420,10 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       index_launch_ast.preamble:map(function(stat) duplicates_check:insert(stat) end)
 
       local _, index_expr
-      if unopt_loop_ast.node_type:is(ast.typed.stat.ForNum) then
-        _, index_expr = util.get_base_indexed_node(call_args[arg]).arg
+      if call_args[arg]:is(ast.typed.expr.Projection) then
+        _, index_expr = util.get_base_indexed_node(call_args[arg].region)
       else
-        if call_args[arg]:is(ast.typed.expr.Projection) then
-          _, index_expr = util.get_base_indexed_node(call_args[arg].region)
-        else
-          _, index_expr = util.get_base_indexed_node(call_args[arg])
-        end
+        _, index_expr = util.get_base_indexed_node(call_args[arg])
       end
 
       -- Assign: value = collapse(index_expr)

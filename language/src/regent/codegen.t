@@ -2965,7 +2965,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- Never return 0 for cross products
   if is_identity_projection(expr, loop_index) and
-     std.is_partition(std.as_read(expr.value.expr_type))
+     std.is_partition(std.as_read(util.get_base_indexed_node(expr).expr_type))
   then
     return 0
   end
@@ -5437,8 +5437,7 @@ function codegen.expr_list_slice_cross_product(cx, node)
       var color = c.legion_domain_point_from_point_1d(
         c.legion_point_1d_t { x = arrayof(c.coord_t, [indices_type:data(indices.value)][i]) })
       var ip = c.legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
-        [cx.runtime], [cx.context],
-        [product.value].product, color)
+        [cx.runtime], [product.value].product, color)
       var lp = c.legion_logical_partition_create_by_tree(
         [cx.runtime], [cx.context], ip,
         [product.value].impl.field_space, [product.value].impl.tree_id)
