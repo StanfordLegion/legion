@@ -8024,16 +8024,19 @@ function codegen.expr_import_cross_product(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = quote
-    [colors.actions];
-    [value.actions];
-  end
+  local actions = quote end
 
   for _, p in pairs(partitions) do
     actions = quote
       [actions];
       [p.actions];
     end
+  end
+
+  actions = quote
+    [actions];
+    [colors.actions];
+    [value.actions];
   end
 
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")

@@ -15,20 +15,6 @@
 import "regent"
 
 local c = regentlib.c
-local fmt = require('std/format')
-
-terra bar(p : c.legion_logical_partition_t,
-          q : c.legion_logical_partition_t,
-          r : c.legion_logical_partition_t,
-          colors : uint32[3],
-          runtime : c.legion_runtime_t,
-          cx : c.legion_context_t)
-
-  var partitions = array(p.index_partition, q.index_partition, r.index_partition)
-  var raw_cp = c.legion_terra_index_cross_product_create_multi(
-                 runtime, cx, &partitions[0], &colors[0], 3)
-  return raw_cp
-end
 
 task main()
   var R = region(ispace(int1d, 40), int)
@@ -37,8 +23,14 @@ task main()
   var p = partition(equal, R, ispace(int1d, 2))
   var q = partition(equal, R, ispace(int1d, 5))
   var r = partition(equal, R, ispace(int1d, 10))
+  var partitions = array(
+                     __raw(p).index_partition,
+                     __raw(q).index_partition,
+                     __raw(r).index_partition)
+
   var colors : uint32[3]
-  var raw_cp = bar(__raw(p), __raw(q), __raw(r), colors, __runtime(), __context())
+  var raw_cp = c.legion_terra_index_cross_product_create_multi(
+                 __runtime(), __context(), &partitions[0], &colors[0], 3)
 
   var cp = __import_cross_product(p, q, r, colors, raw_cp)
 

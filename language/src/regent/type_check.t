@@ -3534,7 +3534,7 @@ function type_check.expr_import_cross_product(cx, node)
 
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.as_read(colors.expr_type)
-  if colors_type ~= uint32[#partitions] then
+  if not std.validate_implicit_cast(colors_type, uint32[#partitions]) then
     report.error(colors,
       "type mismatch in argument " .. tostring(#partitions + 1) ..
         ": expected uint32[" .. #partitions ..  "] but got " ..  tostring(colors_type))
@@ -3542,7 +3542,7 @@ function type_check.expr_import_cross_product(cx, node)
 
   local value = type_check.expr(cx, node.value)
   local value_type = std.as_read(value.expr_type)
-  if value_type ~= std.c.legion_terra_index_cross_product_t then
+  if not std.validate_implicit_cast(value_type, std.c.legion_terra_index_cross_product_t) then
     report.error(value,
       "type mismatch in argument " .. tostring(#node.partitions + 1) ..
         ": expected a logical cross product handle but got " ..

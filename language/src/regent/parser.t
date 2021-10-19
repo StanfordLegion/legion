@@ -1377,10 +1377,14 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("__import_cross_product") then
     local start = ast.save(p)
-    local partitions = terralib.newlist()
     p:expect("(")
     local list = parser.expr_list(p)
     p:expect(")")
+
+    if #list < 4 then
+      p:error("__import_cross_product needs at least 4 arguments, got " .. #list)
+    end
+
     return ast.unspecialized.expr.ImportCrossProduct {
       partitions = list:sub(1, #list - 2),
       colors = list[#list - 1],
