@@ -17012,12 +17012,6 @@ namespace Legion {
                                     collective, sid, implicit);
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
-      if (futures.size() != domain_node->get_volume())
-        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
-          "The number of futures passed into a future map construction (%zd) "
-          "does not match the volume of the domain (%zd) for the future map "
-          "in task %s (UID %lld)", futures.size(), domain_node->get_volume(),
-          get_task_name(), get_unique_id())
       CreationOp *creation_op = runtime->get_available_creation_op();
       creation_op->initialize_map(this, futures);
       FutureMap result;
@@ -17072,6 +17066,12 @@ namespace Legion {
       }
       else
       {
+        if (futures.size() != domain_node->get_volume())
+          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_COUNT_MISMATCH,
+            "The number of futures passed into a future map construction (%zd) "
+            "does not match the volume of the domain (%zd) for the future map "
+            "in task %s (UID %lld)", futures.size(), domain_node->get_volume(),
+            get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(
             new FutureMapImpl(this, creation_op, RtEvent::NO_RT_EVENT,
