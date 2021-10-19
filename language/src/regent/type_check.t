@@ -3521,15 +3521,6 @@ function type_check.expr_import_partition(cx, node)
 end
 
 function type_check.expr_import_cross_product(cx, node)
-  local value = type_check.expr(cx, node.value)
-  local value_type = std.as_read(value.expr_type)
-  if value_type ~= std.c.legion_terra_index_cross_product_t then
-    report.error(node.value,
-      "type mismatch in argument " .. tostring(#node.partitions + 1) ..
-        " : expected a logical cross product handle but got " ..
-      tostring(value_type))
-  end
-
   local partitions = node.partitions:map(function(p) return type_check.expr(cx, p) end)
   local partition_type
   for idx, p in pairs(partitions) do
@@ -3537,13 +3528,31 @@ function type_check.expr_import_cross_product(cx, node)
     if not std.is_partition(partition_type) then
       report.error(p,
         "type mismatch in argument " .. tostring(idx) ..
-          " : expected a partition but got " ..  tostring(partition_type))
+          ": expected a partition but got " ..  tostring(partition_type))
     end
   end
 
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.as_read(colors.expr_type)
+  if colors_type ~= uint32[#partitions] then
+    report.error(colors,
+      "type mismatch in argument " .. tostring(#partitions + 1) ..
+        ": expected uint32[" .. #partitions ..  "] but got " ..  tostring(colors_type))
+  end
+
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_terra_index_cross_product_t then
+    report.error(value,
+      "type mismatch in argument " .. tostring(#node.partitions + 1) ..
+        ": expected a logical cross product handle but got " ..
+      tostring(value_type))
+  end
+
   return ast.typed.expr.ImportCrossProduct {
-    value = value,
     partitions = partitions,
+    colors = colors,
+    value = value,
     expr_type = std.cross_product(unpack(partitions:map(function(p) return p.value end))),
     annotations = node.annotations,
     span = node.span,

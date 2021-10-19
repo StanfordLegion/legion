@@ -1267,6 +1267,7 @@ end
 function specialize.expr_import_cross_product(cx, node)
   return ast.specialized.expr.ImportCrossProduct {
     partitions = node.partitions:map(function(p) return specialize.expr(cx, p) end),
+    colors = specialize.expr(cx, node.colors),
     value = specialize.expr(cx, node.value),
     annotations = node.annotations,
     span = node.span,

@@ -760,7 +760,9 @@ end
 function pretty.expr_import_cross_product(cx, node)
   return join({
       "__import_cross_product(",
-      commas({pretty.expr_list(cx, node.partitions), pretty.expr(cx, node.value)}),
+      commas({pretty.expr_list(cx, node.partitions),
+              pretty.expr(cx, node.colors),
+              pretty.expr(cx, node.value)}),
       ")"})
 end
 

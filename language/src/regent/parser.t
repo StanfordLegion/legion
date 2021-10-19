@@ -1382,7 +1382,8 @@ function parser.expr_prefix(p)
     local list = parser.expr_list(p)
     p:expect(")")
     return ast.unspecialized.expr.ImportCrossProduct {
-      partitions = list:sub(1, #list - 1),
+      partitions = list:sub(1, #list - 2),
+      colors = list[#list - 1],
       value = list[#list],
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
