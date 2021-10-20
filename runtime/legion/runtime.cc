@@ -3410,9 +3410,6 @@ namespace Legion {
                                      const std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
       // No need for the lock here since we're initializing
       futures = others;
     }
@@ -31889,4 +31886,3 @@ namespace Legion {
 }; // namespace Legion 
 
 // EOF
-
