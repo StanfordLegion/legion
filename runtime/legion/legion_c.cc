@@ -6159,12 +6159,13 @@ legion_sharding_functor_shard(legion_sharding_id_t sid,
   return functor->shard(point, full_space, total_shards);
 }
 
-legion_domain_point_t *
+void
 legion_sharding_functor_invert(legion_sharding_id_t sid,
                                legion_shard_id_t shard,
                                legion_domain_t shard_domain_,
                                legion_domain_t full_domain_,
                                size_t total_shards,
+                               legion_domain_point_t *points_,
                                size_t *points_size)
 {
   Domain shard_domain = CObjectWrapper::unwrap(shard_domain_);
@@ -6175,14 +6176,11 @@ legion_sharding_functor_invert(legion_sharding_id_t sid,
 #endif
   std::vector<DomainPoint> points;
   functor->invert(shard, shard_domain, full_domain, total_shards, points);
+  assert(*points_size >= points.size());
   *points_size = points.size();
-  legion_domain_point_t *points_ =
-    static_cast<legion_domain_point_t *>(
-      malloc(points.size() * sizeof(legion_domain_point_t)));
   for (size_t i = 0; i < points.size(); ++i) {
     points_[i] = CObjectWrapper::wrap(points[i]);
   }
-  return points_;
 }
 
 void

@@ -4819,18 +4819,24 @@ extern "C" {
   /**
    * @param sid Must correspond to a previously registered sharding functor.
    *            This functor must be invertible.
-   * @param points_size Number of returned points.
-   * @return Points returned from `invert` call. The caller takes ownership of
-   *         this memory, and must explicitly `free()` it when done.
+   * @param points Pre-allocated array to fill in with the points returned by
+   *               the `invert` call. This array must be large enough to fit the
+   *               output of any call to this functor's `invert`. A safe limit
+   *               that will work for any functor is
+   *               `legion_domain_get_volume(full_domain)`.
+   * @param points_size At entry this must be the capacity of the `points`
+   *                    array. At exit this value has been updated to the actual
+   *                    number of returned points.
    *
    * @see Legion::ShardingFunctor::invert()
    */
-  legion_domain_point_t *
+  void
   legion_sharding_functor_invert(legion_sharding_id_t sid,
                                  legion_shard_id_t shard,
                                  legion_domain_t shard_domain,
                                  legion_domain_t full_domain,
                                  size_t total_shards,
+                                 legion_domain_point_t *points,
                                  size_t *points_size);
 
   void
