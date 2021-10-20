@@ -128,7 +128,7 @@ ifeq ($(strip $(REALM_LIMIT_SYMBOL_VISIBILITY)),1)
 endif
 
 # generate header files for public-facing defines
-DEFINE_HEADERS_DIR ?= $(CURDIR)
+DEFINE_HEADERS_DIR ?= .
 LEGION_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/legion_defines.h
 REALM_DEFINES_HEADER := $(DEFINE_HEADERS_DIR)/realm_defines.h
 
@@ -1179,16 +1179,23 @@ endif
 .PHONY: install
 ifdef PREFIX
 INSTALL_BIN_FILES += $(OUTFILE)
-INSTALL_INC_FILES += $(INSTALL_HEADERS)
+INSTALL_INC_FILES += legion_defines.h realm_defines.h
 INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION)
-install: $(addprefix $(PREFIX)/bin/,$(INSTALL_BIN_FILES)) $(addprefix $(PREFIX)/include/,$(INSTALL_INC_FILES)) $(addprefix $(PREFIX)/lib/,$(INSTALL_LIB_FILES))
-$(PREFIX)/bin/%: %
+TARGET_HEADERS := $(addprefix $(PREFIX)/include/,$(INSTALL_HEADERS))
+TARGET_BIN_FILES := $(addprefix $(PREFIX)/bin/,$(INSTALL_BIN_FILES))
+TARGET_INC_FILES := $(addprefix $(PREFIX)/include/,$(INSTALL_INC_FILES))
+TARGET_LIB_FILES := $(addprefix $(PREFIX)/lib/,$(INSTALL_LIB_FILES))
+install: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
+$(TARGET_HEADERS) : $(PREFIX)/include/% : $(LG_RT_DIR)/%
 	mkdir -p $(dir $@)
 	cp $< $@
-$(PREFIX)/include/%: %
+$(TARGET_BIN_FILES) : $(PREFIX)/bin/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
-$(PREFIX)/lib/%: %
+$(TARGET_INC_FILES) : $(PREFIX)/include/% : %
+	mkdir -p $(dir $@)
+	cp $< $@
+$(TARGET_LIB_FILES) : $(PREFIX)/lib/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
 else
