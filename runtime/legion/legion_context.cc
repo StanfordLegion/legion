@@ -16902,25 +16902,10 @@ namespace Legion {
       FutureMap result;
       if (collective)
       {
-        // Make one future map for all the shards
-        DistributedID did = 0;
-        if (owner_shard->shard_id == dynamic_id_allocator_shard)
-        {
-          ValueBroadcast<DistributedID> collective(this, COLLECTIVE_LOC_99);
-          did = runtime->get_available_distributed_id();
-          collective.broadcast(did);
-        }
-        else
-        {
-          ValueBroadcast<DistributedID> collective(this,
-              dynamic_id_allocator_shard, COLLECTIVE_LOC_99);
-          did = collective.get_value();
-        }
-        const AddressSpaceID owner_space =
-          shard_manager->get_shard_space(dynamic_id_allocator_shard);
         ReplFutureMapImpl *repl_impl =
-          new ReplFutureMapImpl(this, runtime, domain_node, domain_node, did,
-            total_children_count++, owner_space, RtEvent::NO_RT_EVENT);
+          new ReplFutureMapImpl(this, runtime, domain_node, domain_node,
+              runtime->get_available_distributed_id(), total_children_count++,
+              runtime->address_space, RtEvent::NO_RT_EVENT);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17018,24 +17003,10 @@ namespace Legion {
       if (collective)
       {
         // Make one future map for all the shards
-        DistributedID did = 0;
-        if (owner_shard->shard_id == dynamic_id_allocator_shard)
-        {
-          ValueBroadcast<DistributedID> collective(this, COLLECTIVE_LOC_99);
-          did = runtime->get_available_distributed_id();
-          collective.broadcast(did);
-        }
-        else
-        {
-          ValueBroadcast<DistributedID> collective(this,
-              dynamic_id_allocator_shard, COLLECTIVE_LOC_99);
-          did = collective.get_value();
-        }
-        const AddressSpaceID owner_space =
-          shard_manager->get_shard_space(dynamic_id_allocator_shard);
         ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, creation_op,
                             RtEvent::NO_RT_EVENT, domain_node, domain_node,
-                            runtime, did, owner_space);
+                            runtime, runtime->get_available_distributed_id(),
+                            runtime->address_space);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
