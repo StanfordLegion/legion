@@ -3019,9 +3019,14 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     end)
 
     local parent = terralib.newsymbol(c.legion_logical_partition_t, "parent")
-    if std.is_partition(std.as_read(util.get_base_indexed_node(expr).expr_type)) then
+    local base = std.as_read(util.get_base_indexed_node(expr).expr_type)
+    local depth = 0
+    if std.is_partition(base) then
       expr = wrap_partition_internal(expr, parent)
+    else
+      depth = #base.partition_symbols - 1
     end
+
     local index_access = codegen.expr_index_access(cx, expr):read(cx)
 
     local terra partition_functor([cx.runtime],
@@ -3054,7 +3059,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       return [index_access.value].impl
     end
 
-    return std.register_projection_functor(false, false, 0, nil, partition_functor)
+    return std.register_projection_functor(false, false, depth, nil, partition_functor)
 
   -- create fill projection functor without mappable
   -- create projection functors with no preamble or free variables without mappable
