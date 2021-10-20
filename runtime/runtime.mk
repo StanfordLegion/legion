@@ -995,6 +995,8 @@ LEGION_FORT_SRC  += $(LG_RT_DIR)/legion/legion_f_types.f90 \
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
 		   realm.h \
+		   legion_defines.h \
+		   realm_defines.h \
 		   legion/bitmask.h \
 		   legion/legion.inl \
 		   legion/legion_agency.h \
@@ -1176,31 +1178,19 @@ endif
 # Provide support for installing legion with the make build system
 .PHONY: install
 ifdef PREFIX
-INSTALL_BIN_FILES ?=
-INSTALL_INC_FILES ?=
-INSTALL_LIB_FILES ?=
-install: $(OUTFILE)
-	@echo "Installing into $(PREFIX)..."
-	@mkdir -p $(PREFIX)/bin
-	@mkdir -p $(PREFIX)/include/realm
-	@mkdir -p $(PREFIX)/include/realm/cuda
-	@mkdir -p $(PREFIX)/include/realm/hdf5
-	@mkdir -p $(PREFIX)/include/realm/llvm
-	@mkdir -p $(PREFIX)/include/realm/python
-	@mkdir -p $(PREFIX)/include/legion
-	@mkdir -p $(PREFIX)/include/mappers
-	@mkdir -p $(PREFIX)/include/mathtypes
-	@mkdir -p $(PREFIX)/lib
-	@cp $(OUTFILE) $(PREFIX)/bin/$(OUTFILE)
-	@$(foreach file,$(INSTALL_BIN_FILES),cp $(file) $(PREFIX)/bin/$(file);)
-	@cp realm_defines.h $(PREFIX)/include/realm_defines.h
-	@cp legion_defines.h $(PREFIX)/include/legion_defines.h
-	@$(foreach file,$(INSTALL_HEADERS),cp $(LG_RT_DIR)/$(file) $(PREFIX)/include/$(file);)
-	@$(foreach file,$(INSTALL_INC_FILES),cp $(file) $(PREFIX)/include/$(file);)
-	@cp $(SLIB_REALM) $(PREFIX)/lib/$(SLIB_REALM)
-	@cp $(SLIB_LEGION) $(PREFIX)/lib/$(SLIB_LEGION)
-	@$(foreach file,$(INSTALL_LIB_FILES),cp $(file) $(PREFIX)/lib/$(file);)
-	@echo "Installation complete"
+INSTALL_BIN_FILES += $(OUTFILE)
+INSTALL_INC_FILES += $(INSTALL_HEADERS)
+INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION)
+install: $(addprefix $(PREFIX)/bin/,$(INSTALL_BIN_FILES)) $(addprefix $(PREFIX)/include/,$(INSTALL_INC_FILES)) $(addprefix $(PREFIX)/lib/,$(INSTALL_LIB_FILES))
+$(PREFIX)/bin/%: %
+	mkdir -p $(dir $@)
+	cp $< $@
+$(PREFIX)/include/%: %
+	mkdir -p $(dir $@)
+	cp $< $@
+$(PREFIX)/lib/%: %
+	mkdir -p $(dir $@)
+	cp $< $@
 else
 install:
 	$(error Must specify PREFIX for installation)
