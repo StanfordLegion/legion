@@ -113,6 +113,12 @@ namespace Realm {
       //  modified during this call
       void swap(SequenceAssembler& other);
 
+      // imports data from this assembler into another (this is thread-safe
+      //  on the `other` but assumes no changes being made on `this`)
+      void import(SequenceAssembler& other) const;
+
+      bool empty() const;
+
       // asks if a span exists - return value is number of bytes from the
       //  start that do
       size_t span_exists(size_t start, size_t count);
@@ -122,9 +128,11 @@ namespace Realm {
       size_t add_span(size_t pos, size_t count);
 
     protected:
+      Mutex *ensure_mutex();
+
       atomic<size_t> contig_amount_x2;  // everything from [0, contig_amount) is covered - LSB indicates potential presence of noncontig spans
-      atomic<size_t> first_noncontig; // nothing in [contig_amount, first_noncontig) 
-      Mutex *mutex;
+      atomic<size_t> first_noncontig; // nothing in [contig_amount, first_noncontig)
+      atomic<Mutex *> mutex; // created on first use
       std::map<size_t, size_t> spans;  // noncontiguous spans
     };
 
@@ -1291,14 +1299,38 @@ namespace Realm {
       }
     };
 
+    // object used to hold input progress (pre_write and bytes_total) before
+    //  we've actually created the correct xd
+    class XferDesPlaceholder {
+    public:
+      XferDesPlaceholder();
+
+    protected:
+      ~XferDesPlaceholder();
+
+    public:
+      void add_reference();
+      void remove_reference();
+
+      void update_pre_bytes_write(int port_idx,
+				  size_t span_start, size_t span_size);
+      void update_pre_bytes_total(int port_idx, size_t pre_bytes_total);
+
+      void set_real_xd(XferDes *_xd);
+
+    protected:
+      static const int INLINE_PORTS = 4;
+      atomic<unsigned> refcount;
+      XferDes *xd;
+      size_t inline_bytes_total[INLINE_PORTS];
+      SequenceAssembler inline_pre_write[INLINE_PORTS];
+      Mutex extra_mutex;
+      std::map<int, size_t> extra_bytes_total;
+      std::map<int, SequenceAssembler> extra_pre_write;
+    };
+
     class XferDesQueue {
     public:
-      struct XferDesWithUpdates{
-        XferDesWithUpdates(void): xd(NULL) {}
-        XferDes* xd;
-	std::map<int, size_t> pre_bytes_total;
-	std::map<int, SequenceAssembler> seq_pre_write;
-      };
       enum {
         NODE_BITS = 16,
         INDEX_BITS = 32
@@ -1332,26 +1364,18 @@ namespace Realm {
       void update_next_bytes_read(XferDesID xd_guid, int port_idx,
 				  size_t span_start, size_t span_size);
 
-      void destroy_xferDes(XferDesID guid) {
-	XferDes *xd;
-	{
-	  RWLock::AutoWriterLock al(guid_lock);
-	  std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(guid);
-	  assert(it != guid_to_xd.end());
-	  assert(it->second.xd != NULL);
-	  xd = it->second.xd;
-	  guid_to_xd.erase(it);
-	}
-	xd->remove_reference();
-      }
+      void destroy_xferDes(XferDesID guid);
 
       // returns true if xd is ready, false if enqueue has been deferred
       bool enqueue_xferDes_local(XferDes* xd, bool add_to_queue = true);
 
     protected:
-      std::map<XferDesID, XferDesWithUpdates> guid_to_xd;
+      // guid_to_xd maps a guid to either an XferDes * (as a uintptr_t) or
+      //  a XferDesPlaceholder * (as a uintptr_t with the LSB set)
+      Mutex guid_lock;
+      std::map<XferDesID, uintptr_t> guid_to_xd;
+
       Mutex queues_lock;
-      RWLock guid_lock;
       atomic<XferDesID> next_to_assign_idx;
     };
 

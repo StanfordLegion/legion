@@ -422,24 +422,50 @@ namespace Realm {
         return (nbytes > 0) && (start / buf_size < (start + nbytes - 1) / buf_size);
       }
 #endif
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class SequenceAssembler
+    //
+
     SequenceAssembler::SequenceAssembler(void)
       : contig_amount_x2(0)
       , first_noncontig((size_t)-1)
-    {
-      mutex = new Mutex;
-    }
+      , mutex(0)
+    {}
 
     SequenceAssembler::SequenceAssembler(const SequenceAssembler& copy_from)
       : contig_amount_x2(copy_from.contig_amount_x2)
       , first_noncontig(copy_from.first_noncontig)
+      , mutex(0)
       , spans(copy_from.spans)
-    {
-      mutex = new Mutex;
-    }
+    {}
 
     SequenceAssembler::~SequenceAssembler(void)
     {
-      delete mutex;
+      if(mutex.load())
+        delete mutex.load();
+    }
+
+    Mutex *SequenceAssembler::ensure_mutex()
+    {
+      Mutex *ptr = mutex.load();
+      if(ptr)
+        return ptr;
+      // allocate one and try to install it
+      Mutex *new_mutex = new Mutex;
+      if(mutex.compare_exchange(ptr, new_mutex)) {
+        // succeeded - return the mutex we made
+        return new_mutex;
+      } else {
+        // failed - destroy the one we made and use the one that got there first
+        delete new_mutex;
+        return ptr;
+      }
+    }
+
+    bool SequenceAssembler::empty() const
+    {
+      return (contig_amount_x2.load() == 0);
     }
 
     void SequenceAssembler::swap(SequenceAssembler& other)
@@ -448,6 +474,19 @@ namespace Realm {
       std::swap(contig_amount_x2, other.contig_amount_x2);
       std::swap(first_noncontig, other.first_noncontig);
       spans.swap(other.spans);
+    }
+
+    void SequenceAssembler::import(SequenceAssembler& other) const
+    {
+      size_t contig_sample_x2 = contig_amount_x2.load_acquire();
+      if(contig_sample_x2 > 1)
+        other.add_span(0, contig_sample_x2 >> 1);
+      if((contig_sample_x2 & 1) != 0) {
+        for(std::map<size_t, size_t>::const_iterator it = spans.begin();
+            it != spans.end();
+            ++it)
+          other.add_span(it->first, it->second);
+      }
     }
 
     // asks if a span exists - return value is number of bytes from the
@@ -475,7 +514,7 @@ namespace Realm {
 
       // general case 3: take the lock and look through spans/etc.
       {
-	AutoLock<> al(*mutex);
+	AutoLock<> al(*ensure_mutex());
 
 	// first, recheck the contig_amount, in case both it and the noncontig
 	//  counters were bumped in between looking at the two of them
@@ -541,7 +580,7 @@ namespace Realm {
       if((prev_x2 >> 1) == pos) {
 	size_t span_end = pos + count;
 	{
-	  AutoLock<> al(*mutex);
+	  AutoLock<> al(*ensure_mutex());
 
 	  size_t new_noncontig = size_t(-1);
 	  while(!spans.empty()) {
@@ -573,7 +612,7 @@ namespace Realm {
       //  take the mutex and add to the noncontig list (we may end up being
       //  contiguous if we're the first noncontig and things have caught up)
       {
-	AutoLock<> al(*mutex);
+	AutoLock<> al(*ensure_mutex());
 
 	spans[pos] = count;
 
@@ -5542,6 +5581,108 @@ namespace Realm {
 							      args.span_size);
       }
 
+      ////////////////////////////////////////////////////////////////////////
+      //
+      // class XferDesPlaceholder
+      //
+
+      XferDesPlaceholder::XferDesPlaceholder()
+        : refcount(1)
+        , xd(0)
+      {
+        for(int i = 0; i < INLINE_PORTS; i++)
+          inline_bytes_total[i] = ~size_t(0);
+      }
+
+      XferDesPlaceholder::~XferDesPlaceholder()
+      {}
+
+      void XferDesPlaceholder::add_reference()
+      {
+        refcount.fetch_add_acqrel(1);
+      }
+
+      void XferDesPlaceholder::remove_reference()
+      {
+        unsigned prev = refcount.fetch_sub_acqrel(1);
+        // if this is the last reference to a placeholder that was assigned an
+        //  xd (the unassigned case should only happen on an insertion race),
+        //  propagate our progress info to the xd
+        if((prev == 1) && xd) {
+          bool updated = false;
+          for(int i = 0; i < INLINE_PORTS; i++) {
+            if(inline_bytes_total[i] != ~size_t(0)) {
+              xd->update_pre_bytes_total(i, inline_bytes_total[i]);
+              updated = true;
+            }
+            if(!inline_pre_write[i].empty()) {
+              inline_pre_write[i].import(xd->input_ports[i].seq_remote);
+              updated = true;
+            }
+          }
+          for(std::map<int, size_t>::const_iterator it = extra_bytes_total.begin();
+              it != extra_bytes_total.end();
+              ++it) {
+            xd->update_pre_bytes_total(it->first, it->second);
+            updated = true;
+          }
+          for(std::map<int, SequenceAssembler>::const_iterator it = extra_pre_write.begin();
+              it != extra_pre_write.end();
+              ++it) {
+            it->second.import(xd->input_ports[it->first].seq_remote);
+            updated = true;
+          }
+          if(updated)
+            xd->update_progress();
+          xd->remove_reference();
+        }
+
+        if(prev == 1)
+          delete this;
+      }
+
+      void XferDesPlaceholder::update_pre_bytes_write(int port_idx,
+                                                      size_t span_start,
+                                                      size_t span_size)
+      {
+        if(port_idx < INLINE_PORTS) {
+          inline_pre_write[port_idx].add_span(span_start, span_size);
+        } else {
+          // need a mutex around getting the reference to the SequenceAssembler
+          SequenceAssembler *sa;
+          {
+            AutoLock<> al(extra_mutex);
+            sa = &extra_pre_write[port_idx];
+          }
+          sa->add_span(span_start, span_size);
+        }
+      }
+
+      void XferDesPlaceholder::update_pre_bytes_total(int port_idx,
+                                                      size_t pre_bytes_total)
+      {
+        if(port_idx < INLINE_PORTS) {
+          inline_bytes_total[port_idx] = pre_bytes_total;
+        } else {
+          AutoLock<> al(extra_mutex);
+          extra_bytes_total[port_idx] = pre_bytes_total;
+        }
+      }
+
+      void XferDesPlaceholder::set_real_xd(XferDes *_xd)
+      {
+        // remember the xd and add a reference to it - actual updates will
+        //  happen once we're destroyed
+        xd = _xd;
+        xd->add_reference();
+      }
+
+
+      ////////////////////////////////////////////////////////////////////////
+      //
+      // class XferDesQueue
+      //
+
       /*static*/ XferDesQueue* XferDesQueue::get_singleton()
       {
 	// we use a single queue for all xferDes
@@ -5554,17 +5695,60 @@ namespace Realm {
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == Network::my_node_id) {
-	  RWLock::AutoWriterLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-            if (it->second.xd != NULL) {
-	      it->second.xd->update_pre_bytes_write(port_idx, span_start, span_size);
-            } else {
-	      it->second.seq_pre_write[port_idx].add_span(span_start, span_size);
+          XferDes *xd = 0;
+          XferDesPlaceholder *ph = 0;
+          {
+            AutoLock<> al(guid_lock);
+            std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(xd_guid);
+            if(it != guid_to_xd.end()) {
+              if((it->second & 1) == 0) {
+                // is a real xd - add a reference before we release the lock
+                xd = reinterpret_cast<XferDes *>(it->second);
+                xd->add_reference();
+              } else {
+                // is a placeholder - add a reference before we release lock
+                ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
+                ph->add_reference();
+              }
             }
+          }
+          // if we got neither, create a new placeholder and try to add it,
+          //  coping with the case where we lose to another insertion
+          if(!xd && !ph) {
+            XferDesPlaceholder *new_ph = new XferDesPlaceholder;
+            {
+              AutoLock<> al(guid_lock);
+              std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(xd_guid);
+              if(it != guid_to_xd.end()) {
+                if((it->second & 1) == 0) {
+                  // is a real xd - add a reference before we release the lock
+                  xd = reinterpret_cast<XferDes *>(it->second);
+                  xd->add_reference();
+                } else {
+                  // is a placeholder - add a reference before we release lock
+                  ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
+                  ph->add_reference();
+                }
+              } else {
+                guid_to_xd.insert(std::make_pair(xd_guid,
+                                                 reinterpret_cast<uintptr_t>(new_ph) + 1));
+                ph = new_ph;
+                new_ph->add_reference();  // table keeps the original reference
+              }
+            }
+            // if we didn't install our placeholder, remove the reference so it
+            //  goes away
+            if(ph != new_ph)
+              new_ph->remove_reference();
+          }
+          // now we can update the xd or the placeholder and then release the
+          //  reference we kept
+          if(xd) {
+            xd->update_pre_bytes_write(port_idx, span_start, span_size);
+            xd->remove_reference();
           } else {
-            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
-	    xdup.seq_pre_write[port_idx].add_span(span_start, span_size);
+            ph->update_pre_bytes_write(port_idx, span_start, span_size);
+            ph->remove_reference();
           }
         }
         else {
@@ -5586,19 +5770,60 @@ namespace Realm {
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == Network::my_node_id) {
-	  RWLock::AutoWriterLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-            if (it->second.xd != NULL) {
-	      it->second.xd->update_pre_bytes_total(port_idx, pre_bytes_total);
-            } else {
-	      // should never get more than one update
-	      assert(it->second.pre_bytes_total.count(port_idx) == 0);
-	      it->second.pre_bytes_total[port_idx] = pre_bytes_total;
+          XferDes *xd = 0;
+          XferDesPlaceholder *ph = 0;
+          {
+            AutoLock<> al(guid_lock);
+            std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(xd_guid);
+            if(it != guid_to_xd.end()) {
+              if((it->second & 1) == 0) {
+                // is a real xd - add a reference before we release the lock
+                xd = reinterpret_cast<XferDes *>(it->second);
+                xd->add_reference();
+              } else {
+                // is a placeholder - add a reference before we release lock
+                ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
+                ph->add_reference();
+              }
             }
+          }
+          // if we got neither, create a new placeholder and try to add it,
+          //  coping with the case where we lose to another insertion
+          if(!xd && !ph) {
+            XferDesPlaceholder *new_ph = new XferDesPlaceholder;
+            {
+              AutoLock<> al(guid_lock);
+              std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(xd_guid);
+              if(it != guid_to_xd.end()) {
+                if((it->second & 1) == 0) {
+                  // is a real xd - add a reference before we release the lock
+                  xd = reinterpret_cast<XferDes *>(it->second);
+                  xd->add_reference();
+                } else {
+                  // is a placeholder - add a reference before we release lock
+                  ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
+                  ph->add_reference();
+                }
+              } else {
+                guid_to_xd.insert(std::make_pair(xd_guid,
+                                                 reinterpret_cast<uintptr_t>(new_ph) + 1));
+                ph = new_ph;
+                new_ph->add_reference();  // table keeps the original reference
+              }
+            }
+            // if we didn't install our placeholder, remove the reference so it
+            //  goes away
+            if(ph != new_ph)
+              new_ph->remove_reference();
+          }
+          // now we can update the xd or the placeholder and then release the
+          //  reference we kept
+          if(xd) {
+            xd->update_pre_bytes_total(port_idx, pre_bytes_total);
+            xd->remove_reference();
           } else {
-            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
-	    xdup.pre_bytes_total[port_idx] = pre_bytes_total;
+            ph->update_pre_bytes_total(port_idx, pre_bytes_total);
+            ph->remove_reference();
           }
         }
         else {
@@ -5616,15 +5841,26 @@ namespace Realm {
       {
         NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == Network::my_node_id) {
-	  RWLock::AutoReaderLock al(guid_lock);
-          std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it != guid_to_xd.end()) {
-	    assert(it->second.xd != NULL);
-	    it->second.xd->update_next_bytes_read(port_idx, span_start, span_size);
-	  } else {
-            // This means this update goes slower than future updates, which marks
-            // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
-	  }
+          XferDes *xd = 0;
+          {
+            AutoLock<> al(guid_lock);
+            std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(xd_guid);
+            if(it != guid_to_xd.end()) {
+              if((it->second & 1) == 0) {
+                // is a real xd - add a reference before we release the lock
+                xd = reinterpret_cast<XferDes *>(it->second);
+                xd->add_reference();
+              } else {
+                // should never be a placeholder!
+                assert(0);
+              }
+            } else {
+              // ok if we don't find it - upstream xd's can be destroyed before
+              //  the downstream xd has stopped updating it
+            }
+          }
+          if(xd)
+            xd->update_next_bytes_read(port_idx, span_start, span_size);
         }
         else {
           // send a active message to remote node
@@ -5632,6 +5868,31 @@ namespace Realm {
 					       port_idx,
 					       span_start, span_size);
         }
+      }
+
+      void XferDesQueue::destroy_xferDes(XferDesID guid)
+      {
+	XferDes *xd = 0;
+        {
+          AutoLock<> al(guid_lock);
+          std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(guid);
+          if(it != guid_to_xd.end()) {
+            if((it->second & 1) == 0) {
+              // remember xd but remove from table (stealing table's reference)
+              xd = reinterpret_cast<XferDes *>(it->second);
+              guid_to_xd.erase(it);
+            } else {
+              // should never be a placeholder!
+              assert(0);
+            }
+          } else {
+            // should always be present!
+            assert(0);
+          }
+        }
+        // just remove table's reference (actual destruction may be delayed
+        //   if some other thread is still poking it)
+	xd->remove_reference();
       }
 
       bool XferDesQueue::enqueue_xferDes_local(XferDes* xd,
@@ -5644,27 +5905,33 @@ namespace Realm {
 	  return false;
 	}
 
-	{
-	  RWLock::AutoWriterLock al(guid_lock);
-	  std::map<XferDesID, XferDesWithUpdates>::iterator git = guid_to_xd.find(xd->guid);
-	  if (git != guid_to_xd.end()) {
-	    // xerDes_queue has received updates of this xferdes
-	    // need to integrate these updates into xferdes
-	    assert(git->second.xd == NULL);
-	    git->second.xd = xd;
-	    for(std::map<int, size_t>::const_iterator it = git->second.pre_bytes_total.begin();
-		it != git->second.pre_bytes_total.end();
-		++it)
-	      xd->input_ports[it->first].remote_bytes_total.store(it->second);
-	    for(std::map<int, SequenceAssembler>::iterator it = git->second.seq_pre_write.begin();
-		it != git->second.seq_pre_write.end();
-		++it)
-	      xd->input_ports[it->first].seq_remote.swap(it->second);
-	  } else {
-	    XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
-	    xdup.xd = xd;
-	  }
-	}
+        // insert ourselves in the table, replacing a placeholder if present
+        XferDesPlaceholder *ph = 0;
+        {
+          AutoLock<> al(guid_lock);
+          std::map<XferDesID, uintptr_t>::iterator it = guid_to_xd.find(xd->guid);
+          if(it != guid_to_xd.end()) {
+            if((it->second & 1) == 0) {
+              // should never be a real xd!
+              assert(0);
+              guid_to_xd.erase(it);
+            } else {
+              // remember placeholder (stealing table's reference)
+              ph = reinterpret_cast<XferDesPlaceholder *>(it->second - 1);
+              // put xd in, donating the initial reference to the table
+              it->second = reinterpret_cast<uintptr_t>(xd);
+            }
+          } else {
+            guid_to_xd.insert(std::make_pair(xd->guid,
+                                             reinterpret_cast<uintptr_t>(xd)));
+          }
+        }
+        if(ph) {
+          // tell placeholder about real xd and have it update it once there
+          //  are no other concurrent updates
+          ph->set_real_xd(xd);
+          ph->remove_reference();
+        }
 
 	if(!add_to_queue) return true;
 	assert(0);
