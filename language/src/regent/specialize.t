@@ -885,6 +885,9 @@ end
 function specialize.expr_region(cx, node, allow_lists)
   local ispace = specialize.expr(cx, node.ispace)
   local fspace_type = node.fspace_type_expr(cx.env:env())
+  if not fspace_type then
+    report.error(node, "fspace type is undefined or nil")
+  end
   return ast.specialized.expr.Region {
     ispace = ispace,
     fspace_type = fspace_type,
