@@ -8018,6 +8018,45 @@ function codegen.expr_import_partition(cx, node)
     partition_type)
 end
 
+function codegen.expr_import_cross_product(cx, node)
+  local partitions = node.partitions:map(function(p) return codegen.expr(cx, p):read(cx) end)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = quote end
+
+  for _, p in pairs(partitions) do
+    actions = quote
+      [actions];
+      [p.actions];
+    end
+  end
+
+  actions = quote
+    [actions];
+    [colors.actions];
+    [value.actions];
+  end
+
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  local lr = cx:region(expr_type:parent_region()).logical_region
+
+  actions = quote
+    [actions];
+    var ip = c.legion_terra_index_cross_product_get_partition(value.value)
+    var [lp] = c.legion_logical_partition_create(
+      [cx.runtime], [cx.context], lr.impl, ip)
+  end
+
+  return values.value(node,
+    expr.once_only(
+      actions,
+        `(expr_type { impl = [lp], product = [value.value], colors = [colors.value] }),
+         expr_type),
+    expr_type)
+end
+
 function codegen.expr_projection(cx, node)
   local orig_region_value = codegen.expr(cx, node.region):read(cx)
   local orig_region_type = std.as_read(node.region.expr_type)
@@ -8299,6 +8338,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ImportPartition) then
     return codegen.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportCrossProduct) then
+    return codegen.expr_import_cross_product(cx, node)
 
   elseif node:is(ast.typed.expr.Projection) then
     return codegen.expr_projection(cx, node)

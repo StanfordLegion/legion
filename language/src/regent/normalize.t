@@ -338,6 +338,9 @@ local expr_import_region =
 local expr_import_partition =
   normalize_expr_factory_full({"region", "colors", "value"}, {false, true, true})
 
+local expr_import_cross_product =
+  normalize_expr_factory_full({"value"}, {false})
+
 local expr_projection = normalize_expr_factory("region", false, false)
 
 local normalize_expr_table = {
@@ -411,6 +414,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.ImportIspace]               = expr_import_ispace,
   [ast.specialized.expr.ImportRegion]               = expr_import_region,
   [ast.specialized.expr.ImportPartition]            = expr_import_partition,
+  [ast.specialized.expr.ImportCrossProduct]         = expr_import_cross_product,
   [ast.specialized.expr.Projection]                 = expr_projection,
 }
 

@@ -1264,6 +1264,16 @@ function specialize.expr_import_partition(cx, node)
   }
 end
 
+function specialize.expr_import_cross_product(cx, node)
+  return ast.specialized.expr.ImportCrossProduct {
+    partitions = node.partitions:map(function(p) return specialize.expr(cx, p) end),
+    colors = specialize.expr(cx, node.colors),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.projection_field(cx, node)
   local renames = node.rename and specialize.field_names(cx, node.rename)
   local field_names = specialize.field_names(cx, node.field_name)
@@ -1515,6 +1525,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ImportPartition) then
     return specialize.expr_import_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ImportCrossProduct) then
+    return specialize.expr_import_cross_product(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Projection) then
     return specialize.expr_projection(cx, node)

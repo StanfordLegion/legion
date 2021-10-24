@@ -6076,11 +6076,23 @@ legion_runtime_select_tunable_value(legion_runtime_t runtime_,
 // Miscellaneous Operations
 // -----------------------------------------------------------------------
 
+bool
+legion_runtime_has_runtime()
+{
+  return Runtime::has_runtime();
+}
+
 legion_runtime_t
 legion_runtime_get_runtime()
 {
   Runtime *runtime = Runtime::get_runtime();
   return CObjectWrapper::wrap(runtime);
+}
+
+bool
+legion_runtime_has_context()
+{
+  return Runtime::has_context();
 }
 
 legion_context_t

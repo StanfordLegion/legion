@@ -255,6 +255,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.ImportIspace) or
     node:is(ast.typed.expr.ImportRegion) or
     node:is(ast.typed.expr.ImportPartition) or
+    node:is(ast.typed.expr.ImportCrossProduct) or
     node:is(ast.typed.expr.Projection)
   then
     return flow_empty()
@@ -1234,6 +1235,17 @@ function optimize_futures.expr_import_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_import_cross_product(cx, node)
+  local partitions = node.partitions:map(function(p) return concretize(cx, optimize_futures.expr(cx, p)) end)
+  local colors  = concretize(cx, optimize_futures.expr(cx, node.colors))
+  local value  = concretize(cx, optimize_futures.expr(cx, node.value))
+  return node {
+    partitions = partitions,
+    colors = colors,
+    value = value,
+  }
+end
+
 function optimize_futures.expr_projection(cx, node)
   local region = concretize(cx, optimize_futures.expr(cx, node.region))
   return node {
@@ -1433,6 +1445,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ImportPartition) then
     return optimize_futures.expr_import_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportCrossProduct) then
+    return optimize_futures.expr_import_cross_product(cx, node)
 
   elseif node:is(ast.typed.expr.Projection) then
     return optimize_futures.expr_projection(cx, node)
