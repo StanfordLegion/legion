@@ -7140,6 +7140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool Runtime::has_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::runtime_started;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
@@ -7151,6 +7158,13 @@ namespace Legion {
         return Internal::implicit_runtime->external;
       // Otherwise this is not from a Legion task, so fallback to the_runtime
       return Internal::Runtime::the_runtime->external;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool Runtime::has_context(void)
+    //--------------------------------------------------------------------------
+    {
+      return (Internal::implicit_context != NULL);
     }
 
     //--------------------------------------------------------------------------

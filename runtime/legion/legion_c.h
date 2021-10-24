@@ -4651,10 +4651,22 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @see Legion::Runtime::has_runtime()
+   */
+  bool
+  legion_runtime_has_runtime(void);
+
+  /**
    * @see Legion::Runtime::get_runtime()
    */
   legion_runtime_t
   legion_runtime_get_runtime(void);
+
+  /**
+   * @see Legion::Runtime::has_context()
+   */
+  bool
+  legion_runtime_has_context(void);
 
   /**
    * @return Caller takes ownership of return value.
