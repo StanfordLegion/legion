@@ -18,7 +18,7 @@
 #include <cuda_runtime.h>
 
 #include "realm/cuda/cudart_hijack.h"
-
+#include "realm/cuda/cuda_module.h"
 #include "realm/cuda/cuda_internal.h"
 #include "realm/logging.h"
 
@@ -806,80 +806,16 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int index)
   {
-    // doesn't need a current device - the index is supplied
-    CUdevice device;
-    CHECK_CU( cuDeviceGet(&device, index) );
-    CHECK_CU( cuDeviceGetName(prop->name, 255, device) );
-    CHECK_CU( cuDeviceTotalMem(&(prop->totalGlobalMem), device) );
-#define GET_DEVICE_PROP(member, name)					\
-    do {								\
-      int tmp;								\
-      CHECK_CU( cuDeviceGetAttribute(&tmp, CU_DEVICE_ATTRIBUTE_##name, device) ); \
-      prop->member = tmp;						\
-    } while(0)
-    // SCREW TEXTURES AND SURFACES FOR NOW!
-    GET_DEVICE_PROP(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK);
-    GET_DEVICE_PROP(regsPerBlock, MAX_REGISTERS_PER_BLOCK);
-    GET_DEVICE_PROP(warpSize, WARP_SIZE);
-    GET_DEVICE_PROP(memPitch, MAX_PITCH);
-    GET_DEVICE_PROP(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK);
-    GET_DEVICE_PROP(maxThreadsDim[0], MAX_BLOCK_DIM_X);
-    GET_DEVICE_PROP(maxThreadsDim[1], MAX_BLOCK_DIM_Y);
-    GET_DEVICE_PROP(maxThreadsDim[2], MAX_BLOCK_DIM_Z);
-    GET_DEVICE_PROP(maxGridSize[0], MAX_GRID_DIM_X);
-    GET_DEVICE_PROP(maxGridSize[1], MAX_GRID_DIM_Y);
-    GET_DEVICE_PROP(maxGridSize[2], MAX_GRID_DIM_Z);
-    GET_DEVICE_PROP(clockRate, CLOCK_RATE);
-    GET_DEVICE_PROP(totalConstMem, TOTAL_CONSTANT_MEMORY);
-    GET_DEVICE_PROP(major, COMPUTE_CAPABILITY_MAJOR);
-    GET_DEVICE_PROP(minor, COMPUTE_CAPABILITY_MINOR);
-    GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
-    GET_DEVICE_PROP(multiProcessorCount, MULTIPROCESSOR_COUNT);
-    GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
-    GET_DEVICE_PROP(integrated, INTEGRATED);
-    GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
-    GET_DEVICE_PROP(computeMode, COMPUTE_MODE);
-    GET_DEVICE_PROP(concurrentKernels, CONCURRENT_KERNELS);
-    GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
-    GET_DEVICE_PROP(pciBusID, PCI_BUS_ID);
-    GET_DEVICE_PROP(pciDeviceID, PCI_DEVICE_ID);
-    GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
-    GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
-    GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
-    GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
-    GET_DEVICE_PROP(memoryClockRate, MEMORY_CLOCK_RATE);
-    GET_DEVICE_PROP(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH);
-    GET_DEVICE_PROP(l2CacheSize, L2_CACHE_SIZE);
-    GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR);
-    GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
-    GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
-    GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
-    GET_DEVICE_PROP(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR);
-    GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
-    GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
-    GET_DEVICE_PROP(isMultiGpuBoard, MULTI_GPU_BOARD);
-    GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
-#if CUDA_VERSION >= 8000
-    GET_DEVICE_PROP(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO);
-    GET_DEVICE_PROP(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS);
-    GET_DEVICE_PROP(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS);
-#endif
-#if CUDA_VERSION >= 9000
-    GET_DEVICE_PROP(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED);
-    GET_DEVICE_PROP(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM);
-    GET_DEVICE_PROP(cooperativeLaunch, COOPERATIVE_LAUNCH);
-    GET_DEVICE_PROP(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH);
-#endif
-#if CUDA_VERSION >= 9200
-    GET_DEVICE_PROP(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES);
-    GET_DEVICE_PROP(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST);
-#endif
-#if CUDA_VERSION >= 11000
-    GET_DEVICE_PROP(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR);
-    GET_DEVICE_PROP(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE);
-#endif
-#undef GET_DEVICE_PROP
-    return cudaSuccess;
+    GPUProcessor *p = get_gpu_or_die("cudaGetDeviceProperties");
+    const std::vector<GPUInfo*> &infos = p->gpu->module->gpu_info;
+    for (const GPUInfo* info : infos) {
+      if (info->index != index)
+        continue;
+      static_assert(std::is_trivially_copyable<cudaDeviceProp>::value, "cudaDeviceProp is no longer trivially copyable");
+      memcpy(prop, info, sizeof(cudaDeviceProp));
+      return cudaSuccess;
+    }
+    return cudaErrorInvalidDevice;
   }
       
   REALM_PUBLIC_API
