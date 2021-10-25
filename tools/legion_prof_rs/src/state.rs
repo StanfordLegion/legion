@@ -21,8 +21,9 @@ pub enum ProcKind {
     Utility = 3,
     IO = 4,
     ProcGroup = 5,
-    OpenMP = 6,
-    Python = 7,
+    ProcSet = 6,
+    OpenMP = 7,
+    Python = 8,
 }
 
 // Make sure this is up to date with lowlevel.h
