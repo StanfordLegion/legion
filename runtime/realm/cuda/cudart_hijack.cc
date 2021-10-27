@@ -829,7 +829,7 @@ extern "C" {
     CUdevice_attribute cu_attr = (CUdevice_attribute)attr;
     CHECK_CU( cuDeviceGetAttribute(value, cu_attr, device) );
     return cudaSuccess;
-  }
+  } 
 
   REALM_PUBLIC_API
   cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attr, const void *func)
@@ -861,6 +861,125 @@ extern "C" {
     GET_FUNC_ATTR(sharedSizeBytes, SHARED_SIZE_BYTES);
 #undef GET_FUNC_ATTR
     return cudaSuccess;
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaFuncSetAttribute(const void *func, cudaFuncAttribute attr, int value)
+  {
+    GPUProcessor *p = get_gpu_or_die("cudaFuncSetAttribute");
+
+    CUfunction handle = p->gpu->lookup_function(func);
+    switch (attr)
+    {
+      case cudaFuncAttributeMaxDynamicSharedMemorySize:
+        {
+          CHECK_CU( cuFuncSetAttribute(handle, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, value) );
+          return cudaSuccess;
+        }
+      case cudaFuncAttributePreferredSharedMemoryCarveout:
+        {
+          CHECK_CU( cuFuncSetAttribute(handle, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, value) );
+          return cudaSuccess;
+        }
+      default:
+        break;
+    }
+    return cudaErrorInvalidValue;
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaFuncSetCacheConfig(const void *func, cudaFuncCache cacheConfig)
+  {
+    GPUProcessor *p = get_gpu_or_die("cudaFuncSetCacheConfig");
+
+    CUfunction handle = p->gpu->lookup_function(func);
+    switch (cacheConfig)
+    {
+      case cudaFuncCachePreferNone:
+        {
+          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_NONE) ); 
+          return cudaSuccess;
+        }
+      case cudaFuncCachePreferShared:
+        {
+          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_SHARED) ); 
+          return cudaSuccess;
+        }
+      case cudaFuncCachePreferL1:
+        {
+          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_L1) ); 
+          return cudaSuccess;
+        }
+      case cudaFuncCachePreferEqual:
+        {
+          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_EQUAL) ); 
+          return cudaSuccess;
+        }
+      default:
+        break;
+    }
+    return cudaErrorInvalidValue;
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaDeviceSetCacheConfig(cudaFuncCache config)
+  {
+    get_gpu_or_die("cudaDeviceSetCacheConfig");
+    switch (config)
+    {
+      case cudaFuncCachePreferNone:
+        {
+          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_NONE) ); 
+          return cudaSuccess;
+        }
+      case cudaFuncCachePreferShared:
+        {
+          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_SHARED) ); 
+          return cudaSuccess;
+        }
+      case cudaFuncCachePreferL1:
+        {
+          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_L1) ); 
+          return cudaSuccess;
+        }
+      case cudaFuncCachePreferEqual:
+        {
+          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_EQUAL) ); 
+          return cudaSuccess;
+        }
+      default:
+        break;
+    }
+    return cudaErrorInvalidValue;
+  }
+
+  REALM_PUBLIC_API
+  cudaError_t cudaFuncSetSharedMemConfig(const void *func, cudaSharedMemConfig config)
+  {
+    GPUProcessor *p = get_gpu_or_die("cudaFuncSetSharedMemConfig");
+
+    CUfunction handle = p->gpu->lookup_function(func);
+    switch (config)
+    {
+      case cudaSharedMemBankSizeDefault:
+        {
+          CHECK_CU( cuFuncSetSharedMemConfig(handle, CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE) );
+          return cudaSuccess;
+        }
+      case cudaSharedMemBankSizeFourByte:
+        {
+          CHECK_CU( cuFuncSetSharedMemConfig(handle, CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE) );
+          return cudaSuccess;
+        }
+      case cudaSharedMemBankSizeEightByte:
+        {
+          CHECK_CU( cuFuncSetSharedMemConfig(handle, CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE) );
+          return cudaSuccess;
+        }
+      default:
+        break;
+    }
+    return cudaErrorInvalidValue;
   }
 
 #if CUDA_VERSION >= 11000
@@ -959,23 +1078,7 @@ extern "C" {
     // Ignore calls to set the device here since we already
     // know which device we are running on
     return cudaSuccess;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaFuncSetCacheConfig(const void *func, cudaFuncCache config)
-  {
-    get_gpu_or_die("cudaFuncSetCacheConfig");
-    // TODO: actually do something with this
-    return cudaSuccess;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaDeviceSetCacheConfig(cudaFuncCache config)
-  {
-    get_gpu_or_die("cudaDeviceSetCacheConfig");
-    // TODO: actually do something with this
-    return cudaSuccess;
-  }
+  } 
 
   REALM_PUBLIC_API
   cudaError_t cudaThreadSetCacheConfig(cudaFuncCache config)
