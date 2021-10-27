@@ -67,15 +67,21 @@ namespace Realm {
 
   namespace Cuda {
 
-    struct GPUInfo {
+    struct GPUInfo 
+#ifdef REALM_USE_CUDART_HIJACK
+      : public cudaDeviceProp
+#endif
+        {
       int index;  // index used by CUDA runtime
       CUdevice device;
 
+#ifndef REALM_USE_CUDART_HIAJCK
       static const size_t MAX_NAME_LEN = 64;
       char name[MAX_NAME_LEN];
 
-      int compute_major, compute_minor;
-      size_t total_mem;
+      int major, minor;
+      size_t totalGlobalMem;
+#endif
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
     };
 
