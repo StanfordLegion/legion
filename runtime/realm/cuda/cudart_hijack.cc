@@ -863,6 +863,7 @@ extern "C" {
     return cudaSuccess;
   }
 
+#ifdef CUDA_VERSION >= 9000
   REALM_PUBLIC_API
   cudaError_t cudaFuncSetAttribute(const void *func, cudaFuncAttribute attr, int value)
   {
@@ -886,6 +887,7 @@ extern "C" {
     }
     return cudaErrorInvalidValue;
   }
+#endif
 
   REALM_PUBLIC_API
   cudaError_t cudaFuncSetCacheConfig(const void *func, cudaFuncCache cacheConfig)
