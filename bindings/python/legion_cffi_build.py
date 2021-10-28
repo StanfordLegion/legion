@@ -47,7 +47,10 @@ def build(defines_dir, output_dir):
         # For Make, legion_defines.h is in the source directory:
         build_flags = ['-I', os.path.dirname(os.path.realpath(__file__))]
 
-    header = subprocess.check_output(['gcc', '-I', prefix_dir] + build_flags + ['-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
+    # Check to see if the user specified a C compiler with the CC environment variable, if not assume there is a built-in C compiler
+    compiler = os.getenv('CC', 'cc')
+
+    header = subprocess.check_output([compiler, '-I', prefix_dir] + build_flags + ['-DLEGION_USE_PYTHON_CFFI', '-E', '-P', legion_h_path]).decode('utf-8')
 
     with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'legion_cffi.py.in')) as f:
         content = f.read()
