@@ -11559,6 +11559,13 @@ namespace Legion {
         unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
+      if (LEGION_MAX_NUM_NODES <= address_space)
+        REPORT_LEGION_ERROR(ERROR_MAXIMUM_NODES_EXCEEDED,
+            "Maximum number of nodes exceeded. Detected node %d but "
+            "'LEGION_MAX_NUM_NODES' is set to %d. Change the value of "
+            "'LEGION_MAX_NUM_NODES' in legion_config.h and recompile. "
+            "Please note that 'LEGION_MAX_NUM_NODES' must be a power of two.",
+            address_space, LEGION_MAX_NUM_NODES)
       log_run.debug("Initializing Legion runtime in address space %x",
                             address_space);
       // Construct a local utility processor group
