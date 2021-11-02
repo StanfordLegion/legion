@@ -45,21 +45,11 @@ namespace Legion {
         memcpy(&ptr, &p, sizeof(p));
         return ptr;
       }
-      inline operator T*(void) const { return pointer; }
-      inline T operator*(void) const 
-      { 
-        T value;
-        memcpy(&value, pointer, sizeof(T));
-        return value; 
-      }
-      inline T operator[](size_t off) const 
-      { 
-        T value;
-        memcpy(&value, pointer+off, sizeof(T));
-        return value;
-      }
+      inline operator T*(void) const { return (T*)pointer; }
+      inline T operator*(void) const { return *pointer; }
+      inline T operator[](size_t off) const { return pointer[off]; }
     private:
-      T *const pointer;
+      volatile T *const pointer;
     };
     template<typename T, size_t ALIGNMENT = alignof(T)>
     class AlignedPointer {
@@ -84,17 +74,12 @@ namespace Legion {
         memcpy(&ptr, &p, sizeof(ptr));
         return ptr % ALIGNMENT;
       }
-      inline operator T*(void) const { return pointer; }
-      inline T operator*(void) const 
-      { 
-        T value;
-        memcpy(&value, pointer, sizeof(T));
-        return value;
-      }
+      inline operator T*(void) const { return (T*)pointer; }
+      inline T operator*(void) const { return *pointer; }
       inline size_t offset(void) const { return off; }
     private:
       size_t off;
-      T *const pointer;
+      volatile T *const pointer;
     };
     template<typename T1, typename T2>
     class Alias {
