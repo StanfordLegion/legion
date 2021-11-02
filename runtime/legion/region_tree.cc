@@ -18331,7 +18331,7 @@ namespace Legion {
       const bool last = remove_reference();
       // If we weren't the last one that means we remove the reference
       if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF, mutator))
-        delete node;
+        delete node.load();
       return last;
     }
 
