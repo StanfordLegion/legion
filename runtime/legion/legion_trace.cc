@@ -67,11 +67,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
-      : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
+      : ctx(c), tid(t), last_memoized(0),
         physical_op_count(0), blocking_call_observed(false), 
         has_intermediate_ops(false), fixed(false)
     //--------------------------------------------------------------------------
     {
+      state.store(LOGICAL_ONLY);
       physical_trace = logical_only ? NULL : 
         new PhysicalTrace(c->owner_task->runtime, this);
     }
@@ -3847,16 +3848,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
                                        TaskTreeCoordinates &&coords)
-      : trace(t), coordinates(std::move(coords)), recording(true),
+      : trace(t), coordinates(std::move(coords)),
         replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), last_fence(NULL),
-        recording_done(Runtime::create_rt_user_event()),
-        pending_inv_topo_order(NULL), pending_transitive_reduction(NULL)
+        recording_done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
+      recording.store(true);
       events.push_back(fence_event);
       event_map[fence_event] = fence_completion_id;
+      pending_inv_topo_order.store(NULL);
+      pending_transitive_reduction.store(NULL);
       instructions.push_back(
          new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
       // always want at least one set of operations ready for recording
@@ -3865,7 +3868,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : trace(NULL), coordinates(rhs.coordinates), recording(true),
+      : trace(NULL), coordinates(rhs.coordinates),
         replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
@@ -3914,10 +3917,13 @@ namespace Legion {
         if (!remote_memos.empty())
           release_remote_memos();
       }
-      if (pending_inv_topo_order != NULL)
-        delete pending_inv_topo_order;
-      if (pending_transitive_reduction != NULL)
-        delete pending_transitive_reduction;
+      std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
+      if (inv_topo_order != NULL)
+        delete inv_topo_order;
+      std::vector<std::vector<unsigned> > *transitive_reduction =
+        pending_transitive_reduction.load();
+      if (transitive_reduction != NULL)
+        delete transitive_reduction;
     }
 
     //--------------------------------------------------------------------------
@@ -5173,10 +5179,10 @@ namespace Legion {
           new std::vector<std::vector<unsigned> >();
         in_reduced_copy->swap(incoming_reduced);
         // Write them to the members
-        pending_inv_topo_order = inv_topo_order_copy;
+        pending_inv_topo_order.store(inv_topo_order_copy);
         // Need memory fence so writes happen in this order
         __sync_synchronize();
-        pending_transitive_reduction = in_reduced_copy;
+        pending_transitive_reduction.store(in_reduced_copy);
       }
       else
         finalize_transitive_reduction(inv_topo_order, incoming_reduced);
@@ -6576,17 +6582,19 @@ namespace Legion {
         pending_replays.pop_front();
       }
       // Check to see if we have a pending transitive reduction result
-      if (pending_transitive_reduction != NULL)
+      std::vector<std::vector<unsigned> > *transitive_reduction = 
+        pending_transitive_reduction.load();
+      if (transitive_reduction != NULL)
       {
+        std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
 #ifdef DEBUG_LEGION
-        assert(pending_inv_topo_order != NULL);
+        assert(inv_topo_order != NULL);
 #endif
-        finalize_transitive_reduction(*pending_inv_topo_order,
-                                      *pending_transitive_reduction);
-        delete pending_inv_topo_order;
-        pending_inv_topo_order = NULL;
-        delete pending_transitive_reduction;
-        pending_transitive_reduction = NULL;
+        finalize_transitive_reduction(*inv_topo_order, *transitive_reduction);
+        delete inv_topo_order;
+        pending_inv_topo_order.store(NULL);
+        delete transitive_reduction;
+        pending_transitive_reduction.store(NULL);
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);

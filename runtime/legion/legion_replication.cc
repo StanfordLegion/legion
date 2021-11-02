@@ -55,7 +55,7 @@ namespace Legion {
     /*static*/ void CollectiveCheckReduction::apply<false>(LHS &lhs, RHS rhs)
     //--------------------------------------------------------------------------
     {
-      volatile LHS *ptr = &lhs;
+      LHS *ptr = &lhs;
       LHS temp = *ptr;
       while ((temp != BAD) && (temp != rhs))
       {
@@ -86,7 +86,7 @@ namespace Legion {
     /*static*/ void CollectiveCheckReduction::fold<false>(RHS &rhs1, RHS rhs2)
     //--------------------------------------------------------------------------
     {
-      volatile RHS *ptr = &rhs1;
+      RHS *ptr = &rhs1;
       RHS temp = *ptr;
       while ((temp != BAD) && (temp != rhs2))
       {

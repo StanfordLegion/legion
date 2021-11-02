@@ -12167,7 +12167,7 @@ namespace Legion {
     {
       if (is_remote())
       {
-        CollectiveManager *volatile result = NULL;
+        std::atomic<CollectiveManager*> result(NULL);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -12191,7 +12191,7 @@ namespace Legion {
         }
         runtime->send_slice_collective_instance_request(orig_proc, rez);
         ready_event.wait();
-        return result;
+        return result.load();
       }
       else
         return index_owner->find_or_create_collective_instance(mapper_call, 
@@ -12206,7 +12206,7 @@ namespace Legion {
     {
       if (is_remote())
       {
-        volatile bool result = success;
+        std::atomic<bool> result(success);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -12221,7 +12221,7 @@ namespace Legion {
         }
         runtime->send_slice_collective_instance_request(orig_proc, rez);
         ready_event.wait();
-        return result;
+        return result.load();
       }
       else
         return index_owner->finalize_collective_instance(call_kind, index, 
@@ -12289,7 +12289,7 @@ namespace Legion {
             derez.deserialize(remote_unsat_index);
             DomainPoint point;
             derez.deserialize(point);
-            CollectiveManager **target;
+            std::atomic<CollectiveManager*> *target;
             derez.deserialize(target);
             RtUserEvent done_event;
             derez.deserialize(done_event);
@@ -12338,7 +12338,7 @@ namespace Legion {
             derez.deserialize(index);
             bool success;
             derez.deserialize(success);
-            bool *target;
+            std::atomic<bool> *target;
             derez.deserialize(target);
             RtUserEvent done_event;
             derez.deserialize(done_event);
@@ -12393,10 +12393,10 @@ namespace Legion {
             RtEvent ready_event;
             if (did > 0)
             {
-              CollectiveManager **target;
+              std::atomic<CollectiveManager*> *target;
               derez.deserialize(target);
-              *target = static_cast<CollectiveManager*>(
-                  runtime->find_or_request_instance_manager(did, ready_event)); 
+              target->store(static_cast<CollectiveManager*>(
+                  runtime->find_or_request_instance_manager(did, ready_event)));
             }
             size_t *footprint;
             derez.deserialize(footprint);
@@ -12417,9 +12417,11 @@ namespace Legion {
           }
         case SLICE_COLLECTIVE_FINALIZE:
           {
-            bool *target;
+            std::atomic<bool> *target;
             derez.deserialize(target);
-            derez.deserialize<bool>(*target);
+            bool result;
+            derez.deserialize<bool>(result);
+            target->store(result);
             RtUserEvent done_event;
             derez.deserialize(done_event);
             Runtime::trigger_event(done_event);

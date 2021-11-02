@@ -681,9 +681,9 @@ namespace Legion {
       // Whether or not we are currently supporting reentrant calls
       bool permit_reentrant;
       // A flag checking whether we have a pending paused mapper call
-      volatile bool pending_pause_call;
+      std::atomic<bool> pending_pause_call;
       // A flag checking whether we have a pending finished call
-      volatile bool pending_finish_call;
+      std::atomic<bool> pending_finish_call;
     };
 
     /**

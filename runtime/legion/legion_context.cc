@@ -10145,22 +10145,22 @@ namespace Legion {
       // on that node is actually the point of serialization
       if (!manager->is_owner())
       {
-        InstanceView *volatile result = NULL;
+        std::atomic<InstanceView*> result(NULL);
         RtUserEvent wait_on = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize<UniqueID>(get_context_uid());
           rez.serialize(manager->did);
-          rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
+          rez.serialize(&result);
           rez.serialize(wait_on); 
         }
         runtime->send_create_top_view_request(manager->owner_space, rez);
         wait_on.wait();
 #ifdef DEBUG_LEGION
-        assert(result != NULL); // when we wake up we should have the result
+        assert(result.load() != NULL); // when we wake up we should have the result
 #endif
-        return result;
+        return result.load();
       }
       // Check to see if we already have the 
       // instance, if we do, return it, otherwise make it and save it
@@ -10312,7 +10312,7 @@ namespace Legion {
       derez.deserialize(context_uid);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      InstanceView **target;
+      std::atomic<InstanceView*> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -10372,7 +10372,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID result_did;
       derez.deserialize(result_did);
-      InstanceView **target;
+      std::atomic<InstanceView*> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -10380,7 +10380,7 @@ namespace Legion {
       LogicalView *view = 
         runtime->find_or_request_logical_view(result_did, ready);
       // Have to static cast since it might not be ready
-      *target = static_cast<InstanceView*>(view);
+      target->store(static_cast<InstanceView*>(view));
       if (ready.exists())
         Runtime::trigger_event(to_trigger, ready);
       else
@@ -20852,23 +20852,23 @@ namespace Legion {
       // then we need to send this request back to our owner node
       if (repl_id > 0)
       {
-        InstanceView *volatile result = NULL;
+        std::atomic<InstanceView*> result(NULL);
         RtUserEvent wait_on = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize<UniqueID>(context_uid);
           rez.serialize(manager->did);
-          rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
+          rez.serialize(&result);
           rez.serialize(wait_on); 
         }
         const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
         runtime->send_create_top_view_request(target, rez);
         wait_on.wait();
 #ifdef DEBUG_LEGION
-        assert(result != NULL);
+        assert(result.load() != NULL);
 #endif
-        return result;
+        return result.load();
       }
       else
         return InnerContext::create_instance_top_view(manager, source);

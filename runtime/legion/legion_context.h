@@ -833,14 +833,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
       public:
         RemoteCreateViewArgs(InnerContext *proxy, PhysicalManager *man,
-               InstanceView **tar, RtUserEvent trig, AddressSpaceID src)
+         std::atomic<InstanceView*> *tar, RtUserEvent trig, AddressSpaceID src)
           : LgTaskArgs<RemoteCreateViewArgs>(implicit_provenance),
             proxy_this(proxy), manager(man), target(tar), 
             to_trigger(trig), source(src) { }
       public:
         InnerContext *const proxy_this;
         PhysicalManager *const manager;
-        InstanceView **target;
+        std::atomic<InstanceView*> *const target;
         const RtUserEvent to_trigger;
         const AddressSpaceID source;
       };

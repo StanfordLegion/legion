@@ -9834,6 +9834,7 @@ namespace Legion {
     {
       set_expr->add_expression_reference();
       region_node->add_nested_resource_ref(did);
+      next_deferral_precondition.store(0);
       if (replicated != NULL)
       {
 #ifdef DEBUG_LEGION

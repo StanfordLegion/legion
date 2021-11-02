@@ -415,8 +415,8 @@ namespace Legion {
       // Whether this future has a size set yet
       bool future_size_set;
     private:
-      volatile bool empty;
-      volatile bool sampled;
+      std::atomic<bool> empty;
+      std::atomic<bool> sampled;
     };
 
     /**
@@ -1159,7 +1159,7 @@ namespace Legion {
       unsigned expected_remote_arrivals;
       unsigned local_shard_id;
       InnerContext *top_context;
-      ShardManager *volatile shard_manager;
+      std::atomic<ShardManager*> shard_manager;
       RtUserEvent manager_ready;
       std::vector<std::pair<AddressSpaceID,void*> > remote_spaces;
     };
@@ -1379,11 +1379,11 @@ namespace Legion {
         {
           if (!ready.has_triggered())
             ready.wait();
-          return success;
+          return success.load();
         }
       private:
         const RtUserEvent ready;
-        volatile bool success;
+        std::atomic<bool> success;
       };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
