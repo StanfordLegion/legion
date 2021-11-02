@@ -3062,7 +3062,7 @@ namespace Legion {
       // Memory managers for all the memories we know about
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
-      MessageManager *message_managers[LEGION_MAX_NUM_NODES];
+      std::atomic<MessageManager*> message_managers[LEGION_MAX_NUM_NODES];
       // Pending message manager requests
       std::map<AddressSpaceID,RtUserEvent> pending_endpoint_requests;
       // For every processor map it to its address space

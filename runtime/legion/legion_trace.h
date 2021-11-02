@@ -117,10 +117,10 @@ namespace Legion {
       void end_trace_execution(FenceOp *fence_op);
     public:
       void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
-      void set_state_record(void) { state = PHYSICAL_RECORD; }
-      void set_state_replay(void) { state = PHYSICAL_REPLAY; }
-      bool is_recording(void) const { return state == PHYSICAL_RECORD; }
-      bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
+      void set_state_record(void) { state.store(PHYSICAL_RECORD); }
+      void set_state_replay(void) { state.store(PHYSICAL_REPLAY); }
+      bool is_recording(void) const { return state.load() == PHYSICAL_RECORD; }
+      bool is_replaying(void) const { return state.load() == PHYSICAL_REPLAY; }
     public:
       inline void clear_blocking_call(void) { blocking_call_observed = false; }
       inline void record_blocking_call(void) { blocking_call_observed = true; }
@@ -146,7 +146,7 @@ namespace Legion {
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
       std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
-      volatile TracingState state;
+      std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
       unsigned last_memoized;
@@ -713,12 +713,12 @@ namespace Legion {
       UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
     public:
-      inline bool is_replaying(void) const { return !recording; }
+      inline bool is_replaying(void) const { return !recording.load(); }
       inline bool is_replayable(void) const { return replayable.replayable; }
       inline const std::string& get_replayable_message(void) const
         { return replayable.message; }
     public:
-      virtual bool is_recording(void) const { return recording; }
+      virtual bool is_recording(void) const { return recording.load(); }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
       virtual bool remove_recorder_reference(void) 
         { /*do nothing, never delete*/ return false; }
@@ -885,7 +885,7 @@ namespace Legion {
       void release_remote_memos(void);
     private:
       PhysicalTrace * const trace;
-      volatile bool recording;
+      std::atomic<bool> recording;
       Replayable replayable;
       mutable LocalLock template_lock;
       const unsigned fence_completion_id;
@@ -925,8 +925,9 @@ namespace Legion {
     private:
       RtUserEvent recording_done;
       RtEvent transitive_reduction_done;
-      std::vector<unsigned> *volatile pending_inv_topo_order;
-      std::vector<std::vector<unsigned> >*volatile pending_transitive_reduction;
+      std::atomic<std::vector<unsigned>*> pending_inv_topo_order;
+      std::atomic<
+        std::vector<std::vector<unsigned> >*> pending_transitive_reduction;
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;

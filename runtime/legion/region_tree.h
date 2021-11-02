@@ -1804,14 +1804,15 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_INDEX_SPACE_DEFER_CHILD_TASK_ID;
       public:
         DeferChildArgs(IndexSpaceNode *proxy, LegionColor child, 
-                       IndexPartNode *tar, RtUserEvent trig, AddressSpaceID src)
+                       std::atomic<IndexPartitionID> *tar,
+                       RtUserEvent trig, AddressSpaceID src)
           : LgTaskArgs<DeferChildArgs>(implicit_provenance),
             proxy_this(proxy), child_color(child), target(tar), 
             to_trigger(trig), source(src) { }
       public:
         IndexSpaceNode *const proxy_this;
         const LegionColor child_color;
-        IndexPartNode *const target;
+        std::atomic<IndexPartitionID> *const target;
         const RtUserEvent to_trigger;
         const AddressSpaceID source;
       };
@@ -2642,7 +2643,7 @@ namespace Legion {
       bool can_prune(void);
       bool remove_partition_reference(ReferenceMutator *mutator);
     private:
-      PartitionNode *volatile partition;
+      PartitionNode *const partition;
     };
 
     /**
@@ -2693,14 +2694,15 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_CHILD_TASK_ID;
       public:
         DeferChildArgs(IndexPartNode *proxy, LegionColor child,
-                       IndexSpace *tar, RtUserEvent trig, AddressSpaceID src)
+                       std::atomic<IndexSpaceID> *tar,
+                       RtUserEvent trig, AddressSpaceID src)
           : LgTaskArgs<DeferChildArgs>(implicit_provenance),
             proxy_this(proxy), child_color(child), target(tar),
             to_trigger(trig), source(src) { }
       public:
         IndexPartNode *const proxy_this;
         const LegionColor child_color;
-        IndexSpace *const target;
+        std::atomic<IndexSpaceID> *const target;
         const RtUserEvent to_trigger;
         const AddressSpaceID source;
       };
@@ -2871,7 +2873,7 @@ namespace Legion {
       bool tree_valid;
       unsigned send_count;
       RtUserEvent send_done;
-      volatile IndexSpaceExpression *union_expr;
+      std::atomic<IndexSpaceExpression*> union_expr;
     };
 
     /**

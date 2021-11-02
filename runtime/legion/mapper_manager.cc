@@ -3884,10 +3884,11 @@ namespace Legion {
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
              MapperID map_id, Processor p, bool init_reentrant, bool def)
       : MapperManager(rt,mp,map_id,p,def),executing_call(NULL),paused_calls(0),
-        allow_reentrant(init_reentrant), permit_reentrant(init_reentrant), 
-        pending_pause_call(false), pending_finish_call(false)
+        allow_reentrant(init_reentrant), permit_reentrant(init_reentrant)
     //--------------------------------------------------------------------------
     {
+      pending_pause_call.store(false);
+      pending_finish_call.store(false);
     }
 
     //--------------------------------------------------------------------------
@@ -4014,9 +4015,9 @@ namespace Legion {
         AutoLock m_lock(mapper_lock);
         result = allocate_call_info(kind, op,false/*need lock*/);
         // See if there is a pending call for us to handle
-        if (pending_pause_call)
+        if (pending_pause_call.load())
           to_trigger = complete_pending_pause_mapper_call();
-        else if (pending_finish_call)
+        else if (pending_finish_call.load())
           to_trigger = complete_pending_finish_mapper_call();
         // See if we are ready to run this or not
         if ((executing_call != NULL) || (!permit_reentrant && 
@@ -4061,12 +4062,12 @@ namespace Legion {
                       "cannot be stored beyond the lifetime of the "
                       "mapper call.", mapper->get_mapper_name())
 #ifdef DEBUG_LEGION
-      assert(!pending_pause_call);
+      assert(!pending_pause_call.load());
 #endif
       // Set the flag indicating there is a paused mapper call that
       // needs to be handled, do this asynchronoulsy and check to 
       // see if we lost the race later
-      pending_pause_call = true; 
+      pending_pause_call.store(true); 
       // We definitely know we can't start any non_reentrant calls
       // Screw fairness, we care about throughput, see if there are any
       // pending calls to wake up, and then go to sleep ourself
@@ -4074,7 +4075,7 @@ namespace Legion {
       {
         AutoLock m_lock(mapper_lock);
         // See if we lost the race
-        if (pending_pause_call)
+        if (pending_pause_call.load())
           to_trigger = complete_pending_pause_mapper_call(); 
       }
       if (to_trigger.exists())
@@ -4130,14 +4131,14 @@ namespace Legion {
       // to avoid the priority inversion that can occur where this
       // lock acquire gets stuck behind a bunch of pending ones
 #ifdef DEBUG_LEGION
-      assert(!pending_finish_call);
+      assert(!pending_finish_call.load());
 #endif
-      pending_finish_call = true;
+      pending_finish_call.store(true);
       RtUserEvent to_trigger;
       {
         AutoLock m_lock(mapper_lock);
         // We've got the lock, see if we won the race to the flag
-        if (pending_finish_call)
+        if (pending_finish_call.load())
           to_trigger = complete_pending_finish_mapper_call();  
         // Return our call info
         free_call_info(info, false/*need lock*/);
@@ -4152,10 +4153,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(pending_pause_call);
-      assert(!pending_finish_call);
+      assert(pending_pause_call.load());
+      assert(!pending_finish_call.load());
 #endif
-      pending_pause_call = false;
+      pending_pause_call.store(false);
       // Increment the count of the paused mapper calls
       paused_calls++;
       if (permit_reentrant)
@@ -4185,11 +4186,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!pending_pause_call);
-      assert(pending_finish_call);
+      assert(!pending_pause_call.load());
+      assert(pending_finish_call.load());
       assert(executing_call != NULL);
 #endif
-      pending_finish_call = false;
+      pending_finish_call.store(false);
       // If we allow reentrant calls then reset whether we are permitting
       // reentrant calls in case the user forgot to do it at the end of call
       if (allow_reentrant && executing_call->reentrant_disabled)

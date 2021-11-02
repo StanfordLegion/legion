@@ -4595,7 +4595,7 @@ namespace Legion {
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
+      std::atomic<bool> success(false);
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
@@ -4653,12 +4653,12 @@ namespace Legion {
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
-          success = true;
+          success.store(true);
         }
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
-      return success;
+      return success.load();
     }
     
     //--------------------------------------------------------------------------
@@ -4673,7 +4673,7 @@ namespace Legion {
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
+      std::atomic<bool> success(false);
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
@@ -4731,12 +4731,12 @@ namespace Legion {
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
-          success = true;
+          success.store(true);
         }
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
-      return success;
+      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4752,17 +4752,17 @@ namespace Legion {
                                   UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
+      std::atomic<bool> success(false);
       // Set created to default to false
       created = false;
       if (!is_owner)
       {
         // See if we can find a locally valid instance first
-        success = find_valid_instance(constraints, regions, result, 
-                                      acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, result, 
+                                acquire, tight_region_bounds, remote))
           return true;
         // Not the owner, send a message to the owner to request creation
+        std::atomic<bool> remote_created(created);
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
@@ -4785,11 +4785,12 @@ namespace Legion {
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
-          rez.serialize(&created);
+          rez.serialize(&remote_created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled in
+        created = remote_created.load();
       }
       else
       {
@@ -4805,16 +4806,16 @@ namespace Legion {
         // Since this is find or acquire, first see if we can find
         // an instance that has already been makde that satisfies 
         // our layout constraints
-        success = find_satisfying_instance(constraints, regions, 
-                   result, acquire, tight_region_bounds, remote);
-        if (!success)
+        success.store(find_satisfying_instance(constraints, regions, 
+                       result, acquire, tight_region_bounds, remote));
+        if (!success.load())
         {
           // If we couldn't find it, we have to make it
           PhysicalManager *manager = allocate_physical_instance(builder, 
               footprint, unsat_kind, unsat_index);
           if (manager != NULL)
           {
-            success = true;
+            success.store(true);
             if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
             record_created_instance(manager, acquire, mapper_id, processor,
@@ -4829,7 +4830,7 @@ namespace Legion {
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
-      return success;
+      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4845,16 +4846,16 @@ namespace Legion {
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
+      std::atomic<bool> success(false);
       // Set created to false in case we fail
       created = false;
       if (!is_owner)
       {
         // See if we can find it locally
-        success = find_valid_instance(constraints, regions, result, 
-                                      acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, result, 
+                                acquire, tight_region_bounds, remote))
           return true;
+        std::atomic<bool> remote_created(created);
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
@@ -4878,11 +4879,12 @@ namespace Legion {
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
-          rez.serialize(&created);
+          rez.serialize(&remote_created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled
+        created = remote_created.load();
       }
       else
       {
@@ -4899,16 +4901,16 @@ namespace Legion {
         // an instance that has already been makde that satisfies 
         // our layout constraints
         // Try to find an instance first and then make one
-        success = find_satisfying_instance(constraints, regions, 
-                   result, acquire, tight_region_bounds, remote);
-        if (!success)
+        success.store(find_satisfying_instance(constraints, regions, 
+                        result, acquire, tight_region_bounds, remote));
+        if (!success.load())
         {
           // If we couldn't find it, we have to make it
           PhysicalManager *manager = allocate_physical_instance(builder, 
               footprint, unsat_kind, unsat_index);
           if (manager != NULL)
           {
-            success = true;
+            success.store(true);
             if (runtime->legion_spy_enabled)
               manager->log_instance_creation(creator_id, processor, regions);
             record_created_instance(manager, acquire, mapper_id, processor,
@@ -4923,7 +4925,7 @@ namespace Legion {
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
-      return success;
+      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4934,14 +4936,13 @@ namespace Legion {
                                      bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
       if (!is_owner)
       {
         // See if we can find it locally 
-        success = find_valid_instance(constraints, regions, result, 
-                                      acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, result, 
+                                  acquire, tight_region_bounds, remote))
           return true;
+        std::atomic<bool> success(false);
         // Not the owner, send a message to the owner to try and find it
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
@@ -4962,14 +4963,14 @@ namespace Legion {
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled
+        return success.load();
       }
       else
       {
         // Try to find an instance
-        success = find_satisfying_instance(constraints, regions, result, 
+        return find_satisfying_instance(constraints, regions, result, 
                                   acquire, tight_region_bounds, remote);
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -4979,14 +4980,13 @@ namespace Legion {
                                       bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
       if (!is_owner)
       {
         // See if we can find a persistent instance
-        success = find_valid_instance(constraints, regions, result, 
-                                      acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, result, 
+                                  acquire, tight_region_bounds, remote))
           return true;
+        std::atomic<bool> success(false);
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
@@ -5006,14 +5006,14 @@ namespace Legion {
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled
+        return success.load();
       }
       else
       {
         // Try to find an instance
-        success = find_satisfying_instance(constraints, regions, result,
-                                   acquire, tight_region_bounds, remote);
+        return find_satisfying_instance(constraints, regions, result,
+                               acquire, tight_region_bounds, remote);
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -5232,7 +5232,7 @@ namespace Legion {
         // We are not the owner so send a message to the owner
         // to update the priority, no need to send the manager
         // since we know we are sending to the owner node
-        volatile bool success = true;
+        std::atomic<bool> success(true);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -5252,7 +5252,7 @@ namespace Legion {
         {
           never_gc_wait.wait();
           bool remove_duplicate = false;
-          if (success)
+          if (success.load())
           {
             LocalReferenceMutator local_mutator;
             // Add our local reference
@@ -5451,7 +5451,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -5539,7 +5539,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -5616,7 +5616,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success, *remote_created;
+            std::atomic<bool> *remote_success, *remote_created;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -5696,7 +5696,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success, *remote_created;
+            std::atomic<bool> *remote_success, *remote_created;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -5764,7 +5764,7 @@ namespace Legion {
             constraints.deserialize(derez);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -5805,7 +5805,7 @@ namespace Legion {
             derez.deserialize(layout_id);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -5848,8 +5848,6 @@ namespace Legion {
             constraints.deserialize(derez);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
-            derez.deserialize(remote_success);
             std::vector<MappingInstance> *remote_target;
             derez.deserialize(remote_target);
             std::vector<MappingInstance> results;
@@ -5892,8 +5890,6 @@ namespace Legion {
             derez.deserialize(layout_id);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
-            derez.deserialize(remote_success);
             std::vector<MappingInstance> *remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints *constraints = 
@@ -5955,7 +5951,7 @@ namespace Legion {
         derez.deserialize(acquire);
         MappingInstance *target;
         derez.deserialize(target);
-        bool *success_ptr;
+        std::atomic<bool> *success_ptr;
         derez.deserialize(success_ptr);
         RequestKind kind;
         derez.deserialize(kind);
@@ -5983,7 +5979,7 @@ namespace Legion {
             mutator.record_reference_mutation_effect(reference_effects);
         }
         *target = MappingInstance(manager);
-        *success_ptr = true;
+        success_ptr->store(true);
         if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
             (kind == FIND_OR_CREATE_LAYOUT))
         {
@@ -6184,7 +6180,7 @@ namespace Legion {
       {
         if (never_gc_event.exists())
         {
-          bool *success;
+          std::atomic<bool> *success;
           derez.deserialize(success);
           // Only have to send the message back when we fail
           Serializer rez;
@@ -6201,7 +6197,7 @@ namespace Legion {
       set_garbage_collection_priority(manager, mapper_id, processor, priority);
       if (never_gc_event.exists())
       {
-        bool *success;
+        std::atomic<bool> *success;
         derez.deserialize(success);
         // If we succeed we can trigger immediately, otherwise we
         // have to send back the response to fail
@@ -6228,11 +6224,11 @@ namespace Legion {
     void MemoryManager::process_never_gc_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      bool *success;
+      std::atomic<bool> *success;
       derez.deserialize(success);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      *success = false;
+      success->store(false);
       Runtime::trigger_event(to_trigger);
     }
 
@@ -11611,7 +11607,7 @@ namespace Legion {
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
-        message_managers[idx] = NULL;
+        message_managers[idx].store(NULL);
       
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
@@ -11739,10 +11735,11 @@ namespace Legion {
       // Make sure we don't send anymore messages
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
-        if (message_managers[idx] != NULL)
+        MessageManager *manager = message_managers[idx].load();
+        if (manager != NULL)
         {
-          delete message_managers[idx];
-          message_managers[idx] = NULL;
+          delete manager;
+          message_managers[idx].store(NULL);
         }
       }
       if (profiler != NULL)
@@ -15552,7 +15549,7 @@ namespace Legion {
       assert(sid < LEGION_MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
 #endif
-      MessageManager *result = message_managers[sid];
+      MessageManager *result = message_managers[sid].load();
       if (result != NULL)
         return result;
       // If we made it here, then we don't have a message manager yet
@@ -15564,7 +15561,7 @@ namespace Legion {
         AutoLock m_lock(message_manager_lock);
         // Re-check to see if we lost the race, force the compiler
         // to re-load the value here
-        result = *(((MessageManager**)message_managers)+sid);
+        result = message_managers[sid].load();
         if (result != NULL)
           return result;
         // Figure out if there is an event to wait on yet
@@ -15615,7 +15612,7 @@ namespace Legion {
       if (!wait_on.has_triggered())
         wait_on.wait();
       // When we wake up there should be a result
-      result = *(((MessageManager**)message_managers)+sid);
+      result = message_managers[sid].load();
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -15676,8 +15673,8 @@ namespace Legion {
         AddressSpaceID remote_space;
         derez.deserialize(remote_space);
         AutoLock m_lock(message_manager_lock);
-        message_managers[remote_space] = new MessageManager(remote_space, 
-                            this, max_message_size, remote_utility_group);
+        message_managers[remote_space].store(new MessageManager(remote_space,
+                              this, max_message_size, remote_utility_group));
         // Also update the endpoint spaces
         endpoint_spaces[remote_utility_group] = remote_space;
         std::map<AddressSpaceID,RtUserEvent>::iterator finder = 
@@ -20339,8 +20336,9 @@ namespace Legion {
       // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
-        if (message_managers[idx] != NULL)
-          message_managers[idx]->confirm_shutdown(shutdown_manager, phase_one);
+        MessageManager *manager = message_managers[idx].load();
+        if (manager != NULL)
+          manager->confirm_shutdown(shutdown_manager, phase_one);
       }
     }
 

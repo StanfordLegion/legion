@@ -7717,7 +7717,7 @@ namespace Legion {
       else
       {
         // Send a message to the owner to pick a color and wait for the result
-        volatile LegionColor result = suggestion; 
+        std::atomic<LegionColor> result(suggestion); 
         RtUserEvent ready = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -7792,26 +7792,24 @@ namespace Legion {
                         "index space %x.", c, handle.id)
       }
       RtUserEvent ready_event = Runtime::create_rt_user_event();
-      IndexPartition child_handle = IndexPartition::NO_PART;
-      IndexPartition *volatile handle_ptr = &child_handle;
+      std::atomic<IndexPartitionID> target(0);
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(c);
         if (defer == NULL)
-          rez.serialize(const_cast<IndexPartition*>(handle_ptr));
+          rez.serialize(&target);
         else
-          rez.serialize<IndexPartition*>(NULL);
+          rez.serialize<std::atomic<IndexPartitionID>*>(NULL);
         rez.serialize(ready_event);
       }
       context->runtime->send_index_space_child_request(owner_space, rez);
       if (defer == NULL)
       {
         ready_event.wait();
-        // Stupid volatile-ness
-        IndexPartition handle_copy = *handle_ptr;
-        if (!handle_copy.exists())
+        IndexPartitionID child_id = target.load();
+        if (child_id == 0)
         {
           if (can_fail)
             return NULL;
@@ -7819,7 +7817,8 @@ namespace Legion {
             "Unable to find entry for color %lld in "
                           "index space %x.", c, handle.id)
         }
-        return context->get_node(handle_copy);
+        IndexPartition child_handle(child_id, handle.tid, handle.type_tag);
+        return context->get_node(child_handle);
       }
       else
       {
@@ -8400,7 +8399,7 @@ namespace Legion {
       derez.deserialize(handle);
       LegionColor child_color;
       derez.deserialize(child_color);
-      IndexPartNode *target;
+      std::atomic<IndexPartitionID> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -8464,7 +8463,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      IndexPartition *target;
+      std::atomic<IndexPartitionID> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -8476,7 +8475,7 @@ namespace Legion {
       }
       else
       {
-        (*target) = handle;
+        target->store(handle.get_id());
         Runtime::trigger_event(to_trigger);
       }
     }
@@ -8552,7 +8551,7 @@ namespace Legion {
       derez.deserialize(handle);
       LegionColor suggestion;
       derez.deserialize(suggestion);
-      LegionColor *target;
+      std::atomic<LegionColor> *target;
       derez.deserialize(target);
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -8580,9 +8579,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      LegionColor *target;
+      std::atomic<LegionColor> *target;
       derez.deserialize(target);
-      derez.deserialize(*target);
+      LegionColor result;
+      derez.deserialize(result);
+      target->store(result);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
@@ -8849,11 +8850,15 @@ namespace Legion {
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial), disjoint(dis), 
         has_complete(comp >= 0), complete(comp != 0), tree_valid(is_owner()), 
-        send_count(0), union_expr((has_complete && complete) ? parent : NULL)
+        send_count(0)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
+      if (has_complete && complete)
+        union_expr.store(parent);
+      else
+        union_expr.store(NULL);
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
@@ -8879,11 +8884,15 @@ namespace Legion {
         partition_ready(part_ready), partial_pending(part), 
         disjoint_ready(dis_ready), disjoint(false), 
         has_complete(comp >= 0), complete(comp != 0), tree_valid(is_owner()), 
-        send_count(0), union_expr((has_complete && complete) ? parent : NULL)
+        send_count(0)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
+      if (has_complete && complete)
+        union_expr.store(parent);
+      else
+        union_expr.store(NULL);
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
@@ -9342,8 +9351,7 @@ namespace Legion {
       // Otherwise, request a child node from the owner node
       else
       {
-        IndexSpace child_handle = IndexSpace::NO_SPACE;
-        IndexSpace *volatile handle_ptr = &child_handle;
+        std::atomic<IndexSpaceID> child_id(0);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -9351,20 +9359,22 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(c);
           if (defer == NULL)
-            rez.serialize(const_cast<IndexSpace*>(handle_ptr));
+            rez.serialize(&child_id);
           else
-            rez.serialize<IndexSpace*>(NULL);
+            rez.serialize<std::atomic<IndexSpaceID>*>(NULL);
           rez.serialize(ready_event);
         }
         context->runtime->send_index_partition_child_request(owner_space, rez);
         if (defer == NULL)
         {
           ready_event.wait();
-          IndexSpace copy_handle = *handle_ptr;
+          IndexSpaceID cid = child_id.load();
 #ifdef DEBUG_LEGION
-          assert(copy_handle.exists());
+          assert(cid > 0);
 #endif
-          return context->get_node(copy_handle);
+          IndexSpace child_handle(cid, 
+              handle.get_tree_id(), handle.get_type_tag());
+          return context->get_node(child_handle);
         }
         else
         {
@@ -9722,35 +9732,35 @@ namespace Legion {
                                                             bool check_complete)
     //--------------------------------------------------------------------------
     {
-      if (union_expr == NULL)
+      IndexSpaceExpression *result = union_expr.load();
+      if (result != NULL)
+        return result;
+      // If we're complete then we can use the parent index space expresion
+      if (!check_complete || !is_complete())
       {
-        // If we're complete then we can use the parent index space expresion
-        if (!check_complete || !is_complete())
+        std::set<IndexSpaceExpression*> child_spaces;
+        if (total_children == max_linearized_color)
         {
-          std::set<IndexSpaceExpression*> child_spaces;
-          if (total_children == max_linearized_color)
-          {
-            for (LegionColor color = 0; color < total_children; color++)
-              child_spaces.insert(get_child(color));
-          }
-          else
-          {
-            for (LegionColor color = 0; color < max_linearized_color; color++)
-            {
-              if (!color_space->contains_color(color))
-                continue;
-              child_spaces.insert(get_child(color));
-            }
-          }
-          // We can always write the result immediately since we know
-          // that the common sub-expression code will give the same
-          // result if there is a race
-          union_expr = context->union_index_spaces(child_spaces);
+          for (LegionColor color = 0; color < total_children; color++)
+            child_spaces.insert(get_child(color));
         }
-        else // if we're complete the parent is our expression
-          union_expr = parent;
+        else
+        {
+          for (LegionColor color = 0; color < max_linearized_color; color++)
+          {
+            if (!color_space->contains_color(color))
+              continue;
+            child_spaces.insert(get_child(color));
+          }
+        }
+        // We can always write the result immediately since we know
+        // that the common sub-expression code will give the same
+        // result if there is a race
+        union_expr.store(context->union_index_spaces(child_spaces));
       }
-      return const_cast<IndexSpaceExpression*>(union_expr);
+      else // if we're complete the parent is our expression
+        union_expr.store(parent);
+      return union_expr.load();
     }
 
     //--------------------------------------------------------------------------
@@ -10375,7 +10385,7 @@ namespace Legion {
       derez.deserialize(handle);
       LegionColor child_color;
       derez.deserialize(child_color);
-      IndexSpace *target;
+      std::atomic<IndexSpaceID> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -10428,7 +10438,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      IndexSpace *target;
+      std::atomic<IndexSpaceID> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -10440,7 +10450,7 @@ namespace Legion {
       }
       else
       {
-        (*target) = handle;
+        target->store(handle.get_id());
         Runtime::trigger_event(to_trigger);
       }
     }
@@ -12920,7 +12930,7 @@ namespace Legion {
       if (inst.address_space() != context->runtime->address_space)
       {
         Serializer rez;
-        volatile DistributedID remote_did = 0;
+        std::atomic<DistributedID> remote_did(0);
         const RtUserEvent wait_for = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -12995,7 +13005,7 @@ namespace Legion {
       LogicalRegion region_handle;
       derez.deserialize(region_handle);
       RegionNode *region_node = runtime->forest->get_node(region_handle);
-      DistributedID *did_ptr;
+      std::atomic<DistributedID> *did_ptr;
       derez.deserialize(did_ptr);
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -13019,10 +13029,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID *did_ptr;
+      std::atomic<DistributedID> *did_ptr;
       derez.deserialize(did_ptr);
-      derez.deserialize(*did_ptr);
-      __sync_synchronize();
+      DistributedID did;
+      derez.deserialize(did);
+      did_ptr->store(did);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
@@ -18316,10 +18327,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Pull a copy of this on to the stack in case we get deleted
-      PartitionNode *node = partition;
+      std::atomic<PartitionNode*> node(partition);
       const bool last = remove_reference();
       // If we weren't the last one that means we remove the reference
-      if (!last && node->remove_base_gc_ref(REGION_TREE_REF, mutator))
+      if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF, mutator))
         delete node;
       return last;
     }

@@ -498,22 +498,23 @@ namespace Legion {
         : DynamicTableNodeBase<IT>(_level, _first_index, _last_index) 
       { 
         for (size_t i = 0; i < SIZE; i++)
-          elems[i] = 0;
+          elems[i].store(NULL);
       }
       DynamicTableNode(const DynamicTableNode &rhs) { assert(false); }
       virtual ~DynamicTableNode(void)
       {
         for (size_t i = 0; i < SIZE; i++)
         {
-          if (elems[i] != 0)
-            delete elems[i];
+          ET *elem = elems[i].load();
+          if (elem != NULL)
+            delete elem;
         }
       }
     public:
       DynamicTableNode& operator=(const DynamicTableNode &rhs)
         { assert(false); return *this; }
     public:
-      ET*volatile elems[SIZE];
+      std::atomic<ET*> elems[SIZE];
     };
 
     template<typename ET, size_t _SIZE, typename IT>
@@ -525,24 +526,23 @@ namespace Legion {
         : DynamicTableNodeBase<IT>(_level, _first_index, _last_index) 
       { 
         for (size_t i = 0; i < SIZE; i++)
-          elems[i] = 0;
+          elems[i].store(NULL);
       }
       LeafTableNode(const LeafTableNode &rhs) { assert(false); }
       virtual ~LeafTableNode(void)
       {
         for (size_t i = 0; i < SIZE; i++)
         {
-          if (elems[i] != 0)
-          {
-            delete elems[i];
-          }
+          ET *elem = elems[i].load();
+          if (elem != NULL)
+            delete elem;
         }
       }
     public:
       LeafTableNode& operator=(const LeafTableNode &rhs)
         { assert(false); return *this; }
     public:
-      ET*volatile elems[SIZE];
+      std::atomic<ET*> elems[SIZE];
     };
 
     template<typename ALLOCATOR>
@@ -569,7 +569,7 @@ namespace Legion {
       NodeBase* new_tree_node(int level, IT first_index, IT last_index);
       NodeBase* lookup_leaf(IT index);
     protected:
-      NodeBase *volatile root;
+      std::atomic<NodeBase*> root;
       mutable LocalLock lock; 
     };
 
@@ -1529,9 +1529,9 @@ namespace Legion {
     //-------------------------------------------------------------------------
     template<typename ALLOCATOR>
     DynamicTable<ALLOCATOR>::DynamicTable(void)
-      : root(0)
     //-------------------------------------------------------------------------
     {
+      root.store(NULL);
     }
 
     //-------------------------------------------------------------------------
@@ -1548,10 +1548,11 @@ namespace Legion {
     DynamicTable<ALLOCATOR>::~DynamicTable(void)
     //-------------------------------------------------------------------------
     {
-      if (root != 0)
+      NodeBase *r = root.load();
+      if (r != NULL)
       {
-        delete root;
-        root = NULL;
+        delete r;
+        root.store(NULL);
       }
     }
 
@@ -1588,10 +1589,10 @@ namespace Legion {
     size_t DynamicTable<ALLOCATOR>::max_entries(void) const
     //-------------------------------------------------------------------------
     {
-      if (!root)
+      if (root.load() == NULL)
         return 0;
       size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
-      for (int i = 0; i < root->level; i++)
+      for (int i = 0; i < root.load()->level; i++)
         elems_addressable <<= ALLOCATOR::INNER_BITS;
       return elems_addressable;
     }
@@ -1609,7 +1610,7 @@ namespace Legion {
 	elems_addressable <<= ALLOCATOR::INNER_BITS;
       }
 
-      NodeBase *n = root;
+      NodeBase *n = root.load();
       if (!n || (n->level < level_needed))
         return false;
 
@@ -1630,7 +1631,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
-        NodeBase *child = inner->elems[i];
+        NodeBase *child = inner->elems[i].load();
         if (child == 0)
           return false;
 #ifdef DEBUG_LEGION
@@ -1655,22 +1656,22 @@ namespace Legion {
       typename ALLOCATOR::LEAF_TYPE *leaf = 
         static_cast<typename ALLOCATOR::LEAF_TYPE*>(n);
       int offset = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
-      ET *result = leaf->elems[offset];
-      if (result == 0)
+      ET *result = leaf->elems[offset].load();
+      if (result == NULL)
       {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
-        if (leaf->elems[offset] == 0)
+        if (leaf->elems[offset].load() == NULL)
         {
           ET *elem = new ET();
           // Enforce total store ordering
           __sync_synchronize();
-          leaf->elems[offset] = elem;
+          leaf->elems[offset].store(elem);
         }
-        result = leaf->elems[offset];
+        result = leaf->elems[offset].load();
       }
 #ifdef DEBUG_LEGION
-      assert(result != 0);
+      assert(result != NULL);
 #endif
       return result;
     }
@@ -1686,22 +1687,22 @@ namespace Legion {
       typename ALLOCATOR::LEAF_TYPE *leaf = 
         static_cast<typename ALLOCATOR::LEAF_TYPE*>(n);
       int offset = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
-      ET *result = leaf->elems[offset];
-      if (result == 0)
+      ET *result = leaf->elems[offset].load();
+      if (result == NULL)
       {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
-        if (leaf->elems[offset] == 0)
+        if (leaf->elems[offset].load() == NULL)
         {
           ET *elem = new ET(arg);
           // Enforce total store ordering
           __sync_synchronize();
-          leaf->elems[offset] = elem;
+          leaf->elems[offset].store(elem);
         }
-        result = leaf->elems[offset];
+        result = leaf->elems[offset].load();
       }
 #ifdef DEBUG_LEGION
-      assert(result != 0);
+      assert(result != NULL);
 #endif
       return result;
     }
@@ -1718,22 +1719,22 @@ namespace Legion {
       typename ALLOCATOR::LEAF_TYPE *leaf = 
         static_cast<typename ALLOCATOR::LEAF_TYPE*>(n);
       int offset = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
-      ET *result = leaf->elems[offset];
-      if (result == 0)
+      ET *result = leaf->elems[offset].load();
+      if (result == NULL)
       {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
-        if (leaf->elems[offset] == 0)
+        if (leaf->elems[offset].load() == NULL)
         {
           ET *elem = new ET(arg1, arg2);
           // Enforce total store ordering
           __sync_synchronize();
-          leaf->elems[offset] = elem;
+          leaf->elems[offset].store(elem);
         }
-        result = leaf->elems[offset];
+        result = leaf->elems[offset].load();
       }
 #ifdef DEBUG_LEGION
-      assert(result != 0);
+      assert(result != NULL);
 #endif
       return result;
     }
@@ -1755,31 +1756,32 @@ namespace Legion {
 
       // In most cases we won't need to add levels to the tree, but
       // if we do, then do it now
-      NodeBase *n = root;
+      NodeBase *n = root.load();
       if (!n || (n->level < level_needed)) 
       {
         AutoLock l(lock); 
-        if (root)
+        n = root.load();
+        if (n != NULL)
         {
           // some of the tree exists - add new layers on top
-          while (root->level < level_needed)
+          while (n->level < level_needed)
           {
-            int parent_level = root->level + 1;
+            int parent_level = n->level + 1;
             IT parent_first = 0;
             IT parent_last = 
-              (((root->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
+              (((n->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
             NodeBase *parent = new_tree_node(parent_level, 
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
             __sync_synchronize();
-            inner->elems[0] = root;
-            root = parent;
+            inner->elems[0].store(n);
+            n = parent;
           }
         }
         else
-          root = new_tree_node(level_needed, 0, elems_addressable - 1);
-        n = root;
+          n = new_tree_node(level_needed, 0, elems_addressable - 1);
+        root.store(n);
       }
       // root should be high-enough now
 #ifdef DEBUG_LEGION
@@ -1799,12 +1801,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
-        NodeBase *child = inner->elems[i];
-        if (child == 0)
+        NodeBase *child = inner->elems[i].load();
+        if (child == NULL)
         {
           AutoLock l(inner->lock);
           // Now that the lock is held, check to see if we lost the race
-          if (inner->elems[i] == 0)
+          if (inner->elems[i].load() == NULL)
           {
             int child_level = inner->level - 1;
             int child_shift = 
@@ -1815,12 +1817,12 @@ namespace Legion {
             NodeBase *next = new_tree_node(child_level, 
                                            child_first, child_last);
             __sync_synchronize();
-            inner->elems[i] = next;
+            inner->elems[i].store(next);
           }
-          child = inner->elems[i];
+          child = inner->elems[i].load();
         }
 #ifdef DEBUG_LEGION
-        assert((child != 0) &&
+        assert((child != NULL) &&
                (child->level == (n->level - 1)) &&
                (index >= child->first_index) &&
                (index <= child->last_index));
