@@ -5859,8 +5859,10 @@ namespace Realm {
               //  the downstream xd has stopped updating it
             }
           }
-          if(xd)
+          if(xd) {
             xd->update_next_bytes_read(port_idx, span_start, span_size);
+            xd->remove_reference();
+          }
         }
         else {
           // send a active message to remote node

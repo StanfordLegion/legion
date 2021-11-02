@@ -74,8 +74,8 @@ namespace Legion {
         memcpy(&ptr, &p, sizeof(ptr));
         return ptr % ALIGNMENT;
       }
-      inline operator T*(void) const { return pointer; }
-      inline T operator*(void) const { return pointer[off]; } 
+      inline operator T*(void) const { return (T*)pointer; }
+      inline T operator*(void) const { return *pointer; }
       inline size_t offset(void) const { return off; }
     private:
       size_t off;
