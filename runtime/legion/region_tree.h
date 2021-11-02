@@ -2872,7 +2872,7 @@ namespace Legion {
       bool can_prune(void);
       bool remove_partition_reference(ReferenceMutator *mutator);
     private:
-      PartitionNode *volatile partition;
+      PartitionNode *const partition;
     };
 
     /**

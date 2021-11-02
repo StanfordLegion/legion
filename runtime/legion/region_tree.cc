@@ -21132,11 +21132,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Pull a copy of this on to the stack in case we get deleted
-      PartitionNode *node = partition;
+      std::atomic<PartitionNode*> node(partition);
       const bool last = remove_reference();
       // If we weren't the last one that means we remove the reference
-      if (!last && node->remove_base_gc_ref(REGION_TREE_REF, mutator))
-        delete node;
+      if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF, mutator))
+        delete node.load();
       return last;
     }
 
