@@ -1508,6 +1508,49 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   return util.mk_stat_block(util.mk_block(check))
 end
 
+local function find_invariant_prefix(cx, node, parent)
+  if not node:is(ast.typed.expr.IndexAccess) then
+    return false
+  end
+  if not analyze_is_loop_invariant(cx, node) then
+    return find_invariant_prefix(cx, node.value, node)
+  end
+  return true, parent
+end
+
+local function licm(cx, node)
+  local hoisted = terralib.newlist()
+
+  local loop_cx = cx:new_local_scope()
+  loop_cx:set_loop_index(node.symbol)
+  loop_cx:add_loop_variable(node.symbol)
+
+  for i = 1, #node.block.stats - 1 do
+    local stat = node.block.stats[i]
+    if stat:is(ast.typed.stat.Var) and analyze_is_loop_invariant(loop_cx, stat) then
+      hoisted:insert(stat)
+      node.block.stats[i] = false
+    end
+  end
+
+  node.block.stats = node.block.stats:filter(function(stat) return stat end)
+
+  local body = node.block.stats[#node.block.stats]
+  if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
+    for _, i in pairs(body.expr.args) do
+      if i:is(ast.typed.expr.IndexAccess) then
+        local proceed, parent = find_invariant_prefix(loop_cx, i)
+        if proceed then
+          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
+          parent.value = util.mk_expr_id(invariant)
+        end
+      end
+    end
+  end
+  return hoisted
+end
+
 function optimize_index_launch.stat_for_num(cx, node)
   local report_pass = ignore
   local report_fail = report.info
@@ -1535,6 +1578,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     return node
   end
 
+  local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     return node {
@@ -1561,12 +1605,23 @@ function optimize_index_launch.stat_for_num(cx, node)
   }
 
   if #body.args_need_dynamic_check == 0 then
-    return index_launch_ast
-  else
-    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+    if #hoisted_stmts == 0 then
+      return index_launch_ast
+    end
+    hoisted_stmts:insert(index_launch_ast)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
+  end
+
+  local dynamic_check = insert_dynamic_check(
+    is_demand, body.args_need_dynamic_check, index_launch_ast, node {
       block = optimize_index_launches.block(cx, node.block),
     })
+
+  if #hoisted_stmts == 0 then
+    return dynamic_check
   end
+  hoisted_stmts:insert(dynamic_check)
+  return util.mk_stat_block(util.mk_block(hoisted_stmts))
 end
 
 function optimize_index_launch.stat_for_list(cx, node)
@@ -1597,6 +1652,7 @@ function optimize_index_launch.stat_for_list(cx, node)
     return node
   end
 
+  local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     return node {
@@ -1623,12 +1679,23 @@ function optimize_index_launch.stat_for_list(cx, node)
   }
 
   if #body.args_need_dynamic_check == 0 then
-    return index_launch_ast
-  else
-    return insert_dynamic_check(is_demand, body.args_need_dynamic_check, index_launch_ast, node {
+    if #hoisted_stmts == 0 then
+      return index_launch_ast
+    end
+    hoisted_stmts:insert(index_launch_ast)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
+  end
+
+  local dynamic_check = insert_dynamic_check(
+    is_demand, body.args_need_dynamic_check, index_launch_ast, node {
       block = optimize_index_launches.block(cx, node.block),
     })
+
+  if #hoisted_stmts == 0 then
+    return dynamic_check
   end
+  hoisted_stmts:insert(dynamic_check)
+  return util.mk_stat_block(util.mk_block(hoisted_stmts))
 end
 
 local function do_nothing(cx, node) return node end
