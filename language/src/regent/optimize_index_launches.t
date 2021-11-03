@@ -1599,16 +1599,15 @@ function optimize_index_launch.stat_for_num(cx, node)
   local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    if #hoisted_stmts ~= 0 then
-      -- Retain LICM even if we can't index launch
-      local stats = terralib.newlist()
-      hoisted_stmts:app(function(stmt) stats:insert(stmt) end)
-      node.block.stats:app(function(stmt) stats:insert(stmt) end)
-      node.block.stats = stats
-    end
-    return node {
+    local node_ = node {
       block = optimize_index_launches.block(cx, node.block),
     }
+    if #hoisted_stmts == 0 then
+      return node_
+    end
+    -- Retain LICM even if we can't index launch
+    hoisted_stmts:insert(node_)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
   end
 
   -- If we reach here then either the self interference test failed,
@@ -1680,16 +1679,15 @@ function optimize_index_launch.stat_for_list(cx, node)
   local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    if #hoisted_stmts ~= 0 then
-      -- Retain LICM even if we can't index launch
-      local stats = terralib.newlist()
-      hoisted_stmts:app(function(stmt) stats:insert(stmt) end)
-      node.block.stats:app(function(stmt) stats:insert(stmt) end)
-      node.block.stats = stats
-    end
-    return node {
+    local node_ = node {
       block = optimize_index_launches.block(cx, node.block),
     }
+    if #hoisted_stmts == 0 then
+      return node_
+    end
+    -- Retain LICM even if we can't index launch
+    hoisted_stmts:insert(node_)
+    return util.mk_stat_block(util.mk_block(hoisted_stmts))
   end
 
   -- If we reach here then either the self interference test failed,
