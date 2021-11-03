@@ -175,7 +175,7 @@ set(CMAKE_ENABLE_EXPORTS ON)
 #------------------------------------------------------------------------------#
 
 # For now we want the optimization flags to match on both normal make and cmake
-# builds so we override the cmake defaults here for release, this changes 
+# builds so we override the cmake defaults here for release, this changes
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
@@ -262,6 +262,44 @@ if(Legion_USE_Python)
 endif()
 
 set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
+
+#------------------------------------------------------------------------------#
+# System configuration and limits
+#------------------------------------------------------------------------------#
+function(is_power_of_two x ret)
+  set(${ret} FALSE PARENT_SCOPE)
+  if (${x} LESS_EQUAL 0)
+    return()
+  endif()
+  math(EXPR y "${x} & (${x} - 1)")
+  if (${y} EQUAL 0)
+    set(${ret} TRUE PARENT_SCOPE)
+  endif()
+endfunction()
+
+if (NOT DEFINED Legion_MAX_NUM_NODES)
+  set(Legion_MAX_NUM_NODES 1024 CACHE STRING
+    "Maximum number of nodes supported by the runtime -- MUST be a power of two.")
+  mark_as_advanced(Legion_MAX_NUM_NODES)
+else()
+  is_power_of_two(${Legion_MAX_NUM_NODES} is_pow_two)
+  if (NOT is_pow_two)
+    message(FATAL_ERROR "Legion_MAX_NUM_NODES must be a power of two.")
+  endif()
+endif()
+add_compile_definitions(LEGION_MAX_NUM_NODES=${Legion_MAX_NUM_NODES})
+
+if (NOT DEFINED Legion_MAX_NUM_PROCS)
+  set(Legion_MAX_NUM_PROCS 64 CACHE STRING
+    "Maximum number of processors (per node) supported by the runtime -- MUST be a power of two.")
+  mark_as_advanced(Legion_MAX_NUM_PROCS)
+else()
+  is_power_of_two(${Legion_MAX_NUM_PROCS} is_pow_two)
+  if (NOT is_pow_two)
+    message(FATAL_ERROR "Legion_MAX_NUM_PROCS must be a power of two.")
+  endif()
+endif()
+add_compile_definitions(LEGION_MAX_NUM_PROCS=${Legion_MAX_NUM_PROCS})
 
 #------------------------------------------------------------------------------#
 # Kokkos configuration
@@ -374,9 +412,9 @@ if(Legion_USE_HIP)
     install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
     )
-    set(HIPCC_FLAGS "-D__HIP_PLATFORM_NVCC__")    
+    set(HIPCC_FLAGS "-D__HIP_PLATFORM_NVCC__")
   endif()
-  
+
   if (Legion_HIP_TARGET STREQUAL "ROCM")
     set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
 
@@ -390,7 +428,7 @@ if(Legion_USE_HIP)
       set(HIP_GENCODE "--amdgpu-target=${Legion_HIP_ARCH}")
     endif()
   endif()
-  
+
   # find the hip library
   find_package(HIP REQUIRED)
 
@@ -579,7 +617,7 @@ if(Legion_USE_ZLIB)
   # define variable for legion_defines.h
   set(LEGION_USE_ZLIB ON)
 endif()
-                                                                                          
+
 #------------------------------------------------------------------------------#
 # Fortran configuration
 #------------------------------------------------------------------------------#
@@ -745,7 +783,7 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
     set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
   endif()
-  
+
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
