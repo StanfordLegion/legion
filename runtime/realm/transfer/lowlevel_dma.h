@@ -29,61 +29,6 @@
 
 namespace Realm {
 
-  // keeps a per-memory queue of pending IB allocation requests
-  class PendingIBQueue {
-  public:
-    // enqueues a request (or handles immediately, if possible)
-    void enqueue_request(Memory tgt_mem, NodeID req_node, uintptr_t req_op,
-			 unsigned ib_index, size_t size);
-
-    // attempts to dequeue pending requests for the specified memory
-    void dequeue_request(Memory tgt_mem);
-
-  protected:
-    Mutex queue_mutex;
-    struct IBAllocRequest {
-      NodeID req_node;
-      uintptr_t req_op;
-      unsigned ib_index;
-      size_t size;
-    };
-    struct PerMemory {
-      int deq_count;  // count of pending dequeuers
-      CircularQueue<IBAllocRequest, 16> requests;
-    };
-    std::map<Memory, PerMemory> queues;
-  };
-
-  extern PendingIBQueue ib_req_queue;
-
-  struct RemoteIBAllocRequest {
-    Memory memory;
-    size_t size;
-    uintptr_t req_op;
-    unsigned ib_index;
-    
-    static void handle_message(NodeID sender, const RemoteIBAllocRequest &args,
-			       const void *data, size_t msglen);
-  };
-
-  struct RemoteIBAllocResponse {
-    uintptr_t req_op;
-    unsigned ib_index;
-    off_t offset;
-
-    static void handle_message(NodeID sender, const RemoteIBAllocResponse &args,
-			       const void *data, size_t msglen);
-  };
-
-    struct RemoteIBFreeRequestAsync {
-      Memory memory;
-      off_t ib_offset;
-      size_t ib_size;
-
-      static void handle_message(NodeID sender, const RemoteIBFreeRequestAsync &args,
-				 const void *data, size_t msglen);
-    };
-
     extern void init_dma_handler(void);
 
     extern void start_dma_system(BackgroundWorkManager *bgwork);

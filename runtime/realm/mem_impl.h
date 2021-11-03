@@ -155,6 +155,26 @@ namespace Realm {
     InstanceList local_instances;
   };
 
+  class PendingIBRequests {
+  public:
+    PendingIBRequests(NodeID _sender, uintptr_t _req_op,
+                      unsigned _count, unsigned _first_req, unsigned _current_req);
+    PendingIBRequests(NodeID _sender, uintptr_t _req_op,
+                      unsigned _count, unsigned _first_req, unsigned _current_req,
+                      const Memory *_memories, const size_t *_sizes,
+                      const off_t *_offsets);
+
+    PendingIBRequests *next_req;
+    NodeID sender;
+    uintptr_t req_op;
+    unsigned count;
+    unsigned first_req;
+    unsigned current_req;
+    std::vector<Memory> memories;
+    std::vector<size_t> sizes;
+    std::vector<off_t> offsets;
+  };
+
   // a simple memory used for intermediate buffers in dma system
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE IBMemory : public MemoryImpl {
   public:
@@ -189,11 +209,91 @@ namespace Realm {
       assert(0);
     }
 
+    // attempts to allocate one or more IBs - either all succeed or all fail
+    bool attempt_immediate_allocation(NodeID requestor, uintptr_t req_op,
+                                      size_t count, const size_t *sizes,
+                                      off_t *offsets);
+
+    // enqueues a batch of PendingIBRequests to be satisfied as soon as possible
+    void enqueue_requests(PendingIBRequests *reqs);
+
+    void free_multiple(size_t count,
+                       const off_t *offsets, const size_t *sizes);
+
   protected:
+    // these must be called with the mutex held
+    off_t do_alloc(size_t size);
+    void do_free(off_t offset, size_t size);
+    PendingIBRequests *satisfy_pending_reqs();
+    void forward_satisfied_reqs(PendingIBRequests *reqs);
+
     Mutex mutex; // protection for resizing vectors
     std::map<off_t, off_t> free_blocks;
     char *base;
     NetworkSegment *segment;
+    PendingIBRequests *ibreq_head;
+    PendingIBRequests **ibreq_tail;
+  };
+
+  struct RemoteIBAllocRequestSingle {
+    Memory memory;
+    size_t size;
+    uintptr_t req_op;
+    unsigned req_index;
+    bool immediate;
+
+    static void handle_message(NodeID sender,
+                               const RemoteIBAllocRequestSingle &args,
+                               const void *data, size_t msglen);
+  };
+
+  struct RemoteIBAllocRequestMultiple {
+    NodeID requestor;
+    unsigned count, first_index, curr_index;
+    uintptr_t req_op;
+    bool immediate;
+
+    static void handle_message(NodeID sender,
+                               const RemoteIBAllocRequestMultiple &args,
+                               const void *data, size_t msglen);
+  };
+
+  struct RemoteIBAllocResponseSingle {
+    uintptr_t req_op;
+    unsigned req_index;
+    off_t offset;
+
+    static void handle_message(NodeID sender,
+                               const RemoteIBAllocResponseSingle &args,
+                               const void *data, size_t msglen);
+  };
+
+
+  struct RemoteIBAllocResponseMultiple {
+    uintptr_t req_op;
+    unsigned count, first_index;
+
+    static void handle_message(NodeID sender,
+                               const RemoteIBAllocResponseMultiple &args,
+                               const void *data, size_t msglen);
+  };
+
+  struct RemoteIBReleaseSingle {
+    Memory memory;
+    size_t size;
+    off_t offset;
+
+    static void handle_message(NodeID sender,
+                               const RemoteIBReleaseSingle &args,
+                               const void *data, size_t msglen);
+  };
+
+  struct RemoteIBReleaseMultiple {
+    unsigned count;
+
+    static void handle_message(NodeID sender,
+                               const RemoteIBReleaseMultiple &args,
+                               const void *data, size_t msglen);
   };
 
   // manages a basic free list of ranges (using range type RT) and allocated
