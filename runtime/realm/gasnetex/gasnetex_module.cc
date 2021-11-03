@@ -25,6 +25,7 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/logging.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifdef REALM_GASNETEX_MODULE_DYNAMIC
 REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::GASNetEXModule);

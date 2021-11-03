@@ -27,6 +27,7 @@
 
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifndef GASNET_PAR
 #define GASNET_PAR

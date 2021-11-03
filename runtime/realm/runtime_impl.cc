@@ -20,6 +20,7 @@
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
+#include "realm/transfer/ib_memory.h"
 
 #include "realm/activemsg.h"
 #include "realm/deppart/preimage.h"

@@ -48,8 +48,6 @@ namespace Realm {
 			    MemPathInfo& info,
 			    bool skip_final_memcpy = false);
 
-    void free_intermediate_buffer(Memory mem, off_t offset, size_t size);
-
     class AsyncFileIOContext : public BackgroundWorkItem {
     public:
       AsyncFileIOContext(int _max_depth);

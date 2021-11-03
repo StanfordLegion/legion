@@ -19,7 +19,7 @@
 #include "realm/transfer/channel.h"
 
 #include "realm/transfer/lowlevel_dma.h"
-#include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 #include "realm/inst_layout.h"
 
 #ifdef REALM_ON_WINDOWS

@@ -20,6 +20,7 @@
 #include "realm/threads.h"
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
+#include "realm/transfer/ib_memory.h"
 
 #include <errno.h>
 // included for file memory data transfer
@@ -54,22 +55,6 @@ namespace Realm {
     Logger log_dma("dma");
     //extern Logger log_new_dma;
     Logger log_aio("aio");
-
-    void free_intermediate_buffer(Memory mem, off_t offset, size_t size)
-    {
-      //CopyRequest* cr = (CopyRequest*) req;
-      //AutoLock<> al(cr->ib_mutex);
-      if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
-        get_runtime()->get_ib_memory_impl(mem)->free_bytes_local(offset, size);
-      } else {
-	ActiveMessage<RemoteIBReleaseSingle> amsg(ID(mem).memory_owner_node());
-	amsg->memory = mem;
-	amsg->offset = offset;
-	amsg->size = size;
-	amsg.commit();
-      }
-    }
-
 
     static atomic<unsigned> rdma_sequence_no(1);
 

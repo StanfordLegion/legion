@@ -24,6 +24,7 @@
 
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifdef REALM_USE_HIP_HIJACK
 #include "realm/hip/hip_hijack.h"

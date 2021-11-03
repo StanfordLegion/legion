@@ -23,6 +23,7 @@
 
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifdef REALM_USE_CUDART_HIJACK
 #include "realm/cuda/cudart_hijack.h"

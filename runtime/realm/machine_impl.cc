@@ -22,6 +22,7 @@
 
 #include "realm/activemsg.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifdef REALM_ON_WINDOWS
 // TODO: clean up query cache code and renable!
