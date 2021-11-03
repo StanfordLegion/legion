@@ -127,6 +127,7 @@ local node_is_leaf = {
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
   [ast.typed.expr.ImportPartition]            = always_false,
+  [ast.typed.expr.ImportCrossProduct]         = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
@@ -295,6 +296,7 @@ local node_is_inner = {
   [ast.typed.expr.ImportIspace]               = always_true,
   [ast.typed.expr.ImportRegion]               = always_true,
   [ast.typed.expr.ImportPartition]            = always_true,
+  [ast.typed.expr.ImportCrossProduct]         = always_true,
   [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
@@ -368,6 +370,7 @@ local node_is_idempotent = {
   [ast.typed.expr.ImportIspace]               = always_false,
   [ast.typed.expr.ImportRegion]               = always_false,
   [ast.typed.expr.ImportPartition]            = always_false,
+  [ast.typed.expr.ImportCrossProduct]         = always_false,
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
@@ -579,6 +582,7 @@ local node_is_replicable = {
   [ast.typed.expr.ImportIspace]               = always_true,
   [ast.typed.expr.ImportRegion]               = always_true,
   [ast.typed.expr.ImportPartition]            = always_true,
+  [ast.typed.expr.ImportCrossProduct]         = always_true,
   [ast.typed.expr.Projection]                 = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,

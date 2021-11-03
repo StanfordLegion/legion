@@ -330,6 +330,7 @@ local copy_propagate_expr_table = {
   [ast.typed.expr.ImportIspace]               = unreachable,
   [ast.typed.expr.ImportRegion]               = unreachable,
   [ast.typed.expr.ImportPartition]            = unreachable,
+  [ast.typed.expr.ImportCrossProduct]         = unreachable,
 }
 
 local copy_propagate_expr = ast.make_single_dispatch(

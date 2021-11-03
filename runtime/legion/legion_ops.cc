@@ -21086,7 +21086,7 @@ namespace Legion {
           (result.address_space() != runtime->address_space))
       {
         Serializer rez;
-        volatile DistributedID remote_did = 0;
+        std::atomic<DistributedID> remote_did(0);
         const RtUserEvent wait_for = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -21115,7 +21115,7 @@ namespace Legion {
         // Now we can request the physical manager
         RtEvent wait_on;
         PhysicalManager *result = 
-         runtime->find_or_request_instance_manager(remote_did, wait_on);
+         runtime->find_or_request_instance_manager(remote_did.load(), wait_on);
         if (wait_on.exists())
           wait_on.wait();
         return result;

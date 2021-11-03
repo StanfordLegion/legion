@@ -9895,6 +9895,7 @@ namespace Legion {
     {
       set_expr->add_expression_reference();
       region_node->add_nested_resource_ref(did);
+      next_deferral_precondition.store(0);
       if (replicated != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -14754,6 +14755,19 @@ namespace Legion {
                             it->second.get_valid_mask(), it->second,
                             analysis.source_views, analysis.trace_info,
                             applied_events, true/*record valid*/); 
+      // Finally update the tracing postconditions now that we've recorded
+      // any copies as part of the trace
+      if (tracing_postconditions != NULL)
+      {
+        for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
+        {
+          InstanceView *restrict_view = analysis.target_views[idx];
+          const FieldMask &restrict_mask =
+            analysis.target_instances[idx].get_valid_fields();
+          tracing_postconditions->invalidate_all_but(restrict_view, expr,
+                                                     restrict_mask);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14902,10 +14916,6 @@ namespace Legion {
 #endif
       // Always update the restricted fields
       restricted_fields |= restrict_mask;
-      // Invalidate any tracing postconditions not for the restriction
-      if (tracing_postconditions != NULL)
-        tracing_postconditions->invalidate_all_but(restrict_view, expr, 
-                                                   restrict_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -15936,6 +15946,9 @@ namespace Legion {
 #endif
           InstanceView *inst_view = log_view->as_instance_view();
           record_restriction(expr,expr_covers,overwrite_mask,inst_view,mutator);
+          if (tracing_postconditions != NULL)
+            tracing_postconditions->invalidate_all_but(inst_view, expr,
+                                                       overwrite_mask);
         }
       }
       // Record that there is initialized data for this equivalence set
@@ -16292,7 +16305,7 @@ namespace Legion {
     {
       // No need for the lock here since we should be called from a copy
       // fill aggregator that is being built while already holding the lock
-      if (HAS_READ(usage))
+      if (HAS_READ(usage) && !IS_DISCARD(usage))
       {
         FieldMaskSet<IndexSpaceExpression> not_dominated;
         if (tracing_postconditions != NULL)

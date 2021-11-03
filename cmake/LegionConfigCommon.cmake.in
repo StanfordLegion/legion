@@ -102,6 +102,24 @@ if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
 endif()
 
+# bring in Kokkos if needed
+set(Legion_USE_Kokkos @Legion_USE_Kokkos@)
+if(Legion_USE_Kokkos)
+  find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
+
+  # in order to build using Kokkos' exported compile options, we need to use
+  #  the same compiler - newer versions of Kokkos will tell us, but for older
+  #  versions, we need it from the configuration or the environment
+  if(Kokkos_CXX_COMPILER)
+    set(KOKKOS_CXX_COMPILER ${Kokkos_CXX_COMPILER})
+  elseif(DEFINED ENV{KOKKOS_CXX_COMPILER})
+    set(KOKKOS_CXX_COMPILER $ENV{KOKKOS_CXX_COMPILER})
+  endif()
+  if(NOT KOKKOS_CXX_COMPILER)
+    message(FATAL_ERROR "to build correctly with Kokkos, the exact compiler used in the Kokkos build (typically set via CXX=... or -DCMAKE_CXX_COMPILER=...) must be provided in KOKKOS_CXX_COMPILER (either on the command line or from the environment)")
+  endif()
+endif()
+
 # task registration across nodes often relies on being able to map function
 #  pointers back to symbol names, so ask cmake to export symbols in binaries
 set(CMAKE_ENABLE_EXPORTS ON)

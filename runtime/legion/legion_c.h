@@ -2750,13 +2750,15 @@ extern "C" {
    * @see Legion::Runtime::construct_future_map
    */
   legion_future_map_t
-  legion_construct_future_map(legion_runtime_t runtime,
-                              legion_context_t ctx,
-                              legion_domain_t domain,
-                              legion_domain_point_t *points,
-                              legion_untyped_buffer_t *buffers,
-                              size_t num_points,
-                              bool collective);
+  legion_future_map_construct_from_buffers(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_domain_t domain,
+                                           legion_domain_point_t *points,
+                                           legion_untyped_buffer_t *buffers,
+                                           size_t num_points,
+                                           bool collective,
+                                           legion_sharding_id_t sid,
+                                           bool implicit_sharding);
 
   /**
    * @return Caller takes ownership of return value
@@ -2764,13 +2766,15 @@ extern "C" {
    * @see Legion::Runtime::construct_future_map
    */
   legion_future_map_t
-  legion_future_map_construct(legion_runtime_t runtime,
-                              legion_context_t ctx,
-                              legion_domain_t domain,
-                              legion_domain_point_t *points,
-                              legion_future_t *futures,
-                              size_t num_futures,
-                              bool collective);
+  legion_future_map_construct_from_futures(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_domain_t domain,
+                                           legion_domain_point_t *points,
+                                           legion_future_t *futures,
+                                           size_t num_futures,
+                                           bool collective,
+                                           legion_sharding_id_t sid,
+                                           bool implicit_sharding);
 
   // -----------------------------------------------------------------------
   // Deferred Buffer Operations
@@ -4602,7 +4606,7 @@ extern "C" {
   legion_external_resources_t
   legion_attach_external_resources(legion_runtime_t runtime,
                                    legion_context_t ctx,
-                                   legion_attach_launcher_t launcher);
+                                   legion_index_attach_launcher_t launcher);
 
   /**
    * @return Caller takes ownership of return value
@@ -4752,10 +4756,22 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @see Legion::Runtime::has_runtime()
+   */
+  bool
+  legion_runtime_has_runtime(void);
+
+  /**
    * @see Legion::Runtime::get_runtime()
    */
   legion_runtime_t
   legion_runtime_get_runtime(void);
+
+  /**
+   * @see Legion::Runtime::has_context()
+   */
+  bool
+  legion_runtime_has_context(void);
 
   /**
    * @return Caller takes ownership of return value.
@@ -4800,6 +4816,40 @@ extern "C" {
    */
   size_t
   legion_runtime_total_shards(legion_runtime_t runtime, legion_context_t ctx);
+
+  /**
+   * @param sid Must correspond to a previously registered sharding functor.
+   *
+   * @see Legion::ShardingFunctor::shard()
+   */
+  legion_shard_id_t
+  legion_sharding_functor_shard(legion_sharding_id_t sid,
+                                legion_domain_point_t point,
+                                legion_domain_t full_space,
+                                size_t total_shards);
+
+  /**
+   * @param sid Must correspond to a previously registered sharding functor.
+   *            This functor must be invertible.
+   * @param points Pre-allocated array to fill in with the points returned by
+   *               the `invert` call. This array must be large enough to fit the
+   *               output of any call to this functor's `invert`. A safe limit
+   *               that will work for any functor is
+   *               `legion_domain_get_volume(full_domain)`.
+   * @param points_size At entry this must be the capacity of the `points`
+   *                    array. At exit this value has been updated to the actual
+   *                    number of returned points.
+   *
+   * @see Legion::ShardingFunctor::invert()
+   */
+  void
+  legion_sharding_functor_invert(legion_sharding_id_t sid,
+                                 legion_shard_id_t shard,
+                                 legion_domain_t shard_domain,
+                                 legion_domain_t full_domain,
+                                 size_t total_shards,
+                                 legion_domain_point_t *points,
+                                 size_t *points_size);
 
   void
   legion_runtime_enable_scheduler_lock(void);

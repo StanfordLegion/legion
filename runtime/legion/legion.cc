@@ -6074,38 +6074,39 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid)
+                                bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, data, collective, sid);
+      return ctx->construct_future_map(domain, data, collective, sid, implicit);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
-                                bool collective, ShardingID sid)
+                                bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, data, collective, sid);
+      return ctx->construct_future_map(domain, data, collective, sid, implicit);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, IndexSpace domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    bool collective, ShardingID sid)
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
-      return ctx->construct_future_map(domain, futures, false, collective, sid);
+      return ctx->construct_future_map(domain, futures, false,
+                                       collective, sid, implicit);
     }
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::construct_future_map(Context ctx, const Domain &domain,
-                                    const std::map<DomainPoint,Future> &futures,
-                                    bool collective, ShardingID sid)
+                                 const std::map<DomainPoint,Future> &futures,
+                                 bool collective, ShardingID sid, bool implicit)
     //--------------------------------------------------------------------------
     {
       return ctx->construct_future_map(domain, futures, false/*internal*/,
-                                       collective, sid);
+                                       collective, sid, implicit);
     }
 
     //--------------------------------------------------------------------------
@@ -7582,6 +7583,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool Runtime::has_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::runtime_started;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
@@ -7593,6 +7601,13 @@ namespace Legion {
         return Internal::implicit_runtime->external;
       // Otherwise this is not from a Legion task, so fallback to the_runtime
       return Internal::Runtime::the_runtime->external;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool Runtime::has_context(void)
+    //--------------------------------------------------------------------------
+    {
+      return (Internal::implicit_context != NULL);
     }
 
     //--------------------------------------------------------------------------

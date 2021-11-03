@@ -415,8 +415,8 @@ namespace Legion {
       // Whether this future has a size set yet
       bool future_size_set;
     private:
-      volatile bool empty;
-      volatile bool sampled;
+      std::atomic<bool> empty;
+      std::atomic<bool> sampled;
     };
 
     /**
@@ -703,7 +703,7 @@ namespace Legion {
       virtual void get_shard_local_futures(
                                      std::map<DomainPoint,Future> &futures);
     public:
-      void set_sharding_function(ShardingFunction *function);
+      void set_sharding_function(ShardingFunction *function, bool own = false);
       void handle_future_map_request(Deserializer &derez);
     protected:
       void process_future_map_request(const DomainPoint &point,
@@ -730,6 +730,8 @@ namespace Legion {
       std::set<RtEvent> exchange_events;
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
+      // Whether the future map owns the sharding function
+      bool own_sharding_function;
       bool collective_performed;
       // For replicated future maps we track whether there have been any
       // non-triival calls to this shard of the future map. If there are
@@ -1152,7 +1154,7 @@ namespace Legion {
       unsigned expected_remote_arrivals;
       unsigned local_shard_id;
       InnerContext *top_context;
-      ShardManager *volatile shard_manager;
+      std::atomic<ShardManager*> shard_manager;
       RtUserEvent manager_ready;
       std::vector<std::pair<AddressSpaceID,void*> > remote_spaces;
     };
@@ -1372,11 +1374,11 @@ namespace Legion {
         {
           if (!ready.has_triggered())
             ready.wait();
-          return success;
+          return success.load();
         }
       private:
         const RtUserEvent ready;
-        volatile bool success;
+        std::atomic<bool> success;
       };
     public:
       struct PendingCollectiveAllocation {

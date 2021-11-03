@@ -6702,15 +6702,20 @@ namespace Legion {
        *                   should work collectively to construct the map
        * @param sid the sharding function ID that describes the sharding
        *                   pattern if collective=true
+       * @param implicit_sharding if collective=true this says whether the
+       *                   sharding should be implicitly handled by the
+       *                   runtime and the sharding function ID ignored
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain, 
                            const std::map<DomainPoint,UntypedBuffer> &data,
-                           bool collective = false, ShardingID sid = 0);
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,UntypedBuffer> &data,
-                           bool collective = false, ShardingID sid = 0);
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
 
       /**
        * Construct a future map from a collection of futures. The user must
@@ -6728,16 +6733,20 @@ namespace Legion {
        *                   should work collectively to construct the map
        * @param sid the sharding function ID that describes the sharding
        *                   pattern if collective=true
+       * @param implicit_sharding if collective=true this says whether the
+       *                   sharding should be implicitly handled by the
+       *                   runtime and the sharding function ID ignored
        * @return a new future map containing all the futures
        */
       FutureMap construct_future_map(Context ctx, IndexSpace domain,
                            const std::map<DomainPoint,Future> &futures,
-                           bool collective = false, ShardingID sid = 0);
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
       LEGION_DEPRECATED("Use the version that takes an IndexSpace instead")
       FutureMap construct_future_map(Context ctx, const Domain &domain,
                            const std::map<DomainPoint,Future> &futures,
-                           bool collective = false, ShardingID sid = 0);
-      
+                           bool collective = false, ShardingID sid = 0,
+                           bool implicit_sharding = false);
 
       /**
        * Apply a transform to a FutureMap. All points that access the
@@ -9482,6 +9491,14 @@ namespace Legion {
                                          const char *task_name = NULL);
     public:
       /**
+       * Provide a method to test whether the Legion runtime has been
+       * started yet or not. Note that this method simply queries at a
+       * single point in time and can race with a call to Runtime::start
+       * performed by a different thread.
+       */
+      static bool has_runtime(void);
+
+      /**
        * Provide a mechanism for finding the Legion runtime
        * pointer for a processor wrapper tasks that are starting
        * a new application level task.
@@ -9489,6 +9506,14 @@ namespace Legion {
        * @return the Legion runtime pointer for the specified processor
        */
       static Runtime* get_runtime(Processor p = Processor::NO_PROC);
+
+      /**
+       * Test whether we are inside of a Legion task and therefore
+       * have a context available. This can be used to see if it
+       * is safe to call 'Runtime::get_context'.
+       * @return boolean indicating if we are inside of a Legion task
+       */
+      static bool has_context(void);
 
       /**
        * Get the context for the currently executing task this must

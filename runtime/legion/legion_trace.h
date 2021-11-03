@@ -118,10 +118,10 @@ namespace Legion {
       void end_trace_execution(FenceOp *fence_op);
     public:
       void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
-      void set_state_record(void) { state = PHYSICAL_RECORD; }
-      void set_state_replay(void) { state = PHYSICAL_REPLAY; }
-      bool is_recording(void) const { return state == PHYSICAL_RECORD; }
-      bool is_replaying(void) const { return state == PHYSICAL_REPLAY; }
+      void set_state_record(void) { state.store(PHYSICAL_RECORD); }
+      void set_state_replay(void) { state.store(PHYSICAL_REPLAY); }
+      bool is_recording(void) const { return state.load() == PHYSICAL_RECORD; }
+      bool is_replaying(void) const { return state.load() == PHYSICAL_REPLAY; }
     public:
       inline void clear_blocking_call(void) { blocking_call_observed = false; }
       inline void record_blocking_call(void) { blocking_call_observed = true; }
@@ -147,7 +147,7 @@ namespace Legion {
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
       std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
-      volatile TracingState state;
+      std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
       unsigned last_memoized;
@@ -875,12 +875,12 @@ namespace Legion {
       UniqueID get_fence_uid(void) const { return prev_fence_uid; }
 #endif
     public:
-      inline bool is_replaying(void) const { return !recording; }
+      inline bool is_replaying(void) const { return !recording.load(); }
       inline bool is_replayable(void) const { return replayable.replayable; }
       inline const std::string& get_replayable_message(void) const
         { return replayable.message; }
     public:
-      virtual bool is_recording(void) const { return recording; }
+      virtual bool is_recording(void) const { return recording.load(); }
       virtual void add_recorder_reference(void) { /*do nothing*/ }
       virtual bool remove_recorder_reference(void) 
         { /*do nothing, never delete*/ return false; }
@@ -1072,7 +1072,7 @@ namespace Legion {
     protected:
       PhysicalTrace * const trace;
       const TaskTreeCoordinates coordinates;
-      volatile bool recording;
+      std::atomic<bool> recording;
       Replayable replayable;
     protected:
       mutable LocalLock template_lock;
@@ -1116,8 +1116,9 @@ namespace Legion {
     protected:
       RtUserEvent recording_done;
       RtEvent transitive_reduction_done;
-      std::vector<unsigned> *volatile pending_inv_topo_order;
-      std::vector<std::vector<unsigned> >*volatile pending_transitive_reduction;
+      std::atomic<std::vector<unsigned>*> pending_inv_topo_order;
+      std::atomic<
+        std::vector<std::vector<unsigned> >*> pending_transitive_reduction;
     private:
       std::map<TraceLocalID,ViewExprs> op_views;
       std::map<unsigned,ViewExprs>     copy_views;
@@ -1240,12 +1241,9 @@ namespace Legion {
       { free(ptr); }
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
-        volatile Realm::Event::id_t *ptr = &next_deferral_precondition.id;
         RtEvent continuation_pre;
-        do {
-          continuation_pre.id = *ptr;
-        } while (!__sync_bool_compare_and_swap(ptr,
-                  continuation_pre.id, deferral_event.id));
+        continuation_pre.id = 
+          next_deferral_precondition.exchange(deferral_event.id);
         return continuation_pre;
       }
     public:
@@ -1393,7 +1391,7 @@ namespace Legion {
       // An event to signal when our advances are ready
       RtUserEvent update_advances_ready;
       // An event for chainging deferrals of update tasks
-      RtEvent next_deferral_precondition;
+      std::atomic<Realm::Event::id_t> next_deferral_precondition;
       // Barrier for signaliing when we are done recording our template
       RtBarrier recording_barrier;
     protected:

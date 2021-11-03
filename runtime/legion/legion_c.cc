@@ -3251,13 +3251,15 @@ legion_future_map_reduce(legion_runtime_t runtime_,
 }
 
 legion_future_map_t
-legion_construct_future_map(legion_runtime_t runtime_,
-                            legion_context_t ctx_,
-                            legion_domain_t domain_,
-                            legion_domain_point_t *points_,
-                            legion_untyped_buffer_t *data_,
-                            size_t num_points,
-                            bool collective)
+legion_future_map_construct_from_buffers(legion_runtime_t runtime_,
+                                         legion_context_t ctx_,
+                                         legion_domain_t domain_,
+                                         legion_domain_point_t *points_,
+                                         legion_untyped_buffer_t *data_,
+                                         size_t num_points,
+                                         bool collective,
+                                         legion_sharding_id_t sid,
+                                         bool implicit_sharding)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -3269,17 +3271,20 @@ legion_construct_future_map(legion_runtime_t runtime_,
     data[point] = CObjectWrapper::unwrap(data_[idx]);
   }
   return CObjectWrapper::wrap(new FutureMap(
-        runtime->construct_future_map(ctx, domain, data, collective)));
+    runtime->construct_future_map(ctx, domain, data, collective, sid,
+                                  implicit_sharding)));
 }
 
 legion_future_map_t
-legion_future_map_construct(legion_runtime_t runtime_,
-                            legion_context_t ctx_,
-                            legion_domain_t domain_,
-                            legion_domain_point_t *points_,
-                            legion_future_t *futures_,
-                            size_t num_futures,
-                            bool collective)
+legion_future_map_construct_from_futures(legion_runtime_t runtime_,
+                                         legion_context_t ctx_,
+                                         legion_domain_t domain_,
+                                         legion_domain_point_t *points_,
+                                         legion_future_t *futures_,
+                                         size_t num_futures,
+                                         bool collective,
+                                         legion_sharding_id_t sid,
+                                         bool implicit_sharding)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -3291,7 +3296,8 @@ legion_future_map_construct(legion_runtime_t runtime_,
     futures[point] = *(CObjectWrapper::unwrap(futures_[idx]));
   }
   return CObjectWrapper::wrap(new FutureMap(
-        runtime->construct_future_map(ctx, domain, futures, collective)));
+    runtime->construct_future_map(ctx, domain, futures, collective, sid,
+                                  implicit_sharding)));
 }
 
 // -----------------------------------------------------------------------
@@ -6070,11 +6076,23 @@ legion_runtime_select_tunable_value(legion_runtime_t runtime_,
 // Miscellaneous Operations
 // -----------------------------------------------------------------------
 
+bool
+legion_runtime_has_runtime()
+{
+  return Runtime::has_runtime();
+}
+
 legion_runtime_t
 legion_runtime_get_runtime()
 {
   Runtime *runtime = Runtime::get_runtime();
   return CObjectWrapper::wrap(runtime);
+}
+
+bool
+legion_runtime_has_context()
+{
+  return Runtime::has_context();
 }
 
 legion_context_t
@@ -6139,6 +6157,42 @@ legion_runtime_total_shards(legion_runtime_t runtime_, legion_context_t ctx_)
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   return runtime->total_shards(ctx);
+}
+
+legion_shard_id_t
+legion_sharding_functor_shard(legion_sharding_id_t sid,
+                              legion_domain_point_t point_,
+                              legion_domain_t full_space_,
+                              size_t total_shards)
+{
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  Domain full_space = CObjectWrapper::unwrap(full_space_);
+  ShardingFunctor *functor = Runtime::get_sharding_functor(sid);
+  return functor->shard(point, full_space, total_shards);
+}
+
+void
+legion_sharding_functor_invert(legion_sharding_id_t sid,
+                               legion_shard_id_t shard,
+                               legion_domain_t shard_domain_,
+                               legion_domain_t full_domain_,
+                               size_t total_shards,
+                               legion_domain_point_t *points_,
+                               size_t *points_size)
+{
+  Domain shard_domain = CObjectWrapper::unwrap(shard_domain_);
+  Domain full_domain = CObjectWrapper::unwrap(full_domain_);
+  ShardingFunctor *functor = Runtime::get_sharding_functor(sid);
+#ifdef DEBUG_LEGION
+  assert(functor->is_invertible());
+#endif
+  std::vector<DomainPoint> points;
+  functor->invert(shard, shard_domain, full_domain, total_shards, points);
+  assert(*points_size >= points.size());
+  *points_size = points.size();
+  for (size_t i = 0; i < points.size(); ++i) {
+    points_[i] = CObjectWrapper::wrap(points[i]);
+  }
 }
 
 void

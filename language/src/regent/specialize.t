@@ -885,6 +885,9 @@ end
 function specialize.expr_region(cx, node, allow_lists)
   local ispace = specialize.expr(cx, node.ispace)
   local fspace_type = node.fspace_type_expr(cx.env:env())
+  if not fspace_type then
+    report.error(node, "fspace type is undefined or nil")
+  end
   return ast.specialized.expr.Region {
     ispace = ispace,
     fspace_type = fspace_type,
@@ -1264,6 +1267,16 @@ function specialize.expr_import_partition(cx, node)
   }
 end
 
+function specialize.expr_import_cross_product(cx, node)
+  return ast.specialized.expr.ImportCrossProduct {
+    partitions = node.partitions:map(function(p) return specialize.expr(cx, p) end),
+    colors = specialize.expr(cx, node.colors),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.projection_field(cx, node)
   local renames = node.rename and specialize.field_names(cx, node.rename)
   local field_names = specialize.field_names(cx, node.field_name)
@@ -1515,6 +1528,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ImportPartition) then
     return specialize.expr_import_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ImportCrossProduct) then
+    return specialize.expr_import_cross_product(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Projection) then
     return specialize.expr_projection(cx, node)
@@ -1872,19 +1888,32 @@ function specialize.stat_escape(cx, node)
   end
 end
 
-local rescape_remit_key = std.newsymbol()
+-- Hack: use a separate global symbol table to track stracked
+-- rescapes/remits. This is basically implementing a stack, but I'm
+-- lazy and don't want to write a dedicated stack just to do this.
+--
+-- Why not use the normal symbol table? Because rescape shouldn't
+-- actually introduce a new scope.
+local rescape_remit_key = std.newsymbol("rescape_remit_key")
+local rescape_remit_env = symbol_table.new_global_scope({})
 function specialize.stat_rescape(cx, node)
   local result = terralib.newlist()
 
-  -- We're going to use a special symbol to track the rescape/remit context.
-  local cx = cx:new_local_scope()
-  cx.env:insert(node, rescape_remit_key, result)
+  -- This is ugly, but we have to push/pop the rescape scope because
+  -- we can only pass one environment through the Lua function that
+  -- evaluates the escape contents.
+  local old_env = rescape_remit_env
+  rescape_remit_env = rescape_remit_env:new_local_scope()
+  rescape_remit_env:insert(node, rescape_remit_key, result)
 
   -- Now run the escape code. It will populate the result by looking
   -- up the escape key.
   node.stats(cx.env:env())
 
-  return data.flatmap(function(x) return get_quote_contents(cx, x) end, result)
+  local result = data.flatmap(function(x) return get_quote_contents(cx, x) end, result)
+
+  rescape_remit_env = old_env
+  return result
 end
 
 function specialize.stat_raw_delete(cx, node)
@@ -2215,7 +2244,7 @@ function specialize.top_fspace(cx, node)
 end
 
 function specialize.top_remit(cx, node)
-  local result = cx.env:safe_lookup(rescape_remit_key)
+  local result = rescape_remit_env:safe_lookup(rescape_remit_key)
   if not result then
     report.error(node, "remit must be used inside of rescape")
   end

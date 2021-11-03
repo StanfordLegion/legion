@@ -55,7 +55,7 @@ namespace Legion {
     /*static*/ void CollectiveCheckReduction::apply<false>(LHS &lhs, RHS rhs)
     //--------------------------------------------------------------------------
     {
-      volatile LHS *ptr = &lhs;
+      LHS *ptr = &lhs;
       LHS temp = *ptr;
       while ((temp != BAD) && (temp != rhs))
       {
@@ -86,7 +86,7 @@ namespace Legion {
     /*static*/ void CollectiveCheckReduction::fold<false>(RHS &rhs1, RHS rhs2)
     //--------------------------------------------------------------------------
     {
-      volatile RHS *ptr = &rhs1;
+      RHS *ptr = &rhs1;
       RHS temp = *ptr;
       while ((temp != BAD) && (temp != rhs2))
       {
@@ -378,9 +378,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     ReplCollectiveInstanceCreator<OP>::ReplCollectiveInstanceCreator(Runtime *r)
-      : OP(r), shard_mapping(NULL)
+      : OP(r)
     //--------------------------------------------------------------------------
     {
+      shard_mapping.store(NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -400,7 +401,7 @@ namespace Legion {
                                  activate_repl_collective_instance_creator(void)
     //--------------------------------------------------------------------------
     {
-      shard_mapping = NULL;
+      shard_mapping.store(NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -409,7 +410,8 @@ namespace Legion {
                                deactivate_repl_collective_instance_creator(void)
     //--------------------------------------------------------------------------
     {
-      if (shard_mapping != NULL)
+      ShardedMapping *map = shard_mapping.load();
+      if (map != NULL)
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -421,8 +423,8 @@ namespace Legion {
 #endif
         repl_ctx->unregister_collective_instance_handler(
                               this->get_context_index());
-        if (shard_mapping->remove_reference())
-          delete shard_mapping;
+        if (map->remove_reference())
+          delete map;
       }
     }
 
@@ -444,22 +446,27 @@ namespace Legion {
       // If not then we need to get it and register ourselves so that we
       // can receive any incoming messages
       bool register_with_manager = false;
-      if (shard_mapping == NULL)
+      ShardedMapping *mapping = shard_mapping.load(); 
+      if (mapping == NULL)
       {
-        ShardedMapping *mapping = get_collective_instance_sharded_mapping();
+        mapping = get_collective_instance_sharded_mapping();
 #ifdef DEBUG_LEGION
         // We should be included in this if we've received this call
         assert(mapping->contains(repl_ctx->owner_shard->shard_id));
 #endif
         AutoLock o_lock(this->op_lock);
-        if (shard_mapping == NULL)
+        if (shard_mapping.load() == NULL)
         {
           // Reference comes with this the mapping
-          shard_mapping = mapping;
+          shard_mapping.store(mapping);
           register_with_manager = true;
         }
-        else if (mapping->remove_reference())
-          delete mapping;
+        else
+        {
+          if (mapping->remove_reference())
+            delete mapping;
+          mapping = shard_mapping.load();
+        }
       }
       if (register_with_manager)
         repl_ctx->register_collective_instance_handler(
@@ -468,7 +475,7 @@ namespace Legion {
       // Figure out how many local points we have plus how ever
       // many messages we are expecting from "children" shards
       return OP::get_total_collective_instance_points() +
-                shard_mapping->count_children(origin_shard,
+                mapping->count_children(origin_shard,
                           repl_ctx->owner_shard->shard_id);
     }
 
@@ -485,7 +492,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -494,8 +501,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         // Package this up and send it off to the parent shard
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
@@ -529,7 +536,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -538,8 +545,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(parent_shard);
@@ -570,7 +577,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -579,8 +586,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(parent_shard);
@@ -634,7 +641,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -643,8 +650,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(parent_shard);
@@ -683,7 +690,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -692,8 +699,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(parent_shard);
@@ -724,7 +731,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -733,8 +740,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(parent_shard);
@@ -764,7 +771,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -773,8 +780,8 @@ namespace Legion {
       ShardID origin_shard = get_collective_instance_origin_shard(repl_ctx);
       if (origin_shard != repl_ctx->owner_shard->shard_id)
       {
-        const ShardID parent_shard = shard_mapping->get_parent(origin_shard,
-                                            repl_ctx->owner_shard->shard_id);
+        const ShardID parent_shard = shard_mapping.load()->
+          get_parent(origin_shard, repl_ctx->owner_shard->shard_id);
         Serializer rez;
         rez.serialize(repl_ctx->shard_manager->repl_id);
         rez.serialize(parent_shard);
@@ -808,7 +815,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(this->get_context());
       assert(repl_ctx != NULL);
-      assert(shard_mapping != NULL);
+      assert(shard_mapping.load() != NULL);
 #else
       ReplicateContext *repl_ctx =
         static_cast<ReplicateContext*>(this->get_context());
@@ -8046,7 +8053,7 @@ namespace Legion {
       {
         // Figure out what the collective mapping is for this instance
         CollectiveMapping *mapping = &shard_manager->get_collective_mapping();
-        volatile DistributedID manager_did = 0;
+        std::atomic<DistributedID> manager_did(0);
         if ((resource == LEGION_EXTERNAL_INSTANCE) && !contains_individual)
         {
           // We need to send a message to the remote node where no shard
@@ -8090,16 +8097,15 @@ namespace Legion {
             // Wait for the response to come back
             wait_for.wait();
 #ifdef DEBUG_LEGION
-            assert(manager_did > 0);
+            assert(manager_did.load() > 0);
 #endif
-            const DistributedID did_copy = manager_did;
-            did_broadcast->broadcast(did_copy);
+            did_broadcast->broadcast(manager_did.load());
           }
           else
-            manager_did = did_broadcast->get_value(false/*not origin*/);
+            manager_did.store(did_broadcast->get_value(false/*not origin*/));
         }
         else
-          manager_did = did_broadcast->get_value(!did_broadcast->is_origin());
+          manager_did.store(did_broadcast->get_value(!did_broadcast->is_origin()));
         // Making an individual instance across all shards
         // Have the first shard be the one to make it 
         if (is_first_local_shard)
@@ -8108,7 +8114,7 @@ namespace Legion {
           PhysicalManager *manager =
             node->column_source->create_external_manager(instance, ready_event,
             footprint, constraints, field_set, field_sizes, external_mask,
-            mask_index_map, node, serdez, manager_did, mapping);
+            mask_index_map, node, serdez, manager_did.load(), mapping);
           // If we're the owner address space, record that we have 
           // instances on all other address spaces in the control
           // replicated parent task's collective mapping
@@ -13118,8 +13124,12 @@ namespace Legion {
           && (int(local_shard) < int(manager->total_shards -
                                      shard_collective_participating_shards)))
         send_remainder_stage();
-      // Only after we send this message can we mark that we're done
-      Runtime::trigger_event(done_event);
+      // Pull this onto the stack in case post_complete_exchange ends up
+      // deleting the object
+      const RtUserEvent to_trigger = done_event;
+      post_complete_exchange();
+      // Only after we send the message and do the post can we signal we're done
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////
@@ -16983,6 +16993,101 @@ namespace Legion {
         spaces.insert(spaces.end(), it->second.begin(), it->second.end());
       }
       return local_size;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Implicit Sharding Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor::ImplicitShardingFunctor(ReplicateContext *ctx,
+                              CollectiveIndexLocation loc, ReplFutureMapImpl *m)
+      : AllGatherCollective<false>(loc, ctx), ShardingFunctor(), map(m)
+    //--------------------------------------------------------------------------
+    {
+      // Add this reference here, it will be removed after the exchange is
+      // complete and that will break the cycle on deleting things since
+      // technically the future map will have a reference to this as well
+      map->add_base_resource_ref(PENDING_UNBOUND_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor::ImplicitShardingFunctor(
+                                             const ImplicitShardingFunctor &rhs)
+      : AllGatherCollective<false>(rhs), map(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor::~ImplicitShardingFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ImplicitShardingFunctor& ImplicitShardingFunctor::operator=(
+                                             const ImplicitShardingFunctor &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardingFunctor::pack_collective_stage(Serializer &rez, 
+                                                        int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(implicit_sharding.size());
+      for (std::map<DomainPoint,ShardID>::const_iterator it =
+            implicit_sharding.begin(); it != implicit_sharding.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardingFunctor::unpack_collective_stage(Deserializer &derez,
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points;
+      derez.deserialize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+        derez.deserialize(implicit_sharding[point]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ImplicitShardingFunctor::shard(const DomainPoint &point,
+                                           const Domain &full_space,
+                                           const size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      std::map<DomainPoint,ShardID>::const_iterator finder =
+        implicit_sharding.find(point);
+#ifdef DEBUG_LEGION
+      assert(finder != implicit_sharding.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitShardingFunctor::post_complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove our reference on the map
+      if (map->remove_base_resource_ref(PENDING_UNBOUND_REF))
+        delete map;
     }
 
     /////////////////////////////////////////////////////////////

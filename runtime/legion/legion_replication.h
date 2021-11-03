@@ -219,6 +219,7 @@ namespace Legion {
       bool send_ready_stages(const int start_stage=1);
       void unpack_stage(int stage, Deserializer &derez);
       void complete_exchange(void);
+      virtual void post_complete_exchange(void) { }
     public: 
       const int shard_collective_radix;
       const int shard_collective_log_radix;
@@ -1219,6 +1220,45 @@ namespace Legion {
     };
 
     /**
+     * \class ImplicitShardingFunctor
+     * Support the computation of an implicit sharding function for 
+     * the creation of replicated future maps
+     */
+    class ImplicitShardingFunctor : public AllGatherCollective<false>,
+                                    public ShardingFunctor {
+    public:
+      ImplicitShardingFunctor(ReplicateContext *ctx,
+                              CollectiveIndexLocation loc,
+                              ReplFutureMapImpl *map);
+      ImplicitShardingFunctor(const ImplicitShardingFunctor &rhs);
+      virtual ~ImplicitShardingFunctor(void);
+    public:
+      ImplicitShardingFunctor& operator=(const ImplicitShardingFunctor &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      virtual ShardID shard(const DomainPoint &point,
+                            const Domain &full_space,
+                            const size_t total_shards);
+    protected:
+      virtual void post_complete_exchange(void);
+    public:
+      template<typename T>
+      void compute_sharding(const std::map<DomainPoint,T> &points)
+      {
+        for (typename std::map<DomainPoint,T>::const_iterator it =
+              points.begin(); it != points.end(); it++)
+          implicit_sharding[it->first] = local_shard; 
+        this->perform_collective_async();
+      }
+    public:
+      ReplFutureMapImpl *const map;
+    protected:
+      std::map<DomainPoint,ShardID> implicit_sharding;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1350,7 +1390,7 @@ namespace Legion {
       virtual void perform_count_collective_region_occurrences(unsigned index,
                                   std::map<LogicalRegion,size_t> &counts);
     protected:
-      ShardedMapping *volatile shard_mapping;
+      std::atomic<ShardedMapping*> shard_mapping;
     };
 
     /**

@@ -2590,12 +2590,9 @@ namespace Legion {
                            const bool already_deferred);
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
-        volatile Realm::Event::id_t *ptr = &next_deferral_precondition.id;
         RtEvent continuation_pre;
-        do {
-          continuation_pre.id = *ptr;
-        } while (!__sync_bool_compare_and_swap(ptr,
-                  continuation_pre.id, deferral_event.id));
+        continuation_pre.id = 
+          next_deferral_precondition.exchange(deferral_event.id);
         return continuation_pre;
       }
       bool is_remote_analysis(PhysicalAnalysis &analysis,
@@ -2868,7 +2865,7 @@ namespace Legion {
       // cases so that reductions that depend on the same fill are ordered
       FieldMaskSet<CopyFillGuard>                       reduction_fill_guards;
       // An event to order to deferral tasks
-      volatile RtEvent                               next_deferral_precondition;
+      std::atomic<Realm::Event::id_t>                next_deferral_precondition;
     protected:
       // This node is the node which contains the valid state data
       AddressSpaceID                                    logical_owner_space;

@@ -67,11 +67,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(InnerContext *c, TraceID t, bool logical_only)
-      : ctx(c), tid(t), state(LOGICAL_ONLY), last_memoized(0),
+      : ctx(c), tid(t), last_memoized(0),
         physical_op_count(0), blocking_call_observed(false), 
         has_intermediate_ops(false), fixed(false)
     //--------------------------------------------------------------------------
     {
+      state.store(LOGICAL_ONLY);
       physical_trace = logical_only ? NULL : 
         new PhysicalTrace(c->owner_task->runtime, this);
     }
@@ -1989,16 +1990,18 @@ namespace Legion {
       templates.push_back(tpl);
       if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
       {
+        InnerContext *ctx = logical_trace->ctx;
         REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
             "WARNING: The runtime has created %d new replayable templates "
-            "for trace %u without replaying any existing templates. This "
-            "may mean that your mapper is not making mapper decisions "
-            "conducive to replaying templates. Please check that your "
-            "mapper is making decisions that align with prior templates. "
-            "If you believe that this number of templates is reasonable "
-            "please adjust the settings for LEGION_NEW_TEMPLATE_WARNING_COUNT "
-            "in legion_config.h.", LEGION_NEW_TEMPLATE_WARNING_COUNT, 
-            logical_trace->get_trace_id())
+            "for trace %u in task %s (UID %lld) without replaying any "
+            "existing templates. This may mean that your mapper is not "
+            "making mapper decisions conducive to replaying templates. Please "
+            "check that your mapper is making decisions that align with prior "
+            "templates. If you believe that this number of templates is "
+            "reasonable please adjust the settings for "
+            "LEGION_NEW_TEMPLATE_WARNING_COUNT in legion_config.h.",
+            LEGION_NEW_TEMPLATE_WARNING_COUNT, logical_trace->get_trace_id(),
+            ctx->get_task_name(), ctx->get_unique_id())
         new_template_count = 0;
       }
       // Reset the nonreplayable count when we find a replayable template
@@ -2015,14 +2018,16 @@ namespace Legion {
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
+        InnerContext *ctx = logical_trace->ctx;
         REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
             "WARNING: The runtime has failed to memoize the trace more than "
             "%u times, due to the absence of a replayable template. It is "
-            "highly likely that trace %u will not be memoized for the rest "
-            "of execution. The most recent template was not replayable "
-            "for the following reason: %s. Please change the mapper to stop "
-            "making memoization requests.", LEGION_NON_REPLAYABLE_WARNING,
-            logical_trace->get_trace_id(), message_buffer)
+            "highly likely that trace %u in task %s (UID %lld) will not be "
+            "memoized for the rest of execution. The most recent template was "
+            "not replayable for the following reason: %s. Please change the "
+            "mapper to stop making memoization requests.",
+            LEGION_NON_REPLAYABLE_WARNING, logical_trace->get_trace_id(),
+            ctx->get_task_name(), ctx->get_unique_id(), message_buffer)
         nonreplayable_count = 0;
       }
       current_template = NULL;
@@ -3844,16 +3849,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
                                        TaskTreeCoordinates &&coords)
-      : trace(t), coordinates(std::move(coords)), recording(true),
+      : trace(t), coordinates(std::move(coords)),
         replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
         has_virtual_mapping(false), last_fence(NULL),
-        recording_done(Runtime::create_rt_user_event()),
-        pending_inv_topo_order(NULL), pending_transitive_reduction(NULL)
+        recording_done(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
+      recording.store(true);
       events.push_back(fence_event);
       event_map[fence_event] = fence_completion_id;
+      pending_inv_topo_order.store(NULL);
+      pending_transitive_reduction.store(NULL);
       instructions.push_back(
          new AssignFenceCompletion(*this, fence_completion_id, TraceLocalID()));
       // always want at least one set of operations ready for recording
@@ -3862,7 +3869,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
-      : trace(NULL), coordinates(rhs.coordinates), recording(true),
+      : trace(NULL), coordinates(rhs.coordinates),
         replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(1), recording_done(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
@@ -3911,10 +3918,13 @@ namespace Legion {
         if (!remote_memos.empty())
           release_remote_memos();
       }
-      if (pending_inv_topo_order != NULL)
-        delete pending_inv_topo_order;
-      if (pending_transitive_reduction != NULL)
-        delete pending_transitive_reduction;
+      std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
+      if (inv_topo_order != NULL)
+        delete inv_topo_order;
+      std::vector<std::vector<unsigned> > *transitive_reduction =
+        pending_transitive_reduction.load();
+      if (transitive_reduction != NULL)
+        delete transitive_reduction;
     }
 
     //--------------------------------------------------------------------------
@@ -5170,10 +5180,10 @@ namespace Legion {
           new std::vector<std::vector<unsigned> >();
         in_reduced_copy->swap(incoming_reduced);
         // Write them to the members
-        pending_inv_topo_order = inv_topo_order_copy;
+        pending_inv_topo_order.store(inv_topo_order_copy);
         // Need memory fence so writes happen in this order
         __sync_synchronize();
-        pending_transitive_reduction = in_reduced_copy;
+        pending_transitive_reduction.store(in_reduced_copy);
       }
       else
         finalize_transitive_reduction(inv_topo_order, incoming_reduced);
@@ -5687,7 +5697,10 @@ namespace Legion {
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
-      log_tracing.info() << "#### " << replayable << " " << this << " ####";
+      InnerContext *ctx = trace->logical_trace->ctx;
+      log_tracing.info() << "#### " << replayable << " " << this << " Trace "
+        << trace->logical_trace->tid << " for " << ctx->get_task_name()
+        << " (UID " << ctx->get_unique_id() << ") ####";
       for (unsigned sidx = 0; sidx < replay_parallelism; ++sidx)
       {
         log_tracing.info() << "[Slice " << sidx << "]";
@@ -6570,17 +6583,19 @@ namespace Legion {
         pending_replays.pop_front();
       }
       // Check to see if we have a pending transitive reduction result
-      if (pending_transitive_reduction != NULL)
+      std::vector<std::vector<unsigned> > *transitive_reduction = 
+        pending_transitive_reduction.load();
+      if (transitive_reduction != NULL)
       {
+        std::vector<unsigned> *inv_topo_order = pending_inv_topo_order.load();
 #ifdef DEBUG_LEGION
-        assert(pending_inv_topo_order != NULL);
+        assert(inv_topo_order != NULL);
 #endif
-        finalize_transitive_reduction(*pending_inv_topo_order,
-                                      *pending_transitive_reduction);
-        delete pending_inv_topo_order;
-        pending_inv_topo_order = NULL;
-        delete pending_transitive_reduction;
-        pending_transitive_reduction = NULL;
+        finalize_transitive_reduction(*inv_topo_order, *transitive_reduction);
+        delete inv_topo_order;
+        pending_inv_topo_order.store(NULL);
+        delete transitive_reduction;
+        pending_transitive_reduction.store(NULL);
         // We also need to rerun the propagate copies analysis to
         // remove any mergers which contain only a single input
         propagate_copies(NULL/*don't need the gen out*/);

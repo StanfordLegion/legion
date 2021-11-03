@@ -113,6 +113,7 @@ SLIB_LEGION_DEPS = -L. -lrealm
 SLIB_REALM_DEPS  =
 ifeq ($(strip $(DARWIN)),1)
 SO_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
+LD_FLAGS += -Wl,-all_load
 else
 SO_FLAGS += -shared
 endif
@@ -247,12 +248,15 @@ INC_FLAGS	+= -I$(DEFINE_HEADERS_DIR) -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
 # support libraries are OS specific unfortunately
 ifeq ($(shell uname -s),Linux)
 LEGION_LD_FLAGS	+= -lrt -lpthread -latomic
+SLIB_REALM_DEPS += -lrt -lpthread -ldl
 endif
 ifeq ($(strip $(DARWIN)),1)
 LEGION_LD_FLAGS	+= -lpthread
+SLIB_REALM_DEPS += -lpthread
 endif
 ifeq ($(shell uname -s),FreeBSD)
 LEGION_LD_FLAGS	+= -lexecinfo -lpthread -latomic
+SLIB_REALM_DEPS += -lpthread
 endif
 
 USE_HALF ?= 0

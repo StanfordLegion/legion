@@ -200,6 +200,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.ImportIspace]               = continue,
   [ast.typed.expr.ImportRegion]               = continue,
   [ast.typed.expr.ImportPartition]            = continue,
+  [ast.typed.expr.ImportCrossProduct]         = continue,
   [ast.typed.expr.Future]                     = continue,
   [ast.typed.expr.FutureGetResult]            = continue,
   [ast.typed.expr.ParallelizerConstraint]     = continue,

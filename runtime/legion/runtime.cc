@@ -617,9 +617,11 @@ namespace Legion {
         future_size((fsize == NULL) ? 0 : *fsize), 
         upper_bound_size((fsize == NULL) ? SIZE_MAX : *fsize),
         callback_functor(NULL), own_callback_functor(false),
-        future_size_set(fsize != NULL), empty(true), sampled(false)
+        future_size_set(fsize != NULL)
     //--------------------------------------------------------------------------
     {
+      empty.store(true);
+      sampled.store(false);
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
 #ifdef LEGION_GC
@@ -648,10 +650,11 @@ namespace Legion {
         future_complete(complete), result_set_space(local_space),
         canonical_instance(NULL), metadata(NULL), metasize(0), future_size(0),
         upper_bound_size(SIZE_MAX), callback_functor(NULL),
-        own_callback_functor(false), future_size_set(false), empty(true),
-        sampled(false)
+        own_callback_functor(false), future_size_set(false)
     //--------------------------------------------------------------------------
     {
+      empty.store(true);
+      sampled.store(false);
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
 #ifdef LEGION_GC
@@ -684,7 +687,7 @@ namespace Legion {
               (instances[canonical_instance->memory] == canonical_instance));
 #endif
       // Remove the extra reference on a remote set future if there is one
-      if (empty && (result_set_space != local_space))
+      if (empty.load() && (result_set_space != local_space))
       {
         Serializer rez;
         {
@@ -833,7 +836,7 @@ namespace Legion {
       {
         if (check_extent)
         {
-          if (empty)
+          if (empty.load())
             REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                                 "Accessing empty future! (UID %lld)",
                                 (producer_op == NULL) ? 0 :
@@ -946,7 +949,7 @@ namespace Legion {
       }
       if (poisoned)
         implicit_context->raise_poison_exception();
-      if (empty)
+      if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
             (producer_op == NULL) ? 0 : producer_op->get_unique_op_id())
@@ -1072,7 +1075,7 @@ namespace Legion {
         {
           // We're on the right node to make this instance
           // See if we've subscribed yet or not
-          if (empty)
+          if (empty.load())
           {
             std::map<Memory,PendingInstance>::iterator finder =
               pending_instances.find(target);
@@ -1171,7 +1174,7 @@ namespace Legion {
       bool need_subscribe = false;
       {
         AutoLock f_lock(future_lock);
-        if (!empty)
+        if (!empty.load())
         {
           if ((canonical_instance == NULL) ||
               canonical_instance->is_meta_visible)
@@ -1245,7 +1248,7 @@ namespace Legion {
         if (finder != instances.end())
           return finder->second->ready_event;
         // Handle the case where we have a future with no payload
-        if (!empty && (canonical_instance == NULL))
+        if (!empty.load() && (canonical_instance == NULL))
           return future_complete;
       }
       // Make an event and request it
@@ -1271,7 +1274,7 @@ namespace Legion {
           return NULL;
         }
 #ifdef DEBUG_LEGION
-        assert(!empty);
+        assert(!empty.load());
 #endif
         if (canonical_instance == NULL)
         {
@@ -1371,7 +1374,7 @@ namespace Legion {
         if (ready_event.exists() && !ready_event.has_triggered())
           ready_event.wait();
       }
-      return empty;
+      return empty.load();
     }
 
     //--------------------------------------------------------------------------
@@ -1379,7 +1382,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
-      if (!empty || (callback_functor != NULL))
+      if (!empty.load() || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
             "Duplicate future set! This can be either a runtime bug or a "
             "user error. If you have a must epoch launch in this program "
@@ -1407,7 +1410,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
-      if (!empty || (callback_functor != NULL))
+      if (!empty.load() || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
             "Duplicate future set! This can be either a runtime bug or a "
             "user error. If you have a must epoch launch in this program "
@@ -1442,7 +1445,7 @@ namespace Legion {
       assert(proc.kind() != Processor::UTIL_PROC);
 #endif
       AutoLock f_lock(future_lock);
-      if (!empty || (callback_functor != NULL))
+      if (!empty.load() || (callback_functor != NULL))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
             "Duplicate future set! This can be either a runtime bug or a "
             "user error. If you have a must epoch launch in this program "
@@ -1469,7 +1472,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
-      if (!empty || future_size_set)
+      if (!empty.load() || future_size_set)
         return;
       upper_bound_size = size;
       future_size = size;
@@ -1568,7 +1571,7 @@ namespace Legion {
       future_size = (canonical_instance == NULL) ? 0 : canonical_instance->size;
       future_size_set = true;
       __sync_synchronize();
-      empty = false; 
+      empty.store(false); 
       if (!pending_instances.empty())
         create_pending_instances();
       if (!is_owner())
@@ -1672,7 +1675,7 @@ namespace Legion {
            false/*need lock*/, ready_event, create_instance, existing);
       }
 #ifdef DEBUG_LEGION
-      assert(!empty);
+      assert(!empty.load());
 #endif
       // Handle the case where we don't have a payload
       if (canonical_instance == NULL)
@@ -1869,7 +1872,7 @@ namespace Legion {
       DerezCheck z(derez);
       AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
-      assert(empty);
+      assert(empty.load());
       assert(subscription_event.exists());
       assert(metadata == NULL);
 #endif
@@ -1901,7 +1904,7 @@ namespace Legion {
       }
       derez.deserialize(upper_bound_size);
       __sync_synchronize();
-      empty = false;
+      empty.store(false);
       if (!pending_instances.empty())
         create_pending_instances();
       Runtime::trigger_event(subscription_event);
@@ -1957,8 +1960,8 @@ namespace Legion {
     {
       // TODO: update this for resilience
       assert(false);
-      bool was_sampled = sampled;
-      sampled = false;
+      bool was_sampled = sampled.load();
+      sampled.store(false);
       return was_sampled;
     }
 
@@ -1978,11 +1981,11 @@ namespace Legion {
     RtEvent FutureImpl::subscribe(void)
     //--------------------------------------------------------------------------
     {
-      if (!empty && (callback_functor == NULL))
+      if (!empty.load() && (callback_functor == NULL))
         return RtEvent::NO_RT_EVENT;
       AutoLock f_lock(future_lock);
       // See if we lost the race
-      if (empty)
+      if (empty.load())
       {
         if (!subscription_event.exists())
         {
@@ -2016,7 +2019,7 @@ namespace Legion {
     {
       {
         AutoLock f_lock(future_lock,1,false/*exclusive*/);
-        if (!empty || future_size_set)
+        if (!empty.load() || future_size_set)
           return upper_bound_size;
       }
       const RtEvent subscribed = subscribe();
@@ -2024,7 +2027,7 @@ namespace Legion {
         subscribed.wait();
       AutoLock f_lock(future_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-      assert(!empty || future_size_set);
+      assert(!empty.load() || future_size_set);
 #endif
       return upper_bound_size;
     }
@@ -2139,7 +2142,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       else
-        assert(!empty); // better not be empty if it doesn't have an op
+        assert(!empty.load()); // better not be empty if it doesn't have an op
 #endif
     }
 
@@ -2147,7 +2150,7 @@ namespace Legion {
     void FutureImpl::mark_sampled(void)
     //--------------------------------------------------------------------------
     {
-      sampled = true;
+      sampled.store(true);
     }
 
     //--------------------------------------------------------------------------
@@ -2164,7 +2167,7 @@ namespace Legion {
         return;
       }
 #ifdef DEBUG_LEGION
-      assert(!empty);
+      assert(!empty.load());
 #endif
       if (callback_functor != NULL)
       {
@@ -2215,7 +2218,7 @@ namespace Legion {
         record_subscription(subscriber, false/*need lock*/);
         return;
       }
-      if (empty)
+      if (empty.load())
       {
         // See if we know who has the result
         if (result_set_space != local_space)
@@ -3410,9 +3413,6 @@ namespace Legion {
                                      const std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
       // No need for the lock here since we're initializing
       futures = others;
     }
@@ -3833,8 +3833,8 @@ namespace Legion {
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
-        sharding_function(NULL), collective_performed(false), 
-        has_non_trivial_call(false)
+        sharding_function(NULL), own_sharding_function(false),
+        collective_performed(false), has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3859,8 +3859,8 @@ namespace Legion {
         collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         op_depth(repl_ctx->get_depth()), op_uid(repl_ctx->get_unique_id()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
-        sharding_function(NULL), collective_performed(false), 
-        has_non_trivial_call(false)
+        sharding_function(NULL), own_sharding_function(false),
+        collective_performed(false), has_non_trivial_call(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3891,6 +3891,8 @@ namespace Legion {
         delete shard_domain;
       if (repl_ctx->remove_reference())
         delete repl_ctx;
+      if (own_sharding_function)
+        delete sharding_function;
     }
 
     //--------------------------------------------------------------------------
@@ -4110,7 +4112,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function)
+    void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function,
+                                                  bool own_function)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4120,6 +4123,7 @@ namespace Legion {
       {
         AutoLock fm_lock(future_map_lock);
         sharding_function = function;
+        own_sharding_function = own_function;
         if (!pending_future_map_requests.empty())
           to_perform.swap(pending_future_map_requests);
       }
@@ -6294,9 +6298,10 @@ namespace Legion {
       : Collectable(), runtime(rt), task_id(tid), mapper_id(mid), kind(k), 
         shards_per_address_space(shards_per_space), 
         expected_local_arrivals(shards_per_space), expected_remote_arrivals(0),
-        local_shard_id(0), top_context(NULL), shard_manager(NULL)
+        local_shard_id(0), top_context(NULL)
     //--------------------------------------------------------------------------
     {
+      shard_manager.store(NULL);
       // If we're the owner node, we also expect one arrival from
       // every remote node as well
       if (runtime->address_space == 0)
@@ -6362,21 +6367,21 @@ namespace Legion {
       if (runtime->address_space == 0)
       {
         AutoLock m_lock(manager_lock);
-        if (shard_manager == NULL)
+        if (shard_manager.load() == NULL)
           create_shard_manager(proxy, task_name);
 #ifdef DEBUG_LEGION
         assert(local_shard_id < shards_per_address_space);
 #endif
         const ShardID shard = (shard_id < 0) ? local_shard_id++ : shard_id;
-        result = shard_manager->create_shard(shard, proxy);
+        result = shard_manager.load()->create_shard(shard, proxy);
       }
       else
       {
         RtEvent wait_on;
-        if (shard_manager == NULL)
+        if (shard_manager.load() == NULL)
         {
           AutoLock m_lock(manager_lock); 
-          if (shard_manager == NULL)
+          if (shard_manager.load() == NULL)
           {
             if (!manager_ready.exists())
               request_shard_manager();
@@ -6391,7 +6396,7 @@ namespace Legion {
 #endif
         const ShardID shard = (shard_id < 0) ? (runtime->address_space * 
           shards_per_address_space + local_shard_id++) : shard_id; 
-        result = shard_manager->create_shard(shard, proxy);
+        result = shard_manager.load()->create_shard(shard, proxy);
       }
 #ifdef DEBUG_LEGION
       assert(top_context != NULL);
@@ -6410,7 +6415,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(top_context == NULL);
-      assert(shard_manager == NULL);
+      assert(shard_manager.load() == NULL);
 #endif
       IndividualTask *implicit_top = 
        runtime->create_implicit_top_level(task_id, mapper_id, proxy, task_name);
@@ -6420,13 +6425,14 @@ namespace Legion {
       const size_t total_shards = 
         runtime->total_address_spaces * shards_per_address_space;
       // We also need a shard 
-      shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
-        true/*top level*/, total_shards, runtime->address_space, implicit_top);
-      implicit_top->set_shard_manager(shard_manager);
+      ShardManager *manager = new ShardManager(runtime, repl_context,true/*cr*/,
+         true/*top level*/, total_shards, runtime->address_space, implicit_top);
+      shard_manager.store(manager);
+      implicit_top->set_shard_manager(manager);
       // This is a dummy shard_mapping for now since we won't actually need
       // a real one, this just needs to make sure all the checks pass
       std::vector<Processor> shard_mapping(total_shards, Processor::NO_PROC);
-      shard_manager->set_shard_mapping(shard_mapping);
+      manager->set_shard_mapping(shard_mapping);
       std::vector<AddressSpaceID> address_spaces(total_shards);
       for (AddressSpaceID space = 0; 
             space < runtime->total_address_spaces; space++)
@@ -6434,10 +6440,10 @@ namespace Legion {
         for (unsigned idx = 0; idx < shards_per_address_space; idx++)
           address_spaces[space * shards_per_address_space + idx] = space;
       }
-      shard_manager->set_address_spaces(address_spaces);
+      manager->set_address_spaces(address_spaces);
       // We also need to make the callback barrier here, but its easy here
       // because we know that this has to contain all address spaces
-      shard_manager->create_callback_barrier(runtime->total_address_spaces);
+      manager->create_callback_barrier(runtime->total_address_spaces);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_replication(implicit_top->get_unique_id(), repl_context,
                                    true/*control replication*/);
@@ -6445,7 +6451,7 @@ namespace Legion {
       std::vector<ShardTask*> empty_shards;
       for (AddressSpaceID space = 1; 
             space < runtime->total_address_spaces; space++)
-        shard_manager->distribute_shards(space, empty_shards);
+        manager->distribute_shards(space, empty_shards);
       // Then send any pending responses
       if (!remote_spaces.empty())
       {
@@ -6469,7 +6475,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_manager == NULL);
+      assert(shard_manager.load() == NULL);
       assert(!manager_ready.exists());
 #endif
       manager_ready = Runtime::create_rt_user_event();
@@ -6491,14 +6497,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      if (shard_manager != NULL)
+      ShardManager *manager = shard_manager.load();
+      if (manager != NULL)
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(remote);
           rez.serialize(top_context->get_context_uid());
-          rez.serialize(shard_manager->repl_id);
+          rez.serialize(manager->repl_id);
         }
         runtime->send_control_replicate_implicit_response(space, rez);
       }
@@ -6514,11 +6521,11 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(top_context == NULL);
-      assert(shard_manager == NULL);
+      assert(shard_manager.load() == NULL);
       assert(manager_ready.exists());
 #endif
       top_context = c;
-      shard_manager = m;
+      shard_manager.store(m);
       RtUserEvent to_trigger = manager_ready;
       manager_ready = RtUserEvent::NO_RT_USER_EVENT;
       return to_trigger;
@@ -7907,7 +7914,7 @@ namespace Legion {
                                 bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
+      std::atomic<bool> success(false);
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
@@ -7968,12 +7975,12 @@ namespace Legion {
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
-          success = true;
+          success.store(true);
         }
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
-      return success;
+      return success.load();
     }
     
     //--------------------------------------------------------------------------
@@ -7989,7 +7996,7 @@ namespace Legion {
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
+      std::atomic<bool> success(false);
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
@@ -8050,12 +8057,12 @@ namespace Legion {
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
-          success = true;
+          success.store(true);
         }
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
       }
-      return success;
+      return success.load();
     }
 
     //--------------------------------------------------------------------------
@@ -8071,7 +8078,6 @@ namespace Legion {
                                   UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
       // Set created to default to false
       created = false;
       // Atomicity for find-or-create with collective instances
@@ -8085,13 +8091,14 @@ namespace Legion {
       {
 
         // See if we can find a locally valid instance first
-        success = find_valid_instance(constraints, regions, dummy_point,
-                          result, acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, dummy_point,
+                      result, acquire, tight_region_bounds, remote))
           return true;
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
+        std::atomic<bool> success(false);
+        std::atomic<bool> remote_created(created);
         {
           RezCheck z(rez);
           rez.serialize(memory);
@@ -8112,11 +8119,13 @@ namespace Legion {
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
-          rez.serialize(&created);
+          rez.serialize(&remote_created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled in
+        created = remote_created.load();
+        return success.load();
       }
       else
       {
@@ -8132,8 +8141,8 @@ namespace Legion {
         // Since this is find or acquire, first see if we can find
         // an instance that has already been makde that satisfies 
         // our layout constraints
-        success = find_satisfying_instance(constraints, regions, dummy_point,
-                                result, acquire, tight_region_bounds, remote);
+        bool success = find_satisfying_instance(constraints, regions,
+            dummy_point, result, acquire, tight_region_bounds, remote);
         if (!success)
         {
           // If we couldn't find it, we have to make it
@@ -8155,8 +8164,8 @@ namespace Legion {
           *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
+        return success;
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -8172,7 +8181,6 @@ namespace Legion {
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
       // Set created to false in case we fail
       created = false;
       // Atomicity for find-or-create with collective instances
@@ -8185,13 +8193,14 @@ namespace Legion {
       if (!is_owner)
       {
         // See if we can find it locally
-        success = find_valid_instance(constraints, regions, dummy_point,
-                          result, acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, dummy_point,
+                      result, acquire, tight_region_bounds, remote))
           return true;
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
+        std::atomic<bool> success(false);
+        std::atomic<bool> remote_created(created);
         {
           RezCheck z(rez);
           rez.serialize(memory);
@@ -8212,11 +8221,13 @@ namespace Legion {
           rez.serialize(creator_id);
           rez.serialize(&success);
           rez.serialize(&result);
-          rez.serialize(&created);
+          rez.serialize(&remote_created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled
+        created = remote_created.load();
+        return success.load();
       }
       else
       {
@@ -8233,8 +8244,8 @@ namespace Legion {
         // an instance that has already been makde that satisfies 
         // our layout constraints
         // Try to find an instance first and then make one
-        success = find_satisfying_instance(constraints, regions, dummy_point,
-                                result, acquire, tight_region_bounds, remote);
+        bool success = find_satisfying_instance(constraints, regions,
+            dummy_point, result, acquire, tight_region_bounds, remote);
         if (!success)
         {
           // If we couldn't find it, we have to make it
@@ -8256,8 +8267,8 @@ namespace Legion {
           *footprint = result.get_instance_size();
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
+        return success;
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -8269,17 +8280,16 @@ namespace Legion {
                                      bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
       if (!is_owner)
       {
         // See if we can find it locally 
-        success = find_valid_instance(constraints, regions, collective_point,
-                                result, acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, collective_point,
+                                result, acquire, tight_region_bounds, remote))
           return true;
         // Not the owner, send a message to the owner to try and find it
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
+        std::atomic<bool> success(false);
         {
           RezCheck z(rez);
           rez.serialize(memory);
@@ -8298,14 +8308,14 @@ namespace Legion {
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled
+        return success.load();
       }
       else
       {
         // Try to find an instance
-        success = find_satisfying_instance(constraints, regions,
-            collective_point,result, acquire, tight_region_bounds, remote);
+        return find_satisfying_instance(constraints, regions, collective_point,
+                                  result, acquire, tight_region_bounds, remote);
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -8316,16 +8326,15 @@ namespace Legion {
                                       bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      volatile bool success = false;
       if (!is_owner)
       {
         // See if we can find a persistent instance
-        success = find_valid_instance(constraints, regions, collective_point,
-                                result, acquire, tight_region_bounds, remote);
-        if (success)
+        if (find_valid_instance(constraints, regions, collective_point,
+                                result, acquire, tight_region_bounds, remote))
           return true;
         Serializer rez;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
+        std::atomic<bool> success(false);
         {
           RezCheck z(rez);
           rez.serialize(memory);
@@ -8344,14 +8353,14 @@ namespace Legion {
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
         // When the event is triggered, everything will be filled
+        return success.load();
       }
       else
       {
         // Try to find an instance
-        success = find_satisfying_instance(constraints, regions,
-            collective_point, result, acquire, tight_region_bounds, remote);
+        return find_satisfying_instance(constraints, regions, collective_point,
+                                  result, acquire, tight_region_bounds, remote);
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -8575,7 +8584,7 @@ namespace Legion {
         // We are not the owner so send a message to the owner
         // to update the priority, no need to send the manager
         // since we know we are sending to the owner node
-        volatile bool success = true;
+        std::atomic<bool> success(true);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -8806,7 +8815,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -8892,7 +8901,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -8969,7 +8978,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success, *remote_created;
+            std::atomic<bool> *remote_success, *remote_created;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -9049,7 +9058,7 @@ namespace Legion {
             derez.deserialize(remote_footprint);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            bool *remote_success, *remote_created;
+            std::atomic<bool> *remote_success, *remote_created;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -9119,7 +9128,7 @@ namespace Legion {
             derez.deserialize(collective_point);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -9162,7 +9171,7 @@ namespace Legion {
             derez.deserialize(collective_point);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
+            std::atomic<bool> *remote_success;
             derez.deserialize(remote_success);
             MappingInstance *remote_target;
             derez.deserialize(remote_target);
@@ -9207,8 +9216,6 @@ namespace Legion {
             derez.deserialize(collective_point);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
-            derez.deserialize(remote_success);
             std::vector<MappingInstance> *remote_target;
             derez.deserialize(remote_target);
             std::vector<MappingInstance> results;
@@ -9253,8 +9260,6 @@ namespace Legion {
             derez.deserialize(collective_point);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            bool *remote_success;
-            derez.deserialize(remote_success);
             std::vector<MappingInstance> *remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints *constraints = 
@@ -9545,7 +9550,7 @@ namespace Legion {
       {
         if (never_gc_event.exists())
         {
-          bool *success;
+          std::atomic<bool> *success;
           derez.deserialize(success);
           // Only have to send the message back when we fail
           Serializer rez;
@@ -9562,7 +9567,7 @@ namespace Legion {
       set_garbage_collection_priority(manager, mapper_id, processor, priority);
       if (never_gc_event.exists())
       {
-        bool *success;
+        std::atomic<bool> *success;
         derez.deserialize(success);
         // If we succeed we can trigger immediately, otherwise we
         // have to send back the response to fail
@@ -9594,11 +9599,11 @@ namespace Legion {
     void MemoryManager::process_never_gc_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      bool *success;
+      std::atomic<bool> *success;
       derez.deserialize(success);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      *success = false;
+      success->store(false);
       Runtime::trigger_event(to_trigger);
     }
 
@@ -10337,7 +10342,7 @@ namespace Legion {
     {
       if (!is_owner)
       {
-        FutureInstance *volatile result = NULL;
+        std::atomic<FutureInstance*> result(NULL);
         // Send a message to the owner to do this and wait for the result
         const RtUserEvent wait_on = Runtime::create_rt_user_event();
         Serializer rez;
@@ -10353,7 +10358,8 @@ namespace Legion {
         }
         runtime->send_create_future_instance_request(owner_space, rez);
         wait_on.wait();
-        if (result == NULL)
+        FutureInstance *inst = result.load();
+        if (inst == NULL)
         {
           if (op != NULL)
           {
@@ -10387,7 +10393,7 @@ namespace Legion {
                   mem_names[memory.kind()], memory.id)
           }
         }
-        return result;
+        return inst;
       }
       // Do a quick check to see if we can handle the easy case
       if ((size <= LEGION_MAX_RETURN_SIZE) &&
@@ -10594,9 +10600,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryManager::FutureInstanceAllocator::FutureInstanceAllocator(void)
-      : ready(Runtime::create_rt_user_event()), success(false)
+      : ready(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
+      success.store(false);
     }
 
     //--------------------------------------------------------------------------
@@ -10622,7 +10629,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(measured);
 #endif
-      success = result.success;
+      success.store(result.success);
       Runtime::trigger_event(ready);
     }
 
@@ -13398,7 +13405,7 @@ namespace Legion {
       DerezCheck z(derez);
       Memory memory;
       derez.deserialize(memory);
-      FutureInstance **target;
+      std::atomic<FutureInstance*> *target;
       derez.deserialize(target);
       RtUserEvent done;
       derez.deserialize(done);
@@ -13435,9 +13442,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      FutureInstance **target;
+      std::atomic<FutureInstance*> *target;
       derez.deserialize(target);
-      (*target) = FutureInstance::unpack_instance(derez, this);
+      target->store(FutureInstance::unpack_instance(derez, this));
       RtUserEvent done;
       derez.deserialize(done);
       Runtime::trigger_event(done);
@@ -16382,6 +16389,13 @@ namespace Legion {
         unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
+      if (LEGION_MAX_NUM_NODES <= address_space)
+        REPORT_LEGION_ERROR(ERROR_MAXIMUM_NODES_EXCEEDED,
+            "Maximum number of nodes exceeded. Detected node %d but "
+            "'LEGION_MAX_NUM_NODES' is set to %d. Change the value of "
+            "'LEGION_MAX_NUM_NODES' in legion_config.h and recompile. "
+            "Please note that 'LEGION_MAX_NUM_NODES' must be a power of two.",
+            address_space, LEGION_MAX_NUM_NODES)
       log_run.debug("Initializing Legion runtime in address space %x",
                             address_space);
       // Construct a local utility processor group
@@ -29554,13 +29568,61 @@ namespace Legion {
 #endif
         realm.network_init(argc, argv);
       assert(ok);
-
-      const int num_args = *argc;
       // Next we configure the realm runtime after which we can access the
       // machine model and make events and reservations and do reigstrations
-      std::vector<std::string> cmdline((num_args > 0) ? num_args-1 : 0);
-      for (int i = 1; i < num_args; i++)
-        cmdline[i-1] = (*argv)[i];
+      std::vector<std::string> cmdline;
+      // Check to see if there are any Legion default args from the environment
+      const char *e = getenv("LEGION_DEFAULT_ARGS");
+      if (e)
+      {
+        // This code is borrowed from Realm for parsing default arguments
+        // Prepend any default args so they can still be overridden 
+        // by actual flags on the command line
+        while (*e) 
+        {
+          if (isspace(*e)) 
+          { 
+            e++;
+            continue; 
+          }
+          const char *starts = NULL;
+          if (*e == '\'') 
+          {
+            // single quoted string
+            e++;
+            assert(*e);
+            starts = e;
+            // read until next single quote
+            while (*e && (*e != '\''))
+              e++;
+            cmdline.emplace_back(std::string(starts, size_t(e++ - starts))); 
+            assert(!*e || isspace(*e));
+            continue;
+          }
+          if (*e == '\"')
+          {
+            // double quoted string
+            e++;
+            assert(*e);
+            starts = e;
+            // read until next double quote
+            while (*e && (*e != '\"'))
+              e++;
+            cmdline.emplace_back(std::string(starts, size_t(e++ - starts)));
+            assert(!*e || isspace(*e));
+            continue;
+          }
+          // no quotes - just take until next whitespace
+          starts = e;
+          while (*e && !isspace(*e))
+            e++;
+          cmdline.emplace_back(std::string(starts, size_t(e - starts)));
+        }
+      }
+      size_t num_args = *argc;
+      cmdline.reserve(cmdline.size() + ((num_args > 0) ? num_args-1 : 0));
+      for (unsigned i = 1; i < num_args; i++)
+        cmdline.emplace_back((*argv)[i]);
 #ifndef NDEBUG
       ok = 
 #endif
@@ -29673,7 +29735,7 @@ namespace Legion {
       {
         if (!cmdline.empty())
         {
-          int arg_index = 1;
+          unsigned arg_index = 1;
           for (unsigned idx = 0; idx < cmdline.size(); idx++)
           {
             const char *str = cmdline[idx].c_str();
@@ -29687,7 +29749,7 @@ namespace Legion {
             }
             // Now that we've got it's original pointer we can move
             // it to the new location in the outputs
-            if (arg_index == int(idx+1))
+            if (arg_index == (idx+1))
               arg_index++; // already in the right place 
             else
               (*argv)[idx+1] = (*argv)[arg_index++];
@@ -32169,4 +32231,3 @@ namespace Legion {
 }; // namespace Legion 
 
 // EOF
-
