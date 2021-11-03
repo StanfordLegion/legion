@@ -2654,7 +2654,7 @@ namespace Legion {
         memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2688,8 +2688,8 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, source->size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2734,8 +2734,8 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, source->size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         dst.set_redop(redop_id, true/*fold*/);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);

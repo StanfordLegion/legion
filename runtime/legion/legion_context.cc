@@ -2275,12 +2275,12 @@ namespace Legion {
             owner_task->get_unique_op_id(), ready,size, true/*eager*/);
         // create an external instance for the current allocation
         const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, size);
+        const std::vector<size_t> sizes(1, 1);
         const int dim_order[1] = { 0 };
         const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
         const Realm::IndexSpace<1,coord_t> rect_space(
             Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                   Realm::Point<1,coord_t>(0)));
+                                   Realm::Point<1,coord_t>(size - 1)));
         Realm::InstanceLayoutGeneric *ilg =
           Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
               rect_space, constraints, dim_order);
