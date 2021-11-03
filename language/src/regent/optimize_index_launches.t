@@ -1518,6 +1518,27 @@ local function find_invariant_prefix(cx, node, parent)
   return true, parent
 end
 
+local function hoist_args(cx, hoisted, args)
+  for i, arg in pairs(args) do
+    if arg:is(ast.typed.expr.IndexAccess) then
+      local proceed, parent = find_invariant_prefix(cx, arg, true)
+      if proceed then
+        if parent == true then
+          -- The entire arg is loop invariant
+          local invariant = std.newsymbol(arg.expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, arg.expr_type, arg))
+          args[i] = util.mk_expr_id(invariant)
+        else
+          -- Only a part of the arg is loop invariant
+          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
+          parent.value = util.mk_expr_id(invariant)
+        end
+      end
+    end
+  end
+end
+
 local function licm(cx, node)
   local hoisted = terralib.newlist()
 
@@ -1527,9 +1548,13 @@ local function licm(cx, node)
 
   for i = 1, #node.block.stats - 1 do
     local stat = node.block.stats[i]
-    if stat:is(ast.typed.stat.Var) and analyze_is_loop_invariant(loop_cx, stat) then
-      hoisted:insert(stat)
-      node.block.stats[i] = false
+    if stat:is(ast.typed.stat.Var) then
+      if analyze_is_loop_invariant(loop_cx, stat) then
+        hoisted:insert(stat)
+        node.block.stats[i] = false
+      else
+        loop_cx:add_loop_variable(stat.symbol)
+      end
     end
   end
 
@@ -1537,16 +1562,9 @@ local function licm(cx, node)
 
   local body = node.block.stats[#node.block.stats]
   if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
-    for _, i in pairs(body.expr.args) do
-      if i:is(ast.typed.expr.IndexAccess) then
-        local proceed, parent = find_invariant_prefix(loop_cx, i)
-        if proceed then
-          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
-          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
-          parent.value = util.mk_expr_id(invariant)
-        end
-      end
-    end
+    hoist_args(loop_cx, hoisted, body.expr.args)
+  elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
+    hoist_args(loop_cx, hoisted, body.rhs.args)
   end
   return hoisted
 end
@@ -1581,6 +1599,13 @@ function optimize_index_launch.stat_for_num(cx, node)
   local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
+    if #hoisted_stmts ~= 0 then
+      -- Retain LICM even if we can't index launch
+      local stats = terralib.newlist()
+      hoisted_stmts:app(function(stmt) stats:insert(stmt) end)
+      node.block.stats:app(function(stmt) stats:insert(stmt) end)
+      node.block.stats = stats
+    end
     return node {
       block = optimize_index_launches.block(cx, node.block),
     }
@@ -1655,6 +1680,13 @@ function optimize_index_launch.stat_for_list(cx, node)
   local hoisted_stmts = licm(cx, node)
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
+    if #hoisted_stmts ~= 0 then
+      -- Retain LICM even if we can't index launch
+      local stats = terralib.newlist()
+      hoisted_stmts:app(function(stmt) stats:insert(stmt) end)
+      node.block.stats:app(function(stmt) stats:insert(stmt) end)
+      node.block.stats = stats
+    end
     return node {
       block = optimize_index_launches.block(cx, node.block),
     }
