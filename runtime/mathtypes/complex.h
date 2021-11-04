@@ -97,7 +97,7 @@ public:
   __CUDA_HD__
   complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
   __CUDA_HD__
-  complex(const complex<__half> &rhs) : _real(rhs.real()), _imag(rhs.imag()) { }
+  complex(const complex<__half> &rhs) = default;
 #ifdef __CUDACC__
   __device__ // Device only constructor
   complex(__half2 val) : _real(val.x), _imag(val.y) { }
@@ -115,12 +115,7 @@ public:
 #endif
 public:
   __CUDA_HD__
-  inline complex<__half>& operator=(const complex<__half> &rhs)
-    {
-      _real = rhs.real();
-      _imag = rhs.imag();
-      return *this;
-    }
+  inline complex<__half>& operator=(const complex<__half> &rhs) = default;
 public:
   __CUDA_HD__
   inline __half real(void) const { return _real; }
