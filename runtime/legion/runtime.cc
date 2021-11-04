@@ -2654,7 +2654,7 @@ namespace Legion {
         memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2688,15 +2688,16 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, source->size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> zero(0);
-        const Rect<1,coord_t> rect(zero, zero);
+        const Point<1,coord_t> lo(0);
+        const Point<1,coord_t> hi(source->size - 1);
+        const Rect<1,coord_t> rect(lo, hi);
         if (use_event.exists() && !use_event.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(check_source_ready),
@@ -2733,16 +2734,17 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, source->size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         dst.set_redop(redop_id, true/*fold*/);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> zero(0);
-        const Rect<1,coord_t> rect(zero, zero);
+        const Point<1,coord_t> lo(0);
+        const Point<1,coord_t> hi(source->size - 1);
+        const Rect<1,coord_t> rect(lo, hi);
         if (use_event.exists() && !use_event.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
                   Runtime::merge_events(NULL, source->get_ready(),
@@ -2815,12 +2817,13 @@ namespace Legion {
         assert(external_allocation);
 #endif
         const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, size);
+        const std::vector<size_t> sizes(1, 1);
         const int dim_order[1] = { 0 };
         const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-        const Point<1,coord_t> zero(0);
+        const Point<1,coord_t> lo(0);
+        const Point<1,coord_t> hi(size - 1);
         const Realm::IndexSpace<1,coord_t> rect_space(
-                      Realm::Rect<1,coord_t>(zero, zero));
+                      Realm::Rect<1,coord_t>(lo, hi));
         Realm::InstanceLayoutGeneric *ilg =
           Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
               rect_space, constraints, dim_order);
@@ -10417,12 +10420,12 @@ namespace Legion {
       }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-      const std::vector<size_t> sizes(1, size);
+      const std::vector<size_t> sizes(1, 1);
       const int dim_order[1] = { 0 };
       const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
       const Realm::IndexSpace<1,coord_t> rect_space(
           Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                 Realm::Point<1,coord_t>(0)));
+                                 Realm::Point<1,coord_t>(size-1)));
       Realm::InstanceLayoutGeneric *ilg =
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);

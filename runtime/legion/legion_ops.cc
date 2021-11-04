@@ -21860,12 +21860,12 @@ namespace Legion {
         // each of the targets, we're done when the copies are done
         // create an external instance for the current allocation
         const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, future_result_size);
+        const std::vector<size_t> sizes(1, 1);
         const int dim_order[1] = { 0 };
         const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
         const Realm::IndexSpace<1,coord_t> rect_space(
             Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                   Realm::Point<1,coord_t>(0)));
+              Realm::Point<1,coord_t>(future_result_size - 1)));
         Realm::InstanceLayoutGeneric *ilg =
           Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
               rect_space, constraints, dim_order);
