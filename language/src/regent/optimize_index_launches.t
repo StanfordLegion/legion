@@ -1520,7 +1520,7 @@ end
 
 local function hoist_args(cx, hoisted, args)
   for i, arg in pairs(args) do
-    if arg:is(ast.typed.expr.IndexAccess) then
+    if arg:is(ast.typed.expr.IndexAccess) and std.is_region(arg.expr_type) then
       local proceed, parent = find_invariant_prefix(cx, arg, true)
       if proceed then
         if parent == true then
