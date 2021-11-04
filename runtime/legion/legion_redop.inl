@@ -25,7 +25,6 @@
 
 namespace Legion {
 
-#if __cplusplus < 202002L
   // We only need this crap if we're using a version of c++ < 20
   // Starting with c++20 we can do all this the right way with atomic_ref
   namespace TypePunning {
@@ -126,7 +125,6 @@ namespace Legion {
       uint8_t buffer[sizeof(T1)];
     };
   }; // TypePunning
-#endif
 
 #if defined (__CUDACC__) || defined (__HIPCC__)
   // We have these functions here because calling memcpy (per the
