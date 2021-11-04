@@ -3867,9 +3867,6 @@ namespace Legion {
         if (!it->second)
           to_delete.push_back(it->first);
       }
-#ifdef DEBUG_LEGION
-      assert(!to_delete.empty());
-#endif
       if (to_delete.size() != finder->second.size())
       {
         for (std::vector<PendingEquivalenceSet*>::const_iterator it =
