@@ -1561,10 +1561,12 @@ local function licm(cx, node)
   node.block.stats = node.block.stats:filter(function(stat) return stat end)
 
   local body = node.block.stats[#node.block.stats]
-  if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
-    hoist_args(loop_cx, hoisted, body.expr.args)
-  elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
-    hoist_args(loop_cx, hoisted, body.rhs.args)
+  if body then
+    if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
+      hoist_args(loop_cx, hoisted, body.expr.args)
+    elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
+      hoist_args(loop_cx, hoisted, body.rhs.args)
+    end
   end
   return hoisted
 end
