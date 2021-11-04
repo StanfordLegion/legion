@@ -25,6 +25,7 @@
 
 namespace Legion {
 
+#if __cplusplus < 202002L
   // We only need this crap if we're using a version of c++ < 20
   // Starting with c++20 we can do all this the right way with atomic_ref
   namespace TypePunning {
@@ -125,6 +126,7 @@ namespace Legion {
       uint8_t buffer[sizeof(T1)];
     };
   }; // TypePunning
+#endif
 
 #if defined (__CUDACC__) || defined (__HIPCC__)
   // We have these functions here because calling memcpy (per the
@@ -1326,6 +1328,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval + rhs;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&lhs);
     do {
@@ -1333,6 +1343,7 @@ namespace Legion {
       newval = oldval.as_two() + rhs;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -1357,6 +1368,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval + rhs2;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
     do {
@@ -1364,6 +1383,7 @@ namespace Legion {
       newval = oldval.as_two() + rhs2;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_HALF
@@ -2394,6 +2414,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval - rhs;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&lhs);
     do {
@@ -2401,6 +2429,7 @@ namespace Legion {
       newval = oldval.as_two() - rhs;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -2425,6 +2454,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval - rhs2;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
     do {
@@ -2432,6 +2469,7 @@ namespace Legion {
       newval = oldval.as_two() - rhs2;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_HALF
@@ -3698,6 +3736,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval * rhs;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&lhs);
     do {
@@ -3705,6 +3751,7 @@ namespace Legion {
       newval = oldval.as_two() * rhs;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -3729,6 +3776,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval * rhs2;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
     do {
@@ -3736,6 +3791,7 @@ namespace Legion {
       newval = oldval.as_two() * rhs2;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_HALF
@@ -4914,6 +4970,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval / rhs;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&lhs);
     do {
@@ -4921,6 +4985,7 @@ namespace Legion {
       newval = oldval.as_two() / rhs;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -4945,6 +5010,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval / rhs2;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
     do {
@@ -4952,6 +5025,7 @@ namespace Legion {
       newval = oldval.as_two() / rhs2;
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_HALF
@@ -5017,6 +5091,14 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = oldval / rhs2;
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
     do {
@@ -5024,6 +5106,7 @@ namespace Legion {
       newval = oldval.as_two() / rhs2;
     } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_COMPLEX
@@ -6220,6 +6303,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = __MAX__(oldval, rhs);
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&lhs);
     do {
@@ -6227,6 +6318,7 @@ namespace Legion {
       newval = __MAX__(oldval.as_two(), rhs);
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -6252,6 +6344,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = __MAX__(oldval, rhs2);
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
     do {
@@ -6259,6 +6359,7 @@ namespace Legion {
       newval = __MAX__(oldval.as_two(), rhs2);
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_HALF
@@ -6285,6 +6386,14 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = __MAX__(oldval, rhs);
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
     do {
@@ -6292,6 +6401,7 @@ namespace Legion {
       newval = __MAX__(oldval.as_two(), rhs);
     } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -7534,6 +7644,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = __MIN__(oldval, rhs);
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&lhs);
     do {
@@ -7541,6 +7659,7 @@ namespace Legion {
       newval = __MIN__(oldval.as_two(), rhs);
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
@@ -7566,6 +7685,14 @@ namespace Legion {
             __complex_as_uint(oldval), __complex_as_uint(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(rhs1);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = __MIN__(oldval, rhs2);
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
     TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
     do {
@@ -7573,6 +7700,7 @@ namespace Legion {
       newval = __MIN__(oldval.as_two(), rhs2);
     } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 #endif // LEGION_REDOP_HALF
@@ -7599,6 +7727,14 @@ namespace Legion {
             __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
+#if __cplusplus >= 202002L
+    std::atomic_ref<RHS> atomic(lhs);
+    RHS oldval = atomic.load();
+    RHS newval;
+    do {
+      newval = __MIN__(oldval, rhs);
+    } while (!atomic.compare_exchange_weak(oldval, newval));
+#else
     TypePunning::Alias<int64_t,complex<float> > oldval, newval;
     TypePunning::Pointer<int64_t> pointer((void*)&lhs);
     do {
@@ -7606,6 +7742,7 @@ namespace Legion {
       newval = __MIN__(oldval.as_two(), rhs);
     } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
                       oldval.as_one(), newval.as_one()));
+#endif
 #endif
   }
 
