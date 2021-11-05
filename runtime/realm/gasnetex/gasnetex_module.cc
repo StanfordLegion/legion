@@ -661,7 +661,8 @@ namespace Realm {
     // if checksums are enabled, we'll tack it on to the end of the header
     //  to avoid any alignment issues
     if(cfg_do_checksums)
-      header_size += sizeof(gex_AM_Arg_t);
+      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
+                                 sizeof(gex_AM_Arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     GASNetEXMessageImpl *impl = new(storage_base) GASNetEXMessageImpl(internal,
@@ -690,7 +691,8 @@ namespace Realm {
     // if checksums are enabled, we'll tack it on to the end of the header
     //  to avoid any alignment issues
     if(cfg_do_checksums)
-      header_size += sizeof(gex_AM_Arg_t);
+      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
+                                 sizeof(gex_AM_Arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     GASNetEXMessageImpl *impl = new(storage_base) GASNetEXMessageImpl(internal,
@@ -719,7 +721,8 @@ namespace Realm {
     // if checksums are enabled, we'll tack it on to the end of the header
     //  to avoid any alignment issues
     if(cfg_do_checksums)
-      header_size += sizeof(gex_AM_Arg_t);
+      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
+                                 sizeof(gex_AM_Arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     if(targets.size() == 1) {
@@ -754,7 +757,8 @@ namespace Realm {
 						 size_t header_size)
   {
     if(cfg_do_checksums)
-      header_size += sizeof(gex_AM_Arg_t);
+      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
+                                 sizeof(gex_AM_Arg_t));
 
     return internal->recommended_max_payload(target, 0 /*ep_index*/,
 					     with_congestion,
@@ -767,7 +771,8 @@ namespace Realm {
 						 size_t header_size)
   {
     if(cfg_do_checksums)
-      header_size += sizeof(gex_AM_Arg_t);
+      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
+                                 sizeof(gex_AM_Arg_t));
 
     if(targets.size() == 1) {
       // optimization - if there's exactly 1 target, redirect to the unicast mode
@@ -789,7 +794,8 @@ namespace Realm {
 						 size_t header_size)
   {
     if(cfg_do_checksums)
-      header_size += sizeof(gex_AM_Arg_t);
+      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
+                                 sizeof(gex_AM_Arg_t));
 
     return internal->recommended_max_payload(target,
 					     dest_payload_addr.extra,
