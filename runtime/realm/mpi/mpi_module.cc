@@ -637,6 +637,8 @@ namespace Realm {
     Realm::MPI::AM_Init(&mpi_rank, &mpi_size);
     Network::my_node_id = mpi_rank;
     Network::max_node_id = mpi_size - 1;
+    Network::all_peers.add_range(0, mpi_size - 1);
+    Network::all_peers.remove(mpi_rank);
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];

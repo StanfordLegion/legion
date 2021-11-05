@@ -3044,6 +3044,8 @@ namespace Realm {
     prim_size = gex_TM_QuerySize(prim_tm);
     Network::my_node_id = prim_rank;
     Network::max_node_id = prim_size - 1;
+    Network::all_peers.add_range(0, prim_size - 1);
+    Network::all_peers.remove(prim_rank);
 
     // stick a pointer to ourselves in the endpoint CData so that handlers
     //  can find us
