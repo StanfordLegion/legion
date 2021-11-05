@@ -2308,6 +2308,13 @@ namespace Realm {
 	(*it)->shutdown();
       stop_dma_system();
 
+      // let network-dependent cleanup happen before we detach
+      for(std::vector<Module *>::iterator it = modules.begin();
+          it != modules.end();
+          it++) {
+        (*it)->pre_detach_cleanup();
+      }
+
       // detach from the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
 	  it != network_modules.end();
