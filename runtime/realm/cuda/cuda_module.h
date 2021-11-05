@@ -19,6 +19,7 @@
 #include "realm/realm_config.h"
 #include "realm/module.h"
 #include "realm/network.h"
+#include "realm/atomics.h"
 
 namespace Realm {
 
@@ -64,6 +65,10 @@ namespace Realm {
       // create any code translators provided by the module (default == do nothing)
       virtual void create_code_translators(RuntimeImpl *runtime);
 
+      // if a module has to do cleanup that involves sending messages to other
+      //  nodes, this must be done in the pre-detach cleanup
+      virtual void pre_detach_cleanup(void);
+
       // clean up any common resources created by the module - this will be called
       //  after all memories/processors/etc. have been shut down and destroyed
       virtual void cleanup(void);
@@ -84,6 +89,7 @@ namespace Realm {
       bool cfg_multithread_dma;
       size_t cfg_hostreg_limit;
       int cfg_d2d_stream_priority;
+      bool cfg_use_cuda_ipc;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
@@ -95,6 +101,12 @@ namespace Realm {
       void *uvm_base; // guaranteed to be same for CPU and GPU
       GPUZCMemory *uvmmem;
       std::vector<void *> registered_host_ptrs;
+
+      Mutex cudaipc_mutex;
+      Mutex::CondVar cudaipc_condvar;
+      atomic<int> cudaipc_responses_needed;
+      atomic<int> cudaipc_releases_needed;
+      atomic<int> cudaipc_exports_remaining;
     };
 
   }; // namespace Cuda
