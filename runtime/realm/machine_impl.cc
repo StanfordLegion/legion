@@ -205,8 +205,6 @@ namespace Realm {
 
     ptr = new MachineProcInfo(p);
 
-    Processor::Kind k = p.kind();
-    proc_by_kind[k][p] = ptr;
     return true;
   }
   
@@ -220,8 +218,6 @@ namespace Realm {
 
     ptr = new MachineMemInfo(m);
 
-    Memory::Kind k = m.kind();
-    mem_by_kind[k][m] = ptr;
     return true;
   }
 
@@ -265,6 +261,21 @@ namespace Realm {
     }
 
     return changed;
+  }
+
+  void MachineNodeInfo::update_kind_maps()
+  {
+    proc_by_kind.clear();
+    for(std::map<Processor, MachineProcInfo *>::const_iterator it = procs.begin();
+        it != procs.end();
+        ++it)
+      proc_by_kind[it->first.kind()][it->first] = it->second;
+
+    mem_by_kind.clear();
+    for(std::map<Memory, MachineMemInfo *>::const_iterator it = mems.begin();
+        it != mems.end();
+        ++it)
+      mem_by_kind[it->first.kind()][it->first] = it->second;
   }
 
 
@@ -3132,6 +3143,13 @@ namespace Realm {
     }
 
     log_annc.info("node %d has received all of its announcements", Network::my_node_id);
+
+    // 3) go ahead and build the by-kind maps in each node info
+    MachineImpl *impl = get_machine();
+    for(std::map<int, MachineNodeInfo *>::iterator it = impl->nodeinfos.begin();
+        it != impl->nodeinfos.end();
+        ++it)
+      it->second->update_kind_maps();
   }
   
 
