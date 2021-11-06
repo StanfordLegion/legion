@@ -1201,6 +1201,15 @@ install:
 	$(error Must specify PREFIX for installation)
 endif
 
+# Include generated dependency files
+DEP_FILES += $(APP_OBJS:.o=.d)
+DEP_FILES += $(REALM_OBJS:.o=.d)
+DEP_FILES += $(REALM_INST_OBJS:.o=.d)
+DEP_FILES += $(LEGION_OBJS:.o=.d)
+DEP_FILES += $(LEGION_INST_OBJS:.o=.d)
+DEP_FILES += $(MAPPER_OBJS:.o=.d)
+-include $(DEP_FILES)
+
 $(OUTFILE) : $(APP_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(APP_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS)
@@ -1224,10 +1233,10 @@ $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 endif
 
 $(filter %.c.o,$(APP_OBJS)) : %.c.o : %.c $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CC) -o $@ -c $< $(CPPFLAGS) $(CFLAGS) $(INC_FLAGS)
+	$(CC) -MMD -o $@ -c $< $(CPPFLAGS) $(CFLAGS) $(INC_FLAGS)
 
 $(filter %.cc.o,$(APP_OBJS)) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(filter %.S.o,$(APP_OBJS)) : %.S.o : %.S
 	$(AS) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
@@ -1236,13 +1245,13 @@ $(filter %.S.o,$(APP_OBJS)) : %.S.o : %.S
 #  (hopefully making the path explicit doesn't break things too badly...)
 ifneq ($(USE_PGI),1)
 $(LG_RT_DIR)/realm/deppart/image_%.cc.o : $(LG_RT_DIR)/realm/deppart/image_tmpl.cc $(LG_RT_DIR)/realm/deppart/image.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
 
 $(LG_RT_DIR)/realm/deppart/preimage_%.cc.o : $(LG_RT_DIR)/realm/deppart/preimage_tmpl.cc $(LG_RT_DIR)/realm/deppart/preimage.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
 
 $(LG_RT_DIR)/realm/deppart/byfield_%.cc.o : $(LG_RT_DIR)/realm/deppart/byfield_tmpl.cc $(LG_RT_DIR)/realm/deppart/byfield.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) -DINST_N2=$(word 2,$(subst _, ,$*)) $(REALM_DEFCHECK)
 else
 # nvc++ names some symbols based on the source filename, so the trick above
 #  of compiling multiple things from the same template with different defines
@@ -1269,11 +1278,11 @@ REALM_OBJS += $(REALM_INST_OBJS)
 endif
 
 $(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 
 ifneq ($(USE_PGI),1)
 $(LG_RT_DIR)/legion/region_tree_%.cc.o : $(LG_RT_DIR)/legion/region_tree_tmpl.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) $(patsubst %,-DINST_N2=%,$(word 2,$(subst _, ,$*))) $(LEGION_DEFCHECK)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) -DINST_N1=$(word 1,$(subst _, ,$*)) $(patsubst %,-DINST_N2=%,$(word 2,$(subst _, ,$*))) $(LEGION_DEFCHECK)
 else
 # nvc++ names some symbols based on the source filename, so the trick above
 #  of compiling multiple things from the same template with different defines
@@ -1290,23 +1299,29 @@ LEGION_OBJS += $(LEGION_INST_OBJS)
 endif
 
 $(filter %.cc.o,$(LEGION_OBJS)) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(LEGION_DEFCHECK)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS) $(LEGION_DEFCHECK)
 
 $(MAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+
+# GPU compilation rules; We can't use -MMD for dependency generation because
+# it's not supported by old versions of nvcc.
 
 ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
 $(filter %.cpp.o,$(APP_OBJS)) : %.cpp.o : %.cpp $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
 $(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(USE_CUDA)),1)
 $(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(NVCC) -o $<.d -M $< $(NVCC_FLAGS) $(INC_FLAGS)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 endif
 
@@ -1314,16 +1329,19 @@ ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
 $(filter %.cpp,$(LEGION_HIP_SRC)): %.cpp : %.cu
 	hipify-perl $< > $@
 $(filter %.cpp.o,$(LEGION_OBJS)): %.cpp.o : %.cpp $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
 $(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(USE_CUDA)),1)
 $(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(NVCC) -o $<.d -M $< $(NVCC_FLAGS) $(INC_FLAGS)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 endif
 
@@ -1346,7 +1364,7 @@ endif
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(LEGION_HIP_GENERATED_SRC)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(LEGION_HIP_GENERATED_SRC) $(DEP_FILES)
 
 ifeq ($(strip $(USE_LLVM)),1)
 llvmjit_internal.cc.o : CC_FLAGS += $(LLVM_CXXFLAGS)
