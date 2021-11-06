@@ -995,8 +995,6 @@ LEGION_FORT_SRC  += $(LG_RT_DIR)/legion/legion_f_types.f90 \
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
 		   realm.h \
-		   legion_defines.h \
-		   realm_defines.h \
 		   legion/bitmask.h \
 		   legion/legion.inl \
 		   legion/legion_agency.h \
