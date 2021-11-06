@@ -1302,7 +1302,7 @@ namespace Realm {
     struct UpdateBytesWriteMessage {
       XferDesID guid;
       int port_idx;
-      size_t span_start, span_size, pre_bytes_total;
+      size_t span_start, span_size;
 
       static void handle_message(NodeID sender,
 				 const UpdateBytesWriteMessage &args,
@@ -1311,15 +1311,13 @@ namespace Realm {
 
       static void send_request(NodeID target, XferDesID guid,
 			       int port_idx,
-			       size_t span_start, size_t span_size,
-			       size_t pre_bytes_total)
+			       size_t span_start, size_t span_size)
       {
 	ActiveMessage<UpdateBytesWriteMessage> amsg(target);
         amsg->guid = guid;
 	amsg->port_idx = port_idx;
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
-	amsg->pre_bytes_total = pre_bytes_total;
 	amsg.commit();
       }
     };

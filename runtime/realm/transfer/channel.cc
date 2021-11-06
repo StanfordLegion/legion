@@ -6001,16 +6001,11 @@ namespace Realm {
           }
         }
         else {
-	  // this should never happen?  (i.e. it should be built into whatever
-	  //  message delivered the data)
-	  assert(0);
-#if 0
           // send a active message to remote node
+          // this can happen if we have a non-network path (e.g. ipc) to another rank
           UpdateBytesWriteMessage::send_request(execution_node, xd_guid,
 						port_idx,
-						span_start, span_size,
-						pre_bytes_total);
-#endif
+						span_start, span_size);
         }
       }
 
