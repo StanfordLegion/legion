@@ -276,7 +276,7 @@ extern "C" {
       // give back the whole loop and hope for the best
       *istart = start;
       *iend = end;
-      return (start < end);
+      return ((incr > 0) ? (start < end) : (start > end));
     }
 
     // loops must be inside work items
@@ -293,6 +293,43 @@ extern "C" {
     if(more) {
       *istart = span_start;
       *iend = span_end;
+    }
+    return more;
+  }
+
+  REALM_PUBLIC_API
+  bool GOMP_loop_ull_dynamic_start(bool up,
+                                   uint64_t start, uint64_t end,
+                                   uint64_t incr, uint64_t chunk,
+                                   uint64_t *istart, uint64_t *iend)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(true);
+    if(!wi) {
+      // give back the whole loop and hope for the best
+      *istart = start;
+      *iend = end;
+      return (up ? (start < end) : (start > end));
+    }
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    log_omp.debug() << "loop dynamic start: start=" << start
+		    << " end=" << end << " incr=" << (int64_t)incr
+		    << " chunk=" << chunk;
+
+    // shift values down to int64_t rank for LoopSchedule
+    int64_t start_shifted = static_cast<int64_t>(start - (uint64_t(1) << 63));
+    int64_t end_shifted = static_cast<int64_t>(end - (uint64_t(1) << 63));
+
+    wi->work_item->schedule.start_dynamic(start_shifted, end_shifted, incr, chunk);
+    int64_t span_start, span_end;
+    long stride = 0; // not used
+    bool more = wi->work_item->schedule.next_dynamic(span_start, span_end, stride);
+    if(more) {
+      // shift from int64_t back to uint64_t range
+      *istart = static_cast<uint64_t>(span_start) + (uint64_t(1) << 63);
+      *iend = static_cast<uint64_t>(span_end) + (uint64_t(1) << 63);
     }
     return more;
   }
@@ -371,6 +408,35 @@ extern "C" {
     if(more) {
       *istart = span_start;
       *iend = span_end;
+      log_omp.debug() << "loop dynamic next: start=" << *istart
+		      << " end=" << *iend;
+    } else
+      log_omp.debug() << "loop dynamic next: done";
+
+    return more;
+  }
+
+  REALM_PUBLIC_API
+  bool GOMP_loop_ull_dynamic_next(uint64_t *istart, uint64_t *iend)
+  {
+    Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info(false);
+    if(!wi)
+      return false;  // complained already above
+
+    // loops must be inside work items
+    assert(wi->work_item != 0);
+
+    log_omp.debug() << "loop dynamic next: pstart=" << *istart
+		    << " pend=" << *iend;
+
+    int64_t span_start, span_end, stride;
+    bool more = wi->work_item->schedule.next_dynamic(span_start, span_end,
+						     stride);
+
+    if(more) {
+      // shift from int64_t back to uint64_t range
+      *istart = static_cast<uint64_t>(span_start) + (uint64_t(1) << 63);
+      *iend = static_cast<uint64_t>(span_end) + (uint64_t(1) << 63);
       log_omp.debug() << "loop dynamic next: start=" << *istart
 		      << " end=" << *iend;
     } else
@@ -1194,6 +1260,7 @@ namespace Realm {
     //printf("static_init(%p, %d, %d)\n", loc, global_tid, schedtype);
     switch(schedtype) {
     case 34 /* kmp_sch_static */:
+    case 33 /* kmp_sch_static_chunked - (chunk ignored - TODO) */:
       {
 	T iters;
 	if(incr > 0) {
@@ -1210,7 +1277,8 @@ namespace Realm {
 	// special case for when some threads get no iterations at all
 	*plastiter = ((whole > 0) ? (wi->thread_id == (wi->num_threads - 1)) :
 		                    (((T)(wi->thread_id)) == (leftover - 1)));
-	//printf("static(%d, %d, %d, %d, %d)\n", *plower, *pupper, *pstride, incr, *plastiter);
+        //log_omp.print() << "static: " << *plower << " " << *pupper << " " << *pstride
+        //                << " " << incr << " " << *plastiter;
 	return;
       }
 
