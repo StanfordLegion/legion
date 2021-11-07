@@ -583,8 +583,8 @@ namespace Legion {
                               const RegionRequirement &req,
                               // Two views are usually the same but different
                               // in cases of control replication
-                              InstanceView *local_view,
-                              LogicalView *registration_view,
+                              std::vector<InstanceView*> &local_views,
+                              std::set<LogicalView*> &registration_views,
                               const ApEvent termination_event,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,

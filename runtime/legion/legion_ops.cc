@@ -6936,7 +6936,7 @@ namespace Legion {
               it != points.end(); it++) 
           (*it)->log_copy_requirements();
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexCopyOp::handle_point_commit(RtEvent point_committed)
@@ -17101,6 +17101,7 @@ namespace Legion {
       activate_operation();
       file_name = NULL;
       footprint = 0;
+      attached_event = ApUserEvent::NO_AP_USER_EVENT;
       termination_event = ApEvent::NO_AP_EVENT;
       restricted = true;
     }
@@ -17134,6 +17135,7 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
+      external_instances.clear();
       layout_constraint_set = LayoutConstraintSet();
     }
 
@@ -17165,8 +17167,37 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
+      create_external_instance();
       if (runtime->legion_spy_enabled)
         log_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion AttachOp::create_external_instance(void)
+    //--------------------------------------------------------------------------
+    {
+      external_instances.resize(1);
+      switch (resource)
+      {
+        case LEGION_EXTERNAL_POSIX_FILE:
+        case LEGION_EXTERNAL_HDF5_FILE:
+          {
+            external_instances[0] = 
+              runtime->forest->create_external_instance(this, requirement, 
+                                              requirement.instance_fields);
+            break;
+          }
+        case LEGION_EXTERNAL_INSTANCE:
+          {
+            external_instances[0] = 
+              runtime->forest->create_external_instance(this, requirement,
+                        layout_constraint_set.field_constraint.field_set);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return requirement.region;
     }
 
     //--------------------------------------------------------------------------
@@ -17209,6 +17240,20 @@ namespace Legion {
                                                    requirement,
                                                    version_info,
                                                    preconditions);
+      // Register the instance with the memory manager and make sure it is
+      // done before we perform our mapping
+#ifdef DEBUG_LEGION
+      assert(!external_instances.empty());
+      assert(external_instances[0].has_ref());
+#endif
+      PhysicalManager *manager = external_instances[0].get_physical_manager();
+      const RtEvent attached = manager->attach_external_instance();
+      if (attached.exists())
+        preconditions.insert(attached);
+      // Perform an exchange looking for any coregions for point AttachOps
+      const RtEvent exchanged = check_for_coregions();
+      if (exchanged.exists())
+        preconditions.insert(exchanged);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -17216,63 +17261,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::trigger_mapping(void)
+    RtEvent AttachOp::check_for_coregions(void)
     //--------------------------------------------------------------------------
     {
-      InstanceRef external_instance;
-      switch (resource)
-      {
-        case LEGION_EXTERNAL_POSIX_FILE:
-        case LEGION_EXTERNAL_HDF5_FILE:
-          {
-            external_instance = 
-              runtime->forest->create_external_instance(this, requirement, 
-                                              requirement.instance_fields);
-            break;
-          }
-        case LEGION_EXTERNAL_INSTANCE:
-          {
-            external_instance = 
-              runtime->forest->create_external_instance(this, requirement,
-                        layout_constraint_set.field_constraint.field_set);
-            break;
-          }
-        default:
-          assert(false);
-      }
-      // Register this instance with the memory manager
-      PhysicalManager *external_manager = 
-        external_instance.get_physical_manager();
-      const RtEvent attached = external_manager->attach_external_instance();
-      if (attached.exists())
-        attached.wait();
+      // Nothing to do here for individual attach ops
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    { 
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-      InstanceSet external(1);
-      external[0] = external_instance;
-      InnerContext *context = find_physical_context(0/*index*/, requirement);
-      std::vector<InstanceView*> external_views;
-      context->convert_target_views(external, external_views);
+      // Check to see if we're going to be the ones performing the attach
+      // If someone else has already done the attach for us then the 
+      // attached event will be non-trivial
+      ApEvent attach_event = attached_event;
+      if (!attach_event.exists() || (external_instances.size() > 1))
+      {
+        InnerContext *context = find_physical_context(0/*index*/, requirement);
+        std::vector<InstanceView*> external_views;
+        context->convert_target_views(external_instances, external_views);
 #ifdef DEBUG_LEGION
-      assert(external_views.size() == 1);
+        assert(external_views.size() == 1);
 #endif
-      InstanceView *ext_view = external_views[0];
-      ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
+        std::set<LogicalView*> ext_views(external_views.begin(), 
+                                         external_views.end());
+        attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
-                                                        ext_view, ext_view,
-                                                        mapping ?
+                                                        external_views,
+                                                        ext_views, mapping ?
                                                           termination_event :
                                                           completion_event,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
                                                         restricted);
-#ifdef DEBUG_LEGION
-      assert(external_instance.has_ref());
-#endif
+        // Signal to any other point tasks that we performed the attach for them
+        if (attached_event.exists())
+          Runtime::trigger_event(&trace_info, attached_event, attach_event);
+      }
       if (mapping)
-        external_instance.set_ready_event(attach_event);
+        external_instances[0].set_ready_event(attach_event);
       // This operation is ready once the file is attached
-      region.impl->set_reference(external_instance);
+      region.impl->set_reference(external_instances[0]);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -17319,7 +17351,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
                                          const std::vector<FieldID> &field_set,
-                                         const std::vector<size_t> &sizes, 
+                                         const std::vector<size_t> &sizes,
                                                LayoutConstraintSet &constraints,
                                                ApEvent &ready_event,
                                                size_t &instance_footprint)
@@ -17650,6 +17682,8 @@ namespace Legion {
             points.begin(); it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
+      coregions.clear();
+      coregions_attached.clear();
       map_applied_conditions.clear();
     }
 
@@ -17834,6 +17868,14 @@ namespace Legion {
         requirement.projection = 0;
       }
       initialize_privilege_path(privilege_path, requirement);
+      // Have each of the point tasks create their external instances
+      // Keep track of which points share the same logical region
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        PointAttachOp *point = points[idx];
+        LogicalRegion region = point->create_external_instance();
+        coregions[region].push_back(point);
+      }
       if (runtime->check_privileges)
         check_point_requirements();
     }
@@ -17892,6 +17934,57 @@ namespace Legion {
         complete_execution(Runtime::protect_event(done));
       else
         complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexAttachOp::find_coregions(PointAttachOp *point,
+         LogicalRegion reg, InstanceSet &instances, ApUserEvent &attached_event)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here since we know this is being done
+      // sequentially by IndexAttachOp::trigger_ready
+      std::map<LogicalRegion,std::vector<PointAttachOp*> >::iterator
+        finder = coregions.find(reg);
+#ifdef DEBUG_LEGION
+      assert(finder != coregions.end());
+      assert(!finder->second.empty());
+#endif
+      if (finder->second.size() == 1)
+      {
+        // No co-regions in this case
+        coregions.erase(finder);
+        return RtEvent::NO_RT_EVENT;
+      }
+#ifdef DEBUG_LEGION
+      assert(!attached_event.exists());
+#endif
+      // See if we're the first one
+      if (finder->second.front() == point)
+      {
+        // We're the first one
+        // Get the instances from all the other points
+        const size_t offset = instances.size();
+        instances.resize(offset + finder->second.size());
+        for (unsigned idx = 0; idx < finder->second.size(); idx++)
+          instances[offset+idx] = finder->second[idx]->external_instances[0];
+        // Save our attached event for later
+        attached_event = Runtime::create_ap_user_event(NULL);
+        coregions_attached[reg] = attached_event;  
+      }
+      else
+      {
+        // Record the attached event to know that a different
+        // operation is going to be performing the attach for this point
+        std::map<LogicalRegion,ApUserEvent>::const_iterator event_finder =
+          coregions_attached.find(reg);
+#ifdef DEBUG_LEGION
+        assert(event_finder != coregions_attached.end());
+        assert(event_finder->second.exists());
+#endif
+        attached_event = event_finder->second;
+      }
+      // Will only have non-trival events here with control replication
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -18358,6 +18451,15 @@ namespace Legion {
         log_requirement();
       }
       return region.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PointAttachOp::check_for_coregions(void)
+    //--------------------------------------------------------------------------
+    {
+      owner->find_coregions(this, requirement.region, 
+                  external_instances, attached_event); 
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
