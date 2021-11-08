@@ -6351,8 +6351,9 @@ namespace Legion {
       const IndexAttachLauncher &launcher, const std::vector<unsigned> &indexes)
     //--------------------------------------------------------------------------
     {
-      unsigned ancestor_depth = 0;
-      RegionTreeNode *common_ancestor = NULL;
+      std::vector<RegionTreeNode*> previous_nodes(indexes.size());
+      std::vector<unsigned> depths(indexes.size());
+      unsigned max_depth = 0;
       for (unsigned idx = 0; idx < indexes.size(); idx++)
       {
         const unsigned index = indexes[idx];
@@ -6366,52 +6367,74 @@ namespace Legion {
               handle.field_space.id, handle.tree_id, get_task_name(),
               get_unique_id(), launcher.parent.index_space.id,
               launcher.parent.field_space.id, launcher.parent.tree_id)
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        if (common_ancestor != NULL)
-        {
-          if (common_ancestor == node)
-            REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
-               "Handle (%d,%d,%d) of index attach operation in parent task %s "
-              "(UID %lld) is overlaps with previous regions. All regions "
-              "in index space attach operations must be disjoint.",
-              handle.index_space.id, handle.field_space.id, handle.tree_id,
-              get_task_name(), get_unique_id())
-          // Bring them to the same depth
-          unsigned node_depth = node->get_depth();
-          while (ancestor_depth < node_depth)
-          {
-#ifdef DEBUG_LEGION
-            assert(node_depth > 0);
-#endif
-            node = node->get_parent();
-            node_depth--;
-          }
-          while (node_depth < ancestor_depth)
-          {
-#ifdef DEBUG_LEGION
-            assert(ancestor_depth > 0);
-#endif
-            common_ancestor = common_ancestor->get_parent();
-            ancestor_depth--;
-          }
-          while (node != common_ancestor)
-          {
-            // Same depth but different nodes
-#ifdef DEBUG_LEGION
-            assert(ancestor_depth > 0);
-#endif
-            node = node->get_parent();
-            common_ancestor = common_ancestor->get_parent();
-            ancestor_depth--;
-          }
-        }
-        else
-        {
-          common_ancestor = node;
-          ancestor_depth = common_ancestor->get_depth();
-        }
+        previous_nodes[idx] = runtime->forest->get_node(handle);
+        depths[idx] = previous_nodes[idx]->get_depth();
+        if (max_depth < depths[idx])
+          max_depth = depths[idx];
       }
-      return common_ancestor;
+      // Walk all the nodes up from the bottom until they arrive at a 
+      // common ancestor, along the way check to make sure that any nodes
+      // that arrive at a common join point from two different paths do
+      // so at a disjoint partition
+      std::vector<RegionTreeNode*> next_nodes(indexes.size());
+      while (max_depth > 0)
+      {
+        std::map<RegionTreeNode*,std::vector<unsigned> > next_to_previous;
+        bool all_same = true;
+        for (unsigned idx = 0; idx < indexes.size(); idx++)
+        {
+          if (depths[idx] == max_depth)
+          {
+            depths[idx]--;
+            next_nodes[idx] = previous_nodes[idx]->get_parent();
+            next_to_previous[next_nodes[idx]].push_back(idx);
+            if (all_same && (idx > 0) && (next_nodes[idx-1] != next_nodes[idx]))
+              all_same = false;
+          }
+          else
+          {
+            next_nodes[idx] = previous_nodes[idx];
+            all_same = false;
+          }
+        }
+        // check to see if all the next to previous cases play by the rules
+        for (std::map<RegionTreeNode*,std::vector<unsigned> >::const_iterator
+              it = next_to_previous.begin(); it != next_to_previous.end(); it++)
+        {
+          if (it->second.size() == 1)
+            continue;
+          // Can skip any disjoint partitions since it doesn't matter where
+          // their children came from
+          if (!it->first->is_region() &&
+              it->first->as_partition_node()->row_source->is_disjoint())
+            continue;
+          // Otherwise check to see that they all came from the same child
+          // If they didn't, then we can't prove tree disjointness
+          RegionTreeNode *previous = previous_nodes[it->second.front()];
+          for (unsigned idx = 1; idx < it->second.size(); idx++)
+          {
+            if (previous == previous_nodes[it->second[idx]])
+              continue;
+            const LogicalRegion h1 = launcher.handles[it->second.front()];
+            const LogicalRegion h2 = launcher.handles[it->second[idx]];
+            REPORT_LEGION_ERROR(ERROR_ATTEMPTED_EXTERNAL_ATTACH,
+              "Logical region handle (%d,%d,%d) from index %d of index attach "
+              "operation in parent task %s (UID %lld) is not region-tree "
+              "disjoint with logical region handle (%d,%d,%d) from index %d. "
+              "All regions in index space attach operations must be "
+              "region-tree disjoint.", h1.index_space.id,
+              h1.field_space.id, h1.tree_id, it->second.front(),
+              get_task_name(), get_unique_id(), h2.index_space.id,
+              h2.field_space.id, h2.tree_id, it->second[idx])
+          }
+        }
+        previous_nodes.swap(next_nodes);
+        if (all_same)
+          break;
+        max_depth--;
+      }
+      // At this point all the previous nodes should be the same
+      return previous_nodes.back();
     }
 
     //--------------------------------------------------------------------------
