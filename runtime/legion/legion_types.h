@@ -1748,6 +1748,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION_WAITS
     extern __thread int meta_task_id;
 #endif
+#ifdef DEBUG_LEGION_CALLERS
+    extern __thread LgTaskID implicit_task_kind;
+    extern __thread LgTaskID implicit_task_caller;
+#endif
 
     /**
      * \class LgTaskArgs
@@ -1757,10 +1761,17 @@ namespace Legion {
     struct LgTaskArgs {
     public:
       LgTaskArgs(::legion_unique_id_t uid)
-        : provenance(uid), lg_task_id(T::TASK_ID) { }
+        : provenance(uid),
+#ifdef DEBUG_LEGION_CALLERS
+          lg_call_id(implicit_task_kind),
+#endif
+          lg_task_id(T::TASK_ID) { }
     public:
       // In this order for alignment reasons
       const ::legion_unique_id_t provenance;
+#ifdef DEBUG_LEGION_CALLERS
+      const LgTaskID lg_call_id;
+#endif
       const LgTaskID lg_task_id;
     };
     
@@ -2724,6 +2735,10 @@ namespace Legion {
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
+#ifdef DEBUG_LEGION_CALLERS
+      LgTaskID local_kind = Internal::implicit_task_kind;
+      LgTaskID local_caller = Internal::implicit_task_caller;
+#endif
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
       // Check to see if we have any local locks to notify
@@ -2762,6 +2777,10 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+#ifdef DEBUG_LEGION_CALLERS
+      Internal::implicit_task_kind = local_kind;
+      Internal::implicit_task_caller = local_caller;
+#endif
       // Write the registration callback information back
       Internal::inside_registration_callback = local_callback;
 #ifdef DEBUG_LEGION_WAITS
@@ -2780,6 +2799,10 @@ namespace Legion {
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
+#ifdef DEBUG_LEGION_CALLERS
+      LgTaskID local_kind = Internal::implicit_task_kind;
+      LgTaskID local_caller = Internal::implicit_task_caller;
+#endif
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
       // Check to see if we have any local locks to notify
@@ -2818,6 +2841,10 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+#ifdef DEBUG_LEGION_CALLERS
+      Internal::implicit_task_kind = local_kind;
+      Internal::implicit_task_caller = local_caller;
+#endif
       // Write the registration callback information back
       Internal::inside_registration_callback = local_callback;
     }

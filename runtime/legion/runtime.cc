@@ -78,6 +78,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION_WAITS
     __thread int meta_task_id = -1;
 #endif
+#ifdef DEBUG_LEGION_CALLERS
+    __thread LgTaskID implicit_task_kind = LG_SCHEDULER_ID;
+    __thread LgTaskID implicit_task_caller = LG_SCHEDULER_ID;
+#endif
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -11349,6 +11353,10 @@ namespace Legion {
       // messages so we can just set this to zero.
       *((UniqueID*)sending_buffer) = 0;
       sending_index = sizeof(UniqueID);
+#ifdef DEBUG_LEGION_CALLERS
+      *((LgTaskID*)(((char*)sending_buffer)+sending_index)) = LG_SCHEDULER_ID;
+      sending_index += sizeof(LgTaskID);
+#endif
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
       *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
@@ -11411,6 +11419,9 @@ namespace Legion {
       size_t buffer_size = rez.get_used_bytes();
       const char *buffer = (const char*)rez.get_buffer();
       const size_t header_size = 
+#ifdef DEBUG_LEGION_CALLERS
+        sizeof(LgTaskID) +
+#endif
         sizeof(k) + sizeof(implicit_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
       AutoLock c_lock(channel_lock);
@@ -11427,6 +11438,10 @@ namespace Legion {
         sending_index += sizeof(k);
         *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
         sending_index += sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        sending_index += sizeof(implicit_task_kind);
+#endif
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
@@ -11456,6 +11471,10 @@ namespace Legion {
         sending_index += sizeof(k);
         *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
         sending_index += sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        sending_index += sizeof(implicit_task_kind);
+#endif
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
@@ -11504,7 +11523,10 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) + 
+      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) +
+#ifdef DEBUG_LEGION_CALLERS
+        sizeof(LgTaskID) +
+#endif
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
@@ -11869,6 +11891,12 @@ namespace Legion {
         implicit_provenance = *((const UniqueID*)args);
         args += sizeof(implicit_provenance);
         arglen -= sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+        implicit_task_kind = (LgTaskID)(LG_MESSAGE_ID + kind);
+        implicit_task_caller = *((const LgTaskID*)args);
+        args += sizeof(implicit_task_caller);
+        arglen -= sizeof(implicit_task_caller);
+#endif
         size_t message_size = *((const size_t*)args);
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
@@ -25910,8 +25938,24 @@ namespace Legion {
           return finder->second;
       }
       if (!found)
+      {
+#ifdef DEBUG_LEGION_CALLERS
+        LG_TASK_DESCRIPTIONS(task_names);
+        LG_MESSAGE_DESCRIPTIONS(message_names);
         log_run.error("Unable to find distributed collectable %llx "
-                    "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+                      "with type %lld in %s from %s", did,
+                      LEGION_DISTRIBUTED_HELP_DECODE(did),
+                      (implicit_task_kind < LG_MESSAGE_ID) ?
+                        task_names[implicit_task_kind] :
+                        message_names[implicit_task_kind-LG_MESSAGE_ID],
+                      (implicit_task_caller < LG_MESSAGE_ID) ?
+                        task_names[implicit_task_caller] :
+                        message_names[implicit_task_caller-LG_MESSAGE_ID]);
+#else
+        log_run.error("Unable to find distributed collectable %llx with "
+                      "type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+#endif
+      }
       // Wait for it to be ready
       ready.wait();
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
@@ -31068,9 +31112,17 @@ namespace Legion {
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_caller = *((const LgTaskID*)data);
+      data += sizeof(implicit_task_caller);
+      arglen -= sizeof(implicit_task_caller);
+#endif
       LgTaskID tid = *((const LgTaskID*)data);
 #ifdef DEBUG_LEGION_WAITS
       meta_task_id = tid;
+#endif
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_kind = tid;
 #endif
       data += sizeof(tid);
       arglen -= sizeof(tid);
@@ -31788,9 +31840,17 @@ namespace Legion {
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_caller = *((const LgTaskID*)data);
+      data += sizeof(implicit_task_caller);
+      arglen -= sizeof(implicit_task_caller);
+#endif
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_kind = tid;
+#endif
       switch (tid)
       {
         case LG_FUTURE_CALLBACK_TASK_ID:
