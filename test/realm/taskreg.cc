@@ -37,15 +37,9 @@ const char llvmir[] =
 "@.str = private unnamed_addr constant [30 x i8] c\"hello from LLVM JIT! %d %lld\\0A\\00\", align 1\n"
 "declare i32 @printf(i8*, ...)\n"
 "define void @foo(i32* %a, i64 %b, i32* %c, i64 %d, i64 %e) {\n"
-#if REALM_LLVM_VERSION >= 37
 "  %1 = load i32, i32* %a, align 4\n"
 "  %2 = add i32 %1, 57\n"
 "  %3 = call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([30 x i8], [30 x i8]* @.str, i32 0, i32 0), i32 %2, i64 %b)\n"
-#else
-"  %1 = load i32* %a, align 4\n"
-"  %2 = add i32 %1, 57\n"
-"  %3 = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([30 x i8]* @.str, i32 0, i32 0), i32 %2, i64 %b)\n"
-#endif
 "  ret void\n"
 "}\n";
 #endif

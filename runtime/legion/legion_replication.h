@@ -2052,6 +2052,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     protected:

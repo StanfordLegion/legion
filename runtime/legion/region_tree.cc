@@ -3293,15 +3293,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
-                                          unsigned index,
-                                          const RegionRequirement &req,
-                                          InstanceView *local_view,
-                                          LogicalView *registration_view,
-                                          const ApEvent termination_event,
-                                          VersionInfo &version_info,
-                                          const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events,
-                                          const bool restricted)
+                                    unsigned index,
+                                    const RegionRequirement &req,
+                                    std::vector<InstanceView*> &local_views,
+                                    const ApEvent termination_event,
+                                    VersionInfo &version_info,
+                                    const PhysicalTraceInfo &trace_info,
+                                    std::set<RtEvent> &map_applied_events,
+                                    const bool restricted)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
@@ -3317,10 +3316,17 @@ namespace Legion {
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
       const RtEvent collect_event = trace_info.get_collect_event();
-      const ApEvent ready = local_view->register_user(usage, ext_mask,
-                  region_node->row_source, op_id, index, termination_event,
-                  collect_event, registration_applied, trace_info, 
-                  runtime->address_space);
+      std::vector<ApEvent> ready_events;
+      for (std::vector<InstanceView*>::const_iterator it =
+            local_views.begin(); it != local_views.end(); it++)
+      {
+        const ApEvent ready = (*it)->register_user(usage, ext_mask,
+                    region_node->row_source, op_id, index, termination_event,
+                    collect_event, registration_applied, trace_info, 
+                    runtime->address_space);
+        if (ready.exists())
+          ready_events.push_back(ready);
+      }
       RtEvent guard_event;
       if (!registration_applied.empty())
       {
@@ -3328,9 +3334,13 @@ namespace Legion {
         if (guard_event.exists())
           map_applied_events.insert(guard_event);
       }
+      FieldMaskSet<LogicalView> registration_views;
+      for (std::vector<InstanceView*>::const_iterator it =
+            local_views.begin(); it != local_views.end(); it++)
+        registration_views.insert(*it, ext_mask);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), region_node->row_source, registration_view, 
-          ext_mask, trace_info, ApEvent::NO_AP_EVENT, guard_event, 
+          index, RegionUsage(req), region_node->row_source, registration_views,
+          trace_info, ApEvent::NO_AP_EVENT, guard_event, 
           PredEvent::NO_PRED_EVENT, false/*track effects*/, restricted);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -3346,7 +3356,9 @@ namespace Legion {
         analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
-      return ready;
+      if (!ready_events.empty())
+        return Runtime::merge_events(&trace_info, ready_events);
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------

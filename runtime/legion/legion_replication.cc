@@ -6586,6 +6586,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplAttachOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    { 
+      // First compute the parent index
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      // No need to create the external instance here
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -6781,8 +6793,7 @@ namespace Legion {
 #endif
           ApEvent attach_event = runtime->forest->attach_external(this,0/*idx*/,
                                                         requirement,
-                                                        attach_views[0],
-                                                        attach_views[0],
+                                                        attach_views,
                                                         mapping ?
                                                          (ApEvent)reduce_barrier
                                                          : completion_event,

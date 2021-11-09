@@ -314,8 +314,7 @@ ifeq ($(strip $(USE_LLVM)),1)
   ifeq ($(LLVM_CONFIG),)
     $(error cannot find llvm-config-* - set with LLVM_CONFIG if not in path)
   endif
-  LLVM_VERSION_NUMBER := $(shell $(LLVM_CONFIG) --version | cut -c1,3)
-  REALM_CC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
+  REALM_CC_FLAGS += -DREALM_USE_LLVM
 
   # NOTE: do not use these for all source files - just the ones that include llvm include files
   LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
@@ -326,11 +325,7 @@ ifeq ($(strip $(USE_LLVM)),1)
   ifeq ($(strip $(LLVM_LIBS_OPTIONAL)),1)
     REALM_CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
   else
-    ifeq ($(LLVM_VERSION_NUMBER),35)
-      LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
-    else
-      LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
-    endif
+    LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
     LEGION_LD_FLAGS += $(LLVM_LIBS)
   endif
 
