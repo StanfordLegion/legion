@@ -264,44 +264,6 @@ endif()
 set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python bindings, if any")
 
 #------------------------------------------------------------------------------#
-# System configuration and limits
-#------------------------------------------------------------------------------#
-function(is_power_of_two x ret)
-  set(${ret} FALSE PARENT_SCOPE)
-  if (${x} LESS_EQUAL 0)
-    return()
-  endif()
-  math(EXPR y "${x} & (${x} - 1)")
-  if (${y} EQUAL 0)
-    set(${ret} TRUE PARENT_SCOPE)
-  endif()
-endfunction()
-
-if (NOT DEFINED Legion_MAX_NUM_NODES)
-  set(Legion_MAX_NUM_NODES 1024 CACHE STRING
-    "Maximum number of nodes supported by the runtime -- MUST be a power of two.")
-  mark_as_advanced(Legion_MAX_NUM_NODES)
-else()
-  is_power_of_two(${Legion_MAX_NUM_NODES} is_pow_two)
-  if (NOT is_pow_two)
-    message(FATAL_ERROR "Legion_MAX_NUM_NODES must be a power of two.")
-  endif()
-endif()
-add_compile_definitions(LEGION_MAX_NUM_NODES=${Legion_MAX_NUM_NODES})
-
-if (NOT DEFINED Legion_MAX_NUM_PROCS)
-  set(Legion_MAX_NUM_PROCS 64 CACHE STRING
-    "Maximum number of processors (per node) supported by the runtime -- MUST be a power of two.")
-  mark_as_advanced(Legion_MAX_NUM_PROCS)
-else()
-  is_power_of_two(${Legion_MAX_NUM_PROCS} is_pow_two)
-  if (NOT is_pow_two)
-    message(FATAL_ERROR "Legion_MAX_NUM_PROCS must be a power of two.")
-  endif()
-endif()
-add_compile_definitions(LEGION_MAX_NUM_PROCS=${Legion_MAX_NUM_PROCS})
-
-#------------------------------------------------------------------------------#
 # Kokkos configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
@@ -638,12 +600,47 @@ mark_as_advanced(Legion_MAX_DIM)
 set(LEGION_MAX_DIM ${Legion_MAX_DIM})
 set(REALM_MAX_DIM ${Legion_MAX_DIM})
 
-set(Legion_MAX_FIELDS 512 CACHE STRING "Maximum number of fields allocated to a single field space")
-set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
-mark_as_advanced(Legion_MAX_FIELDS)
+# legion uses statically-sized arrays for performance in some cases - make
+#  sure they're big enough for your use case
+set(Legion_MAX_FIELDS 512 CACHE STRING
+    "Maximum number of fields allocated to a single field space -- MUST be a power of two.")
+set(Legion_MAX_NUM_NODES 1024 CACHE STRING
+    "Maximum number of nodes supported by the runtime -- MUST be a power of two.")
+set(Legion_MAX_NUM_PROCS 64 CACHE STRING
+    "Maximum number of processors (per node) supported by the runtime -- MUST be a power of two.")
 
-# define variable for legion_defines.h
+# check that they're all powers of two
+
+function(is_power_of_two x ret)
+  set(${ret} FALSE PARENT_SCOPE)
+  if (${x} LESS_EQUAL 0)
+    return()
+  endif()
+  math(EXPR y "${x} & (${x} - 1)")
+  if (${y} EQUAL 0)
+    set(${ret} TRUE PARENT_SCOPE)
+  endif()
+endfunction()
+
+is_power_of_two(${Legion_MAX_FIELDS} is_pow_two)
+if (NOT is_pow_two)
+  message(FATAL_ERROR "Legion_MAX_FIELDS must be a power of two.")
+endif()
+
+is_power_of_two(${Legion_MAX_NUM_NODES} is_pow_two)
+if (NOT is_pow_two)
+  message(FATAL_ERROR "Legion_MAX_NUM_NODES must be a power of two.")
+endif()
+
+is_power_of_two(${Legion_MAX_NUM_PROCS} is_pow_two)
+if (NOT is_pow_two)
+  message(FATAL_ERROR "Legion_MAX_NUM_PROCS must be a power of two.")
+endif()
+
+# define variables for legion_defines.h
 set(LEGION_MAX_FIELDS ${Legion_MAX_FIELDS})
+set(LEGION_MAX_NUM_NODES ${Legion_MAX_NUM_NODES})
+set(LEGION_MAX_NUM_PROCS ${Legion_MAX_NUM_PROCS})
 
 option(Legion_WARNINGS_FATAL "Make all runtime warnings fatal" OFF)
 set(LEGION_WARNINGS_FATAL ${Legion_WARNINGS_FATAL})
