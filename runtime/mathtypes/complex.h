@@ -96,7 +96,6 @@ public:
   complex(void) { } // empty default constructor for CUDA
   __CUDA_HD__
   complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
-  __CUDA_HD__
   complex(const complex<__half> &rhs) = default;
 #ifdef __CUDACC__
   __device__ // Device only constructor
@@ -114,7 +113,6 @@ public:
   }
 #endif
 public:
-  __CUDA_HD__
   inline complex<__half>& operator=(const complex<__half> &rhs) = default;
 public:
   __CUDA_HD__
