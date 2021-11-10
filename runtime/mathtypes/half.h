@@ -141,7 +141,7 @@ inline float __convert_halfint_to_float(uint16_t __x)
 #endif
 
 // Cuda finally got around to implementing these operators in half precision in 11.5
-#if !defined(LEGION_USE_CUDA) || (__CUDACC_VER_MAJOR__ > 11) || ((__CUDACC_VER_MAJOR == 11) && (__CUDACC_VER_MINOR__ >= 5))
+#if !defined(LEGION_USE_CUDA) || (__CUDACC_VER_MAJOR__ < 11) || ((__CUDACC_VER_MAJOR__ == 11) && (__CUDACC_VER_MINOR__ < 5))
 __CUDA_HD__
 inline __half operator-(const __half &one)
 {
