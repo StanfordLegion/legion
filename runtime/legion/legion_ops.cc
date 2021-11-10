@@ -19315,9 +19315,6 @@ namespace Legion {
         InnerContext *context = find_physical_context(0/*index*/);
         std::vector<InstanceView*> external_views;
         context->convert_target_views(external_instances, external_views);
-#ifdef DEBUG_LEGION
-        assert(external_views.size() == 1);
-#endif
         attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_views,

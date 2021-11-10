@@ -3795,9 +3795,9 @@ namespace Legion {
       virtual void check_point_requirements(
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local) { return local; }
-    public:
-      RtEvent find_coregions(PointAttachOp *point, LogicalRegion region,
+      virtual RtEvent find_coregions(PointAttachOp *point, LogicalRegion region,
           InstanceSet &instances, ApUserEvent &attached_event);
+    public:
       void handle_point_commit(void);
     protected:
       void activate_index_attach(void);
