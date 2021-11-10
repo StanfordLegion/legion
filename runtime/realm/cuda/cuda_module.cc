@@ -86,6 +86,7 @@ namespace Realm {
     // may be called by anybody to enqueue a copy or an event
     void GPUStream::add_copy(GPUMemcpy *copy)
     {
+      assert(0 && "hit old copy path"); // shouldn't be used any more
       bool add_to_worker = false;
       {
 	AutoLock<> al(mutex);
@@ -187,6 +188,15 @@ namespace Realm {
     bool GPUStream::has_work(void) const
     {
       return(!pending_events.empty() || !pending_copies.empty());
+    }
+
+    // atomically checks rate limit counters and returns true if 'bytes'
+    //  worth of copies can be submitted or false if not (in which case
+    //  the progress counter on the xd will be updated when it should try
+    //  again)
+    bool GPUStream::ok_to_submit_copy(size_t bytes, XferDes *xd)
+    {
+      return true;
     }
 
     // to be called by a worker (that should already have the GPU context
