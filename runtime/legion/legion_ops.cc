@@ -20479,9 +20479,8 @@ namespace Legion {
     RtEvent PointAttachOp::check_for_coregions(void)
     //--------------------------------------------------------------------------
     {
-      owner->find_coregions(this, requirement.region, 
-                  external_instances, attached_event); 
-      return RtEvent::NO_RT_EVENT;
+      return owner->find_coregions(this, requirement.region, 
+                          external_instances, attached_event); 
     }
 
     //--------------------------------------------------------------------------
