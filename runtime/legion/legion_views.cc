@@ -532,7 +532,6 @@ namespace Legion {
         LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
         EventFieldMap preconditions;
-        
         for (unsigned idx1 = 0; idx1 < num_events; idx1++)
         {
           ApEvent event;
