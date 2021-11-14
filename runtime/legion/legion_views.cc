@@ -440,10 +440,11 @@ namespace Legion {
           copy_expr, op_id, index, preconditions, trace_recording, source);
       // Pack up the response and send it back
       Serializer rez;
+      if (!preconditions.empty())
       {
         RezCheck z2(rez);
-        rez.serialize(inst_view->did);
         rez.serialize<size_t>(preconditions.size());
+        rez.serialize(inst_view->did);
         for (EventFieldMap::const_iterator it = 
               preconditions.begin(); it != preconditions.end(); it++)
         {
@@ -453,6 +454,15 @@ namespace Legion {
         rez.serialize(remote_aggregator);
         rez.serialize<bool>(reading);
         rez.serialize(done_event);
+        copy_expr->pack_expression(rez, source);
+      }
+      else
+      {
+        // We can trigger the event right away but still need to send
+        // the response to remove the reference on the copy expression
+        Runtime::trigger_event(done_event);
+        RezCheck z2(rez);
+        rez.serialize<size_t>(0);
         copy_expr->pack_expression(rez, source);
       }
       runtime->send_view_find_copy_preconditions_response(source, rez);
@@ -476,10 +486,11 @@ namespace Legion {
           preconditions, dargs->trace_recording, dargs->source);
       // Pack up the response and send it back
       Serializer rez;
+      if (!preconditions.empty())
       {
         RezCheck z2(rez);
-        rez.serialize(inst_view->did);
         rez.serialize<size_t>(preconditions.size());
+        rez.serialize(inst_view->did);
         for (EventFieldMap::const_iterator it =
               preconditions.begin(); it != preconditions.end(); it++)
         {
@@ -489,6 +500,15 @@ namespace Legion {
         rez.serialize(dargs->aggregator);
         rez.serialize<bool>(dargs->reading);
         rez.serialize(dargs->done_event);
+        dargs->copy_expr->pack_expression(rez, dargs->source);
+      }
+      else
+      {
+        // We can trigger the event right away but we still need to send
+        // a message back to remove the reference on the copy expression
+        Runtime::trigger_event(dargs->done_event);
+        RezCheck z2(rez);
+        rez.serialize<size_t>(0); // no preconditions
         dargs->copy_expr->pack_expression(rez, dargs->source);
       }
       runtime->send_view_find_copy_preconditions_response(dargs->source, rez);
@@ -502,35 +522,39 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      EventFieldMap preconditions;
       size_t num_events;
       derez.deserialize(num_events);
-      for (unsigned idx1 = 0; idx1 < num_events; idx1++)
+      if (num_events > 0)
       {
-        ApEvent event;
-        derez.deserialize(event);
-        derez.deserialize(preconditions[event]); 
-      }
-      CopyFillAggregator *local_aggregator;
-      derez.deserialize(local_aggregator);
-      bool reading;
-      derez.deserialize(reading);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready = RtEvent::NO_RT_EVENT;
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
 
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+        EventFieldMap preconditions;
+        
+        for (unsigned idx1 = 0; idx1 < num_events; idx1++)
+        {
+          ApEvent event;
+          derez.deserialize(event);
+          derez.deserialize(preconditions[event]); 
+        }
+        CopyFillAggregator *local_aggregator;
+        derez.deserialize(local_aggregator);
+        bool reading;
+        derez.deserialize(reading);
+        RtUserEvent done_event;
+        derez.deserialize(done_event);
+
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
 #ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
+        assert(view->is_instance_view());
 #endif
-      InstanceView *inst_view = view->as_instance_view();
-      local_aggregator->record_preconditions(inst_view, reading, preconditions);
-      Runtime::trigger_event(done_event);
+        InstanceView *inst_view = view->as_instance_view();
+        local_aggregator->record_preconditions(inst_view,reading,preconditions);
+        Runtime::trigger_event(done_event);
+      }
       // Finally unpack the copy expression and remove the reference we 
       // added to it when we sent the request
       IndexSpaceExpression *copy_expr = 
