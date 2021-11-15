@@ -9556,8 +9556,10 @@ namespace Legion {
         else
           Runtime::trigger_event(never_gc_event);
       }
-      // Remote our reference
+      // Remove our references
       if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        delete manager;
+      if (manager->remove_base_resource_ref(RUNTIME_REF))
         delete manager;
     }
 
@@ -9618,6 +9620,9 @@ namespace Legion {
               std::pair<unsigned,PhysicalManager*>(idx, remote_manager));
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
         }
+        // Remove the runtime reference from the weak acquire
+        if (manager->remove_base_resource_ref(RUNTIME_REF))
+          delete manager;
       }
       std::vector<bool> *target;
       derez.deserialize(target);
@@ -25978,6 +25983,7 @@ namespace Legion {
         dist_collectables.find(did);
       if (finder == dist_collectables.end())
         return NULL;
+      finder->second->add_base_resource_ref(RUNTIME_REF);
       return finder->second;
     } 
 

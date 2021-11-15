@@ -16563,9 +16563,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(
+          runtime->weak_find_distributed_collectable(did));
       FieldMask mask;
       derez.deserialize(mask);
       AddressSpaceID origin;
@@ -16575,16 +16574,21 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      std::set<RtEvent> applied_events; 
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->invalidate_trackers(mask, applied_events, origin,
-                               NULL/*mapping*/, context_uid);
-      if (!applied_events.empty())
-        Runtime::trigger_event(done_event,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(done_event);
+      if (set != NULL)
+      {
+        std::set<RtEvent> applied_events; 
+        set->invalidate_trackers(mask, applied_events, origin,
+                                 NULL/*mapping*/, context_uid);
+        if (set->remove_base_resource_ref(RUNTIME_REF))
+          delete set;
+        if (!applied_events.empty())
+        {
+          Runtime::trigger_event(done_event,
+              Runtime::merge_events(applied_events));
+          return;
+        }
+      }
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
