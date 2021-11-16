@@ -2950,7 +2950,7 @@ namespace Realm {
                               "architecture. Update the 'GPU_ARCH' flag at the top "
                               "of runtime/runtime.mk to match/include your current GPU "
 			      "architecture (%d).",
-			(info->compute_major * 10 + info->compute_minor));
+			(info->major * 10 + info->minor));
         } else {
 	  log_gpu.error("Failed to load HIP module! Error log: %s", 
 			log_error_buffer);
@@ -3090,9 +3090,9 @@ namespace Realm {
         int num_devices;
       	CHECK_CU( hipGetDeviceCount(&num_devices) );
       	if(num_devices == 0) {
-	  // continue on so that we recognize things like -ll:gpu, but there
-	  //  are no devices to be found
-	  log_gpu.info() << "hipInit reports no devices found";
+          // continue on so that we recognize things like -ll:gpu, but there
+          //  are no devices to be found
+          log_gpu.info() << "hipInit reports no devices found";
       	} else {
       	  for(int i = 0; i < num_devices; i++) {
       	    GPUInfo *info = new GPUInfo;
@@ -3102,16 +3102,85 @@ namespace Realm {
             hipDeviceProp_t dev_prop;
             CHECK_CU( hipGetDeviceProperties(&dev_prop, info->device) );
             memcpy(info->name, dev_prop.name, GPUInfo::MAX_NAME_LEN);
-            info->compute_major = dev_prop.major;
-            info->compute_minor = dev_prop.minor;
-            info->total_mem = dev_prop.totalGlobalMem;
-
+            info->major = dev_prop.major;
+            info->minor = dev_prop.minor;
+            info->totalGlobalMem = dev_prop.totalGlobalMem;
+#ifdef REALM_USE_HIP_HIJACK
+            // We only need the rest of these properties for the hijack
+#define GET_DEVICE_PROP(member, name)					\
+            do {								\
+              int tmp;								\
+              CHECK_CU( hipDeviceGetAttribute(&tmp, hipDeviceAttribute##name, info->device) ); \
+              info->member = tmp;						\
+            } while(0)
+            // SCREW TEXTURES AND SURFACES FOR NOW!
+            GET_DEVICE_PROP(sharedMemPerBlock, MaxSharedMemoryPerBlock);
+            GET_DEVICE_PROP(regsPerBlock, MaxRegistersPerBlock);
+            GET_DEVICE_PROP(warpSize, WarpSize);
+            // GET_DEVICE_PROP(memPitch, MAX_PITCH);
+            GET_DEVICE_PROP(maxThreadsPerBlock, MaxThreadsPerBlock);
+            GET_DEVICE_PROP(maxThreadsDim[0], MaxBlockDimX);
+            GET_DEVICE_PROP(maxThreadsDim[1], MaxBlockDimY);
+            GET_DEVICE_PROP(maxThreadsDim[2], MaxBlockDimZ);
+            GET_DEVICE_PROP(maxGridSize[0], MaxGridDimX);
+            GET_DEVICE_PROP(maxGridSize[1], MaxGridDimY);
+            GET_DEVICE_PROP(maxGridSize[2], MaxGridDimZ);
+            GET_DEVICE_PROP(clockRate, ClockRate);
+            GET_DEVICE_PROP(totalConstMem, TotalConstantMemory);
+            // GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
+            GET_DEVICE_PROP(multiProcessorCount, MultiprocessorCount );
+            // GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
+            // GET_DEVICE_PROP(integrated, INTEGRATED);
+            // GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
+            GET_DEVICE_PROP(computeMode, ComputeMode);
+            GET_DEVICE_PROP(concurrentKernels, ConcurrentKernels);
+            // GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
+            GET_DEVICE_PROP(pciBusID, PciBusId);
+            GET_DEVICE_PROP(pciDeviceID, PciDeviceId);
+            // GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
+            // GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
+            // GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
+            // GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
+            GET_DEVICE_PROP(memoryClockRate, MemoryClockRate);
+            GET_DEVICE_PROP(memoryBusWidth, MemoryBusWidth);
+            GET_DEVICE_PROP(l2CacheSize, L2CacheSize);
+            GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MaxThreadsPerMultiProcessor);
+            // GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
+            // GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
+            // GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
+            GET_DEVICE_PROP(maxSharedMemoryPerMultiProcessor, MaxSharedMemoryPerMultiprocessor);
+            // GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
+            // GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
+            GET_DEVICE_PROP(isMultiGpuBoard, IsMultiGpuBoard);
+            // GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
+// #if CUDA_VERSION >= 8000
+//             GET_DEVICE_PROP(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO);
+//             GET_DEVICE_PROP(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS);
+//             GET_DEVICE_PROP(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS);
+// #endif
+// #if CUDA_VERSION >= 9000
+//             GET_DEVICE_PROP(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED);
+//             GET_DEVICE_PROP(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM);
+//             GET_DEVICE_PROP(cooperativeLaunch, COOPERATIVE_LAUNCH);
+//             GET_DEVICE_PROP(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH);
+//             GET_DEVICE_PROP(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
+// #endif
+// #if CUDA_VERSION >= 9200
+//             GET_DEVICE_PROP(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES);
+//             GET_DEVICE_PROP(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST);
+// #endif
+// #if CUDA_VERSION >= 11000
+//             GET_DEVICE_PROP(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR);
+//             GET_DEVICE_PROP(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE);
+// #endif
+#undef GET_DEVICE_PROP
+#endif // REALM_USE_HIP_HIJACK
       	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
-      	     		   << info->compute_major << '.' << info->compute_minor
-      			   << ") " << (info->total_mem >> 20) << " MB";
+      	     		   << info->major << '.' << info->minor
+      			   << ") " << (info->totalGlobalMem >> 20) << " MB";
 
-	    infos.push_back(info);
-	  }
+            infos.push_back(info);
+          }
         }
 
       	if(infos.empty()) {

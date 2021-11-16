@@ -63,15 +63,21 @@ namespace Realm {
   
   namespace Hip {
 
-    struct GPUInfo {
+    struct GPUInfo 
+#ifdef REALM_USE_HIP_HIJACK
+      : public hipDeviceProp_t
+#endif
+    {
       int index;  // index used by HIP runtime
       hipDevice_t device;
 
+#ifdef REALM_USE_HIP_HIJACK
       static const size_t MAX_NAME_LEN = 64;
       char name[MAX_NAME_LEN];
 
-      int compute_major, compute_minor;
-      size_t total_mem;
+      int major, minor;
+      size_t totalGlobalMem;
+#endif
       std::set<hipDevice_t> peers;  // other GPUs we can do p2p copies with
     };
 
