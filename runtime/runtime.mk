@@ -1179,21 +1179,21 @@ ifdef PREFIX
 INSTALL_BIN_FILES += $(OUTFILE)
 INSTALL_INC_FILES += legion_defines.h realm_defines.h
 INSTALL_LIB_FILES += $(SLIB_REALM) $(SLIB_LEGION)
-TARGET_HEADERS := $(addprefix $(PREFIX)/include/,$(INSTALL_HEADERS))
-TARGET_BIN_FILES := $(addprefix $(PREFIX)/bin/,$(INSTALL_BIN_FILES))
-TARGET_INC_FILES := $(addprefix $(PREFIX)/include/,$(INSTALL_INC_FILES))
-TARGET_LIB_FILES := $(addprefix $(PREFIX)/lib/,$(INSTALL_LIB_FILES))
+TARGET_HEADERS := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_HEADERS))
+TARGET_BIN_FILES := $(addprefix $(strip $(PREFIX))/bin/,$(INSTALL_BIN_FILES))
+TARGET_INC_FILES := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_INC_FILES))
+TARGET_LIB_FILES := $(addprefix $(strip $(PREFIX))/lib/,$(INSTALL_LIB_FILES))
 install: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
-$(TARGET_HEADERS) : $(PREFIX)/include/% : $(LG_RT_DIR)/%
+$(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/%
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_BIN_FILES) : $(PREFIX)/bin/% : %
+$(TARGET_BIN_FILES) : $(strip $(PREFIX))/bin/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_INC_FILES) : $(PREFIX)/include/% : %
+$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_LIB_FILES) : $(PREFIX)/lib/% : %
+$(TARGET_LIB_FILES) : $(strip $(PREFIX))/lib/% : %
 	mkdir -p $(dir $@)
 	cp $< $@
 else
