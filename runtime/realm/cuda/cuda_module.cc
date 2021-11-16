@@ -3236,6 +3236,7 @@ namespace Realm {
             GET_DEVICE_PROP(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM);
             GET_DEVICE_PROP(cooperativeLaunch, COOPERATIVE_LAUNCH);
             GET_DEVICE_PROP(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH);
+            GET_DEVICE_PROP(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN); 
 #endif
 #if CUDA_VERSION >= 9200
             GET_DEVICE_PROP(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES);
