@@ -1539,8 +1539,34 @@ local function hoist_args(cx, hoisted, args)
   end
 end
 
+-- This function does not detect all possible index launches,
+-- just those we want to do LICM on.
+local function maybe_index_launch(node)
+  if #node.block.stats == 0 then
+    return false
+  end
+
+  for i = 1, #node.block.stats - 1 do
+    local stat = node.block.stats[i]
+    if not stat:is(ast.typed.stat.Var) then
+      return false
+    end
+  end
+  local body = node.block.stats[#node.block.stats]
+  if (body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call)) or
+     (body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call))
+  then
+    return true
+  end
+  return false
+end
+
 local function licm(cx, node)
   local hoisted = terralib.newlist()
+
+  if not maybe_index_launch(node) then
+    return hoisted
+  end
 
   local loop_cx = cx:new_local_scope()
   loop_cx:set_loop_index(node.symbol)
@@ -1548,13 +1574,11 @@ local function licm(cx, node)
 
   for i = 1, #node.block.stats - 1 do
     local stat = node.block.stats[i]
-    if stat:is(ast.typed.stat.Var) then
-      if analyze_is_loop_invariant(loop_cx, stat) then
-        hoisted:insert(stat)
-        node.block.stats[i] = false
-      else
-        loop_cx:add_loop_variable(stat.symbol)
-      end
+    if analyze_is_loop_invariant(loop_cx, stat) then
+      hoisted:insert(stat)
+      node.block.stats[i] = false
+    else
+      loop_cx:add_loop_variable(stat.symbol)
     end
   end
 
