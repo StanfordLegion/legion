@@ -46,10 +46,8 @@ namespace Realm {
     };
 
     class RegionInstanceImpl {
-    protected:
+    public:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
-      friend class MemoryImpl;
-      friend class LocalManagedMemory;
       RegionInstanceImpl(RegionInstance _me, Memory _memory);
       ~RegionInstanceImpl(void);
 
