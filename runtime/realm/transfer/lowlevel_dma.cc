@@ -20,6 +20,7 @@
 #include "realm/threads.h"
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/channel_disk.h"
+#include "realm/transfer/ib_memory.h"
 
 #include <errno.h>
 // included for file memory data transfer
@@ -52,199 +53,8 @@
 namespace Realm {
 
     Logger log_dma("dma");
-    Logger log_ib_alloc("ib_alloc");
     //extern Logger log_new_dma;
     Logger log_aio("aio");
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class PendingIBQueue
-  //
-
-  PendingIBQueue ib_req_queue;
-
-  // enqueues a request (or handles immediately, if possible)
-  void PendingIBQueue::enqueue_request(Memory tgt_mem, NodeID req_node,
-				       uintptr_t req_op,
-				       unsigned ib_index, size_t size)
-  {
-    // do most of this with mutex held
-    AutoLock<> al(queue_mutex);
-
-    // check if there are NO pending requests for this memory
-    std::map<Memory, PerMemory>::iterator it = queues.find(tgt_mem);
-    if((it == queues.end()) || (it->second.requests.empty())) {
-      // drop the lock while we attempt an immediate allocation
-      al.release();
-
-      IBMemory *ibmem = get_runtime()->get_ib_memory_impl(tgt_mem);
-      off_t offset = ibmem->alloc_bytes_local(size);
-      if(offset >= 0) {
-	// success - notify op and return (lock is already dropped)
-	if(req_node == Network::my_node_id) {
-	  TransferOperation *op = reinterpret_cast<TransferOperation *>(req_op);
-	  op->notify_ib_allocation(ib_index, offset);
-	} else {
-	  ActiveMessage<RemoteIBAllocResponse> amsg(req_node);
-	  amsg->req_op = req_op;
-	  amsg->ib_index = ib_index;
-	  amsg->offset = offset;
-	  amsg.commit();
-	}
-	return;
-      }
-
-      // failed - reacquire lock and enqueue
-      al.reacquire();
-
-      // have to look up memory again if we dropped the lock
-      it = queues.find(tgt_mem);
-    }
-
-    // create element if needed
-    if(it == queues.end())
-      it = queues.insert({ tgt_mem, PerMemory { 0 } }).first;
-
-    it->second.requests.push_back(IBAllocRequest { req_node, req_op, ib_index, size });
-  }
-
-  // attempts to dequeue pending requests for the specified memory
-  void PendingIBQueue::dequeue_request(Memory tgt_mem)
-  {
-    // do most of this with mutex held
-    AutoLock<> al(queue_mutex);
-
-    // find queue for this memory
-    std::map<Memory, PerMemory>::iterator it = queues.find(tgt_mem);
-    if(it == queues.end()) {
-      // no queue - nothing to do!
-      return;
-    }
-
-    // iterator will be lost once we let go of the lock, but the PerMemory
-    //  object will stay where it is even if other things are added to the map
-    PerMemory& pm = it->second;
-
-    // mark that a dequeuer exists and notice if there are others
-    if(pm.deq_count++ > 0) {
-      // we have now delegated our dequeuing to them
-      return;
-    }
-
-    // can look this up once and reuse it
-    IBMemory *ibmem = 0;
-
-    // handle as many items from the queue as we can
-    while(!pm.requests.empty()) {
-      // peek at first entry and then drop lock while attempting allocation
-      IBAllocRequest req = pm.requests.front();
-      al.release();
-
-      if(!ibmem)
-	ibmem = get_runtime()->get_ib_memory_impl(tgt_mem);
-      off_t offset = ibmem->alloc_bytes_local(req.size);
-      if(offset >= 0) {
-	// success - notify op
-	if(req.req_node == Network::my_node_id) {
-	  TransferOperation *op = reinterpret_cast<TransferOperation *>(req.req_op);
-	  op->notify_ib_allocation(req.ib_index, offset);
-	} else {
-	  ActiveMessage<RemoteIBAllocResponse> amsg(req.req_node);
-	  amsg->req_op = req.req_op;
-	  amsg->ib_index = req.ib_index;
-	  amsg->offset = offset;
-	  amsg.commit();
-	}
-      }
-
-      // have to re-take lock even if we failed because another dequeue request
-      //  might have piled up, which means we need to try again
-      al.reacquire();
-      if(offset >= 0) {
-#ifdef DEBUG_REALM
-	assert(req.req_node == pm.requests.front().req_node);
-	assert(req.req_op == pm.requests.front().req_op);
-	assert(req.ib_index == pm.requests.front().ib_index);
-	assert(req.size == pm.requests.front().size);
-#endif
-	pm.requests.pop_front();
-      } else {
-	if(pm.deq_count == 1) break;
-      }
-      // now that we hold the lock and are going to try again, we have "joined"
-      //  with any other pending dequeues
-      pm.deq_count = 1;
-    }
-
-#ifdef DEBUG_REALM
-    assert(pm.deq_count == 1);
-#endif
-    pm.deq_count = 0;
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteIBAllocRequest
-  //
-
-  /*static*/ void RemoteIBAllocRequest::handle_message(NodeID sender,
-						       const RemoteIBAllocRequest &args,
-						       const void *data, size_t msglen)
-  {
-    ib_req_queue.enqueue_request(args.memory, sender,
-				 args.req_op, args.ib_index, args.size);
-  }
-
-  ActiveMessageHandlerReg<RemoteIBAllocRequest> remote_ib_alloc_request_handler;
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RemoteIBAllocResponse
-  //
-
-  /*static*/ void RemoteIBAllocResponse::handle_message(NodeID sender,
-							const RemoteIBAllocResponse &args,
-							const void *data, size_t msglen)
-  {
-    TransferOperation *op = reinterpret_cast<TransferOperation *>(args.req_op);
-    op->notify_ib_allocation(args.ib_index, args.offset);
-  }
-
-  ActiveMessageHandlerReg<RemoteIBAllocResponse> remote_ib_alloc_response_handler;
-
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class RemoteIBFreeRequestAsync
-    //
-
-    /*static*/ void RemoteIBFreeRequestAsync::handle_message(NodeID sender,
-							     const RemoteIBFreeRequestAsync &args,
-							     const void *data, size_t msglen)
-    {
-      assert(NodeID(ID(args.memory).memory_owner_node()) == Network::my_node_id);
-      get_runtime()->get_ib_memory_impl(args.memory)->free_bytes_local(args.ib_offset, args.ib_size);
-      ib_req_queue.dequeue_request(args.memory);
-    }
-
-    void free_intermediate_buffer(Memory mem, off_t offset, size_t size)
-    {
-      //CopyRequest* cr = (CopyRequest*) req;
-      //AutoLock<> al(cr->ib_mutex);
-      if(NodeID(ID(mem).memory_owner_node()) == Network::my_node_id) {
-        get_runtime()->get_ib_memory_impl(mem)->free_bytes_local(offset, size);
-        ib_req_queue.dequeue_request(mem);
-      } else {
-	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
-	amsg->memory = mem;
-	amsg->ib_offset = offset;
-	amsg->ib_size = size;
-	amsg.commit();
-      }
-    }
-
 
     static atomic<unsigned> rdma_sequence_no(1);
 
@@ -1015,7 +825,5 @@ namespace Realm {
       delete aio_context;
       aio_context = 0;
     }
-
-  ActiveMessageHandlerReg<RemoteIBFreeRequestAsync> remote_ib_free_request_async_handler;
 
 };

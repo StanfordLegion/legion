@@ -19,7 +19,7 @@
 #include "realm/transfer/channel.h"
 
 #include "realm/transfer/lowlevel_dma.h"
-#include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 #include "realm/inst_layout.h"
 
 #ifdef REALM_ON_WINDOWS
@@ -30,6 +30,7 @@ typedef SSIZE_T ssize_t;
 namespace Realm {
 
   extern Logger log_dma;
+  extern Logger log_ib_alloc;
   Logger log_xplan("xplan");
 
   ////////////////////////////////////////////////////////////////////////
@@ -3164,6 +3165,24 @@ namespace Realm {
     return ib_size;
   }
 
+  struct IBAllocOrderSorter {
+    IBAllocOrderSorter(const std::vector<TransferGraph::IBInfo>& _edges)
+      : edges(_edges) {}
+
+    bool operator()(unsigned a, unsigned b) const {
+      // first sort by ascending memory ID
+      if(edges[a].memory.id < edges[b].memory.id) return true;
+      if(edges[a].memory.id > edges[b].memory.id) return false;
+      // next by decreasing size
+      if(edges[a].size > edges[b].size) return true;
+      if(edges[a].size < edges[b].size) return false;
+      // finally by index itself for stability
+      return (a < b);
+    }
+
+    const std::vector<TransferGraph::IBInfo>& edges;
+  };
+
   void TransferDesc::perform_analysis()
   {
     // initialize profiling data
@@ -3542,6 +3561,20 @@ namespace Realm {
       }
     }
 
+    // once we've enumerated all the ibs we'll need, we need to pick an order in
+    //  which to allocate them that will avoid deadlock when multiple transfer
+    //  operations are allocating ibs concurrently - sorting by the memory (and
+    //  then having the allocation code do all ibs for the same memory for a single
+    //  transfer op atomically) does the trick
+    if(!graph.ib_edges.empty()) {
+      graph.ib_alloc_order.resize(graph.ib_edges.size());
+      for(size_t i = 0; i < graph.ib_edges.size(); i++)
+        graph.ib_alloc_order[i] = i;
+
+      std::sort(graph.ib_alloc_order.begin(), graph.ib_alloc_order.end(),
+                IBAllocOrderSorter(graph.ib_edges));
+    }
+
     if(log_xplan.want_debug()) {
       log_xplan.debug() << "analysis: plan=" << (void *)this
 			<< " dim_order=" << PrettyVector<int>(dim_order)
@@ -3563,6 +3596,9 @@ namespace Realm {
 	log_xplan.debug() << "analysis: plan=" << (void *)this
 			  << " ibs[" << i << "]: memory=" << graph.ib_edges[i].memory
 			  << " size=" << graph.ib_edges[i].size;
+      if(!graph.ib_edges.empty())
+        log_xplan.debug() << "analysis: plan=" << (void *)this
+			  << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
     }
 
     // mark that the analysis is complete and see if there are any pending
@@ -3710,36 +3746,93 @@ namespace Realm {
       //  this loop
       ib_responses_needed.store(tg.ib_edges.size() + 1);
 
-      // sort requests by target memory to reduce risk of resource deadlock
-      // TODO: actually merge requests so that there's at most one per memory
-      typedef std::map<Memory, std::vector<unsigned> > PendingIBRequests;
-      PendingIBRequests pending;
-      for(size_t i = 0; i < tg.ib_edges.size(); i++)
-	pending[tg.ib_edges[i].memory].push_back(i);
+      // respect computed ib allocation order
+      // TODO: attempt opportunistic unordered allocation
 
-      for(PendingIBRequests::const_iterator it = pending.begin();
-	  it != pending.end();
-	  ++it) {
-	Memory tgt_mem = it->first;
-	for(std::vector<unsigned>::const_iterator it2 = it->second.begin();
-	    it2 != it->second.end();
-	    ++it2) {
-	  NodeID owner = ID(tgt_mem).memory_owner_node();
-	  if(owner == Network::my_node_id) {
-	    // local request
-	    ib_req_queue.enqueue_request(tgt_mem, Network::my_node_id,
-					 reinterpret_cast<uintptr_t>(this),
-					 *it2, tg.ib_edges[*it2].size);
-	  } else {
-	    // send message to remote owner
-	    ActiveMessage<RemoteIBAllocRequest> amsg(owner);
-	    amsg->memory = tgt_mem;
-	    amsg->size = tg.ib_edges[*it2].size;
-	    amsg->req_op = reinterpret_cast<uintptr_t>(this);
-	    amsg->ib_index = *it2;
-	    amsg.commit();
-	  }
-	}
+      // see who owns the first memory we need to allocate from
+      NodeID first_owner = ID(tg.ib_edges[tg.ib_alloc_order[0]].memory).memory_owner_node();
+      unsigned immed_count = 0;
+      if(first_owner == Network::my_node_id) {
+        // attempt immediate allocation of local IBs
+        std::vector<size_t> sizes;
+        std::vector<off_t> offsets;
+        while(immed_count < tg.ib_edges.size()) {
+          Memory tgt_mem = tg.ib_edges[tg.ib_alloc_order[immed_count]].memory;
+          first_owner = ID(tgt_mem).memory_owner_node();
+          // if we've gotten to IB requests that are non-local, stop
+          if(first_owner != Network::my_node_id)
+            break;
+          sizes.assign(1, tg.ib_edges[tg.ib_alloc_order[immed_count]].size);
+          unsigned same_mem = 1;
+          while(((immed_count + same_mem) < tg.ib_edges.size()) &&
+                (tgt_mem == tg.ib_edges[tg.ib_alloc_order[immed_count + same_mem]].memory)) {
+            sizes.push_back(tg.ib_edges[tg.ib_alloc_order[immed_count + same_mem]].size);
+            same_mem += 1;
+          }
+
+          offsets.assign(same_mem, -1);
+          IBMemory *ib_mem = get_runtime()->get_ib_memory_impl(tgt_mem);
+          if(ib_mem->attempt_immediate_allocation(Network::my_node_id,
+                                                  reinterpret_cast<uintptr_t>(this),
+                                                  same_mem, sizes.data(),
+                                                  offsets.data())) {
+            log_ib_alloc.debug() << "satisfied: op=" << Network::my_node_id
+                                 << "/" << (void *)this
+                                 << " index=" << immed_count << "+" << same_mem
+                                 << " mem=" << tgt_mem;
+
+            notify_ib_allocations(same_mem, immed_count, offsets.data());
+            immed_count += same_mem;
+          } else {
+            // an immediate allocation failed, so it's time to enqueue
+            break;
+          }
+        }
+      }
+
+      unsigned rem_count = tg.ib_edges.size() - immed_count;
+      if(rem_count > 0) {
+        if(first_owner == Network::my_node_id) {
+          // enqueue all remaining requests with the first memory
+          PendingIBRequests *reqs = new PendingIBRequests(Network::my_node_id,
+                                                          reinterpret_cast<uintptr_t>(this),
+                                                          rem_count,
+                                                          immed_count, 0);
+          for(unsigned i = 0; i < rem_count; i++) {
+            reqs->memories.push_back(tg.ib_edges[tg.ib_alloc_order[immed_count + i]].memory);
+            reqs->sizes.push_back(tg.ib_edges[tg.ib_alloc_order[immed_count + i]].size);
+          }
+
+          IBMemory *ib_mem = get_runtime()->get_ib_memory_impl(reqs->memories[0]);
+          ib_mem->enqueue_requests(reqs);
+        } else {
+          // active message time - special case for rem_count == 1
+          if(rem_count == 1) {
+            ActiveMessage<RemoteIBAllocRequestSingle> amsg(first_owner);
+            amsg->memory = tg.ib_edges[tg.ib_alloc_order[immed_count]].memory;
+            amsg->size = tg.ib_edges[tg.ib_alloc_order[immed_count]].size;
+            amsg->req_op = reinterpret_cast<uintptr_t>(this);
+            amsg->req_index = immed_count;
+            amsg->immediate = false;
+            amsg.commit();
+          } else {
+            size_t bytes = (rem_count * (sizeof(Memory) + sizeof(size_t)));
+            ActiveMessage<RemoteIBAllocRequestMultiple> amsg(first_owner, bytes);
+            amsg->requestor = Network::my_node_id;
+            amsg->count = rem_count;
+            amsg->first_index = immed_count;
+            amsg->curr_index = 0;
+            amsg->req_op = reinterpret_cast<uintptr_t>(this);
+            amsg->immediate = false;
+
+            for(unsigned i = 0; i < rem_count; i++)
+              amsg << tg.ib_edges[tg.ib_alloc_order[immed_count + i]].memory;
+            for(unsigned i = 0; i < rem_count; i++)
+              amsg << tg.ib_edges[tg.ib_alloc_order[immed_count + i]].size;
+
+            amsg.commit();
+          }
+        }
       }
 
       // once all requests are made, do the extra decrement and continue if they
@@ -3772,7 +3865,15 @@ namespace Realm {
   void TransferOperation::notify_ib_allocation(unsigned ib_index,
 					       off_t ib_offset)
   {
+    log_ib_alloc.info() << "notify: op=" << (void *)this
+                        << " index=" << ib_index << "+1"
+                        << " ok=" << ((ib_offset >= 0) ? 1 : 0);
+
+    // translate alloc order back to original ib index
+    ib_index = desc.graph.ib_alloc_order[ib_index];
     assert(ib_index < ib_offsets.size());
+    // TODO: handle failed immediate allocation attempts
+    assert(ib_offset >= 0);
 #ifdef DEBUG_REALM
     assert(ib_offsets[ib_index] == -1);
 #endif
@@ -3780,6 +3881,32 @@ namespace Realm {
 
     // if this was the last response needed, we can continue on to creating xds
     if(ib_responses_needed.fetch_sub_acqrel(1) == 1)
+      create_xds();
+  }
+
+  void TransferOperation::notify_ib_allocations(unsigned count,
+                                                unsigned first_index,
+                                                const off_t *offsets)
+  {
+    log_ib_alloc.info() << "notify: op=" << (void *)this
+                        << " index=" << first_index << "+" << count
+                        << " ok=" << ((offsets != 0) ? 1 : 0);
+
+    assert((first_index + count) <= ib_offsets.size());
+    // TODO: handle failed immediate allocation attempts
+    assert(offsets);
+
+    for(unsigned i = 0; i < count; i++) {
+      // translate alloc order back to original ib index
+      unsigned ib_index = desc.graph.ib_alloc_order[first_index + i];
+#ifdef DEBUG_REALM
+      assert(ib_offsets[ib_index] == -1);
+#endif
+      ib_offsets[ib_index] = offsets[i];
+    }
+
+    // if this was the last response needed, we can continue on to creating xds
+    if(ib_responses_needed.fetch_sub_acqrel(count) == count)
       create_xds();
   }
 

@@ -32,6 +32,7 @@ list(APPEND REALM_SRC
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
+  realm/transfer/ib_memory.h               realm/transfer/ib_memory.cc
   realm/deppart/byfield.h                  realm/deppart/byfield.cc
   realm/deppart/deppart_config.h
   realm/deppart/image.h

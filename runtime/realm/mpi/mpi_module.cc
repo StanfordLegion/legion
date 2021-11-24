@@ -23,6 +23,7 @@
 
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 
 void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
