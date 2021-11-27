@@ -8142,11 +8142,6 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
-          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION:
-            {
-              runtime->handle_index_space_remote_expression_invalidation(derez);
-              break;
-            }
           case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
             {
               runtime->handle_index_space_generate_color_request(derez,
@@ -16052,16 +16047,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_remote_expression_invalidation(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION,
-          EXPRESSION_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_space_generate_color_request(AddressSpaceID target,
                                                           Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17816,14 +17801,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       forest->handle_remote_expression_response(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_remote_expression_invalidation(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_expression_invalidation(derez);
     }
 
     //--------------------------------------------------------------------------
