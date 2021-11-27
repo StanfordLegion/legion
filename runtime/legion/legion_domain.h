@@ -141,6 +141,8 @@ namespace Legion {
 
     __CUDA_HD__
     DomainPoint& operator=(const DomainPoint &rhs);
+    template<int DIM, typename T> __CUDA_HD__
+    DomainPoint& operator=(const Point<DIM,T> &rhs);
     __CUDA_HD__
     bool operator==(const DomainPoint &rhs) const;
     __CUDA_HD__
@@ -266,6 +268,10 @@ namespace Legion {
 
     __CUDA_HD__
     Domain& operator=(const Domain& other);
+    template<int DIM, typename T> __CUDA_HD__
+    Domain& operator=(const Rect<DIM,T> &other);
+    template<int DIM, typename T> __CUDA_HD__
+    Domain& operator=(const DomainT<DIM,T> &other);
 
     __CUDA_HD__
     bool operator==(const Domain &rhs) const;
