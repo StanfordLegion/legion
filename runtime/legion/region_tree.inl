@@ -3160,20 +3160,64 @@ namespace Legion {
       return result;
     } 
 
+    // This is a small helper class for converting realm index spaces when
+    // the types don't naturally align with the underlying index space type
+    template<int DIM, typename TYPELIST>
+    struct RealmSpaceConverter {
+      static inline void convert_to(const Domain &domain, void *realm_is, 
+                                    const TypeTag type_tag, const char *context)
+      {
+        // Compute the type tag for this particular type with the same DIM
+        const TypeTag tag =
+          NT_TemplateHelper::encode_tag<DIM,typename TYPELIST::HEAD>();
+        if (tag == type_tag)
+        {
+          Realm::IndexSpace<DIM,typename TYPELIST::HEAD> *target =
+            static_cast<Realm::IndexSpace<DIM,typename TYPELIST::HEAD>*>(
+                                                                realm_is);
+          *target = domain;
+        }
+        else
+          RealmSpaceConverter<DIM,typename TYPELIST::TAIL>::convert_to(domain,
+                                                  realm_is, type_tag, context);
+      }
+    };
+
+    // Specialization for end-of-list cases
+    template<int DIM>
+    struct RealmSpaceConverter<DIM,Realm::DynamicTemplates::TypeListTerm> {
+      static inline void convert_to(const Domain &domain, void *realm_is, 
+                                    const TypeTag type_tag, const char *context)
+      {
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+          "Dynamic type mismatch in '%s'", context)
+      }
+    };
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::get_index_space_domain(void *realm_is, 
                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      if (type_tag != handle.get_type_tag())
-        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-            "Dynamic type mismatch in 'get_index_space_domain'")
-      Realm::IndexSpace<DIM,T> *target = 
-        static_cast<Realm::IndexSpace<DIM,T>*>(realm_is);
-      // No need to wait since we're waiting for it to be tight
-      // which implies that it will be ready
-      get_realm_index_space(*target, true/*tight*/);
+      if (type_tag == handle.get_type_tag())
+      {
+        Realm::IndexSpace<DIM,T> *target = 
+          static_cast<Realm::IndexSpace<DIM,T>*>(realm_is);
+        // No need to wait since we're waiting for it to be tight
+        // which implies that it will be ready
+        get_realm_index_space(*target, true/*tight*/);
+      }
+      else
+      {
+        Realm::IndexSpace<DIM,T> target;
+        // No need to wait since we're waiting for it to be tight
+        // which implies that it will be ready
+        get_realm_index_space(target, true/*tight*/);
+        const Domain domain(target);
+        RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to(
+                  domain, realm_is, type_tag, "get_index_space_domain");
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3199,21 +3243,86 @@ namespace Legion {
       return DIM;
     }
 
+    // This is a small helper class for converting realm points when the 
+    // types don't naturally align with the underling index space type
+    template<int DIM, typename TYPELIST>
+    struct RealmPointConverter {
+      // Convert To
+      static inline void convert_to(const DomainPoint &point, void *realm_point,
+                                    const TypeTag type_tag, const char *context)
+      {
+        // Compute the type tag for this particular type with the same DIM
+        const TypeTag tag =
+          NT_TemplateHelper::template encode_tag<DIM,typename TYPELIST::HEAD>();
+        if (tag == type_tag)
+        {
+          Realm::Point<DIM,typename TYPELIST::HEAD> *target =
+           static_cast<Realm::Point<DIM,typename TYPELIST::HEAD>*>(realm_point);
+          *target = point;
+        }
+        else
+          RealmPointConverter<DIM,typename TYPELIST::TAIL>::convert_to(point,
+                                               realm_point, type_tag, context);
+      } 
+      // Convert From
+      static inline void convert_from(const void *realm_point, TypeTag type_tag,
+                                      DomainPoint &point, const char *context)
+      {
+        // Compute the type tag for this particular type with the same DIM
+        const TypeTag tag =
+          NT_TemplateHelper::encode_tag<DIM,typename TYPELIST::HEAD>();
+        if (tag == type_tag)
+        {
+          const Realm::Point<DIM,typename TYPELIST::HEAD> *source =
+           static_cast<const Realm::Point<DIM,typename TYPELIST::HEAD>*>(
+                                                              realm_point);
+          point = *source;
+        }
+        else
+          RealmPointConverter<DIM,typename TYPELIST::TAIL>::convert_from(
+                                    realm_point, type_tag, point, context);
+      } 
+    };
+
+    // Specialization for the end-of-list cases
+    template<int DIM>
+    struct RealmPointConverter<DIM,Realm::DynamicTemplates::TypeListTerm> {
+      static inline void convert_to(const DomainPoint &point, void *realm_point,
+                                    const TypeTag type_tag, const char *context)
+      {
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+          "Dynamic type mismatch in '%s'", context)
+      }
+      static inline void convert_from(const void *realm_point, TypeTag type_tag,
+                                      DomainPoint &point, const char *context)
+      {
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+          "Dynamic type mismatch in '%s'", context)
+      }
+    };
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::contains_point(const void *realm_point, 
                                                 TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      if (type_tag != handle.get_type_tag())
-        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-            "Dynamic type mismatch in 'safe_cast'")
-      const Realm::Point<DIM,T> *point = 
-        static_cast<const Realm::Point<DIM,T>*>(realm_point);
       Realm::IndexSpace<DIM,T> test_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
-      return test_space.contains(*point);
+      if (type_tag == handle.get_type_tag())
+      {
+        const Realm::Point<DIM,T> *point = 
+          static_cast<const Realm::Point<DIM,T>*>(realm_point);
+        return test_space.contains(*point);
+      }
+      else
+      {
+        DomainPoint point;
+        RealmPointConverter<DIM,Realm::DIMTYPES>::convert_from(
+            realm_point, type_tag, point, "safe_cast");
+        return test_space.contains(Point<DIM,T>(point));
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3294,8 +3403,16 @@ namespace Legion {
 #endif
       if (!linearization_ready)
         compute_linearization_metadata();
-      Realm::Point<DIM,T> point = 
-        *(static_cast<const Realm::Point<DIM,T>*>(realm_color));
+      Realm::Point<DIM,T> point;
+      if (type_tag != handle.get_type_tag())
+      {
+        DomainPoint dp;
+        RealmPointConverter<DIM,Realm::DIMTYPES>::convert_from(
+            realm_color, type_tag, dp, "linearize_color");
+        point = dp;
+      }
+      else
+        point = *(static_cast<const Realm::Point<DIM,T>*>(realm_color));
       // First subtract the offset to get to the origin
       point -= offset;
       LegionColor color = 0;
@@ -3325,19 +3442,31 @@ namespace Legion {
                                             void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(type_tag == handle.get_type_tag());
-#endif
       if (!linearization_ready)
         compute_linearization_metadata();
-      Realm::Point<DIM,T> &point = 
-        *(static_cast<Realm::Point<DIM,T>*>(realm_color));
-      for (int idx = DIM-1; idx >= 0; idx--)
+      if (type_tag == handle.get_type_tag())
       {
-        point[idx] = color/strides[idx]; // truncates
-        color -= point[idx] * strides[idx];
+        Realm::Point<DIM,T> &point = 
+          *(static_cast<Realm::Point<DIM,T>*>(realm_color));
+        for (int idx = DIM-1; idx >= 0; idx--)
+        {
+          point[idx] = color/strides[idx]; // truncates
+          color -= point[idx] * strides[idx];
+        }
+        point += offset;
       }
-      point += offset;
+      else
+      {
+        Realm::Point<DIM,T> point;
+        for (int idx = DIM-1; idx >= 0; idx--)
+        {
+          point[idx] = color/strides[idx]; // truncates
+          color -= point[idx] * strides[idx];
+        }
+        point += offset;
+        RealmPointConverter<DIM,Realm::DIMTYPES>::convert_to(
+            DomainPoint(point), realm_color, type_tag, "delinearize_color");
+      }
     }
 
     //--------------------------------------------------------------------------
