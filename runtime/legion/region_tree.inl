@@ -3468,9 +3468,6 @@ namespace Legion {
                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(type_tag == handle.get_type_tag());
-#endif
       if (!linearization_ready)
         compute_linearization_metadata();
       Realm::Point<DIM,T> point;
