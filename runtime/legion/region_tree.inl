@@ -1405,8 +1405,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceOperationT<DIM,T>::IndexSpaceOperationT(RegionTreeForest *ctx, 
-                                                      Deserializer &derez)
-      : IndexSpaceOperation(NT_TemplateHelper::encode_tag<DIM,T>(), ctx, derez),
+        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceOperation *origin, TypeTag tag, Deserializer &derez)
+      : IndexSpaceOperation(tag, ctx, eid, did, owner, origin),
         is_index_space_tight(false)
     //--------------------------------------------------------------------------
     {
@@ -2430,9 +2431,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    RemoteExpression<DIM,T>::RemoteExpression(Deserializer &derez,
-                                              RegionTreeForest *forest)
-      : IndexSpaceOperationT<DIM,T>(forest, derez)
+    RemoteExpression<DIM,T>::RemoteExpression(RegionTreeForest *forest,
+        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceOperation *origin, TypeTag tag, Deserializer &derez)
+      : IndexSpaceOperationT<DIM,T>(forest, eid, did, owner, origin, tag, derez)
     //--------------------------------------------------------------------------
     {
     }

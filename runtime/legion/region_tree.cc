@@ -6582,11 +6582,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
-                                             Deserializer &derez)
-      : IndexSpaceExpression(tag, unpack_expr_id(derez), inter_lock),
-        DistributedCollectable(ctx->runtime, unpack_origin_did(derez),
-                               unpack_origin_space(derez)),
-        context(ctx), origin_expr(unpack_origin_expr(derez)),
+        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceOperation *origin)
+      : IndexSpaceExpression(tag, eid, inter_lock),
+        DistributedCollectable(ctx->runtime, did, owner), 
+        context(ctx), origin_expr(origin),
         op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
     //--------------------------------------------------------------------------
     {
