@@ -1540,7 +1540,7 @@ namespace Legion {
         rez.serialize<bool>(true/*local*/);
         rez.serialize(this);
       }
-      else if (this->is_owner())
+      else if (target == this->owner_space)
       {
         rez.serialize<bool>(true/*local*/);
         rez.serialize(origin_expr);
