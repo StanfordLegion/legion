@@ -68,6 +68,7 @@ constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>
 # Region Tree
 index_space_pat = re.compile(prefix + r'GC Index Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 index_part_pat  = re.compile(prefix + r'GC Index Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+index_expr_pat  = re.compile(prefix + r'GC Index Expr (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 field_space_pat = re.compile(prefix + r'GC Field Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 region_pat      = re.compile(prefix + r'GC Region (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<is>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
 partition_pat   = re.compile(prefix + r'GC Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<ip>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
@@ -629,6 +630,14 @@ class IndexPartition(Base):
     def __repr__(self):
         return 'Index Partition '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
 
+class IndexExpression(Base):
+    def __init__(self, did, node, handle):
+        super(IndexExpression,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Index Expressions '+str(self.did)+' (Node='+str(self.node)+') ExprID '+str(self.handle)
+
 class FieldSpace(Base):
     def __init__(self, did, node, handle):
         super(FieldSpace,self).__init__(did, node)
@@ -679,6 +688,7 @@ class State(object):
         self.equivalence_sets = {}
         self.index_spaces = {}
         self.index_partitions = {}
+        self.index_expressions = {}
         self.field_spaces = {}
         self.regions = {}
         self.partitions = {}
@@ -792,6 +802,12 @@ class State(object):
                     self.log_index_partition(long_type(m.group('did')),
                                              long_type(m.group('node')),
                                              long_type(m.group('handle')))
+                    continue
+                m = index_expr_pat.match(line)
+                if m is not None:
+                    self.log_index_expression(long_type(m.group('did')),
+                                              long_type(m.group('node')),
+                                              long_type(m.group('handle')))
                     continue
                 m = field_space_pat.match(line)
                 if m is not None:
@@ -934,6 +950,9 @@ class State(object):
     def log_index_partition(self, did, node, handle):
         self.get_index_partition(did, node, handle)
 
+    def log_index_expression(self, did, node, handle):
+        self.get_index_expression(did, node, handle)
+
     def log_field_space(self, did, node, handle):
         self.get_field_space(did, node, handle)
 
@@ -1027,6 +1046,15 @@ class State(object):
                 self.index_partitions[key].clone(self.unknowns[key])
                 del self.unknowns[key]
         return self.index_partitions[key]
+
+    def get_index_expression(self, did, node, handle):
+        key = (did,node)
+        if key not in self.index_expressions:
+            self.index_expressions[key] = IndexExpression(did, node, handle)
+            if key in self.unknowns:
+                self.index_expressions[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.index_expressions[key]
 
     def get_field_space(self, did, node, handle):
         key = (did,node)

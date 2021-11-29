@@ -38,8 +38,8 @@ namespace Legion {
 
     enum DistCollectableType {
       PHYSICAL_MANAGER_DC = 0x1,
-      //= 0x2,
-      //= 0x3,
+      INDEX_SPACE_NODE_DC = 0x2,
+      INDEX_PART_NODE_DC = 0x3,
       MATERIALIZED_VIEW_DC = 0x4,
       REDUCTION_VIEW_DC = 0x5,
       FILL_VIEW_DC = 0x6,
@@ -47,7 +47,7 @@ namespace Legion {
       VERSION_STATE_DC = 0x8,
       FUTURE_DC = 0x9,
       FUTURE_MAP_DC = 0xA,
-      INDEX_TREE_NODE_DC = 0xB,
+      INDEX_EXPR_NODE_DC = 0xB,
       FIELD_SPACE_DC = 0xC,
       REGION_TREE_NODE_DC = 0xD,
       EQUIVALENCE_SET_DC = 0xE,

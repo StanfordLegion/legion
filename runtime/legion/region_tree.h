@@ -863,7 +863,6 @@ namespace Legion {
                                             AddressSpaceID source);
       void handle_remote_expression_response(Deserializer &derez,
                                              AddressSpaceID source);
-      void handle_remote_expression_invalidation(Deserializer &derez);
     protected:
       IndexSpaceExpression* unpack_expression_value(Deserializer &derez,
                                                     AddressSpaceID source);
@@ -1306,7 +1305,8 @@ namespace Legion {
       bool empty, has_empty;
     };
 
-    class IndexSpaceOperation : public IndexSpaceExpression,public Collectable {
+    class IndexSpaceOperation : public IndexSpaceExpression,
+                                public DistributedCollectable {
     public:
       enum OperationKind {
         UNION_OP_KIND,
@@ -1318,9 +1318,16 @@ namespace Legion {
     public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
                           RegionTreeForest *ctx);
-      IndexSpaceOperation(TypeTag tag, OperationKind kind,
-                          RegionTreeForest *ctx, Deserializer &derez);
+      IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
+          IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+          IndexSpaceOperation *origin);
       virtual ~IndexSpaceOperation(void);
+    public:
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      // We should never be using valid references for index space expressions
+      virtual void notify_valid(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_invalid(ReferenceMutator *mutator) { assert(false); }
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
@@ -1341,30 +1348,12 @@ namespace Legion {
                       std::set<RtEvent> *applied) = 0;
     public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
-    protected:
-      void record_remote_expression(AddressSpaceID target);
-    public:
-      static inline IndexSpaceExprID unpack_expr_id(Deserializer &derez)
-        {
-          IndexSpaceExprID expr_id;
-          derez.deserialize(expr_id);
-          return expr_id;
-        }
-      static inline IndexSpaceExpression* unpack_origin_expr(Deserializer &drz)
-        {
-          IndexSpaceExpression *origin_expr;
-          drz.deserialize(origin_expr);
-          return origin_expr;
-        }
     public:
       RegionTreeForest *const context;
+      IndexSpaceOperation *const origin_expr;
       const OperationKind op_kind;
-      IndexSpaceExpression *const origin_expr;
-      const AddressSpaceID origin_space;
     protected:
       mutable LocalLock inter_lock;
-    protected:
-      std::set<AddressSpaceID> *remote_exprs;
     private:
       int invalidated;
     };
@@ -1373,8 +1362,9 @@ namespace Legion {
     class IndexSpaceOperationT : public IndexSpaceOperation {
     public:
       IndexSpaceOperationT(OperationKind kind, RegionTreeForest *ctx);
-      IndexSpaceOperationT(OperationKind kind, RegionTreeForest *ctx,
-                           Deserializer &derez);
+      IndexSpaceOperationT(RegionTreeForest *ctx, IndexSpaceExprID eid,
+          DistributedID did, AddressSpaceID owner, IndexSpaceOperation *op,
+          TypeTag tag, Deserializer &derez);
       virtual ~IndexSpaceOperationT(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
@@ -1475,8 +1465,6 @@ namespace Legion {
     public:
       IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
                       RegionTreeForest *context);
-      IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
-                      RegionTreeForest *context, Deserializer &derez);
       IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
       virtual ~IndexSpaceUnion(void);
     public:
@@ -1514,8 +1502,6 @@ namespace Legion {
     public:
       IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
                              RegionTreeForest *context);
-      IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
-                             RegionTreeForest *context, Deserializer &derez);
       IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
       virtual ~IndexSpaceIntersection(void);
     public:
@@ -1553,8 +1539,6 @@ namespace Legion {
     public:
       IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
                            RegionTreeForest *context);
-      IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
-                           RegionTreeForest *context, Deserializer &derez);
       IndexSpaceDifference(const IndexSpaceDifference &rhs);
       virtual ~IndexSpaceDifference(void);
     public:
@@ -1615,7 +1599,9 @@ namespace Legion {
     template<int DIM, typename T>
     class RemoteExpression : public IndexSpaceOperationT<DIM,T> {
     public:
-      RemoteExpression(Deserializer &derez, RegionTreeForest *context);
+      RemoteExpression(RegionTreeForest *context, IndexSpaceExprID eid,
+          DistributedID did, AddressSpaceID own, IndexSpaceOperation *op,
+          TypeTag type_tag, Deserializer &derez);
       RemoteExpression(const RemoteExpression<DIM,T> &rhs);
       virtual ~RemoteExpression(void);
     public:
@@ -1634,8 +1620,17 @@ namespace Legion {
       template<typename N, typename T>
       static inline void demux(RemoteExpressionCreator *creator)
       {
+        IndexSpaceExprID expr_id;
+        creator->derez.deserialize(expr_id);
+        DistributedID did;
+        creator->derez.deserialize(did);
+        AddressSpaceID owner_space;
+        creator->derez.deserialize(owner_space);
+        IndexSpaceOperation *origin;
+        creator->derez.deserialize(origin);
         creator->produce(
-            new RemoteExpression<N::N,T>(creator->derez, creator->forest));
+            new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
+              owner_space, origin, creator->type_tag, creator->derez));
       }
     public:
       // Nothing to do for this
