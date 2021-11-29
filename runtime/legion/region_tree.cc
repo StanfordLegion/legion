@@ -6837,19 +6837,13 @@ namespace Legion {
                                                 IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceExpression *expr;
-      {
-        AutoLock l_lock(lookup_is_op_lock);
-        std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator 
-          finder = remote_expressions.find(remote_expr_id);
+      AutoLock l_lock(lookup_is_op_lock);
+      std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator 
+        finder = remote_expressions.find(remote_expr_id);
 #ifdef DEBUG_LEGION
-        assert(finder != remote_expressions.end());
+      assert(finder != remote_expressions.end());
 #endif
-        expr = finder->second;
-        remote_expressions.erase(finder);
-      }
-      if (expr->remove_expression_reference())
-        delete expr;
+      remote_expressions.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -6901,17 +6895,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::handle_remote_expression_invalidation(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexSpaceExprID remote_expr_id;
-      derez.deserialize(remote_expr_id);
-      unregister_remote_expression(remote_expr_id);
-    }
-
-    //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::unpack_expression_value(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -6926,14 +6909,6 @@ namespace Legion {
         IndexSpaceNode *result = get_node(handle);
         // Remove the reference that we have from when this was packed
         result->send_remote_gc_decrement(source);
-        return result;
-      }
-      bool local;
-      derez.deserialize<bool>(local);
-      if (local)
-      {
-        IndexSpaceExpression *result;
-        derez.deserialize(result);
         return result;
       }
       RemoteExpressionCreator creator(this, derez);
@@ -6990,7 +6965,7 @@ namespace Legion {
     {
       const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
       targs->proxy_this->tighten_index_space();
-      if (targs->proxy_this->remove_expression_reference(true/*tree only*/))
+      if (targs->proxy_this->remove_expression_reference())
         delete targs->proxy_this;
     }
 
@@ -7155,10 +7130,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
-      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), context(ctx),
-        op_kind(kind), origin_expr(this), 
-        origin_space(ctx->runtime->address_space), remote_exprs(NULL),
-        invalidated(0)
+      : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
+        DistributedCollectable(ctx->runtime, 
+          ctx->runtime->get_available_distributed_id(),
+          ctx->runtime->address_space),
+        context(ctx), origin_expr(this), op_kind(kind), invalidated(0)
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
@@ -7166,16 +7142,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
-                                     RegionTreeForest *ctx, Deserializer &derez)
-      : IndexSpaceExpression(tag, unpack_expr_id(derez), inter_lock),
-        context(ctx), op_kind(kind), origin_expr(unpack_origin_expr(derez)), 
-        origin_space(expr_id % ctx->runtime->total_address_spaces),
-        remote_exprs(NULL), invalidated(0)
+    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
+        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceOperation *origin)
+      : IndexSpaceExpression(tag, eid, inter_lock),
+        DistributedCollectable(ctx->runtime, did, owner), 
+        context(ctx), origin_expr(origin),
+        op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
     //--------------------------------------------------------------------------
     {
-      // We always keep a reference on ourself until we get invalidated
-      add_expression_reference(1/*count*/, true/*expr tree*/);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7190,34 +7168,40 @@ namespace Legion {
 #endif
         IndexSpaceExpression::finalize_canonical(volume, context, this, expr);
       }
-      // Send messages to remove any remote expressions
-      if (remote_exprs != NULL)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(expr_id);
-        }
-        Runtime *runtime = context->runtime;
-        for (std::set<AddressSpaceID>::const_iterator it =
-              remote_exprs->begin(); it != remote_exprs->end(); it++)
-          runtime->send_index_space_remote_expression_invalidation(*it, rez);
-        delete remote_exprs;
-      }
+      if (!is_owner())
+        context->unregister_remote_expression(expr_id); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the owner send a gc reference to the owner
+      if (!is_owner())
+        send_remote_gc_increment(owner_space, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the remote gc reference on the owner
+      if (!is_owner())
+        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceOperation::try_add_canonical_reference(void)
     //--------------------------------------------------------------------------
     {
-      return (__sync_fetch_and_add(&references,1) > 0);
+      return check_resource_and_increment(CANONICAL_REF);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceOperation::remove_canonical_reference(void)
     //--------------------------------------------------------------------------
     {
-      return remove_reference();
+      return remove_base_resource_ref(CANONICAL_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -7225,7 +7209,13 @@ namespace Legion {
                                                        bool expr_tree)
     //--------------------------------------------------------------------------
     {
-      add_reference(count);
+      if (!expr_tree)
+      {
+        LocalReferenceMutator mutator;
+        add_base_gc_ref(IS_EXPR_REF, &mutator, count);
+      }
+      else
+        add_base_resource_ref(IS_EXPR_REF, count);
     }
 
     //--------------------------------------------------------------------------
@@ -7233,21 +7223,11 @@ namespace Legion {
                                                           bool expr_tree)
     //--------------------------------------------------------------------------
     {
-      return remove_reference(count);
+      if (expr_tree)
+        return remove_base_resource_ref(IS_EXPR_REF, count);
+      else
+        return remove_base_gc_ref(IS_EXPR_REF, NULL/*mutator*/, count);
     } 
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::record_remote_expression(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inter_lock);
-      if (remote_exprs == NULL)
-        remote_exprs = new std::set<AddressSpaceID>();
-#ifdef DEBUG_LEGION
-      assert(remote_exprs->find(target) == remote_exprs->end());
-#endif
-      remote_exprs->insert(target);
-    }
 
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::invalidate_operation(
@@ -7277,7 +7257,7 @@ namespace Legion {
         {
           // Add a reference to prevent the parents from being collected
           // as we're traversing up the tree
-          (*it)->add_reference();
+          (*it)->add_base_resource_ref(IS_EXPR_REF);
           parents[idx] = (*it);
         }
       }
@@ -7288,7 +7268,7 @@ namespace Legion {
       {
         (*it)->invalidate_operation(to_remove);
         // Remove the reference when we're done with the parents
-        if ((*it)->remove_reference())
+        if ((*it)->remove_base_resource_ref(IS_EXPR_REF))
           delete (*it);
       }
     }
@@ -7679,9 +7659,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
         LegionColor c, DistributedID did, AddressSpaceID owner, RtEvent init)
-      : DistributedCollectable(ctx->runtime, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_TREE_NODE_DC), 
-          owner, false/*register*/),
+      : DistributedCollectable(ctx->runtime, did, owner, false/*register*/),
         context(ctx), depth(d), color(c), initialized(init)
     //--------------------------------------------------------------------------
     {
@@ -7917,8 +7895,10 @@ namespace Legion {
                                    DistributedID did, ApEvent ready,
                                    IndexSpaceExprID exp_id, RtEvent init,
                                    unsigned dep)
-      : IndexTreeNode(ctx, (dep == UINT_MAX) ? ((par == NULL) ? 0 : 
-         par->depth + 1) : dep, c, did, get_owner_space(h, ctx->runtime), init),
+      : IndexTreeNode(ctx,
+          (dep == UINT_MAX) ? ((par == NULL) ? 0 : par->depth + 1) : dep, c, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_SPACE_NODE_DC),
+          get_owner_space(h, ctx->runtime), init),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
@@ -8051,7 +8031,7 @@ namespace Legion {
                 parent_operations.begin(); it != 
                 parent_operations.end(); it++, idx++)
           {
-            (*it)->add_reference();
+            (*it)->add_expression_reference(true/*expr tree*/);
             parents[idx] = (*it);
           }
         }
@@ -8062,7 +8042,7 @@ namespace Legion {
         // Remove any references that we have on the parents
         for (std::vector<IndexSpaceOperation*>::const_iterator it = 
               parents.begin(); it != parents.end(); it++)
-          if ((*it)->remove_reference())
+          if ((*it)->remove_expression_reference(true/*expr tree*/))
             delete (*it);
       }
     }
@@ -9477,9 +9457,11 @@ namespace Legion {
                                  DistributedID did, ApEvent part_ready, 
                                  ApBarrier partial, RtEvent init,
                                  ShardMapping *mapping)
-      : IndexTreeNode(ctx, par->depth+1, c, did,
-          get_owner_space(p, ctx->runtime), init), handle(p), parent(par),
-        color_space(color_sp), total_children(color_sp->get_volume()), 
+      : IndexTreeNode(ctx, par->depth+1, c,
+                      LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
+                      get_owner_space(p, ctx->runtime), init), 
+        handle(p), parent(par), color_space(color_sp), 
+        total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial),
         shard_mapping(mapping), disjoint(dis), 
@@ -9513,9 +9495,11 @@ namespace Legion {
                                  int comp, DistributedID did,
                                  ApEvent part_ready, ApBarrier part,
                                  RtEvent init, ShardMapping *map)
-      : IndexTreeNode(ctx, par->depth+1, c, did,
-          get_owner_space(p, ctx->runtime), init), handle(p), parent(par),
-        color_space(color_sp), total_children(color_sp->get_volume()),
+      : IndexTreeNode(ctx, par->depth+1, c,
+                      LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
+                      get_owner_space(p, ctx->runtime), init), handle(p), 
+        parent(par), color_space(color_sp), 
+        total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part), shard_mapping(map),
         disjoint_ready(dis_ready), disjoint(false), 

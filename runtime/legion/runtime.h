@@ -2989,8 +2989,6 @@ namespace Legion {
                                                       Serializer &rez);
       void send_index_space_remote_expression_response(AddressSpaceID target,
                                                        Serializer &rez);
-      void send_index_space_remote_expression_invalidation(
-                                    AddressSpaceID target, Serializer &rez);
       void send_index_space_generate_color_request(AddressSpaceID target,
                                                    Serializer &rez);
       void send_index_space_generate_color_response(AddressSpaceID target,
@@ -3322,8 +3320,6 @@ namespace Legion {
                                                         AddressSpaceID source);
       void handle_index_space_remote_expression_response(Deserializer &derez,
                                                          AddressSpaceID source);
-      void handle_index_space_remote_expression_invalidation(
-                                                         Deserializer &derez);
       void handle_index_space_generate_color_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_index_space_generate_color_response(Deserializer &derez);
