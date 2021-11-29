@@ -6578,6 +6578,10 @@ namespace Legion {
     {
       // We always keep a reference on ourself until we get invalidated
       add_expression_reference(true/*expr tree*/);
+#ifdef LEGION_GC
+      log_garbage.info("GC Index Expr %lld %d %lld",
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, expr_id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6592,6 +6596,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
+#endif
+#ifdef LEGION_GC
+      log_garbage.info("GC Index Expr %lld %d %lld",
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, expr_id);
 #endif
     }
 

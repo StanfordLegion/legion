@@ -8683,7 +8683,8 @@ namespace Legion {
         index_space_node->add_nested_resource_ref(did);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Equivalence Set %lld %d", this->did, local_space);
+      log_garbage.info("GC Equivalence Set %lld %d",
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
