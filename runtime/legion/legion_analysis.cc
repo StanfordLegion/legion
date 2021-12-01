@@ -9852,7 +9852,7 @@ namespace Legion {
         add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d",
-          LEGION_DISTRIBUTED_ID_FILTER(id), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 

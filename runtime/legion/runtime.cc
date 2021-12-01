@@ -28665,6 +28665,16 @@ namespace Legion {
           return "Layout Constraints";
         case COPY_FILL_AGGREGATOR_ALLOC:
           return "Copy Fill Aggregator";
+        case UNION_EXPR_ALLOC:
+          return "Union Index Space Expression";
+        case INTERSECTION_EXPR_ALLOC:
+          return "Intersection Index Space Expression";
+        case DIFFERENCE_EXPR_ALLOC:
+          return "Difference Index Space Expression";
+        case INSTANCE_EXPR_ALLOC:
+          return "Instance Index Space Expression";
+        case REMOTE_EXPR_ALLOC:
+          return "Remote Index Space Expression";
         default:
           assert(false); // should never get here
       }

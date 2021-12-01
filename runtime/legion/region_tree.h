@@ -1554,7 +1554,10 @@ namespace Legion {
     };
 
     template<int DIM, typename T>
-    class IndexSpaceUnion : public IndexSpaceOperationT<DIM,T> {
+    class IndexSpaceUnion : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<IndexSpaceUnion<DIM,T> > {
+    public:
+      static const AllocationType alloc_type = UNION_EXPR_ALLOC;
     public:
       IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
                       RegionTreeForest *context);
@@ -1591,7 +1594,10 @@ namespace Legion {
     };
 
     template<int DIM, typename T>
-    class IndexSpaceIntersection : public IndexSpaceOperationT<DIM,T> {
+    class IndexSpaceIntersection : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<IndexSpaceIntersection<DIM,T> > {
+    public:
+      static const AllocationType alloc_type = INTERSECTION_EXPR_ALLOC;
     public:
       IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
                              RegionTreeForest *context);
@@ -1628,7 +1634,10 @@ namespace Legion {
     };
 
     template<int DIM, typename T>
-    class IndexSpaceDifference : public IndexSpaceOperationT<DIM,T> {
+    class IndexSpaceDifference : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<IndexSpaceDifference<DIM,T> > {
+    public:
+      static const AllocationType alloc_type = DIFFERENCE_EXPR_ALLOC;
     public:
       IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
                            RegionTreeForest *context);
@@ -1672,7 +1681,10 @@ namespace Legion {
      * rectangles that represent a physical instance
      */
     template<int DIM, typename T>
-    class InstanceExpression : public IndexSpaceOperationT<DIM,T> {
+    class InstanceExpression : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<InstanceExpression<DIM,T> > {
+    public:
+      static const AllocationType alloc_type = INSTANCE_EXPR_ALLOC;
     public:
       InstanceExpression(const Rect<DIM,T> *rects, size_t num_rects,
                          RegionTreeForest *context);
@@ -1690,7 +1702,10 @@ namespace Legion {
      * A copy of an expression that lives on a remote node.
      */
     template<int DIM, typename T>
-    class RemoteExpression : public IndexSpaceOperationT<DIM,T> {
+    class RemoteExpression : public IndexSpaceOperationT<DIM,T>,
+        public LegionHeapify<RemoteExpression<DIM,T> > {
+    public:
+      static const AllocationType alloc_type = REMOTE_EXPR_ALLOC;
     public:
       RemoteExpression(RegionTreeForest *context, IndexSpaceExprID eid,
           DistributedID did, AddressSpaceID own, IndexSpaceOperation *op,
