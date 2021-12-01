@@ -1028,7 +1028,7 @@ namespace Legion {
         TightenIndexSpaceArgs(IndexSpaceExpression *proxy)
           : LgTaskArgs<TightenIndexSpaceArgs>(implicit_provenance),
             proxy_this(proxy) 
-          { proxy->add_expression_tree_reference(); }
+          { proxy->add_base_expression_reference(IS_EXPR_REF); }
       public:
         IndexSpaceExpression *const proxy_this;
       };
@@ -1094,13 +1094,20 @@ namespace Legion {
     public:
       virtual bool try_add_canonical_reference(void) = 0;
       virtual bool remove_canonical_reference(void) = 0;
-      virtual void add_expression_reference(std::set<RtEvent> &applied_events,
-                                            unsigned count = 1) = 0;
-      virtual void add_expression_reference(ReferenceMutator *mutator = NULL,
-                                            unsigned count = 1) = 0;
-      virtual bool remove_expression_reference(unsigned count = 1) = 0;
-      virtual void add_expression_tree_reference(unsigned count = 1) = 0;
-      virtual bool remove_expression_tree_reference(unsigned count = 1) = 0;
+      virtual void add_base_expression_reference(ReferenceSource source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
+      virtual void add_nested_expression_reference(DistributedID source,
+          std::set<RtEvent> &applied_events, unsigned count = 1) = 0;
+      virtual void add_nested_expression_reference(DistributedID source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
+      virtual bool remove_base_expression_reference(ReferenceSource source,
+                                                    unsigned count = 1) = 0;
+      virtual bool remove_nested_expression_reference(DistributedID source,
+                                                      unsigned count = 1) = 0;
+      virtual void add_tree_expression_reference(DistributedID source,
+                                                 unsigned count = 1) = 0;
+      virtual bool remove_tree_expression_reference(DistributedID source,
+                                                    unsigned count = 1) = 0;
     public:
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
@@ -1348,13 +1355,20 @@ namespace Legion {
     public:
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(std::set<RtEvent> &applied_events,
-                                            unsigned count = 1);
-      virtual void add_expression_reference(ReferenceMutator *mutator = NULL,
-                                            unsigned count = 1);
-      virtual bool remove_expression_reference(unsigned count = 1);
-      virtual void add_expression_tree_reference(unsigned count = 1);
-      virtual bool remove_expression_tree_reference(unsigned count = 1);
+      virtual void add_base_expression_reference(ReferenceSource source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          std::set<RtEvent> &applied_events, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual bool remove_base_expression_reference(ReferenceSource source,
+                                                    unsigned count = 1);
+      virtual bool remove_nested_expression_reference(DistributedID source,
+                                                      unsigned count = 1);
+      virtual void add_tree_expression_reference(DistributedID source,
+                                                 unsigned count = 1);
+      virtual bool remove_tree_expression_reference(DistributedID source,
+                                                    unsigned count = 1);
     public:
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
@@ -1963,13 +1977,20 @@ namespace Legion {
     public:
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(std::set<RtEvent> &applied_events,
-                                            unsigned count = 1);
-      virtual void add_expression_reference(ReferenceMutator *mutator = NULL,
-                                            unsigned count = 1);
-      virtual bool remove_expression_reference(unsigned count = 1);
-      virtual void add_expression_tree_reference(unsigned count = 1);
-      virtual bool remove_expression_tree_reference(unsigned count = 1);
+      virtual void add_base_expression_reference(ReferenceSource source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          std::set<RtEvent> &applied_events, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual bool remove_base_expression_reference(ReferenceSource source,
+                                                    unsigned count = 1);
+      virtual bool remove_nested_expression_reference(DistributedID source,
+                                                      unsigned count = 1);
+      virtual void add_tree_expression_reference(DistributedID source,
+                                                 unsigned count = 1);
+      virtual bool remove_tree_expression_reference(DistributedID source,
+                                                    unsigned count = 1);
     public:
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* create_node(IndexSpace handle,

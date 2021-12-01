@@ -2231,11 +2231,13 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_REMOVE_EQ_REF_TASK_ID;
       public:
-        DeferRemoveRefArgs(std::vector<IndexSpaceExpression*> *refs)
+        DeferRemoveRefArgs(std::vector<IndexSpaceExpression*> *refs,
+                           DistributedID src)
           : LgTaskArgs<DeferRemoveRefArgs>(implicit_provenance),
-            references(refs) { }
+            references(refs), source(src) { }
       public:
         std::vector<IndexSpaceExpression*> *const references;
+        const DistributedID source;
       };
     protected:
       enum EqState {

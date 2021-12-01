@@ -80,7 +80,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(IS_EXPR_REF);
     }
 #else
     //--------------------------------------------------------------------------
@@ -92,7 +92,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(IS_EXPR_REF);
     }
 #endif
 
@@ -116,7 +116,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(IS_EXPR_REF))
         delete expr;
     }
 
@@ -8666,7 +8666,7 @@ namespace Legion {
         pending_analyses(0)
     //--------------------------------------------------------------------------
     {
-      set_expr->add_expression_reference();
+      set_expr->add_nested_expression_reference(did);
       if (index_space_node != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -8702,7 +8702,7 @@ namespace Legion {
     EquivalenceSet::~EquivalenceSet(void)
     //--------------------------------------------------------------------------
     {
-      if (set_expr->remove_expression_reference())
+      if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
       if ((index_space_node != NULL) && 
           index_space_node->remove_nested_resource_ref(did))
@@ -8754,7 +8754,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               unrefined_remainders.begin(); it != 
               unrefined_remainders.end(); it++)
-          if (it->first->remove_expression_reference())
+          if (it->first->remove_nested_expression_reference(did))
             delete it->first;
       }
       if (subset_exprs != NULL)
@@ -9028,7 +9028,7 @@ namespace Legion {
                     to_delete.begin(); it != to_delete.end(); it++)
               {
                 unrefined_remainders.erase(*it);
-                if ((*it)->remove_expression_reference())
+                if ((*it)->remove_nested_expression_reference(did))
                   delete (*it);
               }
               unrefined_remainders.tighten_valid_mask();
@@ -9266,7 +9266,7 @@ namespace Legion {
                         assert(unrefined_remainders.get_valid_mask() * overlap);
 #endif
                         if (unrefined_remainders.insert(diff_expr, overlap))
-                          diff_expr->add_expression_reference();
+                          diff_expr->add_nested_expression_reference(did);
                       }
                     }
                     // Remove these fields from the overlap indicating
@@ -9455,7 +9455,7 @@ namespace Legion {
                               it->set_mask);
 #endif
                       if (unrefined_remainders.insert(remainder, it->set_mask))
-                        remainder->add_expression_reference();
+                        remainder->add_nested_expression_reference(did);
                     }
                   }
                 }
@@ -9499,7 +9499,7 @@ namespace Legion {
                             to_filter);
 #endif
                     if (unrefined_remainders.insert(remainder, to_filter))
-                      remainder->add_expression_reference();
+                      remainder->add_nested_expression_reference(did);
                   }
                 }
               }
@@ -9596,7 +9596,7 @@ namespace Legion {
                 forest->subtract_index_spaces(set_expr, expr);
 #endif
               if (unrefined_remainders.insert(diff, ray_mask))
-                diff->add_expression_reference();
+                diff->add_nested_expression_reference(did);
               ray_mask.clear();
             }
           }
@@ -10245,7 +10245,7 @@ namespace Legion {
         unrefined_remainders.clear();
         // Defer removing the references on these expressions until
         // the migration has been done
-        DeferRemoveRefArgs args(references);
+        DeferRemoveRefArgs args(references, did);
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, done_migration);
       }
@@ -10426,7 +10426,7 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);
         if (unrefined_remainders.insert(expr, mask))
-          expr->add_expression_reference();
+          expr->add_nested_expression_reference(did);
       }
       size_t num_disjoint_refinements;
       derez.deserialize(num_disjoint_refinements);
@@ -13395,7 +13395,7 @@ namespace Legion {
         assert(unrefined_remainders.get_valid_mask() * finalize_mask);
 #endif
         if (unrefined_remainders.insert(diff_expr, finalize_mask))
-          diff_expr->add_expression_reference();
+          diff_expr->add_nested_expression_reference(did);
       }
     }
 
@@ -13438,7 +13438,7 @@ namespace Legion {
               it = to_delete.begin(); it != to_delete.end(); it++)
         {
           unrefined_remainders.erase(*it);
-          if ((*it)->remove_expression_reference())
+          if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
         unrefined_remainders.tighten_valid_mask();
@@ -13448,7 +13448,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator
               it = to_add.begin(); it != to_add.end(); it++)
           if (unrefined_remainders.insert(it->first, it->second))
-            it->first->add_expression_reference();
+            it->first->add_nested_expression_reference(did);
       }
     }
 
@@ -13865,7 +13865,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local)
-        expr->add_expression_reference();
+        expr->add_base_expression_reference(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -13885,7 +13885,8 @@ namespace Legion {
       // Clean up our ray mask
       delete dargs->ray_mask;
       // Remove our expression reference too
-      if (dargs->is_local && dargs->expr->remove_expression_reference())
+      if (dargs->is_local &&
+          dargs->expr->remove_base_expression_reference(IS_EXPR_REF))
         delete dargs->expr;
     }
 
@@ -13982,7 +13983,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_local)
-        expr->add_expression_reference();
+        expr->add_base_expression_reference(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -14072,7 +14073,8 @@ namespace Legion {
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
       // Remove our expression reference too
-      if (dargs->is_local && dargs->expr->remove_expression_reference())
+      if (dargs->is_local &&
+          dargs->expr->remove_base_expression_reference(IS_EXPR_REF))
         delete dargs->expr;
     }
 
@@ -14083,7 +14085,7 @@ namespace Legion {
       const DeferRemoveRefArgs *dargs = (const DeferRemoveRefArgs*)args;
       for (std::vector<IndexSpaceExpression*>::const_iterator it = 
             dargs->references->begin(); it != dargs->references->end(); it++)
-        if ((*it)->remove_expression_reference())
+        if ((*it)->remove_nested_expression_reference(dargs->source))
           delete (*it);
       delete dargs->references;
     }

@@ -5548,14 +5548,14 @@ namespace Legion {
       assert(precondition_idx < tpl.events.size());
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
     IssueCopy::~IssueCopy(void)
     //--------------------------------------------------------------------------
     {
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(TRACE_REF))
         delete expr;
     }
 
@@ -5646,7 +5646,7 @@ namespace Legion {
       assert(precondition_idx < tpl.events.size());
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(TRACE_REF);
       indirections.resize(indirects.size());
       for (unsigned idx = 0; idx < indirects.size(); idx++)
         indirections[idx] = indirects[idx]->clone();
@@ -5656,7 +5656,7 @@ namespace Legion {
     IssueIndirect::~IssueIndirect(void)
     //--------------------------------------------------------------------------
     {
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(TRACE_REF))
         delete expr;
       for (unsigned idx = 0; idx < indirections.size(); idx++)
         delete indirections[idx];
@@ -5747,7 +5747,7 @@ namespace Legion {
       assert(precondition_idx < tpl.events.size());
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(TRACE_REF);
       src->add_base_resource_ref(TRACE_REF);
       dst->add_base_resource_ref(TRACE_REF);
     }
@@ -5756,7 +5756,7 @@ namespace Legion {
     GPUReduction::~GPUReduction(void)
     //--------------------------------------------------------------------------
     {
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(TRACE_REF))
         delete expr;
       if (src->remove_base_resource_ref(TRACE_REF))
         delete src;
@@ -5846,7 +5846,7 @@ namespace Legion {
       assert(fields.size() > 0);
       assert(precondition_idx < tpl.events.size());
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(TRACE_REF);
       fill_value = malloc(fill_size);
       memcpy(fill_value, value, fill_size);
     }
@@ -5855,7 +5855,7 @@ namespace Legion {
     IssueFill::~IssueFill(void)
     //--------------------------------------------------------------------------
     {
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(TRACE_REF))
         delete expr;
       free(fill_value);
     }

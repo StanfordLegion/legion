@@ -548,9 +548,9 @@ namespace Legion {
       if (layout != NULL)
         layout->add_reference();
       if (field_space_node != NULL)
-        field_space_node->add_base_gc_ref(PHYSICAL_MANAGER_REF);
+        field_space_node->add_nested_gc_ref(did);
       if (instance_domain != NULL)
-        instance_domain->add_expression_reference();
+        instance_domain->add_nested_expression_reference(did);
     }
 
     //--------------------------------------------------------------------------
@@ -560,10 +560,10 @@ namespace Legion {
       if ((layout != NULL) && layout->remove_reference())
         delete layout;
       if ((field_space_node != NULL) &&
-          field_space_node->remove_base_gc_ref(PHYSICAL_MANAGER_REF))
+          field_space_node->remove_nested_gc_ref(did))
         delete field_space_node;
       if ((instance_domain != NULL) && 
-          instance_domain->remove_expression_reference())
+          instance_domain->remove_nested_expression_reference(did))
         delete instance_domain;
     } 
 
@@ -1592,7 +1592,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local_is)
-        local_expr->add_expression_reference();
+        local_expr->add_base_expression_reference(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1613,7 +1613,8 @@ namespace Legion {
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
           dargs->use_event, dargs->redop, dargs->shadow_instance);
       // Remove the local expression reference if necessary
-      if (dargs->local_is && dargs->local_expr->remove_expression_reference())
+      if (dargs->local_is &&
+          dargs->local_expr->remove_base_expression_reference(IS_EXPR_REF))
         delete dargs->local_expr;
     }
 
@@ -3021,7 +3022,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local_is)
-        local_expr->add_expression_reference();
+        local_expr->add_base_expression_reference(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3044,7 +3045,8 @@ namespace Legion {
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
           dargs->use_event, dargs->redop);
       // Remove the local expression reference if necessary
-      if (dargs->local_is && dargs->local_expr->remove_expression_reference())
+      if (dargs->local_is &&
+          dargs->local_expr->remove_base_expression_reference(IS_EXPR_REF))
         delete dargs->local_expr;
     }
 
