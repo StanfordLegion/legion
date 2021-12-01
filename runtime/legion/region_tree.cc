@@ -6570,8 +6570,8 @@ namespace Legion {
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        DistributedCollectable(ctx->runtime, 
-          ctx->runtime->get_available_distributed_id(),
+        DistributedCollectable(ctx->runtime, LEGION_DISTRIBUTED_HELP_ENCODE(
+              ctx->runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC),
           ctx->runtime->address_space),
         context(ctx), origin_expr(this), op_kind(kind), invalidated(0)
     //--------------------------------------------------------------------------
