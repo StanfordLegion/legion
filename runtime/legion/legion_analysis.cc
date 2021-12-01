@@ -80,7 +80,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_base_expression_reference(IS_EXPR_REF);
+      expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
 #else
     //--------------------------------------------------------------------------
@@ -92,7 +92,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_base_expression_reference(IS_EXPR_REF);
+      expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
 #endif
 
@@ -116,7 +116,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      if (expr->remove_base_expression_reference(IS_EXPR_REF))
+      if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
     }
 

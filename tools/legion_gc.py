@@ -636,7 +636,7 @@ class IndexExpression(Base):
         self.handle = handle
 
     def __repr__(self):
-        return 'Index Expressions '+str(self.did)+' (Node='+str(self.node)+') ExprID '+str(self.handle)
+        return 'Index Expression '+str(self.did)+' (Node='+str(self.node)+') ExprID '+str(self.handle)
 
 class FieldSpace(Base):
     def __init__(self, did, node, handle):

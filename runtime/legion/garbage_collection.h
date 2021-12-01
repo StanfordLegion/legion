@@ -76,7 +76,7 @@ namespace Legion {
       CONTEXT_REF = 17,
       RESTRICTED_REF = 18,
       VERSION_STATE_TREE_REF = 19,
-      PHYSICAL_MANAGER_REF = 20,
+      PHYSICAL_USER_REF = 20,
       LOGICAL_VIEW_REF = 21,
       REGION_TREE_REF = 22,
       LAYOUT_DESC_REF = 23,
@@ -117,7 +117,7 @@ namespace Legion {
       "Context Reference",                          \
       "Restricted Reference",                       \
       "Version State Tree Reference",               \
-      "Physical Manager Reference",                 \
+      "Physical User Reference",                    \
       "Logical View Reference",                     \
       "Region Tree Reference",                      \
       "Layout Description Reference",               \

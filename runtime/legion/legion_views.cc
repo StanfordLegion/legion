@@ -761,7 +761,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ExprView::ExprView(const ExprView &rhs)
       : context(rhs.context), manager(rhs.manager), inst_view(rhs.inst_view),
-        view_did(0), view_expr(rhs.view_expr), view_volume(rhs.view_volume)
+        view_expr(rhs.view_expr), view_volume(rhs.view_volume)
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+        , view_did(rhs.view_did)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
