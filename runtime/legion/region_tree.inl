@@ -1876,7 +1876,7 @@ namespace Legion {
 #endif
         // Add the parent and the reference
         sub->add_parent_operation(this);
-        sub->add_expression_reference(true/*expr tree*/);
+        sub->add_expression_tree_reference();
         // Then get the realm index space expression
         ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
@@ -1946,7 +1946,7 @@ namespace Legion {
     {
       // Remove references from our sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        if (sub_expressions[idx]->remove_expression_reference(true/*exprtree*/))
+        if (sub_expressions[idx]->remove_expression_tree_reference())
           delete sub_expressions[idx];
     }
 
@@ -1997,7 +1997,7 @@ namespace Legion {
         forest->remove_union_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
-      return this->remove_expression_reference(true/*expr tree*/);
+      return this->remove_expression_tree_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -2019,7 +2019,7 @@ namespace Legion {
 #endif
         // Add the parent and the reference
         sub->add_parent_operation(this);
-        sub->add_expression_reference(true/*expr tree*/);
+        sub->add_expression_tree_reference();
         ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
         if (precondition.exists())
@@ -2089,7 +2089,7 @@ namespace Legion {
     {
       // Remove references from our sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        if (sub_expressions[idx]->remove_expression_reference(true/*exprtree*/))
+        if (sub_expressions[idx]->remove_expression_tree_reference())
           delete sub_expressions[idx];
     }
 
@@ -2141,7 +2141,7 @@ namespace Legion {
         forest->remove_intersection_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
-      return this->remove_expression_reference(true/*expr tree*/);
+      return this->remove_expression_tree_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -2160,7 +2160,7 @@ namespace Legion {
       {
         // Special case for when the expressions are the same
         lhs->add_parent_operation(this);
-        lhs->add_expression_reference(true/*expr tree*/);
+        lhs->add_expression_tree_reference();
         this->realm_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->tight_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->realm_index_space_ready = ApEvent::NO_AP_EVENT;
@@ -2172,8 +2172,8 @@ namespace Legion {
         // Add the parent and the references
         lhs->add_parent_operation(this);
         rhs->add_parent_operation(this);
-        lhs->add_expression_reference(true/*expr tree*/);
-        rhs->add_expression_reference(true/*expr tree*/);
+        lhs->add_expression_tree_reference();
+        rhs->add_expression_tree_reference();
         ApEvent left_ready = 
           lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
         ApEvent right_ready = 
@@ -2239,9 +2239,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((rhs != NULL) && (lhs != rhs) && 
-          rhs->remove_expression_reference(true/*expr tree*/))
+          rhs->remove_expression_tree_reference())
         delete rhs;
-      if ((lhs != NULL) && lhs->remove_expression_reference(true/*expr tree*/))
+      if ((lhs != NULL) && lhs->remove_expression_tree_reference())
         delete lhs;
     }
 
@@ -2294,7 +2294,7 @@ namespace Legion {
         forest->remove_subtraction_operation(this, lhs, rhs);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
-      return this->remove_expression_reference(true/*expr tree*/);
+      return this->remove_expression_tree_reference();
     }
 
     /////////////////////////////////////////////////////////////

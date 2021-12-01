@@ -6427,7 +6427,7 @@ namespace Legion {
     {
       const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
       targs->proxy_this->tighten_index_space();
-      if (targs->proxy_this->remove_expression_reference(true/*tree only*/))
+      if (targs->proxy_this->remove_expression_tree_reference())
         delete targs->proxy_this;
     }
 
@@ -6481,7 +6481,7 @@ namespace Legion {
       // forest has given us a reference back on it, see if we're the first
       // ones to write it, if not we can remove the reference now
       if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
-        expr->remove_expression_reference(true/*tree*/);
+        expr->remove_expression_tree_reference();
       return expr;
     }
 
@@ -6577,7 +6577,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
-      add_expression_reference(true/*expr tree*/);
+      add_expression_tree_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Index Expr %lld %d %lld",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, expr_id);
@@ -6651,27 +6651,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceOperation::add_expression_reference(bool expr_tree)
+    void IndexSpaceOperation::add_expression_reference(
+                              std::set<RtEvent> &applied_events, unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (!expr_tree)
-      {
-        LocalReferenceMutator mutator;
-        add_base_gc_ref(IS_EXPR_REF, &mutator);
-      }
-      else
-        add_base_resource_ref(IS_EXPR_REF);
+      WrapperReferenceMutator mutator(applied_events);
+      add_expression_reference(&mutator, count);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_expression_reference(bool expr_tree)
+    void IndexSpaceOperation::add_expression_reference(
+                                      ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (expr_tree)
-        return remove_base_resource_ref(IS_EXPR_REF);
+      if (mutator == NULL)
+      {
+        LocalReferenceMutator local_mutator;
+        add_base_gc_ref(IS_EXPR_REF, &local_mutator, count);
+      }
       else
-        return remove_base_gc_ref(IS_EXPR_REF);
-    } 
+        add_base_gc_ref(IS_EXPR_REF, mutator, count);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::remove_expression_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_gc_ref(IS_EXPR_REF, NULL/*mutator*/, count);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::add_expression_tree_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      add_base_resource_ref(IS_EXPR_REF, count);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::remove_expression_tree_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_resource_ref(IS_EXPR_REF, count);
+    }
 
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::invalidate_operation(
@@ -7461,7 +7482,7 @@ namespace Legion {
                 parent_operations.begin(); it != 
                 parent_operations.end(); it++, idx++)
           {
-            (*it)->add_expression_reference(true/*expr tree*/);
+            (*it)->add_expression_tree_reference();
             parents[idx] = (*it);
           }
         }
@@ -7472,7 +7493,7 @@ namespace Legion {
         // Remove any references that we have on the parents
         for (std::vector<IndexSpaceOperation*>::const_iterator it = 
               parents.begin(); it != parents.end(); it++)
-          if ((*it)->remove_expression_reference(true/*expr tree*/))
+          if ((*it)->remove_expression_tree_reference())
             delete (*it);
       }
     }
@@ -8648,33 +8669,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::add_expression_reference(bool expr_tree)
+    void IndexSpaceNode::add_expression_reference(
+                              std::set<RtEvent> &applied_events, unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (!expr_tree)
-      {
-        LocalReferenceMutator mutator;
-        add_base_valid_ref(IS_EXPR_REF, &mutator);
-      }
-      else
-        add_base_resource_ref(IS_EXPR_REF);
+      WrapperReferenceMutator mutator(applied_events);
+      add_expression_reference(&mutator, count);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_expression_reference(bool expr_tree)
+    void IndexSpaceNode::add_expression_reference(
+                                      ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (expr_tree)
-        return remove_base_resource_ref(IS_EXPR_REF);
+      if (mutator == NULL)
+      {
+        LocalReferenceMutator local_mutator;
+        add_base_gc_ref(IS_EXPR_REF, &local_mutator, count);
+      }
       else
-        return remove_base_valid_ref(IS_EXPR_REF);
+        add_base_gc_ref(IS_EXPR_REF, mutator, count);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_expression_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_gc_ref(IS_EXPR_REF, NULL/*mutator*/, count);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::add_expression_tree_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      add_base_resource_ref(IS_EXPR_REF, count);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_expression_tree_reference(unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_resource_ref(IS_EXPR_REF, count);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::remove_operation(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      return remove_expression_reference(true/*expr tree*/);
+      return remove_expression_tree_reference();
     }
 
     //--------------------------------------------------------------------------

@@ -1028,7 +1028,7 @@ namespace Legion {
         TightenIndexSpaceArgs(IndexSpaceExpression *proxy)
           : LgTaskArgs<TightenIndexSpaceArgs>(implicit_provenance),
             proxy_this(proxy) 
-          { proxy->add_expression_reference(true/*tree only*/); }
+          { proxy->add_expression_tree_reference(); }
       public:
         IndexSpaceExpression *const proxy_this;
       };
@@ -1091,10 +1091,17 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
+    public:
       virtual bool try_add_canonical_reference(void) = 0;
       virtual bool remove_canonical_reference(void) = 0;
-      virtual void add_expression_reference(bool expr_tree = false) = 0;
-      virtual bool remove_expression_reference(bool expr_tree = false) = 0;
+      virtual void add_expression_reference(std::set<RtEvent> &applied_events,
+                                            unsigned count = 1) = 0;
+      virtual void add_expression_reference(ReferenceMutator *mutator = NULL,
+                                            unsigned count = 1) = 0;
+      virtual bool remove_expression_reference(unsigned count = 1) = 0;
+      virtual void add_expression_tree_reference(unsigned count = 1) = 0;
+      virtual bool remove_expression_tree_reference(unsigned count = 1) = 0;
+    public:
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
@@ -1338,10 +1345,17 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
+    public:
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(bool expr_tree = false);
-      virtual bool remove_expression_reference(bool expr_tree = false);
+      virtual void add_expression_reference(std::set<RtEvent> &applied_events,
+                                            unsigned count = 1);
+      virtual void add_expression_reference(ReferenceMutator *mutator = NULL,
+                                            unsigned count = 1);
+      virtual bool remove_expression_reference(unsigned count = 1);
+      virtual void add_expression_tree_reference(unsigned count = 1);
+      virtual bool remove_expression_tree_reference(unsigned count = 1);
+    public:
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                       DistributedID did, RtEvent initialized,
@@ -1946,10 +1960,17 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+    public:
       virtual bool try_add_canonical_reference(void);
       virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(bool expr_tree = false);
-      virtual bool remove_expression_reference(bool expr_tree = false);
+      virtual void add_expression_reference(std::set<RtEvent> &applied_events,
+                                            unsigned count = 1);
+      virtual void add_expression_reference(ReferenceMutator *mutator = NULL,
+                                            unsigned count = 1);
+      virtual bool remove_expression_reference(unsigned count = 1);
+      virtual void add_expression_tree_reference(unsigned count = 1);
+      virtual bool remove_expression_tree_reference(unsigned count = 1);
+    public:
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* create_node(IndexSpace handle,
                     DistributedID did, RtEvent initialized,
