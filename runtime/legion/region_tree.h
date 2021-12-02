@@ -1092,8 +1092,9 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
-      virtual bool try_add_canonical_reference(void) = 0;
-      virtual bool remove_canonical_reference(void) = 0;
+      virtual DistributedID get_distributed_id(void) const = 0;
+      virtual bool try_add_canonical_reference(DistributedID source) = 0;
+      virtual bool remove_canonical_reference(DistributedID source) = 0;
       virtual void add_base_expression_reference(ReferenceSource source,
           ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
       virtual void add_nested_expression_reference(DistributedID source,
@@ -1353,8 +1354,9 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
-      virtual bool try_add_canonical_reference(void);
-      virtual bool remove_canonical_reference(void);
+      virtual DistributedID get_distributed_id(void) const { return did; }
+      virtual bool try_add_canonical_reference(DistributedID source);
+      virtual bool remove_canonical_reference(DistributedID source);
       virtual void add_base_expression_reference(ReferenceSource source,
           ReferenceMutator *mutator = NULL, unsigned count = 1);
       virtual void add_nested_expression_reference(DistributedID source,
@@ -1975,8 +1977,9 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
     public:
-      virtual bool try_add_canonical_reference(void);
-      virtual bool remove_canonical_reference(void);
+      virtual DistributedID get_distributed_id(void) const { return did; }
+      virtual bool try_add_canonical_reference(DistributedID source);
+      virtual bool remove_canonical_reference(DistributedID source);
       virtual void add_base_expression_reference(ReferenceSource source,
           ReferenceMutator *mutator = NULL, unsigned count = 1);
       virtual void add_nested_expression_reference(DistributedID source,

@@ -1238,6 +1238,7 @@ namespace Legion {
       // No need to wait for the event, we know it is already triggered
       // because we called get_volume on this before we got here
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
+      const DistributedID local_did = get_distributed_id();
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             expressions.begin(); it != expressions.end(); it++)
       {
@@ -1258,7 +1259,7 @@ namespace Legion {
           // We know that things are the same here
           // Try to add the expression reference, we can race with deletions
           // here though so handle the case we're we can't add a reference
-          if ((*it)->try_add_canonical_reference())
+          if ((*it)->try_add_canonical_reference(local_did))
             return (*it);
           else
             continue;
@@ -1380,7 +1381,7 @@ namespace Legion {
         // If we get here that means we are congruent
         // Try to add the expression reference, we can race with deletions
         // here though so handle the case we're we can't add a reference
-        if ((*it)->try_add_canonical_reference())
+        if ((*it)->try_add_canonical_reference(local_did))
           return (*it);
       }
       // Did not find any congruences so add ourself

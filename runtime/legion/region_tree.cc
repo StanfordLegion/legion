@@ -6480,7 +6480,7 @@ namespace Legion {
       // forest has given us a reference back on it, see if we're the first
       // ones to write it, if not we can remove the reference now
       if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
-        expr->remove_canonical_reference();
+        expr->remove_canonical_reference(get_distributed_id());
       return expr;
     }
 
@@ -6557,7 +6557,8 @@ namespace Legion {
 #endif
       if (canonical == original)
         forest->remove_canonical_expression(canonical, volume);
-      else if (canonical->remove_canonical_reference())
+      else if (canonical->remove_canonical_reference(
+                        original->get_distributed_id()))
         delete canonical;
     }
 
@@ -6636,17 +6637,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::try_add_canonical_reference(void)
+    bool IndexSpaceOperation::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_resource_and_increment(CANONICAL_REF);
+      return check_resource_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_canonical_reference(void)
+    bool IndexSpaceOperation::remove_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return remove_base_resource_ref(CANONICAL_REF);
+      return remove_nested_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
@@ -8679,17 +8680,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::try_add_canonical_reference(void)
+    bool IndexSpaceNode::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_resource_and_increment(CANONICAL_REF);
+      return check_resource_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_canonical_reference(void)
+    bool IndexSpaceNode::remove_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return remove_base_resource_ref(CANONICAL_REF);
+      return remove_nested_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
