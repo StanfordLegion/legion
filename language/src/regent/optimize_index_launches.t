@@ -1508,33 +1508,63 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
   return util.mk_stat_block(util.mk_block(check))
 end
 
-local function find_invariant_prefix(cx, node, parent)
+local function find_invariant_prefix(cx, node, parent, height)
   if not node:is(ast.typed.expr.IndexAccess) then
     return false
   end
   if not analyze_is_loop_invariant(cx, node) then
-    return find_invariant_prefix(cx, node.value, node)
+    return find_invariant_prefix(cx, node.value, node, height + 1)
   end
-  return true, parent
+  return true, parent, height
 end
 
-local function hoist_args(cx, hoisted, args)
-  for i, arg in pairs(args) do
+local function get_node_at_height(arg, height)
+  if height == 0 then
+    return arg
+  end
+  return get_node_at_height(arg.value, height - 1)
+end
+
+local function hoist_call_args(cx, hoisted, call_args)
+  local collected = {}
+  for i, arg in pairs(call_args) do
     if arg:is(ast.typed.expr.IndexAccess) and std.is_region(arg.expr_type) then
-      local proceed, parent = find_invariant_prefix(cx, arg, true)
-      if proceed then
-        if parent == true then
-          -- The entire arg is loop invariant
-          local invariant = std.newsymbol(arg.expr_type, "invariant")
-          hoisted:insert(util.mk_stat_var(invariant, arg.expr_type, arg))
-          args[i] = util.mk_expr_id(invariant)
-        else
-          -- Only a part of the arg is loop invariant
-          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
-          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
-          parent.value = util.mk_expr_id(invariant)
+      local base = tostring(util.get_base_indexed_node(arg).value)
+      collected[base] = collected[base] or terralib.newlist()
+      collected[base]:insert(i)
+    end
+  end
+
+  for _, indices in pairs(collected) do
+    local heights = indices:map(function(i)
+        local has_invariant_prefix, _, height = find_invariant_prefix(cx, call_args[i], true, 0)
+        if not has_invariant_prefix then
+          return -1
         end
-      end
+        return height
+      end)
+
+    if heights:find(function(ht) return ht == -1 end) then
+      return
+    end
+
+    -- Every argument deriving from the same base partition or cross product
+    -- must have the same type. E.g. cp[i][i] and cp[i] are not allowed together.
+    local licm_height = heights:reduce(math.max)
+
+    if licm_height == 0 then
+      indices:app(function(i)
+        local invariant = std.newsymbol(call_args[i].expr_type, "invariant")
+        hoisted:insert(util.mk_stat_var(invariant, call_args[i].expr_type, call_args[i]))
+        call_args[i] = util.mk_expr_id(invariant)
+      end)
+    else
+      indices:app(function(i)
+        local parent = get_node_at_height(call_args[i], licm_height - 1)
+        local invariant = std.newsymbol(parent.value.expr_type, "invariant")
+        hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
+        parent.value = util.mk_expr_id(invariant)
+      end)
     end
   end
 end
@@ -1552,6 +1582,7 @@ local function maybe_index_launch(node)
       return false
     end
   end
+
   local body = node.block.stats[#node.block.stats]
   if (body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call)) or
      (body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call))
@@ -1587,9 +1618,9 @@ local function licm(cx, node)
   local body = node.block.stats[#node.block.stats]
   if body then
     if body:is(ast.typed.stat.Expr) and body.expr:is(ast.typed.expr.Call) then
-      hoist_args(loop_cx, hoisted, body.expr.args)
+      hoist_call_args(loop_cx, hoisted, body.expr.args)
     elseif body:is(ast.typed.stat.Reduce) and body.rhs:is(ast.typed.expr.Call) then
-      hoist_args(loop_cx, hoisted, body.rhs.args)
+      hoist_call_args(loop_cx, hoisted, body.rhs.args)
     end
   end
   return hoisted
