@@ -1529,42 +1529,52 @@ local function hoist_call_args(cx, hoisted, call_args)
   local collected = {}
   for i, arg in pairs(call_args) do
     if arg:is(ast.typed.expr.IndexAccess) and std.is_region(arg.expr_type) then
-      local base = tostring(util.get_base_indexed_node(arg).value)
+      local base = tostring(get_base_partition_symbol(arg))
       collected[base] = collected[base] or terralib.newlist()
       collected[base]:insert(i)
     end
   end
 
   for _, indices in pairs(collected) do
-    local heights = indices:map(function(i)
-        local has_invariant_prefix, _, height = find_invariant_prefix(cx, call_args[i], true, 0)
-        if not has_invariant_prefix then
-          return -1
-        end
-        return height
+    if not indices:find(
+      function(i)
+        return std.is_partition(std.as_read(
+          util.get_base_indexed_node(call_args[i]).expr_type))
       end)
+    then
+      local heights = indices:map(function(i)
+          local has_invariant_prefix, _, height = find_invariant_prefix(cx, call_args[i], true, 0)
+          if not has_invariant_prefix then
+            return -1
+          end
+          return height
+        end)
 
-    if heights:find(function(ht) return ht == -1 end) then
-      return
-    end
+      if heights:find(function(ht) return ht == -1 end) then
+        return
+      end
 
-    -- Every argument deriving from the same base partition or cross product
-    -- must have the same type. E.g. cp[i][i] and cp[i] are not allowed together.
-    local licm_height = heights:reduce(math.max)
+      -- Every argument deriving from the same base partition or cross product
+      -- must have the same type. E.g. cp[i][i] and cp[i] are not allowed together.
+      local licm_height = heights:reduce(math.max)
+      -- for _, v in pairs(heights) do print(v) end
 
-    if licm_height == 0 then
-      indices:app(function(i)
-        local invariant = std.newsymbol(call_args[i].expr_type, "invariant")
-        hoisted:insert(util.mk_stat_var(invariant, call_args[i].expr_type, call_args[i]))
-        call_args[i] = util.mk_expr_id(invariant)
-      end)
-    else
-      indices:app(function(i)
-        local parent = get_node_at_height(call_args[i], licm_height - 1)
-        local invariant = std.newsymbol(parent.value.expr_type, "invariant")
-        hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
-        parent.value = util.mk_expr_id(invariant)
-      end)
+      if licm_height == 0 then
+        -- Hoist the entire IndexAccess AST
+        indices:app(function(i)
+          local invariant = std.newsymbol(call_args[i].expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, call_args[i].expr_type, call_args[i]))
+          call_args[i] = util.mk_expr_id(invariant)
+        end)
+      else
+        -- Hoist a part of the IndexAccess AST only
+        indices:app(function(i)
+          local parent = get_node_at_height(call_args[i], licm_height - 1)
+          local invariant = std.newsymbol(parent.value.expr_type, "invariant")
+          hoisted:insert(util.mk_stat_var(invariant, parent.value.expr_type, parent.value))
+          parent.value = util.mk_expr_id(invariant)
+        end)
+      end
     end
   end
 end
