@@ -1390,7 +1390,7 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
 
     -- Generate the AST for var volume = p.colors.bounds:volume()
     local p_colors = util.mk_expr_field_access(
-      util.mk_expr_id(get_base_partition_symbol(call_args[args[1]])), "colors", std.ispace(index_types[dim]))
+      util.mk_expr_id(util.get_base_indexed_node(call_args[args[1]]).value), "colors", std.ispace(index_types[dim]))
     local p_bounds = util.mk_expr_field_access(p_colors, "bounds", rect_types[dim])
     local volume = std.newsymbol(int64, "volume")
     stats:insert(
@@ -1554,10 +1554,9 @@ local function hoist_call_args(cx, hoisted, call_args)
         return
       end
 
-      -- Every argument deriving from the same base partition or cross product
-      -- must have the same type. E.g. cp[i][i] and cp[i] are not allowed together.
+      -- Every argument deriving from the same base cross product must have
+      -- the same type. E.g. cp[i][i] and cp[i] are not allowed together.
       local licm_height = heights:reduce(math.max)
-      -- for _, v in pairs(heights) do print(v) end
 
       if licm_height == 0 then
         -- Hoist the entire IndexAccess AST
@@ -1567,7 +1566,7 @@ local function hoist_call_args(cx, hoisted, call_args)
           call_args[i] = util.mk_expr_id(invariant)
         end)
       else
-        -- Hoist a part of the IndexAccess AST only
+        -- Hoist only a part of the IndexAccess AST
         indices:app(function(i)
           local parent = get_node_at_height(call_args[i], licm_height - 1)
           local invariant = std.newsymbol(parent.value.expr_type, "invariant")

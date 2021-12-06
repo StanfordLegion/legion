@@ -2336,7 +2336,7 @@ function codegen.expr_field_access(cx, node)
       node,
       expr.just(actions, volume),
       expr_type)
-  elseif std.is_partition(value_type) and field_name == "colors" then
+  elseif (std.is_partition(value_type) or std.is_cross_product(value_type)) and field_name == "colors" then
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
     local is = terralib.newsymbol(c.legion_index_space_t, "colors")
