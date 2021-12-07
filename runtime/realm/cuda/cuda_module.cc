@@ -29,6 +29,17 @@
 #include "realm/cuda/cudart_hijack.h"
 #endif
 
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+  #ifdef REALM_USE_DLFCN
+    #include <dlfcn.h>
+  #else
+    #error dynamic loading of CUDA driver/runtime requires use of dlfcn!
+  #endif
+  #ifdef REALM_USE_CUDART_HIJACK
+    #error REALM_CUDA_DYNAMIC_LOAD and REALM_USE_CUDART_HIJACK both enabled!
+  #endif
+#endif
+
 #include "realm/mutex.h"
 #include "realm/utils.h"
 
@@ -42,6 +53,17 @@
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == cudaStreamLegacy) || ((stream) == cudaStreamPerThread))
 
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+// the cuda runtime might be statically linked, in which case we want to use
+//  those symbols instead of dlopen'ing a fresh libcudart.so
+extern "C" {
+#define WEAK_RUNTIME_DECL(name, retval, params) \
+  retval name params __attribute__((weak));
+  CUDA_RUNTIME_APIS(WEAK_RUNTIME_DECL);
+  #undef WEAK_RUNTIME_DECL
+};
+#endif
+
 namespace Realm {
   namespace Cuda {
 
@@ -54,6 +76,27 @@ namespace Realm {
 #endif
     Logger log_stream("gpustream");
 
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+    bool cuda_api_fnptrs_loaded = false;
+
+  #if CUDA_VERSION >= 11030
+    // cuda 11.3+ gives us handy PFN_... types
+    #define DEFINE_FNPTR(name) \
+      PFN_ ## name name ## _fnptr = 0;
+  #else
+    // before cuda 11.3, we have to rely on typeof/decltype
+    #define DEFINE_FNPTR(name) \
+      decltype(&name) name ## _fnptr = 0;
+  #endif
+    CUDA_DRIVER_APIS(DEFINE_FNPTR);
+  #undef DEFINE_FNPTR
+
+  #define DEFINE_FNPTR(name, retval, params) \
+    retval (*name ## _fnptr) params = 0;
+    CUDA_RUNTIME_APIS(DEFINE_FNPTR);
+  #undef DEFINE_FNPTR
+#endif
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class GPUStream
@@ -62,7 +105,7 @@ namespace Realm {
       : gpu(_gpu), worker(_worker), issuing_copies(false)
     {
       assert(worker != 0);
-      CHECK_CU( cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamCreate)(&stream, CU_STREAM_NON_BLOCKING) );
       log_stream.info() << "CUDA stream " << stream << " created for GPU " << gpu;
     }
 
@@ -71,7 +114,7 @@ namespace Realm {
       // log_stream.info() << "CUDA stream " << stream << " destroyed - max copies = " 
       // 			<< pending_copies.capacity() << ", max events = " << pending_events.capacity();
 
-      CHECK_CU( cuStreamDestroy(stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamDestroy)(stream) );
     }
 
     GPU *GPUStream::get_gpu(void) const
@@ -109,7 +152,7 @@ namespace Realm {
     {
       CUevent e = gpu->event_pool.get_event();
 
-      CHECK_CU( cuEventRecord(e, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
 
       log_stream.debug() << "CUDA fence event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
@@ -120,7 +163,7 @@ namespace Realm {
     {
       CUevent e = gpu->event_pool.get_event();
 
-      CHECK_CU( cuEventRecord(e, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
 
       log_stream.debug() << "CUDA start event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
@@ -132,7 +175,7 @@ namespace Realm {
     {
       CUevent e = gpu->event_pool.get_event();
 
-      CHECK_CU( cuEventRecord(e, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
 
       add_event(e, 0, notification);
     }
@@ -174,12 +217,12 @@ namespace Realm {
           continue;
         CUevent e = gpu->event_pool.get_event();
 
-        CHECK_CU( cuEventRecord(e, (*it)->get_stream()) );
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, (*it)->get_stream()) );
 
         log_stream.debug() << "CUDA stream " << stream << " waiting on stream " 
                            << (*it)->get_stream() << " (GPU " << gpu << ")";
 
-        CHECK_CU( cuStreamWaitEvent(stream, e, 0) );
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(stream, e, 0) );
 
         // record this event on our stream
         add_event(e, 0);
@@ -276,7 +319,7 @@ namespace Realm {
       // we'll keep looking at events until we find one that hasn't triggered
       bool work_left = true;
       while(event_valid) {
-	CUresult res = cuEventQuery(event);
+	CUresult res = CUDA_DRIVER_FNPTR(cuEventQuery)(event);
 
 	if(res == CUDA_ERROR_NOT_READY)
 	  return true; // oldest event hasn't triggered - check again later
@@ -285,8 +328,8 @@ namespace Realm {
 	if(res != CUDA_SUCCESS) {
 	  const char *ename = 0;
 	  const char *estr = 0;
-	  cuGetErrorName(res, &ename);
-	  cuGetErrorString(res, &estr);
+	  CUDA_DRIVER_FNPTR(cuGetErrorName)(res, &ename);
+	  CUDA_DRIVER_FNPTR(cuGetErrorString)(res, &estr);
 	  log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": " << estr << " (" << ename << ")";
 	  assert(0);
 	}
@@ -374,18 +417,20 @@ namespace Realm {
       {
         case GPU_MEMCPY_HOST_TO_DEVICE:
           {
-            CHECK_CU( cuMemcpyHtoDAsync((CUdeviceptr)(((char*)dst)+span_start),
-                                        (((char*)src)+span_start),
-                                        span_bytes,
-                                        raw_stream) );
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyHtoDAsync)
+                      ((CUdeviceptr)(((char*)dst)+span_start),
+                       (((char*)src)+span_start),
+                       span_bytes,
+                       raw_stream) );
             break;
           }
         case GPU_MEMCPY_DEVICE_TO_HOST:
           {
-            CHECK_CU( cuMemcpyDtoHAsync((((char*)dst)+span_start),
-                                        (CUdeviceptr)(((char*)src)+span_start),
-                                        span_bytes,
-                                        raw_stream) );
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyDtoHAsync)
+                      ((((char*)dst)+span_start),
+                       (CUdeviceptr)(((char*)src)+span_start),
+                       span_bytes,
+                       raw_stream) );
 #ifdef REALM_USE_VALGRIND_ANNOTATIONS
 	    VALGRIND_MAKE_MEM_DEFINED((((char*)dst)+span_start), span_bytes);
 #endif
@@ -394,10 +439,11 @@ namespace Realm {
         case GPU_MEMCPY_DEVICE_TO_DEVICE:
         case GPU_MEMCPY_PEER_TO_PEER:
           {
-            CHECK_CU( cuMemcpyDtoDAsync((CUdeviceptr)(((char*)dst)+span_start),
-                                        (CUdeviceptr)(((char*)src)+span_start),
-                                        span_bytes,
-                                        raw_stream) );
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyDtoDAsync)
+                      ((CUdeviceptr)(((char*)dst)+span_start),
+                       (CUdeviceptr)(((char*)src)+span_start),
+                       span_bytes,
+                       raw_stream) );
             break;
           }
         default:
@@ -468,7 +514,8 @@ namespace Realm {
       copy_info.dstXInBytes = 0;
       copy_info.WidthInBytes = bytes;
       copy_info.Height = lines;
-      CHECK_CU( cuMemcpy2DAsync(&copy_info, stream->get_stream()) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                (&copy_info, stream->get_stream()) );
 
       if(notification)
 	stream->add_notification(notification);
@@ -541,7 +588,8 @@ namespace Realm {
 	copy_info.WidthInBytes = bytes;
 	copy_info.Height = height;
 	copy_info.Depth = depth;
-	CHECK_CU( cuMemcpy3DAsync(&copy_info, stream->get_stream()) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)
+                  (&copy_info, stream->get_stream()) );
       } else {
 	// we can unroll either lines (height) or planes (depth) - choose the
 	//  smaller of the two to minimize API calls
@@ -589,7 +637,8 @@ namespace Realm {
 	copy_info.Height = lines_2d;
 
 	for(size_t i = 0; i < count; i++) {
-	  CHECK_CU( cuMemcpy2DAsync(&copy_info, stream->get_stream()) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                    (&copy_info, stream->get_stream()) );
 	  copy_info.srcDevice += src_delta;
 	  copy_info.srcHost = reinterpret_cast<const void *>(copy_info.srcDevice);
 	  copy_info.dstDevice += dst_delta;
@@ -650,27 +699,30 @@ namespace Realm {
 	{
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
-	  CHECK_CU( cuMemsetD8Async(CUdeviceptr(dst),
-                                    fill_u8, bytes,
-				    raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
+                    (CUdeviceptr(dst),
+                     fill_u8, bytes,
+                     raw_stream) );
 	  break;
 	}
       case 2:
 	{
           unsigned short fill_u16;
           memcpy(&fill_u16, fill_data.direct, 2);
-	  CHECK_CU( cuMemsetD16Async(CUdeviceptr(dst), 
-				     fill_u16, bytes >> 1,
-				     raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD16Async)
+                    (CUdeviceptr(dst),
+                     fill_u16, bytes >> 1,
+                     raw_stream) );
 	  break;
 	}
       case 4:
 	{
           unsigned int fill_u32;
           memcpy(&fill_u32, fill_data.direct, 4);
-	  CHECK_CU( cuMemsetD32Async(CUdeviceptr(dst), 
-				     fill_u32, bytes >> 2,
-				     raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD32Async)
+                    (CUdeviceptr(dst),
+                     fill_u32, bytes >> 2,
+                     raw_stream) );
 	  break;
 	}
       default:
@@ -685,31 +737,34 @@ namespace Realm {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
               unsigned int fill_u32;
               memcpy(&fill_u32, srcdata + offset, 4);
-	      CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset,
-					   fill_data_size /*pitch*/,
-					   fill_u32,
-					   1 /*width*/, elements /*height*/,
-					   raw_stream) );
+	      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                        (CUdeviceptr(dst) + offset,
+                         fill_data_size /*pitch*/,
+                         fill_u32,
+                         1 /*width*/, elements /*height*/,
+                         raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
               unsigned short fill_u16;
               memcpy(&fill_u16, srcdata + offset, 2);
-	      CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset,
-					   fill_data_size /*pitch*/,
-					   fill_u16,
-					   1 /*width*/, elements /*height*/,
-					   raw_stream) );
+	      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                        (CUdeviceptr(dst) + offset,
+                         fill_data_size /*pitch*/,
+                         fill_u16,
+                         1 /*width*/, elements /*height*/,
+                         raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
-	      CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset,
-					  fill_data_size /*pitch*/,
-					  fill_u8,
-					  1 /*width*/, elements /*height*/,
-					  raw_stream) );
+	      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                        (CUdeviceptr(dst) + offset,
+                         fill_data_size /*pitch*/,
+                         fill_u8,
+                         1 /*width*/, elements /*height*/,
+                         raw_stream) );
 	    }
 	  }
 	}
@@ -765,27 +820,30 @@ namespace Realm {
 	{
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
-	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      fill_u8, bytes, lines,
-				      raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                    (CUdeviceptr(dst), dst_stride,
+                     fill_u8, bytes, lines,
+                     raw_stream) );
 	  break;
 	}
       case 2:
 	{
           unsigned short fill_u16;
           memcpy(&fill_u16, fill_data.direct, 2);
-	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       fill_u16, bytes >> 1, lines,
-				       raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                    (CUdeviceptr(dst), dst_stride,
+                     fill_u16, bytes >> 1, lines,
+                     raw_stream) );
 	  break;
 	}
       case 4:
 	{
           unsigned int fill_u32;
           memcpy(&fill_u32, fill_data.direct, 4);
-	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       fill_u32, bytes >> 2, lines,
-				       raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                    (CUdeviceptr(dst), dst_stride,
+                     fill_u32, bytes >> 2, lines,
+                     raw_stream) );
 	  break;
 	}
       default:
@@ -801,33 +859,36 @@ namespace Realm {
               unsigned int fill_u32;
               memcpy(&fill_u32, srcdata + offset, 4);
 	      for(size_t l = 0; l < lines; l++)
-		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-					     fill_data_size /*pitch*/,
-					     fill_u32,
-					     1 /*width*/, elements /*height*/,
-					     raw_stream) );
+		CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                          (CUdeviceptr(dst) + offset + (l * dst_stride),
+                           fill_data_size /*pitch*/,
+                           fill_u32,
+                           1 /*width*/, elements /*height*/,
+                           raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
               unsigned short fill_u16;
               memcpy(&fill_u16, srcdata + offset, 2);
 	      for(size_t l = 0; l < lines; l++)
-		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-					     fill_data_size /*pitch*/,
-					     fill_u16,
-					     1 /*width*/, elements /*height*/,
-					     raw_stream) );
+		CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                          (CUdeviceptr(dst) + offset + (l * dst_stride),
+                           fill_data_size /*pitch*/,
+                           fill_u16,
+                           1 /*width*/, elements /*height*/,
+                           raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
 	      for(size_t l = 0; l < lines; l++)
-		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-					    fill_data_size /*pitch*/,
-					    fill_u8,
-					    1 /*width*/, elements /*height*/,
-					    raw_stream) );
+		CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                          (CUdeviceptr(dst) + offset + (l * dst_stride),
+                           fill_data_size /*pitch*/,
+                           fill_u8,
+                           1 /*width*/, elements /*height*/,
+                           raw_stream) );
 	    }
 	  }
 	}
@@ -886,27 +947,30 @@ namespace Realm {
 	{
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
-	  CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst), dst_stride,
-				      fill_u8, bytes, height,
-				      raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                    (CUdeviceptr(dst), dst_stride,
+                     fill_u8, bytes, height,
+                     raw_stream) );
 	  break;
 	}
       case 2:
 	{
           unsigned short fill_u16;
           memcpy(&fill_u16, fill_data.direct, 2);
-	  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst), dst_stride,
-				       fill_u16, bytes >> 1, height,
-				       raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                    (CUdeviceptr(dst), dst_stride,
+                     fill_u16, bytes >> 1, height,
+                     raw_stream) );
 	  break;
 	}
       case 4:
 	{
           unsigned int fill_u32;
           memcpy(&fill_u32, fill_data.direct, 4);
-	  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst), dst_stride,
-				       fill_u32, bytes >> 2, height,
-				       raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                    (CUdeviceptr(dst), dst_stride,
+                     fill_u32, bytes >> 2, height,
+                     raw_stream) );
 	  break;
 	}
       default:
@@ -922,33 +986,36 @@ namespace Realm {
               unsigned int fill_u32;
               memcpy(&fill_u32, srcdata + offset, 4);
 	      for(size_t l = 0; l < height; l++)
-		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-					     fill_data_size /*pitch*/,
-					     fill_u32,
-					     1 /*width*/, elements /*height*/,
-					     raw_stream) );
+		CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                          (CUdeviceptr(dst) + offset + (l * dst_stride),
+                           fill_data_size /*pitch*/,
+                           fill_u32,
+                           1 /*width*/, elements /*height*/,
+                           raw_stream) );
 	    }
 	  } else if((fill_data_size & 1) == 0) {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
               unsigned short fill_u16;
               memcpy(&fill_u16, srcdata + offset, 2);
 	      for(size_t l = 0; l < height; l++)
-		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-					     fill_data_size /*pitch*/,
-					     fill_u16,
-					     1 /*width*/, elements /*height*/,
-					     raw_stream) );
+		CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                          (CUdeviceptr(dst) + offset + (l * dst_stride),
+                           fill_data_size /*pitch*/,
+                           fill_u16,
+                           1 /*width*/, elements /*height*/,
+                           raw_stream) );
 	    }
 	  } else {
 	    for(size_t offset = 0; offset < fill_data_size; offset += 1) {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
 	      for(size_t l = 0; l < height; l++)
-		CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-					    fill_data_size /*pitch*/,
-					    fill_u8,
-					    1 /*width*/, elements /*height*/,
-					    raw_stream) );
+		CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                          (CUdeviceptr(dst) + offset + (l * dst_stride),
+                           fill_data_size /*pitch*/,
+                           fill_u8,
+                           1 /*width*/, elements /*height*/,
+                           raw_stream) );
 	    }
 	  }
 	}
@@ -983,7 +1050,8 @@ namespace Realm {
 	  copy_info.dstDevice = ((CUdeviceptr)dst +
 				 (done * dst_pstride));
 	  copy_info.Depth = todo;
-	  CHECK_CU( cuMemcpy3DAsync(&copy_info, raw_stream) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)
+                    (&copy_info, raw_stream) );
 	}
       }
 
@@ -1080,7 +1148,7 @@ namespace Realm {
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
-	CHECK_CU( cuStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamAddCallback)(stream->get_stream(), &cuda_callback, (void *)this, 0) );
       } else {
 	stream->add_fence(this);
       }
@@ -1110,7 +1178,7 @@ namespace Realm {
     void GPUWorkStart::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
-	CHECK_CU( cuStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamAddCallback)(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
       } else {
 	stream->add_start_event(this);
       }
@@ -1146,7 +1214,7 @@ namespace Realm {
       //log_stream.info() << "gpu memcpy fence " << this << " (fence = " << fence << ") executed";
       fence->enqueue_on_stream(stream);
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( cuStreamSynchronize(stream->get_stream()) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream->get_stream()) );
 #endif
     }
 
@@ -1179,7 +1247,7 @@ namespace Realm {
       // TODO: measure how much benefit is derived from CU_EVENT_DISABLE_TIMING and
       //  consider using them for completion callbacks
       for(int i = 0; i < init_size; i++)
-	CHECK_CU( cuEventCreate(&available_events[i], CU_EVENT_DEFAULT) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DEFAULT) );
     }
 
     void GPUEventPool::empty_pool(void)
@@ -1190,7 +1258,7 @@ namespace Realm {
         log_stream.warning() << "Application leaking " << external_count << " cuda events";
 
       for(int i = 0; i < current_size; i++)
-	CHECK_CU( cuEventDestroy(available_events[i]) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuEventDestroy)(available_events[i]) );
 
       current_size = 0;
       total_size = 0;
@@ -1214,9 +1282,9 @@ namespace Realm {
 	available_events.resize(total_size);
 
 	for(int i = 0; i < batch_size; i++)
-	  CHECK_CU( cuEventCreate(&available_events[i], CU_EVENT_DEFAULT) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DEFAULT) );
       }
-      
+
       if(external)
         external_count++;
 
@@ -1378,14 +1446,14 @@ namespace Realm {
 	{
 	  AutoGPUContext agc(gpu);
 
-	  CUresult res = cuCtxSynchronize();
+	  CUresult res = CUDA_DRIVER_FNPTR(cuCtxSynchronize)();
 
 	  // complain loudly about any errors
 	  if(res != CUDA_SUCCESS) {
 	    const char *ename = 0;
 	    const char *estr = 0;
-	    cuGetErrorName(res, &ename);
-	    cuGetErrorString(res, &estr);
+	    CUDA_DRIVER_FNPTR(cuGetErrorName)(res, &ename);
+	    CUDA_DRIVER_FNPTR(cuGetErrorString)(res, &estr);
 	    log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": " << estr << " (" << ename << ")";
 	    abort();
 	  }
@@ -1535,7 +1603,7 @@ namespace Realm {
 
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( cuStreamSynchronize(s->get_stream()) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(s->get_stream()) );
 #endif
 
       // pop the CUDA context for this GPU back off
@@ -1584,7 +1652,7 @@ namespace Realm {
       }
 
       // we didn't use streams here, so synchronize the whole context
-      CHECK_CU( cuCtxSynchronize() );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxSynchronize)() );
       gpu_proc->block_on_synchronize = false;
 
       // pop the CUDA context for this GPU back off
@@ -1947,7 +2015,7 @@ namespace Realm {
       {
 	AutoGPUContext agc(gpu);
 
-	CHECK_CU( cuCtxSynchronize() );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxSynchronize)() );
       }
     }
 
@@ -2289,10 +2357,10 @@ namespace Realm {
     void GPUProcessor::stream_wait_on_event(cudaStream_t stream, cudaEvent_t event)
     {
       if(IS_DEFAULT_STREAM(stream))
-        CHECK_CU( cuStreamWaitEvent(
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(
               ThreadLocal::current_gpu_stream->get_stream(), event, 0) );
       else
-        CHECK_CU( cuStreamWaitEvent(stream, event, 0) );
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(stream, event, 0) );
     }
 
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
@@ -2319,11 +2387,11 @@ namespace Realm {
               << stream << " that Realm did not create which suggests "
               << "that there is another copy of the CUDA runtime "
               << "somewhere making its own streams... be VERY careful.";
-            CHECK_CU( cuStreamSynchronize(stream) );
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream) );
           }
         } else {
           // oh well...
-          CHECK_CU( cuStreamSynchronize(stream) );
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream) );
         }
       }
       else
@@ -2376,7 +2444,7 @@ namespace Realm {
 	waiter.preempt();
       } else {
 	// oh well...
-	CHECK_CU( cuStreamSynchronize(current->get_stream()) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(current->get_stream()) );
       }
     }
     
@@ -2407,14 +2475,14 @@ namespace Realm {
       CUevent e = event;
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( cuEventRecord(e, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
     }
 
     void GPUProcessor::event_synchronize(cudaEvent_t event)
     {
       // TODO: consider suspending task rather than busy-waiting here...
       CUevent e = event;
-      CHECK_CU( cuEventSynchronize(e) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventSynchronize)(e) );
     }
       
     void GPUProcessor::event_elapsed_time(float *ms, cudaEvent_t start, cudaEvent_t end)
@@ -2422,7 +2490,7 @@ namespace Realm {
       // TODO: consider suspending task rather than busy-waiting here...
       CUevent e1 = start;
       CUevent e2 = end;
-      CHECK_CU( cuEventElapsedTime(ms, e1, e2) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventElapsedTime)(ms, e1, e2) );
     }
       
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
@@ -2532,7 +2600,8 @@ namespace Realm {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
       //  synchronization to just the right stream
-      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                ((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
       stream_synchronize(current);
     }
 
@@ -2541,7 +2610,8 @@ namespace Realm {
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                ((CUdeviceptr)dst, (CUdeviceptr)src, size, stream) );
       // no synchronization here
     }
 
@@ -2572,7 +2642,8 @@ namespace Realm {
       copy_info.Height = height;
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
       //  synchronization to just the right stream
-      CHECK_CU( cuMemcpy2DAsync(&copy_info, current) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                (&copy_info, current) );
       stream_synchronize(current);
     }
 
@@ -2601,7 +2672,8 @@ namespace Realm {
       copy_info.dstXInBytes = 0;
       copy_info.WidthInBytes = width;
       copy_info.Height = height;
-      CHECK_CU( cuMemcpy2DAsync(&copy_info, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                (&copy_info, stream) );
       // no synchronization here
     }
 
@@ -2611,8 +2683,9 @@ namespace Realm {
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(dst);
-      CHECK_CU( cuMemcpyAsync(var_base + offset,
-			      (CUdeviceptr)src, size, current) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                (var_base + offset,
+                 (CUdeviceptr)src, size, current) );
       stream_synchronize(current);
     }
 
@@ -2623,8 +2696,9 @@ namespace Realm {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(dst);
-      CHECK_CU( cuMemcpyAsync(var_base + offset,
-			      (CUdeviceptr)src, size, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                (var_base + offset,
+                 (CUdeviceptr)src, size, stream) );
       // no synchronization here
     }
 
@@ -2634,9 +2708,10 @@ namespace Realm {
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(src);
-      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
-			      var_base + offset,
-			      size, current) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                ((CUdeviceptr)dst,
+                 var_base + offset,
+                 size, current) );
       stream_synchronize(current);
     }
 
@@ -2647,9 +2722,10 @@ namespace Realm {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CUdeviceptr var_base = gpu->lookup_variable(src);
-      CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
-			      var_base + offset,
-			      size, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                ((CUdeviceptr)dst,
+                 var_base + offset,
+                 size, stream) );
       // no synchronization here
     }
 #endif
@@ -2657,8 +2733,9 @@ namespace Realm {
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
       CUstream current = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value, 
-                                  count, current) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
+                ((CUdeviceptr)dst, (unsigned char)value,
+                 count, current) );
     }
 
     void GPUProcessor::gpu_memset_async(void *dst, int value, 
@@ -2666,8 +2743,9 @@ namespace Realm {
     {
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( cuMemsetD8Async((CUdeviceptr)dst, (unsigned char)value,
-                                  count, stream) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
+                ((CUdeviceptr)dst, (unsigned char)value,
+                 count, stream) );
     }
 
 
@@ -2733,21 +2811,21 @@ namespace Realm {
 
       // free memory
       if(fbmem_base)
-        CHECK_CU( cuMemFree(fbmem_base) );
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(fbmem_base) );
 
-      CHECK_CU( cuDevicePrimaryCtxRelease(info->device) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(info->device) );
     }
 
     void GPU::push_context(void)
     {
-      CHECK_CU( cuCtxPushCurrent(context) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxPushCurrent)(context) );
     }
 
     void GPU::pop_context(void)
     {
       // the context we pop had better be ours...
       CUcontext popped;
-      CHECK_CU( cuCtxPopCurrent(&popped) );
+      CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxPopCurrent)(&popped) );
       assert(popped == context);
     }
 
@@ -2816,7 +2894,7 @@ namespace Realm {
 	{
 	  AutoGPUContext agc(this);
 
-          CUresult ret = cuCtxEnablePeerAccess((*it)->context, 0);
+          CUresult ret = CUDA_DRIVER_FNPTR(cuCtxEnablePeerAccess)((*it)->context, 0);
           if((ret != CUDA_SUCCESS) &&
              (ret != CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED))
             REPORT_CU_ERROR("cuCtxEnablePeerAccess((*it)->context, 0)", ret);
@@ -2841,18 +2919,19 @@ namespace Realm {
       {
 	AutoGPUContext agc(this);
 
-	CUresult ret = cuMemAlloc(&fbmem_base, size);
+	CUresult ret = CUDA_DRIVER_FNPTR(cuMemAlloc)(&fbmem_base, size);
 	if(ret != CUDA_SUCCESS) {
 	  if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
 	    size_t free_bytes, total_bytes;
-	    CHECK_CU( cuMemGetInfo(&free_bytes, &total_bytes) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)
+                      (&free_bytes, &total_bytes) );
 	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
 			    << ": " << size << " bytes needed (from -ll:fsize), "
 			    << free_bytes << " (out of " << total_bytes << ") available";
 	  } else {
 	    const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
-	    cuGetErrorName(ret, &errstring);
+	    CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
 #endif
 	    log_gpu.fatal() << "unexpected error from cuMemAlloc on gpu " << info->index
 			    << ": result=" << ret
@@ -3010,8 +3089,11 @@ namespace Realm {
       option_vals[2] = log_error_buffer;
       option_vals[3] = (void*)buffer_size;
       CUmodule module;
-      CUresult result = cuModuleLoadDataEx(&module, data, num_options, 
-                                           jit_options, option_vals); 
+      CUresult result = CUDA_DRIVER_FNPTR(cuModuleLoadDataEx)(&module,
+                                                              data,
+                                                              num_options,
+                                                              jit_options,
+                                                              option_vals);
       if (result != CUDA_SUCCESS)
       {
 #ifdef REALM_ON_MACOS
@@ -3031,8 +3113,8 @@ namespace Realm {
 			log_error_buffer);
 #if CUDA_VERSION >= 6050
 	  const char *name, *str;
-	  CHECK_CU( cuGetErrorName(result, &name) );
-	  CHECK_CU( cuGetErrorString(result, &str) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuGetErrorName)(result, &name) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuGetErrorString)(result, &str) );
 	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
 		  result, name, str);
 #else
@@ -3106,6 +3188,124 @@ namespace Realm {
       delete_container_contents(gpu_info);
     }
 
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+    static bool resolve_cuda_api_fnptrs(bool required)
+    {
+      if(cuda_api_fnptrs_loaded)
+        return true;
+
+      // driver symbols have to come from a dynamic libcuda
+#ifdef REALM_USE_DLFCN
+      log_gpu.info() << "dynamically loading libcuda.so";
+      void *libcuda = dlopen("libcuda.so", RTLD_NOW);
+      if(!libcuda) {
+        if(required) {
+          log_gpu.fatal() << "could not open libcuda.so: " << strerror(errno);
+          abort();
+        } else {
+          log_gpu.info() << "could not open libcuda.so: " << strerror(errno);
+          return false;
+        }
+      }
+#if CUDA_VERSION >= 11030
+      // cuda 11.3+ provides cuGetProcAddress to handle versioning nicely
+      PFN_cuGetProcAddress driver_getproc = 0;
+      {
+        void *sym = dlsym(libcuda, "cuGetProcAddress");
+        if(sym) {
+          driver_getproc = reinterpret_cast<PFN_cuGetProcAddress>(sym);
+        } else {
+          if(required) {
+            log_gpu.fatal() << "symbol 'cuGetProcAddress' not found in libcuda.so'";
+            abort();
+          } else {
+            log_gpu.info() << "symbol 'cuGetProcAddress' not found in libcuda.so'";
+          }
+        }
+      }
+#else
+      // before cuda 11.3, we have to dlsym things, but rely on cuda.h's
+      //  compile-time translation to versioned function names
+#define STRINGIFY(s) #s
+#define DRIVER_GET_FNPTR(name) \
+      do { \
+        void *sym = dlsym(libcuda, STRINGIFY(name)); \
+        if(!sym) { \
+          log_gpu.fatal() << "symbol '" STRINGIFY(name) " missing from libcuda.so!"; \
+          abort(); \
+        } \
+        name ## _fnptr = reinterpret_cast<decltype(&name)>(sym); \
+      } while(0)
+      CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+#undef STRINGIFY
+#endif
+#endif
+#if CUDA_VERSION >= 11030
+#define DRIVER_GET_FNPTR(name)                                        \
+      CHECK_CU( (driver_getproc)(#name, (void **)&name ## _fnptr,       \
+                                 CUDA_VERSION, CU_GET_PROC_ADDRESS_DEFAULT) );
+      CUDA_DRIVER_APIS(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+#endif
+
+      // see if we've been statically linked against libcudart_static.a
+      if(cudaGetDevice) {
+        log_gpu.info() << "using statically linked libcudart";
+#define RUNTIME_STATIC_FNPTR(name, retval, params) \
+        if(static_cast<retval (*) params>(name)) { \
+          name ## _fnptr = name; \
+        } else { \
+          log_gpu.fatal() << "static cudart linkage missing symbol '" #name "'!"; \
+          abort(); \
+        }
+        CUDA_RUNTIME_APIS(RUNTIME_STATIC_FNPTR);
+#undef RUNTIME_STATIC_FNPTR
+      } else {
+        log_gpu.info() << "dynamically loading libcudart.so";
+        void *libcudart = dlopen("libcudart.so", RTLD_NOW);
+        if(libcudart) {
+          // sanity-check which version of the runtime we loaded
+          {
+            void *sym = dlsym(libcudart, "cudaRuntimeGetVersion");
+            if(sym) {
+              cudaError_t (*runtime_version_fnptr)(int *);
+              runtime_version_fnptr = reinterpret_cast<cudaError_t (*)(int *)>(sym);
+              int loaded_runtime_version = 0;
+              CHECK_CUDART( runtime_version_fnptr(&loaded_runtime_version) );
+              if(loaded_runtime_version < CUDA_VERSION)
+                log_gpu.error() << "CUDA runtime version mismatch - expected " << CUDA_VERSION << ", got " << loaded_runtime_version << " - consider adjusting LD_LIBRARY_PATH";
+            } else {
+              log_gpu.fatal() << "symbol 'cudaRuntimeGetVersion' missing from libcudart.so!";
+              abort();
+            }
+          }
+#define RUNTIME_GET_FNPTR(name, retval, params) \
+          do { \
+            void *sym = dlsym(libcudart, #name); \
+            if(!sym) { \
+              log_gpu.fatal() << "symbol '" #name "' missing from libcudart.so!"; \
+              abort(); \
+            } \
+            name ## _fnptr = reinterpret_cast<retval (*) params>(sym); \
+          } while(0)
+          CUDA_RUNTIME_APIS(RUNTIME_GET_FNPTR);
+#undef RUNTIME_GET_FNPTR
+        } else {
+          if(required) {
+            log_gpu.fatal() << "could not open libcudart.so: " << strerror(errno);
+            abort();
+          } else {
+            log_gpu.info() << "could not open libcudart.so: " << strerror(errno);
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }
+#endif
+
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
@@ -3144,17 +3344,25 @@ namespace Realm {
 	}
       }
 
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+      if(!resolve_cuda_api_fnptrs(m->cfg_num_gpus > 0)) {
+        // warning was printed in resolve function
+        delete m;
+        return 0;
+      }
+#endif
+
       std::vector<GPUInfo *> infos;
       {
 	int num_devices;
-	CUresult ret = cuInit(0);
+	CUresult ret = CUDA_DRIVER_FNPTR(cuInit)(0);
         if(ret != CUDA_SUCCESS) {
           // failure to initialize the driver is a fatal error if we know gpus
           //  have been requested
           if(m->cfg_num_gpus > 0) {
             const char *err_name, *err_str;
-            cuGetErrorName(ret, &err_name);
-            cuGetErrorString(ret, &err_str);
+            CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &err_name);
+            CUDA_DRIVER_FNPTR(cuGetErrorString)(ret, &err_str);
             log_gpu.fatal() << "gpus requested, but cuInit(0) returned "
                             << ret << " (" << err_name << "): " << err_str;
             abort();
@@ -3167,24 +3375,30 @@ namespace Realm {
             return 0;
           }
 	} else {
-	  CHECK_CU( cuDeviceGetCount(&num_devices) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetCount)(&num_devices) );
 	  for(int i = 0; i < num_devices; i++) {
 	    GPUInfo *info = new GPUInfo;
 
 	    info->index = i;
-	    CHECK_CU( cuDeviceGet(&info->device, i) );
-	    CHECK_CU( cuDeviceGetName(info->name, sizeof(info->name), info->device) );
-	    CHECK_CU( cuDeviceGetAttribute(&info->major,
-					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, info->device) );
-	    CHECK_CU( cuDeviceGetAttribute(&info->minor,
-					   CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, info->device) );
-	    CHECK_CU( cuDeviceTotalMem(&info->totalGlobalMem, info->device) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGet)(&info->device, i) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name), info->device) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+                      (&info->major,
+                       CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+                       info->device) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+                      (&info->minor,
+                       CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
+                       info->device) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceTotalMem)
+                      (&info->totalGlobalMem, info->device) );
 #ifdef REALM_USE_CUDART_HIJACK
             // We only need the rest of these properties for the hijack
 #define GET_DEVICE_PROP(member, name)					\
             do {								\
               int tmp;								\
-              CHECK_CU( cuDeviceGetAttribute(&tmp, CU_DEVICE_ATTRIBUTE_##name, info->device) ); \
+              CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)                 \
+                        (&tmp, CU_DEVICE_ATTRIBUTE_##name, info->device) );     \
               info->member = tmp;						\
             } while(0)
             // SCREW TEXTURES AND SURFACES FOR NOW!
@@ -3266,9 +3480,9 @@ namespace Realm {
 	      it2++)
 	    if(it1 != it2) {
 	      int can_access;
-	      CHECK_CU( cuDeviceCanAccessPeer(&can_access,
-					      (*it1)->device,
-					      (*it2)->device) );
+	      CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceCanAccessPeer)(&can_access,
+                                                                 (*it1)->device,
+                                                                 (*it2)->device) );
 	      if(can_access) {
 		log_gpu.info() << "p2p access from device " << (*it1)->index
 			       << " to device " << (*it2)->index;
@@ -3317,13 +3531,13 @@ namespace Realm {
           if(cfg_lmem_resize_to_max)
             flags |= CU_CTX_LMEM_RESIZE_TO_MAX;
 
-	  CUresult res = cuDevicePrimaryCtxSetFlags(gpu_info[i]->device, flags);
+	  CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxSetFlags)(gpu_info[i]->device, flags);
           if(res != CUDA_SUCCESS) {
             bool lmem_ok;
             if(res == CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE) {
               if(cfg_lmem_resize_to_max) {
                 unsigned act_flags = 0;
-                CHECK_CU( cuCtxGetFlags(&act_flags) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxGetFlags)(&act_flags) );
                 lmem_ok = ((act_flags & CU_CTX_LMEM_RESIZE_TO_MAX) != 0);
               } else
                 lmem_ok = true;
@@ -3336,8 +3550,8 @@ namespace Realm {
 	}
 
 	CUcontext context;
-	CUresult res = cuDevicePrimaryCtxRetain(&context,
-						gpu_info[i]->device);
+	CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRetain)(&context,
+                                                                   gpu_info[i]->device);
 	// a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
 	if((res == CUDA_ERROR_INVALID_DEVICE) ||
 	   (res == CUDA_ERROR_OUT_OF_MEMORY)) {
@@ -3354,10 +3568,10 @@ namespace Realm {
 
 	if(cfg_min_avail_mem > 0) {
 	  size_t total_mem, avail_mem;
-	  CHECK_CU( cuMemGetInfo(&avail_mem, &total_mem) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem) );
 	  if(avail_mem < cfg_min_avail_mem) {
 	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
-	    CHECK_CU( cuDevicePrimaryCtxRelease(gpu_info[i]->device) );
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(gpu_info[i]->device) );
 	    continue;
 	  }
 	}
@@ -3411,9 +3625,9 @@ namespace Realm {
 	{
 	  AutoGPUContext agc(gpus[0]);
 
-	  CUresult ret = cuMemHostAlloc(&zcmem_cpu_base, 
-					cfg_zc_mem_size,
-					CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
+	  CUresult ret = CUDA_DRIVER_FNPTR(cuMemHostAlloc)(&zcmem_cpu_base,
+                                                           cfg_zc_mem_size,
+                                                           CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP);
 	  if(ret != CUDA_SUCCESS) {
 	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
 	      log_gpu.fatal() << "insufficient device-mappable host memory: "
@@ -3421,16 +3635,17 @@ namespace Realm {
 	    } else {
 	      const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
-	      cuGetErrorName(ret, &errstring);
+	      CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
 #endif
 	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
 			      << " (" << errstring << ")";
 	    }
 	    abort();
 	  }
-	  CHECK_CU( cuMemHostGetDevicePointer(&zcmem_gpu_base,
-					      zcmem_cpu_base,
-					      0) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)
+                    (&zcmem_gpu_base,
+                     zcmem_cpu_base,
+                     0) );
 	  // right now there are asssumptions in several places that unified addressing keeps
 	  //  the CPU and GPU addresses the same
 	  assert(zcmem_cpu_base == (void *)zcmem_gpu_base);
@@ -3448,7 +3663,9 @@ namespace Realm {
 	  CUresult ret;
 	  {
 	    AutoGPUContext agc(gpus[i]);
-	    ret = cuMemHostGetDevicePointer(&gpuptr, zcmem_cpu_base, 0);
+	    ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr,
+                                                               zcmem_cpu_base,
+                                                               0);
 	  }
 	  if((ret == CUDA_SUCCESS) && (gpuptr == zcmem_gpu_base)) {
 	    gpus[i]->pinned_sysmems.insert(zcmem->me);
@@ -3463,11 +3680,12 @@ namespace Realm {
         CUdeviceptr zcib_gpu_base;
         {
           AutoGPUContext agc(gpus[0]);
-          CHECK_CU( cuMemHostAlloc(&zcib_cpu_base,
-                                   cfg_zc_ib_size,
-                                   CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
-          CHECK_CU( cuMemHostGetDevicePointer(&zcib_gpu_base,
-                                              zcib_cpu_base, 0) );
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostAlloc)
+                    (&zcib_cpu_base,
+                     cfg_zc_ib_size,
+                     CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
+          CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)
+                    (&zcib_gpu_base, zcib_cpu_base, 0) );
           // right now there are asssumptions in several places that unified addressing keeps
           //  the CPU and GPU addresses the same
           assert(zcib_cpu_base == (void *)zcib_gpu_base); 
@@ -3484,7 +3702,9 @@ namespace Realm {
           CUresult ret;
           {
             AutoGPUContext agc(gpus[i]);
-            ret = cuMemHostGetDevicePointer(&gpuptr, zcib_cpu_base, 0);
+            ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr,
+                                                               zcib_cpu_base,
+                                                               0);
           }
           if ((ret == CUDA_SUCCESS) && (gpuptr == zcib_gpu_base)) {
             gpus[i]->pinned_sysmems.insert(ib_mem->me);
@@ -3502,8 +3722,9 @@ namespace Realm {
 	{
 	  AutoGPUContext agc(gpus[0]);
 
-          CUresult ret = cuMemAllocManaged(&uvm_gpu_base, cfg_uvm_mem_size,
-                                           CU_MEM_ATTACH_GLOBAL);
+          CUresult ret = CUDA_DRIVER_FNPTR(cuMemAllocManaged)(&uvm_gpu_base,
+                                                              cfg_uvm_mem_size,
+                                                              CU_MEM_ATTACH_GLOBAL);
 	  if(ret != CUDA_SUCCESS) {
 	    if(ret == CUDA_ERROR_OUT_OF_MEMORY) {
 	      log_gpu.fatal() << "unable to allocate managed memory: "
@@ -3511,7 +3732,7 @@ namespace Realm {
 	    } else {
 	      const char *errstring = "error message not available";
 #if CUDA_VERSION >= 6050
-	      cuGetErrorName(ret, &errstring);
+	      CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &errstring);
 #endif
 	      log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
 			      << " (" << errstring << ")";
@@ -3533,9 +3754,10 @@ namespace Realm {
           int concurrent_access;
 	  {
 	    AutoGPUContext agc(gpus[i]);
-            CHECK_CU( cuDeviceGetAttribute(&concurrent_access,
-                                           CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
-                                           gpus[i]->info->device) );
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)
+                      (&concurrent_access,
+                       CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+                       gpus[i]->info->device) );
           }
 
           if(concurrent_access) {
@@ -3604,9 +3826,10 @@ namespace Realm {
 	  CUresult ret;
 	  {
 	    AutoGPUContext agc(gpus[0]);
-	    ret = cuMemHostRegister(base, (*it)->size, 
-				    CU_MEMHOSTREGISTER_PORTABLE |
-				    CU_MEMHOSTREGISTER_DEVICEMAP);
+	    ret = CUDA_DRIVER_FNPTR(cuMemHostRegister)(base,
+                                                       (*it)->size,
+                                                       CU_MEMHOSTREGISTER_PORTABLE |
+                                                       CU_MEMHOSTREGISTER_DEVICEMAP);
 	  }
 	  if(ret != CUDA_SUCCESS) {
 	    log_gpu.info() << "failed to register mem " << (*it)->me << " (" << base << " + " << (*it)->size << ") : "
@@ -3622,7 +3845,9 @@ namespace Realm {
 	    CUresult ret;
 	    {
 	      AutoGPUContext agc(gpus[i]);
-	      ret = cuMemHostGetDevicePointer(&gpuptr, base, 0);
+	      ret = CUDA_DRIVER_FNPTR(cuMemHostGetDevicePointer)(&gpuptr,
+                                                                 base,
+                                                                 0);
 	    }
 	    if(ret == CUDA_SUCCESS) {
 	      // no test for && ((void *)gpuptr == base)) {
@@ -3684,19 +3909,19 @@ namespace Realm {
       if(zcmem_cpu_base) {
 	assert(!gpus.empty());
 	AutoGPUContext agc(gpus[0]);
-	CHECK_CU( cuMemFreeHost(zcmem_cpu_base) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFreeHost)(zcmem_cpu_base) );
       }
 
       if(zcib_cpu_base) {
 	assert(!gpus.empty());
 	AutoGPUContext agc(gpus[0]);
-	CHECK_CU( cuMemFreeHost(zcib_cpu_base) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFreeHost)(zcib_cpu_base) );
       }
 
       if(uvm_base) {
 	assert(!gpus.empty());
 	AutoGPUContext agc(gpus[0]);
-	CHECK_CU( cuMemFree(reinterpret_cast<CUdeviceptr>(uvm_base)) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuMemFree)(reinterpret_cast<CUdeviceptr>(uvm_base)) );
       }
 
       // also unregister any host memory at this time
@@ -3705,7 +3930,7 @@ namespace Realm {
 	for(std::vector<void *>::const_iterator it = registered_host_ptrs.begin();
 	    it != registered_host_ptrs.end();
 	    ++it)
-	  CHECK_CU( cuMemHostUnregister(*it) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostUnregister)(*it) );
 	registered_host_ptrs.clear();
       }
 

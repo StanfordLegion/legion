@@ -166,21 +166,24 @@ namespace Realm {
                 // grr...  prototypes of these differ slightly...
                 if(in_gpu) {
                   if(out_gpu) {
-                    CHECK_CU( cuMemcpyDtoDAsync(static_cast<CUdeviceptr>(out_base + out_offset),
-                                                static_cast<CUdeviceptr>(in_base + in_offset),
-                                                bytes,
-                                                stream->get_stream()) );
+                    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyDtoDAsync)
+                              (static_cast<CUdeviceptr>(out_base + out_offset),
+                               static_cast<CUdeviceptr>(in_base + in_offset),
+                               bytes,
+                               stream->get_stream()) );
                   } else {
-                    CHECK_CU( cuMemcpyDtoHAsync(reinterpret_cast<void *>(out_base + out_offset),
-                                                static_cast<CUdeviceptr>(in_base + in_offset),
-                                                bytes,
-                                                stream->get_stream()) );
+                    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyDtoHAsync)
+                              (reinterpret_cast<void *>(out_base + out_offset),
+                               static_cast<CUdeviceptr>(in_base + in_offset),
+                               bytes,
+                               stream->get_stream()) );
                   }
                 } else {
-                  CHECK_CU( cuMemcpyHtoDAsync(static_cast<CUdeviceptr>(out_base + out_offset),
-                                              reinterpret_cast<const void *>(in_base + in_offset),
-                                              bytes,
-                                              stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyHtoDAsync)
+                            (static_cast<CUdeviceptr>(out_base + out_offset),
+                             reinterpret_cast<const void *>(in_base + in_offset),
+                             bytes,
+                             stream->get_stream()) );
                 }
                 log_gpudma.info() << "gpu memcpy: dst="
                                   << std::hex << (out_base + out_offset)
@@ -268,7 +271,8 @@ namespace Realm {
                   copy_info.WidthInBytes = contig_bytes;
                   copy_info.Height = lines;
 
-                  CHECK_CU( cuMemcpy2DAsync(&copy_info, stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                            (&copy_info, stream->get_stream()) );
 
                   log_gpudma.info() << "gpu memcpy 2d: dst="
                                     << std::hex << (out_base + out_offset) << std::dec
@@ -348,7 +352,8 @@ namespace Realm {
                     else
                       copy_info.dstHost = reinterpret_cast<void *>(out_base + out_offset + (act_planes * out_pstride));
 
-                    CHECK_CU( cuMemcpy2DAsync(&copy_info, stream->get_stream()) );
+                    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                              (&copy_info, stream->get_stream()) );
                     act_planes++;
 
                     if(work_until.is_expired())
@@ -701,20 +706,22 @@ namespace Realm {
               memcpy(&fill_u8, fill_data, 1);
               if(out_dim == 1) {
                 size_t bytes = out_alc.remaining(0);
-                CHECK_CU( cuMemsetD8Async(CUdeviceptr(out_base + out_offset),
-                                          fill_u8,
-                                          bytes,
-                                          stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           fill_u8,
+                           bytes,
+                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
                 total_bytes += bytes;
               } else {
                 size_t bytes = out_alc.remaining(0);
                 size_t lines = out_alc.remaining(1);
-                CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(out_base + out_offset),
-                                            out_alc.get_stride(1),
-                                            fill_u8,
-                                            bytes, lines,
-                                            stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           out_alc.get_stride(1),
+                           fill_u8,
+                           bytes, lines,
+                           stream->get_stream()) );
                 out_alc.advance(1, lines);
                 total_bytes += bytes * lines;
               }
@@ -730,10 +737,11 @@ namespace Realm {
 #ifdef DEBUG_REALM
                 assert((bytes & 1) == 0);
 #endif
-                CHECK_CU( cuMemsetD16Async(CUdeviceptr(out_base + out_offset),
-                                           fill_u16,
-                                           bytes >> 1,
-                                           stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD16Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           fill_u16,
+                           bytes >> 1,
+                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
                 total_bytes += bytes;
               } else {
@@ -743,11 +751,12 @@ namespace Realm {
                 assert((bytes & 1) == 0);
                 assert((out_alc.get_stride(1) & 1) == 0);
 #endif
-                CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset),
-                                             out_alc.get_stride(1),
-                                             fill_u16,
-                                             bytes >> 1, lines,
-                                             stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           out_alc.get_stride(1),
+                           fill_u16,
+                           bytes >> 1, lines,
+                           stream->get_stream()) );
                 out_alc.advance(1, lines);
                 total_bytes += bytes * lines;
               }
@@ -763,10 +772,11 @@ namespace Realm {
 #ifdef DEBUG_REALM
                 assert((bytes & 3) == 0);
 #endif
-                CHECK_CU( cuMemsetD32Async(CUdeviceptr(out_base + out_offset),
-                                           fill_u32,
-                                           bytes >> 2,
-                                           stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD32Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           fill_u32,
+                           bytes >> 2,
+                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
                 total_bytes += bytes;
               } else {
@@ -776,11 +786,12 @@ namespace Realm {
                 assert((bytes & 3) == 0);
                 assert((out_alc.get_stride(1) & 3) == 0);
 #endif
-                CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(out_base + out_offset),
-                                             out_alc.get_stride(1),
-                                             fill_u32,
-                                             bytes >> 2, lines,
-                                             stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           out_alc.get_stride(1),
+                           fill_u32,
+                           bytes >> 2, lines,
+                           stream->get_stream()) );
                 out_alc.advance(1, lines);
                 total_bytes += bytes * lines;
               }
@@ -811,11 +822,12 @@ namespace Realm {
                   memcpy(&fill_u32,
                          reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                          4);
-                  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                               reduced_fill_size,
-                                               fill_u32,
-                                               1 /*"width"*/, fill_elems /*"height"*/,
-                                               stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                            (CUdeviceptr(out_base + out_offset + partial_bytes),
+                             reduced_fill_size,
+                             fill_u32,
+                             1 /*"width"*/, fill_elems /*"height"*/,
+                             stream->get_stream()) );
                   partial_bytes += 4;
                 }
               }
@@ -826,11 +838,12 @@ namespace Realm {
                   memcpy(&fill_u16,
                          reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                          2);
-                  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                               reduced_fill_size,
-                                               fill_u16,
-                                               1 /*"width"*/, fill_elems /*"height"*/,
-                                               stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                            (CUdeviceptr(out_base + out_offset + partial_bytes),
+                             reduced_fill_size,
+                             fill_u16,
+                             1 /*"width"*/, fill_elems /*"height"*/,
+                             stream->get_stream()) );
                   partial_bytes += 2;
                 }
               }
@@ -840,21 +853,23 @@ namespace Realm {
                 memcpy(&fill_u8,
                        reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                        1);
-                CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                            reduced_fill_size,
-                                            fill_u8,
-                                            1 /*"width"*/, fill_elems /*"height"*/,
-                                            stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                          (CUdeviceptr(out_base + out_offset + partial_bytes),
+                           reduced_fill_size,
+                           fill_u8,
+                           1 /*"width"*/, fill_elems /*"height"*/,
+                           stream->get_stream()) );
                 partial_bytes += 1;
               }
 
               while(fill_elems < elems) {
                 size_t todo = std::min(fill_elems, elems - fill_elems);
-                CHECK_CU( cuMemcpyAsync(CUdeviceptr(out_base + out_offset +
-                                                    (fill_elems * reduced_fill_size)),
-                                        CUdeviceptr(out_base + out_offset),
-                                        todo * reduced_fill_size,
-                                        stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                          (CUdeviceptr(out_base + out_offset +
+                                       (fill_elems * reduced_fill_size)),
+                           CUdeviceptr(out_base + out_offset),
+                           todo * reduced_fill_size,
+                           stream->get_stream()) );
                 fill_elems += todo;
               }
 
@@ -886,7 +901,8 @@ namespace Realm {
                   copy2d.dstDevice = CUdeviceptr(out_base + out_offset +
                                                  (lines_done * lstride));
                   copy2d.Height = todo;
-                  CHECK_CU( cuMemcpy2DAsync(&copy2d, stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                            (&copy2d, stream->get_stream()) );
                   lines_done += todo;
                 }
 
@@ -928,7 +944,8 @@ namespace Realm {
                       copy3d.dstDevice = CUdeviceptr(out_base + out_offset +
                                                      (planes_done * pstride));
                       copy3d.Depth = todo;
-                      CHECK_CU( cuMemcpy3DAsync(&copy3d, stream->get_stream()) );
+                      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)
+                                (&copy3d, stream->get_stream()) );
                       planes_done += todo;
                     }
 
@@ -942,7 +959,8 @@ namespace Realm {
                     for(size_t p = 1; p < planes; p++) {
                       copy2d.dstDevice = CUdeviceptr(out_base + out_offset +
                                                      (p * pstride));
-                      CHECK_CU( cuMemcpy2DAsync(&copy2d, stream->get_stream()) );
+                      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                                (&copy2d, stream->get_stream()) );
                     }
                   }
                 }
@@ -1066,10 +1084,10 @@ namespace Realm {
   #if CUDA_VERSION >= 11000
       // we can ask the runtime to perform the mapping for us
       int orig_device;
-      CHECK_CUDART( cudaGetDevice(&orig_device) );
-      CHECK_CUDART( cudaSetDevice(gpu->info->index) );
-      CHECK_CUDART( cudaGetFuncBySymbol(&kernel, host_proxy) );
-      CHECK_CUDART( cudaSetDevice(orig_device) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetDevice)(&orig_device) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(gpu->info->index) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetFuncBySymbol)(&kernel, host_proxy) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(orig_device) );
   #else
       // no way to ask the runtime to perform the mapping, so we'll have
       //  to actually launch the kernels with the runtime API
@@ -1225,13 +1243,14 @@ namespace Realm {
                   CU_LAUNCH_PARAM_END
                 };
 
-                CHECK_CU( cuLaunchKernel(kernel,
-                                         blocks_per_grid, 1, 1,
-                                         threads_per_block, 1, 1,
-                                         0 /*sharedmem*/,
-                                         stream->get_stream(),
-                                         0 /*params*/,
-                                         extra) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuLaunchKernel)
+                          (kernel,
+                           blocks_per_grid, 1, 1,
+                           threads_per_block, 1, 1,
+                           0 /*sharedmem*/,
+                           stream->get_stream(),
+                           0 /*params*/,
+                           extra) );
 #else
                 int orig_device;
                 void *params[] = {
@@ -1242,15 +1261,16 @@ namespace Realm {
                   &args->count,
                   args+1
                 };
-                CHECK_CUDART( cudaGetDevice(&orig_device) );
-                CHECK_CUDART( cudaSetDevice(channel->gpu->info->index) );
-                CHECK_CUDART( cudaLaunchKernel(kernel_host_proxy,
-                                               dim3(blocks_per_grid, 1, 1),
-                                               dim3(threads_per_block, 1, 1),
-                                               params,
-                                               0 /*sharedMem*/,
-                                               (cudaStream_t)(stream->get_stream())) );
-                CHECK_CUDART( cudaSetDevice(orig_device) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetDevice)(&orig_device) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(channel->gpu->info->index) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaLaunchKernel)
+                              (kernel_host_proxy,
+                               dim3(blocks_per_grid, 1, 1),
+                               dim3(threads_per_block, 1, 1),
+                               params,
+                               0 /*sharedMem*/,
+                               (cudaStream_t)(stream->get_stream())) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(orig_device) );
 #endif
 
                 // insert fence to track completion of reduction kernel
