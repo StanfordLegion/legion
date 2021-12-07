@@ -1131,12 +1131,22 @@ namespace Realm {
         } else {
           max_elems = std::min(input_control.remaining_count / in_elem_size,
                                output_control.remaining_count / out_elem_size);
-          if(in_port != 0)
+          if(in_port != 0) {
             max_elems = std::min(max_elems,
                                  in_port->addrlist.bytes_pending() / in_elem_size);
-          if(out_port != 0)
+            if(in_port->peer_guid != XFERDES_NO_GUID) {
+              size_t read_bytes_avail = in_port->seq_remote.span_exists(in_port->local_bytes_total,
+                                                                        (max_elems * in_elem_size));
+              max_elems = std::min(max_elems,
+                                   (read_bytes_avail / in_elem_size));
+            }
+          }
+          if(out_port != 0) {
             max_elems = std::min(max_elems,
                                  out_port->addrlist.bytes_pending() / out_elem_size);
+            // no support for reducing into an intermediate buffer
+            assert(out_port->peer_guid == XFERDES_NO_GUID);
+          }
         }
 
         size_t total_elems = 0;
