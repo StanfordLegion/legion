@@ -1550,8 +1550,8 @@ local function hoist_call_args(cx, hoisted, call_args)
           return height
         end)
 
-      if heights:find(function(ht) return ht == -1 end) then
-        return
+      for i = 1, #heights do
+        if heights[i] == -1 then return end
       end
 
       -- Every argument deriving from the same base cross product must have
