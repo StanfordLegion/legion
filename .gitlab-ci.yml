@@ -336,6 +336,11 @@ before_script:
       fi
     fi
   - |
+    if [[ "$USE_CUDA" -eq 1 ]]; then
+      # make sure dynamic loading finds the right libcudart.so
+      export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
+    fi
+  - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
       # Kokkos requires cmake 3.16 - grab it here so the default can remain
       #  an older version
@@ -373,9 +378,6 @@ before_script:
         # kokkos expects (the right) nvcc to be in the path, both for toolkit
         #  detection as well as for nvcc_wrapper (if used)
         PATH=$PATH:${CUDA}/bin
-
-        # libkokkoscore.so doesn't remember where libcudart.so is?
-        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
 
         if [[ "$CXX" == *clang* ]]; then
           # clang speaks cuda, so can be used as Kokkos' "C++" compiler
