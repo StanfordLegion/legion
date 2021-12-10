@@ -1592,7 +1592,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local_is)
-        local_expr->add_base_expression_reference(IS_EXPR_REF);
+        local_expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1614,7 +1614,7 @@ namespace Legion {
           dargs->use_event, dargs->redop, dargs->shadow_instance);
       // Remove the local expression reference if necessary
       if (dargs->local_is &&
-          dargs->local_expr->remove_base_expression_reference(IS_EXPR_REF))
+          dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->local_expr;
     }
 
@@ -3022,7 +3022,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local_is)
-        local_expr->add_base_expression_reference(IS_EXPR_REF);
+        local_expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3046,7 +3046,7 @@ namespace Legion {
           dargs->use_event, dargs->redop);
       // Remove the local expression reference if necessary
       if (dargs->local_is &&
-          dargs->local_expr->remove_base_expression_reference(IS_EXPR_REF))
+          dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->local_expr;
     }
 

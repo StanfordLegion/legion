@@ -1480,43 +1480,7 @@ namespace Legion {
     class InnerContext;;
     class TopLevelContext;
     class RemoteContext;
-    class LeafContext;
-
-    // Nasty global variable for TLS support of figuring out
-    // our context implicitly
-    extern __thread TaskContext *implicit_context;
-    // Same thing for the runtime
-    extern __thread Runtime *implicit_runtime;
-    // Another nasty global variable for tracking the fast
-    // reservations that we are holding
-    extern __thread AutoLock *local_lock_list;
-    // One more nasty global variable that we use for tracking
-    // the provenance of meta-task operations for profiling
-    // purposes, this has no bearing on correctness
-    extern __thread ::legion_unique_id_t implicit_provenance;
-    // Use this to track if we're inside of a registration 
-    // callback function which we know to be deduplicated
-    enum RegistrationCallbackMode {
-      NO_REGISTRATION_CALLBACK = 0,
-      LOCAL_REGISTRATION_CALLBACK = 1,
-      GLOBAL_REGISTRATION_CALLBACK = 2,
-    };
-    extern __thread unsigned inside_registration_callback;
-
-    /**
-     * \class LgTaskArgs
-     * The base class for all Legion Task arguments
-     */
-    template<typename T>
-    struct LgTaskArgs {
-    public:
-      LgTaskArgs(::legion_unique_id_t uid)
-        : provenance(uid), lg_task_id(T::TASK_ID) { }
-    public:
-      // In this order for alignment reasons
-      const ::legion_unique_id_t provenance;
-      const LgTaskID lg_task_id;
-    };
+    class LeafContext; 
     
     // legion_trace.h
     class LegionTrace;
@@ -1554,6 +1518,7 @@ namespace Legion {
     class RegionTreeForest;
     class CopyIndirection;
     class IndexSpaceExpression;
+    class IndexSpaceExprRef;
     class IndexSpaceOperation;
     template<int DIM, typename T> class IndexSpaceOperationT;
     template<int DIM, typename T> class IndexSpaceUnion;
@@ -1640,6 +1605,48 @@ namespace Legion {
     class ConcurrentManager;
     typedef Mapping::MapperEvent MapperEvent;
     typedef Mapping::ProfilingMeasurementID ProfilingMeasurementID;
+
+    // Nasty global variable for TLS support of figuring out
+    // our context implicitly
+    extern __thread TaskContext *implicit_context;
+    // Same thing for the runtime
+    extern __thread Runtime *implicit_runtime;
+    // Another nasty global variable for tracking the fast
+    // reservations that we are holding
+    extern __thread AutoLock *local_lock_list;
+    // One more nasty global variable that we use for tracking
+    // the provenance of meta-task operations for profiling
+    // purposes, this has no bearing on correctness
+    extern __thread ::legion_unique_id_t implicit_provenance;
+    // Use this to track if we're inside of a registration 
+    // callback function which we know to be deduplicated
+    enum RegistrationCallbackMode {
+      NO_REGISTRATION_CALLBACK = 0,
+      LOCAL_REGISTRATION_CALLBACK = 1,
+      GLOBAL_REGISTRATION_CALLBACK = 2,
+    };
+    extern __thread unsigned inside_registration_callback;
+    // This data structure tracks references to any live
+    // temporary index space expressions that have been
+    // handed back by the region tree inside the execution
+    // of a meta-task or a runtime API call
+    extern __thread 
+      std::vector<IndexSpaceExpression*> *implicit_live_expressions;
+
+    /**
+     * \class LgTaskArgs
+     * The base class for all Legion Task arguments
+     */
+    template<typename T>
+    struct LgTaskArgs {
+    public:
+      LgTaskArgs(::legion_unique_id_t uid)
+        : provenance(uid), lg_task_id(T::TASK_ID) { }
+    public:
+      // In this order for alignment reasons
+      const ::legion_unique_id_t provenance;
+      const LgTaskID lg_task_id;
+    };
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
@@ -2377,6 +2384,12 @@ namespace Legion {
       UniqueID local_provenance = Internal::implicit_provenance;
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
+      // Save any local live expressions that we have
+      std::vector<IndexSpaceExpression*> *local_live_expressions = 
+        Internal::implicit_live_expressions;
+#ifdef DEBUG_LEGION
+      Internal::implicit_live_expressions = NULL;
+#endif
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2415,6 +2428,11 @@ namespace Legion {
       Internal::implicit_provenance = local_provenance;
       // Write the registration callback information back
       Internal::inside_registration_callback = local_callback;
+#ifdef DEBUG_LEGION
+      assert(Internal::implicit_live_expressions == NULL);
+#endif
+      // Write the local live expressions back
+      Internal::implicit_live_expressions = local_live_expressions;
     }
 
     //--------------------------------------------------------------------------
@@ -2427,6 +2445,12 @@ namespace Legion {
       UniqueID local_provenance = Internal::implicit_provenance;
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
+      // Save any local live expressions that we have
+      std::vector<IndexSpaceExpression*> *local_live_expressions = 
+        Internal::implicit_live_expressions;
+#ifdef DEBUG_LEGION
+      Internal::implicit_live_expressions = NULL;
+#endif
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2465,6 +2489,11 @@ namespace Legion {
       Internal::implicit_provenance = local_provenance;
       // Write the registration callback information back
       Internal::inside_registration_callback = local_callback;
+#ifdef DEBUG_LEGION
+      assert(Internal::implicit_live_expressions == NULL);
+#endif
+      // Write the local live expressions back
+      Internal::implicit_live_expressions = local_live_expressions;
     }
 
 #ifdef LEGION_SPY

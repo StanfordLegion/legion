@@ -448,6 +448,172 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool DistributedCollectable::check_valid_and_increment(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (current_state != VALID_STATE)
+        return false;
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int previous = __sync_fetch_and_add(&valid_references, cnt);
+#ifdef DEBUG_LEGION
+      assert(previous >= 0);
+#endif
+      if (previous == 0)
+        has_valid_references = true;
+#else
+      valid_references++;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      if (finder == detailed_base_valid_references.end())
+        detailed_base_valid_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (valid_references > cnt)
+        return true;
+#ifdef DEBUG_LEGION
+      assert(!has_valid_references);
+#endif
+      has_valid_references = true;
+#endif
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::check_valid_and_increment(
+                                                  DistributedID source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (current_state != VALID_STATE)
+        return false;
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int previous = __sync_fetch_and_add(&valid_references, cnt);
+#ifdef DEBUG_LEGION
+      assert(previous >= 0);
+#endif
+      if (previous == 0)
+        has_valid_references = true;
+#else
+      valid_references++;
+      source = LEGION_DISTRIBUTED_ID_FILTER(source);
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(source);
+      if (finder == detailed_nested_valid_references.end())
+        detailed_nested_valid_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (valid_references > cnt)
+        return true;
+#ifdef DEBUG_LEGION
+      assert(!has_valid_references);
+#endif
+      has_valid_references = true;
+#endif
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::check_gc_and_increment(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if ((current_state == INACTIVE_STATE) || 
+          (current_state == DELETED_STATE) || 
+          (current_state == PENDING_ACTIVE_STATE) || 
+          (current_state == PENDING_INACTIVE_STATE) ||
+          (current_state == PENDING_INACTIVE_INVALID_STATE))
+        return false;
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int previous = __sync_fetch_and_add(&gc_references, cnt);
+#ifdef DEBUG_LEGION
+      assert(previous >= 0);
+#endif
+      if (previous == 0)
+        has_gc_references = true;
+#else
+      gc_references++;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_gc_references.find(source);
+      if (finder == detailed_base_gc_references.end())
+        detailed_base_gc_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (gc_references > cnt)
+        return true;
+#ifdef DEBUG_LEGION
+      assert(!has_gc_references);
+#endif
+      has_gc_references = true;
+#endif
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::check_gc_and_increment(
+                                                  DistributedID source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if ((current_state == INACTIVE_STATE) || 
+          (current_state == DELETED_STATE) || 
+          (current_state == PENDING_ACTIVE_STATE) || 
+          (current_state == PENDING_INACTIVE_STATE) ||
+          (current_state == PENDING_INACTIVE_INVALID_STATE))
+        return false;
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int previous = __sync_fetch_and_add(&gc_references, cnt);
+#ifdef DEBUG_LEGION
+      assert(previous >= 0);
+#endif
+      if (previous == 0)
+        has_gc_references = true;
+#else
+      gc_references++;
+      source = LEGION_DISTRIBUTED_ID_FILTER(source);
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_gc_references.find(source);
+      if (finder == detailed_nested_gc_references.end())
+        detailed_nested_gc_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (gc_references > cnt)
+        return true;
+#ifdef DEBUG_LEGION
+      assert(!has_gc_references);
+#endif
+      has_gc_references = true;
+#endif
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     bool DistributedCollectable::check_resource_and_increment(
                                                 ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------

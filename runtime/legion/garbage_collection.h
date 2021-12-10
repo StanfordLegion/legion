@@ -66,7 +66,7 @@ namespace Legion {
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
-      COMPOSITE_NODE_REF = 10,
+      INSTANCE_BUILDER_REF = 10,
       FIELD_ALLOCATOR_REF = 11,
       REMOTE_CREATE_REF = 12,
       INSTANCE_MAPPER_REF = 13,
@@ -75,15 +75,15 @@ namespace Legion {
       NEVER_GC_REF = 16,
       CONTEXT_REF = 17,
       RESTRICTED_REF = 18,
-      VERSION_STATE_TREE_REF = 19,
+      META_TASK_REF = 19,
       PHYSICAL_USER_REF = 20,
       LOGICAL_VIEW_REF = 21,
       REGION_TREE_REF = 22,
       LAYOUT_DESC_REF = 23,
       RUNTIME_REF = 24,
-      IS_EXPR_REF = 25,
+      LIVE_EXPR_REF = 25,
       TRACE_REF = 26,
-      AGGREGATORE_REF = 27,
+      AGGREGATOR_REF = 27,
       FIELD_STATE_REF = 28,
       LAST_SOURCE_REF = 29,
     };
@@ -106,7 +106,7 @@ namespace Legion {
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
       "Memory Manager Reference",                   \
-      "Composite Node Reference",                   \
+      "Instance Builder Reference",                 \
       "Field Allocator Reference",                  \
       "Remote Creation Reference",                  \
       "Instance Mapper Reference",                  \
@@ -115,13 +115,13 @@ namespace Legion {
       "Never GC Reference",                         \
       "Context Reference",                          \
       "Restricted Reference",                       \
-      "Version State Tree Reference",               \
+      "Meta-Task Reference",                        \
       "Physical User Reference",                    \
       "Logical View Reference",                     \
       "Region Tree Reference",                      \
       "Layout Description Reference",               \
       "Runtime Reference",                          \
-      "Index Space Expression Reference",           \
+      "Live Index Space Expression Reference",      \
       "Physical Trace Reference",                   \
       "Aggregator Reference",                       \
       "Field State Reference",                      \
@@ -331,8 +331,14 @@ namespace Legion {
       inline bool remove_base_resource_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
     public:
+#ifdef DEBUG_LEGION
+      bool check_valid(void) const { return (current_state == VALID_STATE); }
+#endif
       // Atomic check and increment operations 
-      inline bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
+      bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
+      bool check_valid_and_increment(DistributedID source, int cnt = 1);
+      bool check_gc_and_increment(ReferenceSource source, int cnt = 1);
+      bool check_gc_and_increment(DistributedID source, int cnt = 1);
       bool check_resource_and_increment(ReferenceSource source ,int cnt = 1);
       bool check_resource_and_increment(DistributedID source, int cnt = 1);
     private:
@@ -861,38 +867,6 @@ namespace Legion {
       return remove_nested_resource_ref_internal(
           LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool DistributedCollectable::check_valid_and_increment(
-                                         ReferenceSource source, int cnt /*=1*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-      // Don't support this if we are debugging GC
-#ifndef DEBUG_LEGION_GC
-      // Read the value in an unsafe way at first 
-      int current_cnt = valid_references;
-      // Don't even both trying if the count is zero
-      while (current_cnt > 0)
-      {
-        const int next_cnt = current_cnt + cnt;
-        const int prev_cnt = 
-          __sync_val_compare_and_swap(&valid_references, current_cnt, next_cnt);
-        if (prev_cnt == current_cnt)
-        {
-#ifdef LEGION_GC
-          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
-#endif
-          return true;
-        }
-        // Update the current count
-        current_cnt = prev_cnt;
-      }
-#endif
-      return false;
     }
 
   }; // namespace Internal 

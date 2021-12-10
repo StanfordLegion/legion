@@ -75,6 +75,7 @@ namespace Legion {
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
     __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
+    __thread std::vector<IndexSpaceExpression*> *implicit_live_expressions=NULL;
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
     const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
@@ -13143,11 +13144,25 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_live_expressions == NULL);
+#endif
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      bool result = forest->is_index_partition_disjoint(p);
+      const bool result = forest->is_index_partition_disjoint(p);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+      else if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
+      }
       return result;
     }
 
@@ -13155,18 +13170,47 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_disjoint(p);
+#ifdef DEBUG_LEGION
+      assert(implicit_live_expressions == NULL);
+#endif
+      const bool result = forest->is_index_partition_disjoint(p);
+      if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_live_expressions == NULL);
+#endif
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
       bool result = forest->is_index_partition_complete(p);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+      else if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
+      }
       return result;
     }
 
@@ -13174,7 +13218,22 @@ namespace Legion {
     bool Runtime::is_index_partition_complete(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_complete(p);
+#ifdef DEBUG_LEGION
+      assert(implicit_live_expressions == NULL);
+#endif
+      const bool result = forest->is_index_partition_complete(p);
+      if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -24370,6 +24429,7 @@ namespace Legion {
       if (!runtime->local_utils.empty())
         assert(implicit_context == NULL); // this better hold
 #endif
+      assert(implicit_live_expressions == NULL);
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -25000,6 +25060,17 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+      if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
+      }
 #ifdef DEBUG_LEGION
       if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
@@ -25077,6 +25148,7 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
+      assert(implicit_live_expressions == NULL);
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -25115,6 +25187,17 @@ namespace Legion {
 #endif
         default:
           assert(false); // should never get here
+      }
+      if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
       }
 #ifdef DEBUG_LEGION
       runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);

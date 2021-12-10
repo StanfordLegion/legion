@@ -2308,7 +2308,8 @@ namespace Legion {
             return result;
           }
           else
-            return intersect->issue_copy(trace_info, dst_fields, src_fields,
+            return intersect->issue_copy(trace_info,
+                                         dst_fields, src_fields,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
@@ -2616,7 +2617,7 @@ namespace Legion {
       RegionNode *src_node = get_node(src_req.region);
       RegionNode *idx_node = get_node(idx_req.region);
       RegionNode *dst_node = get_node(dst_req.region);
-      IndexSpaceExpression *copy_expr = 
+      IndexSpaceExpression *copy_expr =
         (idx_node->row_source == src_node->row_source) ? idx_node->row_source :
         intersect_index_spaces(src_node->row_source, idx_node->row_source);
       // Easy out if we're not going to move anything
@@ -2796,8 +2797,8 @@ namespace Legion {
       RegionNode *src_idx_node = get_node(src_idx_req.region);
       RegionNode *dst_node = get_node(dst_req.region);
       RegionNode *dst_idx_node = get_node(dst_idx_req.region);
-      IndexSpaceExpression *copy_expr = 
-        (src_idx_node->row_source == dst_idx_node->row_source) ? 
+      IndexSpaceExpression *copy_expr =
+        (src_idx_node->row_source == dst_idx_node->row_source) ?
          src_idx_node->row_source : intersect_index_spaces(
              src_idx_node->row_source, dst_idx_node->row_source);
       // Quick out if there is nothing we're going to copy
@@ -5596,43 +5597,66 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::union_index_spaces(
-                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
+                           ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag == rhs->type_tag);
+      assert(lhs->is_valid());
+      assert(rhs->is_valid());
 #endif
       if (lhs == rhs)
         return lhs;
       if (lhs->is_empty())
         return rhs;
-      lhs = lhs->get_canonical_expression(this);
       if (rhs->is_empty())
         return lhs;
-      rhs = rhs->get_canonical_expression(this);
-      if (lhs == rhs)
+      IndexSpaceExpression *lhs_canon = lhs->get_canonical_expression(this);
+      IndexSpaceExpression *rhs_canon = rhs->get_canonical_expression(this);
+      if (lhs_canon == rhs_canon)
         return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
-      if (compare_expressions(lhs, rhs))
+      if (compare_expressions(lhs_canon, rhs_canon))
       {
-        exprs[0] = lhs;
-        exprs[1] = rhs;
+        exprs[0] = lhs_canon;
+        exprs[1] = rhs_canon;
       }
       else
       {
-        exprs[0] = rhs;
-        exprs[1] = lhs;
+        exprs[0] = rhs_canon;
+        exprs[1] = lhs_canon;
       }
-      return union_index_spaces(exprs);
+      IndexSpaceExpression *result = union_index_spaces(exprs);
+      // Add the live reference 
+      if (mutator == NULL)
+      {
+        LocalReferenceMutator local_mutator;
+        result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
+      }
+      else
+        result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+      // Save it in the implicit live expression references
+      if (implicit_live_expressions == NULL)
+        implicit_live_expressions = new std::vector<IndexSpaceExpression*>();
+      implicit_live_expressions->emplace_back(result);
+      // Remove the gc reference that comes back from finding it in the tree
+      if (result->remove_live_reference(REGION_TREE_REF))
+        assert(false); // should never hit this
+      return result;
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::union_index_spaces(
-                                   const std::set<IndexSpaceExpression*> &exprs)
+                                   const std::set<IndexSpaceExpression*> &exprs,
+                                   ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!exprs.empty());
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            exprs.begin(); it != exprs.end(); it++)
+        assert((*it)->is_valid());
 #endif
       if (exprs.size() == 1)
         return *(exprs.begin());
@@ -5647,8 +5671,23 @@ namespace Legion {
       }
       if (expressions.empty())
         return *(exprs.begin());
+      LocalReferenceMutator local_mutator;
       if (expressions.size() == 1)
-        return expressions[0];
+      {
+        IndexSpaceExpression *result = expressions.back();
+        if (exprs.find(result) == exprs.end())
+        {
+          if (mutator == NULL)
+            result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
+          else
+            result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+          if (implicit_live_expressions == NULL)
+            implicit_live_expressions = 
+              new std::vector<IndexSpaceExpression*>;
+          implicit_live_expressions->emplace_back(result);
+        }
+        return result;
+      }
       // sort them in order by their IDs
       std::sort(expressions.begin(), expressions.end(), compare_expressions);
       // remove duplicates
@@ -5661,8 +5700,24 @@ namespace Legion {
         assert(!expressions.empty());
 #endif
         if (expressions.size() == 1)
+        {
+          IndexSpaceExpression *result = expressions.back();
+          if (exprs.find(result) == exprs.end())
+          {
+            if (mutator == NULL)
+              result->add_base_expression_reference(LIVE_EXPR_REF,
+                                                    &local_mutator);
+            else
+              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            if (implicit_live_expressions == NULL)
+              implicit_live_expressions = 
+                new std::vector<IndexSpaceExpression*>;
+            implicit_live_expressions->emplace_back(result);
+          }
           return expressions.back();
+        }
       }
+      bool first_pass = true;
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5681,34 +5736,110 @@ namespace Legion {
               if (expressions.empty())
                 break;
             }
-            next_expressions.push_back(union_index_spaces(temp_expressions));
+            IndexSpaceExpression *expr = union_index_spaces(temp_expressions);
+            if (mutator == NULL)
+              expr->add_base_expression_reference(REGION_TREE_REF,
+                                                  &local_mutator);
+            else
+              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
+            // Remove the gc ref that comes back from the union call
+            if (expr->remove_live_reference(REGION_TREE_REF))
+              assert(false); // should never hit this
+            next_expressions.push_back(expr);
           }
           else
           {
-            next_expressions.push_back(expressions.back());
+            IndexSpaceExpression *expr = expressions.back();
             expressions.pop_back();
+            if (mutator == NULL)
+              expr->add_base_expression_reference(REGION_TREE_REF, 
+                                                  &local_mutator);
+            else
+              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
+            next_expressions.push_back(expr);
           }
         }
+        if (!first_pass)
+        {
+          // Remove the expression references on the previous set
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                expressions.begin(); it != expressions.end(); it++)
+            if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+              delete (*it);
+        }
+        else
+          first_pass = false;
         expressions.swap(next_expressions);
         // canonicalize and uniquify them all again
+        std::set<IndexSpaceExpression*,CompareExpressions> unique_expressions;
         for (unsigned idx = 0; idx < expressions.size(); idx++)
         {
-          IndexSpaceExpression *&expr = expressions[idx];
-          expr = expr->get_canonical_expression(this);
+          IndexSpaceExpression *expr = expressions[idx];
+          IndexSpaceExpression *unique = expr->get_canonical_expression(this);
+          if (unique_expressions.insert(unique).second)
+          {
+            if (mutator == NULL)
+              unique->add_base_expression_reference(REGION_TREE_REF, 
+                                                    &local_mutator);
+            else
+              unique->add_base_expression_reference(REGION_TREE_REF, mutator);
+          }
         }
-        std::sort(expressions.begin(), expressions.end(), compare_expressions);
-        last = std::unique(expressions.begin(), expressions.end());
-        if (last != expressions.end())
+        // Remove the expression references
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              expressions.begin(); it != expressions.end(); it++)
+          if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+            delete (*it);
+        if (unique_expressions.size() == 1)
         {
-          expressions.erase(last, expressions.end());
-#ifdef DEBUG_LEGION
-          assert(!expressions.empty());
-#endif
-          if (expressions.size() == 1)
-            return expressions.back();
+          IndexSpaceExpression *result = *(unique_expressions.begin());
+          if (exprs.find(result) == exprs.end())
+          {
+            if (mutator == NULL)
+              result->add_base_expression_reference(LIVE_EXPR_REF,
+                                                    &local_mutator);
+            else
+              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            if (implicit_live_expressions == NULL)
+              implicit_live_expressions =
+                new std::vector<IndexSpaceExpression*>();
+            implicit_live_expressions->emplace_back(result);
+          }
+          // Remove the extra expression reference we added
+          if (result->remove_base_expression_reference(REGION_TREE_REF))
+            assert(false); // should never hit this
+          return result; 
         }
+        expressions.resize(unique_expressions.size());
+        unsigned index = 0;
+        for (std::set<IndexSpaceExpression*,CompareExpressions>::const_iterator
+              it = unique_expressions.begin(); 
+              it != unique_expressions.end(); it++)
+          expressions[index++] = *it;
       }
-      return union_index_spaces(expressions);
+      IndexSpaceExpression *result = union_index_spaces(expressions);
+      if (exprs.find(result) == exprs.end())
+      {
+        if (mutator == NULL)
+          result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
+        else
+          result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+        if (implicit_live_expressions == NULL)
+          implicit_live_expressions = new std::vector<IndexSpaceExpression*>();
+        implicit_live_expressions->emplace_back(result);
+      }
+      // Remove the reference added by the trie traversal
+      if (result->remove_live_reference(REGION_TREE_REF))
+        assert(false); // should never hit this deletion
+      if (!first_pass)
+      {
+        // Remove the extra references on the expression vector we added
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              expressions.begin(); it != expressions.end(); it++)
+          if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+            delete (*it);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5732,7 +5863,8 @@ namespace Legion {
         {
           IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
-          if (finder->second->find_operation(expressions, result, next))
+          if (finder->second->find_operation(expressions, result, next) &&
+              result->try_add_live_reference(REGION_TREE_REF))
             return result;
           if (creator == NULL)
           {
@@ -5789,7 +5921,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
+                           ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5799,33 +5932,53 @@ namespace Legion {
         return lhs;
       if (lhs->is_empty())
         return lhs;
-      lhs = lhs->get_canonical_expression(this);
       if (rhs->is_empty())
         return rhs;
-      rhs = rhs->get_canonical_expression(this);
-      if (lhs == rhs)
+      IndexSpaceExpression *lhs_canon = lhs->get_canonical_expression(this);
+      IndexSpaceExpression *rhs_canon = rhs->get_canonical_expression(this);
+      if (lhs_canon == rhs_canon)
         return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
-      if (compare_expressions(lhs, rhs))
+      if (compare_expressions(lhs_canon, rhs_canon))
       {
-        exprs[0] = lhs;
-        exprs[1] = rhs;
+        exprs[0] = lhs_canon;
+        exprs[1] = rhs_canon;
       }
       else
       {
-        exprs[0] = rhs;
-        exprs[1] = lhs;
+        exprs[0] = rhs_canon;
+        exprs[1] = lhs_canon;
       }
-      return intersect_index_spaces(exprs);
+      IndexSpaceExpression *result = intersect_index_spaces(exprs);
+      // Add the live reference 
+      if (mutator == NULL)
+      {
+        LocalReferenceMutator local_mutator;
+        result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
+      }
+      else
+        result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+      // Save it in the implicit live expression references
+      if (implicit_live_expressions == NULL)
+        implicit_live_expressions = new std::vector<IndexSpaceExpression*>();
+      implicit_live_expressions->emplace_back(result);
+      // Remove the gc reference that comes back with the trie traversal
+      if (result->remove_live_reference(REGION_TREE_REF))
+        assert(false); // should never hit this
+      return result;
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-                                   const std::set<IndexSpaceExpression*> &exprs)
+                                   const std::set<IndexSpaceExpression*> &exprs,
+                                   ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!exprs.empty());
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            exprs.begin(); it != exprs.end(); it++)
+        assert((*it)->is_valid());
 #endif
       if (exprs.size() == 1)
         return *(exprs.begin());
@@ -5844,6 +5997,7 @@ namespace Legion {
       // remove duplicates
       std::vector<IndexSpaceExpression*>::iterator last =
         std::unique(expressions.begin(), expressions.end());
+      LocalReferenceMutator local_mutator;
       if (last != expressions.end())
       {
         expressions.erase(last, expressions.end());
@@ -5851,8 +6005,24 @@ namespace Legion {
         assert(!expressions.empty());
 #endif
         if (expressions.size() == 1)
-          return expressions.back();
+        {
+          IndexSpaceExpression *result = expressions.back();
+          if (exprs.find(result) == exprs.end())
+          {
+            if (mutator == NULL)
+              result->add_base_expression_reference(LIVE_EXPR_REF,
+                                                    &local_mutator);
+            else
+              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            if (implicit_live_expressions == NULL)
+              implicit_live_expressions = 
+                new std::vector<IndexSpaceExpression*>;
+            implicit_live_expressions->emplace_back(result);
+          }
+          return result;
+        }
       }
+      bool first_pass = true;
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5871,37 +6041,138 @@ namespace Legion {
               if (expressions.empty())
                 break;
             }
-            next_expressions.push_back(
-                intersect_index_spaces(temp_expressions));
+            IndexSpaceExpression *expr =
+              intersect_index_spaces(temp_expressions);
+            if (mutator == NULL)
+              expr->add_base_expression_reference(REGION_TREE_REF,
+                                                  &local_mutator);
+            else
+              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
+            // Remove the gc ref that comes back from the union call
+            if (expr->remove_live_reference(REGION_TREE_REF))
+              assert(false); // should never hit this
+            next_expressions.push_back(expr);
           }
           else
           {
-            next_expressions.push_back(expressions.back());
+            IndexSpaceExpression *expr = expressions.back();
             expressions.pop_back();
+            if (mutator == NULL)
+              expr->add_base_expression_reference(REGION_TREE_REF,
+                                                  &local_mutator);
+            else
+              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
+            next_expressions.push_back(expr);
           }
         }
+        if (!first_pass)
+        {
+          // Remove the expression references on the previous set
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                expressions.begin(); it != expressions.end(); it++)
+            if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+              delete (*it);
+        }
+        else
+          first_pass = false;
         expressions.swap(next_expressions);
         // canonicalize and uniquify them all again
+        std::set<IndexSpaceExpression*,CompareExpressions> unique_expressions;
         for (unsigned idx = 0; idx < expressions.size(); idx++)
         {
-          IndexSpaceExpression *&expr = expressions[idx];
-          if (expr->is_empty())
-            return expr;
-          expr = expr->get_canonical_expression(this);
+          IndexSpaceExpression *expr = expressions[idx];
+          IndexSpaceExpression *unique = expr->get_canonical_expression(this);
+          if (unique->is_empty())
+          {
+            // Add a reference to the unique expression
+            if (exprs.find(unique) == exprs.end())
+            {
+              if (mutator == NULL)
+                unique->add_base_expression_reference(LIVE_EXPR_REF,
+                                                      &local_mutator);
+              else
+                unique->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+              if (implicit_live_expressions == NULL)
+                implicit_live_expressions = 
+                  new std::vector<IndexSpaceExpression*>;
+              implicit_live_expressions->emplace_back(unique);
+            }
+            // Remove references on all the things we no longer need
+            for (std::set<IndexSpaceExpression*,CompareExpressions>::
+                  const_iterator it = unique_expressions.begin(); it !=
+                  unique_expressions.end(); it++)
+              if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+                delete (*it);
+            for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                  expressions.begin(); it != expressions.end(); it++)
+              if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+                delete (*it);
+            return unique;
+          }
+          if (unique_expressions.insert(unique).second)
+          {
+            if (mutator == NULL)
+              unique->add_base_expression_reference(REGION_TREE_REF, 
+                                                    &local_mutator);
+            else
+              unique->add_base_expression_reference(REGION_TREE_REF, mutator);
+          }
         }
-        std::sort(expressions.begin(), expressions.end(), compare_expressions);
-        last = std::unique(expressions.begin(), expressions.end());
-        if (last != expressions.end())
+        // Remove the expression references
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              expressions.begin(); it != expressions.end(); it++)
+          if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+            delete (*it);
+        if (unique_expressions.size() == 1)
         {
-          expressions.erase(last, expressions.end());
-#ifdef DEBUG_LEGION
-          assert(!expressions.empty());
-#endif
-          if (expressions.size() == 1)
-            return expressions.back();
+          IndexSpaceExpression *result = *(unique_expressions.begin());
+          if (exprs.find(result) == exprs.end())
+          {
+            if (mutator == NULL)
+              result->add_base_expression_reference(LIVE_EXPR_REF,
+                                                    &local_mutator);
+            else
+              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            if (implicit_live_expressions == NULL)
+              implicit_live_expressions =
+                new std::vector<IndexSpaceExpression*>();
+            implicit_live_expressions->emplace_back(result);
+          }
+          // Remove the extra expression reference we added
+          if (result->remove_base_expression_reference(REGION_TREE_REF))
+            assert(false); // should never hit this
+          return result; 
         }
+        expressions.resize(unique_expressions.size());
+        unsigned index = 0;
+        for (std::set<IndexSpaceExpression*,CompareExpressions>::const_iterator
+              it = unique_expressions.begin(); 
+              it != unique_expressions.end(); it++)
+          expressions[index++] = *it;
       }
-      return intersect_index_spaces(expressions);
+      IndexSpaceExpression *result = intersect_index_spaces(expressions);
+      if (exprs.find(result) == exprs.end())
+      {
+        if (mutator == NULL)
+          result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
+        else
+          result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+        if (implicit_live_expressions == NULL)
+          implicit_live_expressions = new std::vector<IndexSpaceExpression*>;
+        implicit_live_expressions->emplace_back(result);
+      }
+      // Remove the reference added by the trie traversal
+      if (result->remove_live_reference(REGION_TREE_REF))
+        assert(false); // should never hit this deletion
+      if (!first_pass)
+      {
+        // Remove the extra references on the expression vector we added
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              expressions.begin(); it != expressions.end(); it++)
+          if ((*it)->remove_base_expression_reference(REGION_TREE_REF))
+            delete (*it);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5925,7 +6196,8 @@ namespace Legion {
         {
           IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
-          if (finder->second->find_operation(expressions, result, next))
+          if (finder->second->find_operation(expressions, result, next) &&
+              result->try_add_live_reference(REGION_TREE_REF))
             return result;
           if (creator == NULL)
           {
@@ -5986,11 +6258,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(
                            IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
-                           OperationCreator *creator/*=NULL*/)
+                           OperationCreator *creator/*=NULL*/,
+                           ReferenceMutator *mutator/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs->type_tag == rhs->type_tag);
+      assert(lhs->is_valid());
+      assert(rhs->is_valid());
 #endif
       // Handle a few easy cases
       if (creator == NULL)
@@ -6005,71 +6280,93 @@ namespace Legion {
       expressions[1] = rhs->get_canonical_expression(this);
       const IndexSpaceExprID key = expressions[0]->expr_id;
       // See if we can find it in read-only mode
+      IndexSpaceExpression *result = NULL;
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
         std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
           finder = difference_ops.find(key);
         if (finder != difference_ops.end())
         {
-          IndexSpaceExpression *result = NULL;
+          IndexSpaceExpression *expr = NULL;
           ExpressionTrieNode *next = NULL;
-          if (finder->second->find_operation(expressions, result, next))
-            return result;
-          if (creator == NULL)
+          if (finder->second->find_operation(expressions, expr, next) &&
+              expr->try_add_live_reference(REGION_TREE_REF))
+            result = expr;
+          if (result == NULL)
           {
-            DifferenceOpCreator diff_creator(this, lhs->type_tag, 
-                                  expressions[0], expressions[1]);
-            return next->find_or_create_operation(expressions, diff_creator);
+            if (creator == NULL)
+            {
+              DifferenceOpCreator diff_creator(this, lhs->type_tag, 
+                                    expressions[0], expressions[1]);
+              result = next->find_or_create_operation(expressions,diff_creator);
+            }
+            else
+              result = next->find_or_create_operation(expressions, *creator);
+          }
+        }
+      }
+      if (result == NULL)
+      {
+        ExpressionTrieNode *node = NULL;
+        if (creator == NULL)
+        {
+          DifferenceOpCreator diff_creator(this, lhs->type_tag,
+                                expressions[0], expressions[1]);
+          // Didn't find it, retake the lock, see if we lost the race
+          // and if not make the actual trie node
+          AutoLock l_lock(lookup_is_op_lock);
+          // See if we lost the race
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+            finder = difference_ops.find(key);
+          if (finder == difference_ops.end())
+          {
+            // Didn't lose the race so make the node
+            node = new ExpressionTrieNode(0/*depth*/, expressions[0]->expr_id);
+            difference_ops[key] = node;
           }
           else
-            return next->find_or_create_operation(expressions, *creator);
-        }
-      }
-      ExpressionTrieNode *node = NULL;
-      if (creator == NULL)
-      {
-        DifferenceOpCreator diff_creator(this, lhs->type_tag,
-                              expressions[0], expressions[1]);
-        // Didn't find it, retake the lock, see if we lost the race
-        // and if not make the actual trie node
-        AutoLock l_lock(lookup_is_op_lock);
-        // See if we lost the race
-        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
-          finder = difference_ops.find(key);
-        if (finder == difference_ops.end())
-        {
-          // Didn't lose the race so make the node
-          node = new ExpressionTrieNode(0/*depth*/, expressions[0]->expr_id);
-          difference_ops[key] = node;
+            node = finder->second;
+#ifdef DEBUG_LEGION
+          assert(node != NULL);
+#endif
+          result = node->find_or_create_operation(expressions, diff_creator);
         }
         else
-          node = finder->second;
+        {
+          // Didn't find it, retake the lock, see if we lost the race
+          // and if not make the actual trie node
+          AutoLock l_lock(lookup_is_op_lock);
+          // See if we lost the race
+          std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+            finder = difference_ops.find(key);
+          if (finder == difference_ops.end())
+          {
+            // Didn't lose the race so make the node
+            node = new ExpressionTrieNode(0/*depth*/, expressions[0]->expr_id);
+            difference_ops[key] = node;
+          }
+          else
+            node = finder->second;
 #ifdef DEBUG_LEGION
-        assert(node != NULL);
+          assert(node != NULL);
 #endif
-        return node->find_or_create_operation(expressions, diff_creator);
+          result = node->find_or_create_operation(expressions, *creator);
+        }
+      }
+      if (mutator == NULL)
+      {
+        LocalReferenceMutator local_mutator;
+        result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
-      {
-        // Didn't find it, retake the lock, see if we lost the race
-        // and if not make the actual trie node
-        AutoLock l_lock(lookup_is_op_lock);
-        // See if we lost the race
-        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
-          finder = difference_ops.find(key);
-        if (finder == difference_ops.end())
-        {
-          // Didn't lose the race so make the node
-          node = new ExpressionTrieNode(0/*depth*/, expressions[0]->expr_id);
-          difference_ops[key] = node;
-        }
-        else
-          node = finder->second;
-#ifdef DEBUG_LEGION
-        assert(node != NULL);
-#endif
-        return node->find_or_create_operation(expressions, *creator);
-      }
+        result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+      if (implicit_live_expressions == NULL)
+        implicit_live_expressions = new std::vector<IndexSpaceExpression*>;
+      implicit_live_expressions->emplace_back(result);
+      // Remove the gc reference that comes back from finding it in the tree
+      if (result->remove_live_reference(REGION_TREE_REF))
+        assert(false); // should never hit this
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -6108,37 +6405,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_index_space_expression(
-                               const std::vector<IndexSpaceOperation*> &parents)
+    void RegionTreeForest::invalidate_index_space_operations(
+                               const std::vector<IndexSpaceOperation*> &derived)
     //--------------------------------------------------------------------------
     {
       // Two phases here: in read-only made figure out the set of operations
       // we are going to invalidate but don't remove them yet
-      std::deque<IndexSpaceOperation*> to_remove;
-      {
-        AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
-        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
-              parents.begin(); it != parents.end(); it++)
-          (*it)->invalidate_operation(to_remove);
-      }
-      if (to_remove.empty())
-        return;
-      // Now retake the lock and do the removal
-      std::deque<IndexSpaceOperation*> to_delete;
+      std::vector<IndexSpaceOperation*> invalidated;
+      invalidated.reserve(derived.size());
       {
         AutoLock l_lock(lookup_is_op_lock);
-        for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-              to_remove.begin(); it != to_remove.end(); it++)
+        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
+              derived.begin(); it != derived.end(); it++)
         {
-          if ((*it)->remove_operation(this))
-            to_delete.push_back(*it);
+          if ((*it)->invalidate_operation())
+            invalidated.push_back(*it);
         }
       }
-      if (to_delete.empty())
-        return;
-      for (std::deque<IndexSpaceOperation*>::const_iterator it = 
-            to_delete.begin(); it != to_delete.end(); it++)
-        delete (*it);
+      for (std::vector<IndexSpaceOperation*>::const_iterator it = 
+            invalidated.begin(); it != invalidated.end(); it++)
+        if ((*it)->remove_base_gc_ref(REGION_TREE_REF))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -6375,8 +6662,14 @@ namespace Legion {
         result->send_remote_gc_decrement(source);
         return result;
       }
-      RemoteExpressionCreator creator(this, derez);
-      return creator.consume(); 
+      TypeTag type_tag;
+      derez.deserialize(type_tag);
+      RemoteExpressionCreator creator(this, type_tag, derez);
+      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
+#ifdef DEBUG_LEGION
+      assert(creator.operation != NULL);
+#endif
+      return creator.operation;
     }
 
     /////////////////////////////////////////////////////////////
@@ -6415,7 +6708,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(parent_operations.empty());
+      assert(derived_operations.empty());
 #endif
     }
 
@@ -6426,7 +6719,7 @@ namespace Legion {
     {
       const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
       targs->proxy_this->tighten_index_space();
-      if (targs->proxy_this->remove_base_expression_reference(IS_EXPR_REF))
+      if (targs->proxy_dc->remove_base_resource_ref(META_TASK_REF))
         delete targs->proxy_this;
     }
 
@@ -6439,25 +6732,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceExpression::add_parent_operation(IndexSpaceOperation *op)
+    void IndexSpaceExpression::add_derived_operation(IndexSpaceOperation *op)
     //--------------------------------------------------------------------------
     {
       AutoLock e_lock(expr_lock);
 #ifdef DEBUG_LEGION
-      assert(parent_operations.find(op) == parent_operations.end());
+      assert(derived_operations.find(op) == derived_operations.end());
 #endif
-      parent_operations.insert(op);
+      derived_operations.insert(op);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceExpression::remove_parent_operation(IndexSpaceOperation *op)
+    void IndexSpaceExpression::remove_derived_operation(IndexSpaceOperation *op)
     //--------------------------------------------------------------------------
     {
       AutoLock e_lock(expr_lock);
 #ifdef DEBUG_LEGION
-      assert(parent_operations.find(op) != parent_operations.end());
+      assert(derived_operations.find(op) != derived_operations.end());
 #endif
-      parent_operations.erase(op);
+      derived_operations.erase(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceExpression::invalidate_derived_operations(DistributedID did,
+                                                      RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      // Traverse upwards for any derived operations and invalidate them
+      std::vector<IndexSpaceOperation*> derived;
+      {
+        AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+        if (!derived_operations.empty())
+        {
+          derived.reserve(derived_operations.size());
+          for (std::set<IndexSpaceOperation*>::const_iterator it = 
+               derived_operations.begin(); it != derived_operations.end(); it++)
+          {
+            (*it)->add_tree_expression_reference(did);
+            derived.push_back(*it);
+          }
+        }
+      }
+      if (!derived.empty())
+      {
+        context->invalidate_index_space_operations(derived);
+        // Remove any references that we have on the parents
+        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
+              derived.begin(); it != derived.end(); it++)
+          if ((*it)->remove_tree_expression_reference(did))
+            delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6479,8 +6803,11 @@ namespace Legion {
       // If the canonical expression is not ourself, then the region tree
       // forest has given us a reference back on it, see if we're the first
       // ones to write it, if not we can remove the reference now
+      const DistributedID did = get_distributed_id();
       if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
-        expr->remove_canonical_reference(get_distributed_id());
+        expr->remove_canonical_reference(did);
+      else // We're the first so add our resource reference
+        expr->add_tree_expression_reference(did);
       return expr;
     }
 
@@ -6545,23 +6872,6 @@ namespace Legion {
                                                        origin, &wait_for);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceExpression::finalize_canonical(size_t volume,
-                                                RegionTreeForest *forest, 
-                                                IndexSpaceExpression *original,
-                                                IndexSpaceExpression *canonical) 
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(canonical != NULL);
-#endif
-      if (canonical == original)
-        forest->remove_canonical_expression(canonical, volume);
-      else if (canonical->remove_canonical_reference(
-                        original->get_distributed_id()))
-        delete canonical;
-    }
-
     /////////////////////////////////////////////////////////////
     // Index Space Operation 
     /////////////////////////////////////////////////////////////
@@ -6574,10 +6884,11 @@ namespace Legion {
           ctx->runtime->get_available_distributed_id(),
           ctx->runtime->address_space),
         context(ctx), origin_expr(this), op_kind(kind), invalidated(0)
+#ifdef DEBUG_LEGION
+        , tree_active(true)
+#endif
     //--------------------------------------------------------------------------
     {
-      // We always keep a reference on ourself until we get invalidated
-      add_base_resource_ref(IS_EXPR_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Index Expr %lld %d %lld",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, expr_id);
@@ -6592,11 +6903,17 @@ namespace Legion {
         DistributedCollectable(ctx->runtime, did, owner), 
         context(ctx), origin_expr(origin),
         op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
+#ifdef DEBUG_LEGION
+        , tree_active(true)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
 #endif
+      // Keep a gc reference to ensure that this remain active until it 
+      // is made invalid on the owner node
+      add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Index Expr %lld %d %lld",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, expr_id);
@@ -6607,47 +6924,121 @@ namespace Legion {
     IndexSpaceOperation::~IndexSpaceOperation(void)
     //--------------------------------------------------------------------------
     {
-      if (canonical != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(has_volume);
-#endif
-        IndexSpaceExpression::finalize_canonical(volume,context,this,canonical);
-      }
-      if (!is_owner())
-        context->unregister_remote_expression(expr_id); 
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // If we're not the owner send a gc reference to the owner
+#ifdef DEBUG_LEGION
+      assert(tree_active); // should only happen once
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the owner send a valid reference to the owner
       if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
+        send_remote_valid_increment(owner_space, mutator);
+      if ((canonical != NULL) && (canonical != this) &&
+          !canonical->try_add_canonical_reference(did))
+      {
+        // We were unsuccessful at adding our canonical reference so 
+        // remove the resource reference to the canonical object and
+        // and mark that we no longer have a canonical expression
+        if (canonical->remove_tree_expression_reference(did))
+          delete canonical;
+        canonical = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+        send_remote_valid_decrement(owner_space, mutator);
+      // If we have a canonical reference that is not ourselves then 
+      // we need to remove the nested reference that we are holding on it too
+      if ((canonical != NULL) && (canonical != this) &&
+          canonical->remove_canonical_reference(did))
+        // should never actually delete it since we have a resource ref too
+        assert(false); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceOperation::InactiveFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      op->send_remote_gc_decrement(target, mutator);
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // Remove the remote gc reference on the owner
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
+#ifdef DEBUG_LEGION
+      // Should only go through one cycle of active to not active
+      assert(tree_active);
+      tree_active = false;
+#endif
+      if (is_owner())
+      {
+        // Send the removal of the gc references on any remote nodes 
+        if (has_remote_instances())
+        {
+          InactiveFunctor functor(this, mutator); 
+          map_over_remote_instances(functor);
+        }
+      }
+      else
+        context->unregister_remote_expression(expr_id);
+      // Invalidate any derived operations
+      invalidate_derived_operations(did, context);
+      // Remove this operation from the region tree
+      remove_operation();
+      if (canonical != NULL)
+      {
+        if (canonical == this)
+        {
+#ifdef DEBUG_LEGION
+          assert(has_volume);
+#endif
+          context->remove_canonical_expression(this, volume);
+        }
+        else if (canonical->remove_tree_expression_reference(did))
+          delete canonical;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceOperation::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_resource_and_increment(source);
+      return check_gc_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceOperation::remove_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_resource_ref(source);
+      return remove_nested_gc_ref(source);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::try_add_live_reference(ReferenceSource source)
+    //--------------------------------------------------------------------------
+    {
+      return check_gc_and_increment(source);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::remove_live_reference(ReferenceSource source)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_gc_ref(source);
     }
 
     //--------------------------------------------------------------------------
@@ -6658,10 +7049,10 @@ namespace Legion {
       if (mutator == NULL)
       {
         LocalReferenceMutator local_mutator;
-        add_base_gc_ref(source, &local_mutator, count);
+        add_base_valid_ref(source, &local_mutator, count);
       }
       else
-        add_base_gc_ref(source, mutator, count);
+        add_base_valid_ref(source, mutator, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6681,10 +7072,10 @@ namespace Legion {
       if (mutator == NULL)
       {
         LocalReferenceMutator local_mutator;
-        add_nested_gc_ref(source, &local_mutator, count);
+        add_nested_valid_ref(source, &local_mutator, count);
       }
       else
-        add_nested_gc_ref(source, mutator, count);
+        add_nested_valid_ref(source, mutator, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6692,7 +7083,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_base_gc_ref(source, NULL/*mutator*/, count);
+      return remove_base_valid_ref(source, NULL/*mutator*/, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6700,7 +7091,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_gc_ref(source, NULL/*mutator*/, count);
+      return remove_nested_valid_ref(source, NULL/*mutator*/, count);
     }
 
     //--------------------------------------------------------------------------
@@ -6719,57 +7110,13 @@ namespace Legion {
       return remove_nested_resource_ref(id, count);
     }
 
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::invalidate_operation(
-                                    std::deque<IndexSpaceOperation*> &to_remove)
-    //--------------------------------------------------------------------------
-    {
-      // See if we're the first one here, there can be a race with
-      // multiple invalidations occurring at the same time
-      if (__sync_fetch_and_add(&invalidated, 1) > 0)
-        return;
-      // Add ourselves to the list if we're here first
-      to_remove.push_back(this);
-      // The expression that we added in the constructor flows back in
-      // the 'to_remove' data structure
-      std::vector<IndexSpaceOperation*> parents;
-      {
-        // Have to get a read-only copy of these while holding the lock
-        AutoLock i_lock(inter_lock,1,false/*exclusive*/);
-        // If we don't have any parent operations then we're done
-        if (parent_operations.empty())
-          return;
-        parents.resize(parent_operations.size());
-        unsigned idx = 0;
-        for (std::set<IndexSpaceOperation*>::const_iterator it = 
-              parent_operations.begin(); it != 
-              parent_operations.end(); it++, idx++)
-        {
-          // Add a reference to prevent the parents from being collected
-          // as we're traversing up the tree
-          (*it)->add_tree_expression_reference(did);
-          parents[idx] = (*it);
-        }
-      }
-      // Now continue up the tree with the parents which we are temporarily
-      // holding a reference to in order to prevent a collection race
-      for (std::vector<IndexSpaceOperation*>::const_iterator it = 
-            parents.begin(); it != parents.end(); it++)
-      {
-        (*it)->invalidate_operation(to_remove);
-        // Remove the reference when we're done with the parents
-        if ((*it)->remove_tree_expression_reference(did))
-          delete (*it);
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // Operation Creator 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OperationCreator::OperationCreator(void)
-      : result(NULL)
+    OperationCreator::OperationCreator(RegionTreeForest *f)
+      : forest(f), result(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -6779,11 +7126,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If we still have a result then it's because it wasn't consumed need 
-      // we need to remove it's reference that was added by the 
-      // IndexSpaceOperation constructor 
-      // We know the operation was never added to the region tree so we
-      // can pass in a NULL pointer to the region tree forest
-      if ((result != NULL) && result->remove_operation(NULL/*forest*/))
+      // we need to remove it's reference that was added by the constructor 
+      if ((result != NULL) && result->remove_base_resource_ref(REGION_TREE_REF))
         delete result;
     }
 
@@ -6806,9 +7150,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      IndexSpaceExpression *temp = result;
-      result = NULL;
-      return temp;
+      // Add an expression reference here since this is going to be put
+      // into the region tree expression trie data structure, the reference
+      // will be removed when the expressions is removed from the trie
+      result->add_base_gc_ref(REGION_TREE_REF);
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -6981,13 +7327,17 @@ namespace Legion {
       {
         // We're the node that should have the operation
         // Check to see if we've made the operation yet
-        if (local_operation != NULL)
+        if ((local_operation != NULL) &&
+            local_operation->try_add_live_reference(REGION_TREE_REF))
           return local_operation;
         // Operation doesn't exist yet, retake the lock and try to make it
         AutoLock t_lock(trie_lock);
-        if (local_operation != NULL)
+        if ((local_operation != NULL) &&
+            local_operation->try_add_live_reference(REGION_TREE_REF))
           return local_operation;
         local_operation = creator.consume();
+        if (!local_operation->try_add_live_reference(REGION_TREE_REF))
+          assert(false); // should never hit this
         return local_operation;
       }
       else if (expressions.size() == (depth+2))
@@ -7001,7 +7351,8 @@ namespace Legion {
           AutoLock t_lock(trie_lock,1,false/*exclusive*/);
           std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
-          if (op_finder != operations.end())
+          if ((op_finder != operations.end()) &&
+              op_finder->second->try_add_live_reference(REGION_TREE_REF))
             return op_finder->second;
           std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
             node_finder = nodes.find(target_expr);
@@ -7015,7 +7366,8 @@ namespace Legion {
           AutoLock t_lock(trie_lock);
           std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
-          if (op_finder != operations.end())
+          if ((op_finder != operations.end()) &&
+              op_finder->second->try_add_live_reference(REGION_TREE_REF))
             return op_finder->second;
           // Still don't have the op
           std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
@@ -7025,6 +7377,8 @@ namespace Legion {
             // Didn't find the sub-node, so make the operation here
             IndexSpaceExpression *result = creator.consume();
             operations[target_expr] = result;
+            if (!result->try_add_live_reference(REGION_TREE_REF))
+              assert(false); // should never hit this
             return result;
           }
           else
@@ -7383,6 +7737,9 @@ namespace Legion {
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
         tight_index_space(false), tree_valid(is_owner())
+#ifdef DEBUG_LEGION
+        , tree_active(true)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7417,13 +7774,6 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
-      if (canonical != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(has_volume);
-#endif
-        IndexSpaceExpression::finalize_canonical(volume,context,this,canonical);
-      }
       // Remove ourselves from the context
       if (registered_with_runtime)
         context->remove_node(handle);
@@ -7444,19 +7794,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_valid(ReferenceMutator *mutator)
+    void IndexSpaceNode::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(tree_valid || !is_owner());
+      assert(tree_active);
 #endif
-      // If we're not the owner, we add a valid reference to the owner
-      if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::InvalidFunctor::apply(AddressSpaceID target)
+    void IndexSpaceNode::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the owner, we add a valid reference to the owner
+      if (!is_owner())
+        send_remote_valid_increment(owner_space, mutator);
+      if ((canonical != NULL) && (canonical != this) &&
+          !canonical->try_add_canonical_reference(did))
+      {
+        // We were unsuccessful at adding our canonical reference so 
+        // remove the resource reference to the canonical object and
+        // and mark that we no longer have a canonical expression
+        if (canonical->remove_tree_expression_reference(did))
+          delete canonical;
+        canonical = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        AutoLock n_lock(node_lock);
+        // First time we become invalid then the tree is no longer valid
+        // Any later valid states are just for expression references
+        tree_valid = false;
+      }
+      else
+        send_remote_valid_decrement(owner_space, mutator); 
+      // If we have a canonical reference that is not ourselves then 
+      // we need to remove the nested reference that we are holding on it too
+      if ((canonical != NULL) && (canonical != this) &&
+          canonical->remove_canonical_reference(did))
+        // should never actually delete it since we have a resource ref too
+        assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::InactiveFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       std::map<AddressSpaceID,RtEvent>::iterator finder =
@@ -7469,57 +7856,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_invalid(ReferenceMutator *mutator)
+    void IndexSpaceNode::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should only become active one time
+      assert(tree_active);
+      tree_active = false;
+#endif
       if (is_owner())
       {
-        AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-        assert(tree_valid);
-#endif
-        tree_valid = false;
-        // Send the invalidations
-        if ((send_references == 0) && has_remote_instances())
+        // Send the removal of the gc references on any remote nodes 
+        if (has_remote_instances())
         {
-          // Make sure invalidation are not handled before send effects
-          InvalidFunctor functor(this, mutator, send_effects);
+          InactiveFunctor functor(this, mutator, send_effects); 
           map_over_remote_instances(functor);
         }
       }
       else
-        send_remote_valid_decrement(owner_space, mutator); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Traverse upwards for any parent operations and invalidate them
-      std::vector<IndexSpaceOperation*> parents;
+        context->unregister_remote_expression(expr_id);
+      // Invalidate any derived operations
+      invalidate_derived_operations(did, context);
+      if (canonical != NULL)
       {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        if (!parent_operations.empty())
+        if (canonical == this)
         {
-          parents.resize(parent_operations.size());
-          unsigned idx = 0;
-          for (std::set<IndexSpaceOperation*>::const_iterator it = 
-                parent_operations.begin(); it != 
-                parent_operations.end(); it++, idx++)
-          {
-            (*it)->add_tree_expression_reference(did);
-            parents[idx] = (*it);
-          }
+#ifdef DEBUG_LEGION
+          assert(has_volume);
+#endif
+          context->remove_canonical_expression(this, volume);
         }
-      }
-      if (!parents.empty())
-      {
-        context->invalidate_index_space_expression(parents);
-        // Remove any references that we have on the parents
-        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
-              parents.begin(); it != parents.end(); it++)
-          if ((*it)->remove_tree_expression_reference(did))
-            delete (*it);
+        else if (canonical->remove_tree_expression_reference(did))
+          delete canonical;
       }
     }
 
@@ -8216,13 +8584,6 @@ namespace Legion {
             // Remove this from the remote instances since we did
             // not actually end up sending it
             filter_remote_instances(target);
-            // Send the invalidations
-            if (remove_reference && !tree_valid && has_remote_instances())
-            {
-              // Make sure invalidation are not handled before send effects
-              InvalidFunctor functor(this, &mutator, send_effects);
-              map_over_remote_instances(functor);
-            }
           }
           if (remove_reference && parent->remove_nested_resource_ref(did))
             delete parent;
@@ -8285,13 +8646,6 @@ namespace Legion {
           assert(send_references > 0);
 #endif
           remove_reference = (--send_references == 0);
-          // Send the invalidations
-          if (remove_reference && !tree_valid && has_remote_instances())
-          {
-            // Make sure invalidation are not handled before send effects
-            InvalidFunctor functor(this, &mutator, send_effects);
-            map_over_remote_instances(functor);
-          }
         }
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
@@ -8307,14 +8661,6 @@ namespace Legion {
       {
         AutoLock n_lock(node_lock);
         remove_reference = (--send_references == 0);
-        // Send the invalidations
-        if (is_owner() && remove_reference &&
-            !tree_valid && has_remote_instances())
-        {
-          // Make sure invalidation are not handled before send effects
-          InvalidFunctor functor(this, &mutator, send_effects);
-          map_over_remote_instances(functor);
-        }
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
         delete parent;
@@ -8683,14 +9029,28 @@ namespace Legion {
     bool IndexSpaceNode::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_resource_and_increment(source);
+      return check_gc_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::remove_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_resource_ref(source);
+      return remove_nested_gc_ref(source);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::try_add_live_reference(ReferenceSource source)
+    //--------------------------------------------------------------------------
+    {
+      return check_gc_and_increment(source);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_live_reference(ReferenceSource source)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_gc_ref(source);
     }
 
     //--------------------------------------------------------------------------
@@ -8701,10 +9061,10 @@ namespace Legion {
       if (mutator == NULL)
       {
         LocalReferenceMutator local_mutator;
-        add_base_gc_ref(source, &local_mutator, count);
+        add_base_valid_ref(source, &local_mutator, count);
       }
       else
-        add_base_gc_ref(source, mutator, count);
+        add_base_valid_ref(source, mutator, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8724,10 +9084,10 @@ namespace Legion {
       if (mutator == NULL)
       {
         LocalReferenceMutator local_mutator;
-        add_nested_gc_ref(source, &local_mutator, count);
+        add_nested_valid_ref(source, &local_mutator, count);
       }
       else
-        add_nested_gc_ref(source, mutator, count);
+        add_nested_valid_ref(source, mutator, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8735,7 +9095,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_base_gc_ref(source, NULL/*mutator*/, count);
+      return remove_base_valid_ref(source, NULL/*mutator*/, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8743,7 +9103,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_gc_ref(source, NULL/*mutator*/, count);
+      return remove_nested_valid_ref(source, NULL/*mutator*/, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8760,13 +9120,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return remove_nested_resource_ref(id, count);
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_operation(RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-      return remove_base_resource_ref(IS_EXPR_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -8946,7 +9299,10 @@ namespace Legion {
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
       if (has_complete && complete)
+      {
+        parent->add_nested_expression_reference(did);
         union_expr.store(parent);
+      }
       else
         union_expr.store(NULL);
 #ifdef DEBUG_LEGION
@@ -8981,7 +9337,10 @@ namespace Legion {
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
       if (has_complete && complete)
+      {
+        parent->add_nested_expression_reference(did);
         union_expr.store(parent);
+      }
       else
         union_expr.store(NULL);
 #ifdef DEBUG_LEGION
@@ -9147,6 +9506,10 @@ namespace Legion {
             delete (*it);
         partition_trackers.clear();
       }
+      // Remove the reference on our union expression if we have one
+      IndexSpaceExpression *expr = union_expr.load();
+      if ((expr != NULL) && expr->remove_nested_expression_reference(did))
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -9847,10 +10210,15 @@ namespace Legion {
         // We can always write the result immediately since we know
         // that the common sub-expression code will give the same
         // result if there is a race
-        union_expr.store(context->union_index_spaces(child_spaces));
+        IndexSpaceExpression *expr = context->union_index_spaces(child_spaces);
+        expr->add_nested_expression_reference(did);
+        union_expr.store(expr);
       }
       else // if we're complete the parent is our expression
+      {
+        parent->add_nested_expression_reference(did);
         union_expr.store(parent);
+      }
       return union_expr.load();
     }
 

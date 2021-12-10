@@ -3973,8 +3973,41 @@ namespace Legion {
       // Remove references from any views that we have
       for (std::set<LogicalView*>::const_iterator it = 
             all_views.begin(); it != all_views.end(); it++)
-        if ((*it)->remove_base_valid_ref(AGGREGATORE_REF))
+        if ((*it)->remove_base_valid_ref(AGGREGATOR_REF))
           delete (*it);
+      all_views.clear();
+      // Remove source precondition expression references
+      for (std::map<InstanceView*,EventFieldExprs>::iterator vit =
+            src_pre.begin(); vit != src_pre.end(); vit++)
+      {
+        for (EventFieldExprs::iterator eit =
+              vit->second.begin(); eit != vit->second.end(); eit++)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            if (it->first->remove_base_expression_reference(AGGREGATOR_REF))
+              delete it->first;
+          eit->second.clear();
+        }
+        vit->second.clear();
+      }
+      src_pre.clear();
+      // Remove destination precondition expression references
+      for (std::map<InstanceView*,EventFieldExprs>::iterator vit =
+            dst_pre.begin(); vit != dst_pre.end(); vit++)
+      {
+        for (EventFieldExprs::iterator eit =
+              vit->second.begin(); eit != vit->second.end(); eit++)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            if (it->first->remove_base_expression_reference(AGGREGATOR_REF))
+              delete it->first;
+          eit->second.clear();
+        }
+        vit->second.clear();
+      }
+      dst_pre.clear();
       // Delete all our copy updates
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
             const_iterator mit = sources.begin(); mit != sources.end(); mit++)
@@ -4012,6 +4045,23 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::Update::Update(IndexSpaceExpression *exp,
+                                const FieldMask &mask, CopyAcrossHelper *helper)
+      : expr(exp), src_mask(mask), across_helper(helper)
+    //--------------------------------------------------------------------------
+    {
+      expr->add_base_expression_reference(AGGREGATOR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::Update::~Update(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_base_expression_reference(AGGREGATOR_REF))
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -4458,6 +4508,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!preconditions.empty());
 #endif
+      WrapperReferenceMutator mutator(effects);
       AutoLock p_lock(pre_lock);
       EventFieldExprs &pre = reading ? src_pre[view] : dst_pre[view]; 
       for (EventFieldExprs::iterator eit = preconditions.begin();
@@ -4473,13 +4524,23 @@ namespace Legion {
             FieldMaskSet<IndexSpaceExpression>::iterator finder = 
               event_finder->second.find(it->first);
             if (finder == event_finder->second.end())
+            {
+              // Keep a reference in case we are deferred
+              it->first->add_base_expression_reference(AGGREGATOR_REF,&mutator);
               event_finder->second.insert(it->first, it->second);
+            }
             else
               finder.merge(it->second);
           }
         }
         else // We can just swap this over
+        {
+          // Keep references in case we are deferred
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_expression_reference(AGGREGATOR_REF, &mutator);
           pre[eit->first].swap(eit->second);
+        }
       }
     }
 
@@ -4496,7 +4557,12 @@ namespace Legion {
       FieldMaskSet<IndexSpaceExpression>::iterator finder = 
         event_pre.find(expr);
       if (finder == event_pre.end())
+      {
         event_pre.insert(expr, mask);
+        // Keep a reference in case we are deferred
+        WrapperReferenceMutator mutator(effects);
+        expr->add_base_expression_reference(AGGREGATOR_REF, &mutator);
+      }
       else
         finder.merge(mask);
     }
@@ -4608,7 +4674,7 @@ namespace Legion {
       std::pair<std::set<LogicalView*>::iterator,bool> result = 
         all_views.insert(new_view);
       if (result.second)
-        new_view->add_base_valid_ref(AGGREGATORE_REF, this);
+        new_view->add_base_valid_ref(AGGREGATOR_REF, this);
     }
 
     //--------------------------------------------------------------------------
@@ -9685,6 +9751,10 @@ namespace Legion {
           std::map<EquivalenceSet*,IndexSpaceExpression*> *copy_exprs = 
             new std::map<EquivalenceSet*,IndexSpaceExpression*>();
           copy_exprs->swap(to_traverse_exprs);
+          WrapperReferenceMutator mutator(done_events);
+          for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator
+                it = copy_exprs->begin(); it != copy_exprs->end(); it++)
+            it->second->add_base_expression_reference(META_TASK_REF, &mutator);
           const RtUserEvent done = Runtime::create_rt_user_event();
           DeferRayTraceFinishArgs args(target, source, copy_traverse,
               copy_exprs, expr->get_volume(), handle, done);
@@ -13865,7 +13935,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local)
-        expr->add_base_expression_reference(IS_EXPR_REF);
+        expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -13886,7 +13956,7 @@ namespace Legion {
       delete dargs->ray_mask;
       // Remove our expression reference too
       if (dargs->is_local &&
-          dargs->expr->remove_base_expression_reference(IS_EXPR_REF))
+          dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
     }
 
@@ -13918,6 +13988,10 @@ namespace Legion {
         Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
       else
         Runtime::trigger_event(dargs->done);
+      for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator it =
+            dargs->exprs->begin(); it != dargs->exprs->end(); it++)
+        if (it->second->remove_base_expression_reference(META_TASK_REF))
+          delete it->second;
       delete dargs->to_traverse;
       delete dargs->exprs;
     }
@@ -13983,7 +14057,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_local)
-        expr->add_base_expression_reference(IS_EXPR_REF);
+        expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -14074,7 +14148,7 @@ namespace Legion {
       set->register_with_runtime(NULL/*no remote registration needed*/);
       // Remove our expression reference too
       if (dargs->is_local &&
-          dargs->expr->remove_base_expression_reference(IS_EXPR_REF))
+          dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
     }
 

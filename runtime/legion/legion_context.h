@@ -2063,6 +2063,9 @@ namespace Legion {
     inline void TaskContext::begin_runtime_call(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_live_expressions == NULL);
+#endif
       if (overhead_tracker == NULL)
         return;
       const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -2075,6 +2078,17 @@ namespace Legion {
     inline void TaskContext::end_runtime_call(void)
     //--------------------------------------------------------------------------
     {
+      if (implicit_live_expressions != NULL)
+      {
+        // Remove references to any live index space expressions we have 
+        for (std::vector<IndexSpaceExpression*>::const_iterator it =
+              implicit_live_expressions->begin(); it !=
+              implicit_live_expressions->end(); it++)
+          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
+            delete (*it);
+        delete implicit_live_expressions;
+        implicit_live_expressions = NULL;
+      }
       if (overhead_tracker == NULL)
         return;
       const long long current = Realm::Clock::current_time_in_nanoseconds();
