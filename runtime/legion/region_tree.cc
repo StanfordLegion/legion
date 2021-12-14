@@ -5631,15 +5631,15 @@ namespace Legion {
       // Add the live reference 
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
         result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
       // Save it in the implicit live expression references
-      if (implicit_live_expressions == NULL)
-        implicit_live_expressions = new std::vector<IndexSpaceExpression*>();
-      implicit_live_expressions->emplace_back(result);
+      if (implicit_reference_tracker == NULL)
+        implicit_reference_tracker = new ImplicitReferenceTracker;
+      implicit_reference_tracker->record_live_expression(result);
       // Remove the gc reference that comes back from finding it in the tree
       if (result->remove_live_reference(REGION_TREE_REF))
         assert(false); // should never hit this
@@ -5671,7 +5671,7 @@ namespace Legion {
       }
       if (expressions.empty())
         return *(exprs.begin());
-      LocalReferenceMutator local_mutator;
+      LocalReferenceMutator local_mutator(true/*waiter*/);
       if (expressions.size() == 1)
       {
         IndexSpaceExpression *result = expressions.back();
@@ -5681,10 +5681,9 @@ namespace Legion {
             result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
           else
             result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-          if (implicit_live_expressions == NULL)
-            implicit_live_expressions = 
-              new std::vector<IndexSpaceExpression*>;
-          implicit_live_expressions->emplace_back(result);
+          if (implicit_reference_tracker == NULL)
+            implicit_reference_tracker = new ImplicitReferenceTracker;
+          implicit_reference_tracker->record_live_expression(result);
         }
         return result;
       }
@@ -5709,10 +5708,9 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_live_expressions == NULL)
-              implicit_live_expressions = 
-                new std::vector<IndexSpaceExpression*>;
-            implicit_live_expressions->emplace_back(result);
+            if (implicit_reference_tracker == NULL)
+              implicit_reference_tracker = new ImplicitReferenceTracker;
+            implicit_reference_tracker->record_live_expression(result);
           }
           return expressions.back();
         }
@@ -5800,10 +5798,9 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_live_expressions == NULL)
-              implicit_live_expressions =
-                new std::vector<IndexSpaceExpression*>();
-            implicit_live_expressions->emplace_back(result);
+            if (implicit_reference_tracker == NULL)
+              implicit_reference_tracker = new ImplicitReferenceTracker;
+            implicit_reference_tracker->record_live_expression(result);
           }
           // Remove the extra expression reference we added
           if (result->remove_base_expression_reference(REGION_TREE_REF))
@@ -5824,9 +5821,9 @@ namespace Legion {
           result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
         else
           result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-        if (implicit_live_expressions == NULL)
-          implicit_live_expressions = new std::vector<IndexSpaceExpression*>();
-        implicit_live_expressions->emplace_back(result);
+        if (implicit_reference_tracker == NULL)
+          implicit_reference_tracker = new ImplicitReferenceTracker;
+        implicit_reference_tracker->record_live_expression(result);
       }
       // Remove the reference added by the trie traversal
       if (result->remove_live_reference(REGION_TREE_REF))
@@ -5953,15 +5950,15 @@ namespace Legion {
       // Add the live reference 
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
         result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
       // Save it in the implicit live expression references
-      if (implicit_live_expressions == NULL)
-        implicit_live_expressions = new std::vector<IndexSpaceExpression*>();
-      implicit_live_expressions->emplace_back(result);
+      if (implicit_reference_tracker == NULL)
+        implicit_reference_tracker = new ImplicitReferenceTracker;
+      implicit_reference_tracker->record_live_expression(result);
       // Remove the gc reference that comes back with the trie traversal
       if (result->remove_live_reference(REGION_TREE_REF))
         assert(false); // should never hit this
@@ -5997,7 +5994,7 @@ namespace Legion {
       // remove duplicates
       std::vector<IndexSpaceExpression*>::iterator last =
         std::unique(expressions.begin(), expressions.end());
-      LocalReferenceMutator local_mutator;
+      LocalReferenceMutator local_mutator(true/*waiter*/);
       if (last != expressions.end())
       {
         expressions.erase(last, expressions.end());
@@ -6014,10 +6011,9 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_live_expressions == NULL)
-              implicit_live_expressions = 
-                new std::vector<IndexSpaceExpression*>;
-            implicit_live_expressions->emplace_back(result);
+            if (implicit_reference_tracker == NULL)
+              implicit_reference_tracker = new ImplicitReferenceTracker;
+            implicit_reference_tracker->record_live_expression(result);
           }
           return result;
         }
@@ -6092,10 +6088,9 @@ namespace Legion {
                                                       &local_mutator);
               else
                 unique->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-              if (implicit_live_expressions == NULL)
-                implicit_live_expressions = 
-                  new std::vector<IndexSpaceExpression*>;
-              implicit_live_expressions->emplace_back(unique);
+              if (implicit_reference_tracker == NULL)
+                implicit_reference_tracker = new ImplicitReferenceTracker;
+              implicit_reference_tracker->record_live_expression(unique);
             }
             // Remove references on all the things we no longer need
             for (std::set<IndexSpaceExpression*,CompareExpressions>::
@@ -6133,10 +6128,9 @@ namespace Legion {
                                                     &local_mutator);
             else
               result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-            if (implicit_live_expressions == NULL)
-              implicit_live_expressions =
-                new std::vector<IndexSpaceExpression*>();
-            implicit_live_expressions->emplace_back(result);
+            if (implicit_reference_tracker == NULL)
+              implicit_reference_tracker = new ImplicitReferenceTracker;
+            implicit_reference_tracker->record_live_expression(result);
           }
           // Remove the extra expression reference we added
           if (result->remove_base_expression_reference(REGION_TREE_REF))
@@ -6157,9 +6151,9 @@ namespace Legion {
           result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
         else
           result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-        if (implicit_live_expressions == NULL)
-          implicit_live_expressions = new std::vector<IndexSpaceExpression*>;
-        implicit_live_expressions->emplace_back(result);
+        if (implicit_reference_tracker == NULL)
+          implicit_reference_tracker = new ImplicitReferenceTracker;
+        implicit_reference_tracker->record_live_expression(result);
       }
       // Remove the reference added by the trie traversal
       if (result->remove_live_reference(REGION_TREE_REF))
@@ -6355,14 +6349,14 @@ namespace Legion {
       }
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
         result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-      if (implicit_live_expressions == NULL)
-        implicit_live_expressions = new std::vector<IndexSpaceExpression*>;
-      implicit_live_expressions->emplace_back(result);
+      if (implicit_reference_tracker == NULL)
+        implicit_reference_tracker = new ImplicitReferenceTracker;
+      implicit_reference_tracker->record_live_expression(result);
       // Remove the gc reference that comes back from finding it in the tree
       if (result->remove_live_reference(REGION_TREE_REF))
         assert(false); // should never hit this
@@ -6516,8 +6510,9 @@ namespace Legion {
       }
       const AddressSpaceID owner = 
           IndexSpaceExpression::get_owner_space(remote_expr_id, runtime);
-      if (owner == runtime->address_space)
-        return origin;
+#ifdef DEBUG_LEGION
+      assert(owner != runtime->address_space);
+#endif
       // Retake the lock in exclusive mode and see if we lost the race
       RtEvent wait_on;
       RtUserEvent request_event;
@@ -6572,16 +6567,38 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::find_remote_expression(
-                                                IndexSpaceExprID remote_expr_id)
+                                         const PendingRemoteExpression &pending)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-      std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-        finder = remote_expressions.find(remote_expr_id);
+      if (pending.is_index_space)
+        return get_node(pending.handle);
+      IndexSpaceExpression *result = NULL;
+      {
+        AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
+        std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
+          finder = remote_expressions.find(pending.remote_expr_id);
 #ifdef DEBUG_LEGION
-      assert(finder != remote_expressions.end());
+        assert(finder != remote_expressions.end());
 #endif
-      return finder->second;
+        result = finder->second;
+      }
+      if (pending.has_reference)
+      {
+#ifdef DEBUG_LEGION
+        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
+        assert(op != NULL);
+#else
+        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+        LocalReferenceMutator mutator(false/*waiter*/);
+        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        op->send_remote_valid_decrement(pending.source, NULL/*mutator*/,
+            mutator.get_done_event());
+        if (implicit_reference_tracker == NULL)
+          implicit_reference_tracker = new ImplicitReferenceTracker;
+        implicit_reference_tracker->record_live_expression(result);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -6592,10 +6609,8 @@ namespace Legion {
       AutoLock l_lock(lookup_is_op_lock);
       std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator 
         finder = remote_expressions.find(remote_expr_id);
-#ifdef DEBUG_LEGION
-      assert(finder != remote_expressions.end());
-#endif
-      remote_expressions.erase(finder);
+      if (finder != remote_expressions.end())
+        remote_expressions.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -6822,8 +6837,32 @@ namespace Legion {
       derez.deserialize(is_local);
       if (is_local)
       {
+        bool has_reference;
+        derez.deserialize(has_reference);
         IndexSpaceExpression *result;
         derez.deserialize(result);
+        if (has_reference)
+        {
+          if (source != forest->runtime->address_space)
+          {
+#ifdef DEBUG_LEGION
+            IndexSpaceOperation *op = 
+              dynamic_cast<IndexSpaceOperation*>(result);
+            assert(op != NULL);
+#else
+            IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+            // Make this valid and then send the removal of the 
+            // remote did expression
+            LocalReferenceMutator mutator(false/*waiter*/);
+            op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+            op->send_remote_valid_decrement(source, NULL/*mutator*/,
+                mutator.get_done_event());
+          }
+          if (implicit_reference_tracker == NULL)
+            implicit_reference_tracker = new ImplicitReferenceTracker;
+          implicit_reference_tracker->record_live_expression(result);
+        }
         return result;
       }
       bool is_index_space;
@@ -6835,41 +6874,107 @@ namespace Legion {
         derez.deserialize(handle);
         return forest->get_node(handle);
       }
+      bool has_reference;
+      derez.deserialize(has_reference);
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id);
       IndexSpaceExpression *origin;
       derez.deserialize(origin);
-      return forest->find_or_request_remote_expression(remote_expr_id, origin);
+      IndexSpaceExpression *result =
+        forest->find_or_request_remote_expression(remote_expr_id, origin);
+      if (has_reference)
+      {
+#ifdef DEBUG_LEGION
+        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
+        assert(op != NULL);
+#else
+        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+        LocalReferenceMutator mutator(false/*waiter*/);
+        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        op->send_remote_valid_decrement(source, NULL/*mutator*/,
+            mutator.get_done_event());
+        if (implicit_reference_tracker == NULL)
+          implicit_reference_tracker = new ImplicitReferenceTracker;
+        implicit_reference_tracker->record_live_expression(result);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
-                           Deserializer &derez, RegionTreeForest *forest, 
-                           AddressSpaceID source, bool &is_local, 
-                           bool &is_index_space, IndexSpace &handle, 
-                           IndexSpaceExprID &remote_expr_id, RtEvent &wait_for)
+          Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source,
+          PendingRemoteExpression &pending, RtEvent &wait_for)
     //--------------------------------------------------------------------------
     {
       // Handle the special case where this is a local index space expression 
+      bool is_local;
       derez.deserialize(is_local);
       if (is_local)
       {
+        derez.deserialize(pending.has_reference);
         IndexSpaceExpression *result;
         derez.deserialize(result);
+        if (pending.has_reference)
+        {
+          if (source != forest->runtime->address_space)
+          {
+#ifdef DEBUG_LEGION
+            IndexSpaceOperation *op = 
+              dynamic_cast<IndexSpaceOperation*>(result);
+            assert(op != NULL);
+#else
+            IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+            // Make this valid and then send the removal of the 
+            // remote did expression
+            LocalReferenceMutator mutator(false/*waiter*/);
+            op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+            op->send_remote_valid_decrement(source, NULL/*mutator*/,
+                mutator.get_done_event());
+          }
+          if (implicit_reference_tracker == NULL)
+            implicit_reference_tracker = new ImplicitReferenceTracker;
+          implicit_reference_tracker->record_live_expression(result);
+        }
         return result;
       }
-      derez.deserialize(is_index_space);
+      derez.deserialize(pending.is_index_space);
       // If this is an index space it is easy
-      if (is_index_space)
+      if (pending.is_index_space)
       {
-        derez.deserialize(handle);
-        return forest->get_node(handle, &wait_for);
+        derez.deserialize(pending.handle);
+        return forest->get_node(pending.handle, &wait_for);
       }
-      derez.deserialize(remote_expr_id);
+      derez.deserialize(pending.has_reference);
+      derez.deserialize(pending.remote_expr_id);
       IndexSpaceExpression *origin;
       derez.deserialize(origin);
-      return forest->find_or_request_remote_expression(remote_expr_id, 
-                                                       origin, &wait_for);
+      IndexSpaceExpression *result =
+        forest->find_or_request_remote_expression(pending.remote_expr_id,
+                                                  origin, &wait_for);
+      if (result == NULL)
+      {
+        pending.source = source;
+        return result;
+      }
+      if (pending.has_reference)
+      {
+#ifdef DEBUG_LEGION
+        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
+        assert(op != NULL);
+#else
+        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+        LocalReferenceMutator mutator(false/*waiter*/);
+        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        op->send_remote_valid_decrement(source, NULL/*mutator*/,
+            mutator.get_done_event());
+        if (implicit_reference_tracker == NULL)
+          implicit_reference_tracker = new ImplicitReferenceTracker;
+        implicit_reference_tracker->record_live_expression(result);
+      }
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7048,7 +7153,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         add_base_valid_ref(source, &local_mutator, count);
       }
       else
@@ -7071,7 +7176,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         add_nested_valid_ref(source, &local_mutator, count);
       }
       else
@@ -8573,7 +8678,7 @@ namespace Legion {
           // If this is above then we don't care about it if it
           // is not still valid
           bool remove_reference = false;
-          LocalReferenceMutator mutator;
+          LocalReferenceMutator mutator(true/*waiter*/);
           if (has_reference)
           {
             AutoLock n_lock(node_lock);
@@ -8607,7 +8712,7 @@ namespace Legion {
       assert(record.node == this);
 #endif
       bool remove_reference = false;
-      LocalReferenceMutator mutator;
+      LocalReferenceMutator mutator(true/*waiter*/);
       {
         AutoLock n_lock(node_lock); 
         {
@@ -8657,7 +8762,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool remove_reference;
-      LocalReferenceMutator mutator;
       {
         AutoLock n_lock(node_lock);
         remove_reference = (--send_references == 0);
@@ -8994,7 +9098,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::pack_expression(Serializer &rez, AddressSpaceID target)
+    void IndexSpaceNode::pack_expression(Serializer &rez, AddressSpaceID target,
+                                         bool need_reference)
     //--------------------------------------------------------------------------
     {
       if (target != context->runtime->address_space)
@@ -9006,7 +9111,10 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(true/*local*/);
+        rez.serialize<bool>(need_reference);
         rez.serialize<IndexSpaceExpression*>(this);
+        if (need_reference)
+          add_base_expression_reference(LIVE_EXPR_REF);
       }
     }
     
@@ -9021,7 +9129,7 @@ namespace Legion {
       // This could be a performance bug since it will block if we
       // have to send a reference to a remote node, but that should
       // never actually happen
-      LocalReferenceMutator mutator;
+      LocalReferenceMutator mutator(true/*waiter*/);
       add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
@@ -9060,7 +9168,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         add_base_valid_ref(source, &local_mutator, count);
       }
       else
@@ -9083,7 +9191,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator;
+        LocalReferenceMutator local_mutator(true/*waiter*/);
         add_nested_valid_ref(source, &local_mutator, count);
       }
       else

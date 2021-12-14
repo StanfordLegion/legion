@@ -130,8 +130,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalUser::pack_user(Serializer &rez, 
-                                 const AddressSpaceID target) const
+    void PhysicalUser::pack_user(Serializer &rez, const AddressSpaceID target,
+                                 bool need_reference) const
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
@@ -139,12 +139,11 @@ namespace Legion {
       rez.serialize(collect_event);
 #endif
       rez.serialize(usage);
-      expr->pack_expression(rez, target);
+      expr->pack_expression(rez, target, need_reference);
       rez.serialize(op_id);
       rez.serialize(index);
       rez.serialize<bool>(copy_user);
       rez.serialize<bool>(covers);
-
     }
 
     //--------------------------------------------------------------------------
@@ -10082,7 +10081,7 @@ namespace Legion {
       if (is_logical_owner() || initial_refinement)
       {
         // We're the owner so we can do the merge
-        LocalReferenceMutator mutator;
+        LocalReferenceMutator mutator(false/*waiter*/);
         for (FieldMaskSet<LogicalView>::const_iterator it =
               new_views.begin(); it != new_views.end(); it++)
           if (valid_instances.insert(it->first, it->second))
@@ -10611,7 +10610,7 @@ namespace Legion {
         transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
       eq_state = MAPPING_STATE;
-      LocalReferenceMutator mutator;
+      LocalReferenceMutator mutator(false/*waiter*/);
       // Add references to all the views that we've loaded
       for (FieldMaskSet<LogicalView>::const_iterator it =
             valid_instances.begin(); it != valid_instances.end(); it++)
@@ -13559,7 +13558,8 @@ namespace Legion {
           else
             rez.serialize(logical_owner_space);
         }
-        set_expr->pack_expression(rez, target);
+        // No need for a reference here since we know we'll continue holding it
+        set_expr->pack_expression(rez, target, false/*need reference*/);
         if (index_space_node != NULL)
           rez.serialize(index_space_node->handle);
         else
@@ -13886,7 +13886,7 @@ namespace Legion {
       const RemoteRefTaskArgs *rargs = (const RemoteRefTaskArgs*)args;
       if (rargs->done_event.exists())
       {
-        LocalReferenceMutator mutator; 
+        LocalReferenceMutator mutator(false/*waiter*/); 
         if (rargs->add_references)
         {
           for (std::map<LogicalView*,unsigned>::const_iterator it = 
@@ -13925,16 +13925,14 @@ namespace Legion {
                           RayTracer *t, IndexSpaceExpression *e, 
                           IndexSpace h, AddressSpaceID o, RtUserEvent d,
                           RtUserEvent def, const FieldMask &m,
-                          bool local, bool is_expr_s, IndexSpace expr_h,
-                          IndexSpaceExprID expr_i)
+                          const PendingRemoteExpression *p)
       : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
-          set(s), target(t), expr(local ? e : NULL), handle(h), origin(o), 
+          set(s), target(t), expr(e), handle(h), origin(o), 
           done(d), deferral(def), ray_mask(new FieldMask(m)),
-          expr_handle(expr_h), expr_id(expr_i), is_local(local),
-          is_expr_space(is_expr_s)
+          pending((p == NULL) ? NULL : new PendingRemoteExpression(*p))
     //--------------------------------------------------------------------------
     {
-      if (local)
+      if (expr != NULL)
         expr->add_base_expression_reference(META_TASK_REF);
     }
 
@@ -13946,18 +13944,20 @@ namespace Legion {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
 
       // See if we need to load the expression or not
-      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
-        (dargs->is_expr_space) ? runtime->forest->get_node(dargs->expr_handle) 
-        : runtime->forest->find_remote_expression(dargs->expr_id);
+      IndexSpaceExpression *expr = dargs->expr;
+      if (expr == NULL)
+        expr = runtime->forest->find_remote_expression(*(dargs->pending));
       dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
                           *(dargs->ray_mask), dargs->handle, dargs->origin,
                           dargs->done, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
       // Remove our expression reference too
-      if (dargs->is_local &&
+      if ((dargs->expr != NULL) &&
           dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
+      if (dargs->pending != NULL)
+        delete dargs->pending;
     }
 
     //--------------------------------------------------------------------------
@@ -14049,14 +14049,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferResponseArgs::DeferResponseArgs(DistributedID id, 
                           AddressSpaceID src, AddressSpaceID log, 
-                          IndexSpaceExpression *ex, bool local, bool is_space, 
-                          IndexSpace expr_h, IndexSpaceExprID xid, IndexSpace h)
+                          IndexSpaceExpression *ex,
+                          const PendingRemoteExpression &p, IndexSpace h)
       : LgTaskArgs<DeferResponseArgs>(implicit_provenance),
-        did(id), source(src), logical_owner(log), expr(ex), is_local(local), 
-        is_index_space(is_space), expr_handle(expr_h), expr_id(xid), handle(h) 
+        did(id), source(src), logical_owner(log), expr(ex),
+        pending((expr != NULL) ? NULL : new PendingRemoteExpression(p)),
+        handle(h)
     //--------------------------------------------------------------------------
     {
-      if (is_local)
+      if (expr != NULL)
         expr->add_base_expression_reference(META_TASK_REF);
     }
 
@@ -14070,11 +14071,11 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      bool is_local, is_index_space;
-      IndexSpace expr_handle; IndexSpaceExprID expr_id; RtEvent wait_for;
+      PendingRemoteExpression pending;
+      RtEvent wait_for;
       IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-        is_local, is_index_space, expr_handle, expr_id, wait_for);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+                                                source, pending, wait_for);
       IndexSpace handle;
       derez.deserialize(handle);
       IndexSpaceNode *node = NULL; RtEvent wait_on;
@@ -14096,16 +14097,15 @@ namespace Legion {
           precondition = wait_on;
         if (precondition.exists() && !precondition.has_triggered())
         {
-          DeferResponseArgs args(did, source, logical_owner, expr, is_local,
-                        is_index_space, expr_handle, expr_id, handle);
+          DeferResponseArgs args(did, source, logical_owner, expr,
+                                 pending, handle);
           runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
                                            precondition);
           return;
         }
         // If we fall through we need to refetch things that we didn't get  
         if (expr == NULL)
-          expr = is_index_space ? runtime->forest->get_node(expr_handle) :
-            runtime->forest->find_remote_expression(expr_id);
+          expr = runtime->forest->find_remote_expression(pending);
         if (handle.exists() && (node == NULL))
           node = runtime->forest->get_node(handle);
       }
@@ -14128,9 +14128,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferResponseArgs *dargs = (const DeferResponseArgs*)args;
-      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
-        (dargs->is_index_space) ? runtime->forest->get_node(dargs->expr_handle)
-        : runtime->forest->find_remote_expression(dargs->expr_id);
+      IndexSpaceExpression *expr = dargs->expr;
+      if (expr == NULL)
+        expr = runtime->forest->find_remote_expression(*(dargs->pending));
       IndexSpaceNode *node = NULL;
       if (dargs->handle.exists() && 
           (dargs->logical_owner == runtime->address_space))
@@ -14147,9 +14147,11 @@ namespace Legion {
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
       // Remove our expression reference too
-      if (dargs->is_local &&
+      if ((dargs->expr != NULL) &&
           dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
+      if (dargs->pending != NULL)
+        delete dargs->pending;
     }
 
     //--------------------------------------------------------------------------
@@ -14233,13 +14235,11 @@ namespace Legion {
 
       RayTracer *target;
       derez.deserialize(target);
-      bool is_local, is_expr_space;
-      IndexSpace expr_handle;
-      IndexSpaceExprID expr_id;
+      PendingRemoteExpression pending;
       RtEvent expr_ready;
       IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-                    is_local, is_expr_space, expr_handle, expr_id, expr_ready);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest,
+                                                source, pending, expr_ready);
       FieldMask ray_mask;
       derez.deserialize(ray_mask);
       IndexSpace handle;
@@ -14257,15 +14257,13 @@ namespace Legion {
           DeferRayTraceArgs args(set, target, expr, 
                                  handle, origin, done_event,
                                  RtUserEvent::NO_RT_USER_EVENT,
-                                 ray_mask, is_local, is_expr_space, 
-                                 expr_handle, expr_id);
+                                 ray_mask, &pending); 
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 
           return;
         }
         if (expr_ready.exists())
-          expr = (is_expr_space) ? runtime->forest->get_node(expr_handle) :
-            runtime->forest->find_remote_expression(expr_id);
+          expr = runtime->forest->find_remote_expression(pending);
         // Fall through and actually do the operation now
       }
       set->ray_trace_equivalence_sets(target, expr, ray_mask, handle, 
@@ -14314,7 +14312,6 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
 
-      LocalReferenceMutator mutator; 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       set->unpack_migration(derez, source, done);

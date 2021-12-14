@@ -43,7 +43,7 @@ namespace Legion {
 
     /**
      * \struct IndirectRecord
-     * A small helper calss for performing exchanges of
+     * A small helper class for performing exchanges of
      * instances for indirection copies
      */
     struct IndirectRecord : public LegionHeapify<IndirectRecord> {
@@ -60,6 +60,24 @@ namespace Legion {
       IndexSpace index_space;
 #endif
       Domain domain;
+    };
+
+    /**
+     * \struct PendingRemoteExpression
+     * A small helper class for passing arguments associated
+     * with deferred calls to unpack remote expressions
+     */
+    struct PendingRemoteExpression {
+    public:
+      PendingRemoteExpression(void)
+        : handle(IndexSpace::NO_SPACE), remote_expr_id(0),
+          source(0), is_index_space(false), has_reference(false) { }
+    public:
+      IndexSpace handle;
+      IndexSpaceExprID remote_expr_id;
+      AddressSpaceID source;
+      bool is_index_space;
+      bool has_reference;
     };
 
     /**
@@ -877,7 +895,7 @@ namespace Legion {
               IndexSpaceExprID remote_expr_id, 
               IndexSpaceExpression *origin, RtEvent *wait_for = NULL);
       IndexSpaceExpression* find_remote_expression(
-              IndexSpaceExprID remote_expr_id);
+              const PendingRemoteExpression &pending_expression);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
       void handle_remote_expression_request(Deserializer &derez,
                                             AddressSpaceID source);
@@ -1110,7 +1128,8 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
+                                   bool need_reference = true) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
@@ -1328,11 +1347,10 @@ namespace Legion {
                         std::set<IndexSpaceExpression*> &expressions);
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
-                         RegionTreeForest *forest, AddressSpaceID source);
+                         RegionTreeForest *forest, AddressSpaceID source); 
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source,
-                         bool &is_local,bool &is_index_space,IndexSpace &handle,
-                         IndexSpaceExprID &remote_expr_id, RtEvent &wait_for);
+                         PendingRemoteExpression &pending, RtEvent &wait_for);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
@@ -1360,7 +1378,7 @@ namespace Legion {
         {
           if (m == NULL)
           {
-            LocalReferenceMutator local_mutator;
+            LocalReferenceMutator local_mutator(true/*waiting*/);
             expr->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
           }
           else
@@ -1452,7 +1470,8 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
+                                   bool need_reference = true) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
@@ -1512,7 +1531,8 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
+                                   bool need_reference = true);
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
       virtual bool invalidate_operation(void) = 0;
@@ -2080,7 +2100,8 @@ namespace Legion {
       virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
+                                   bool need_reference);
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
     public:
 #ifdef DEBUG_LEGION

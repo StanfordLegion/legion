@@ -705,7 +705,8 @@ namespace Legion {
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
     public:
-      void pack_user(Serializer &rez, const AddressSpaceID target) const;
+      void pack_user(Serializer &rez, const AddressSpaceID target,
+                     bool need_reference = true) const;
       static PhysicalUser* unpack_user(Deserializer &derez, 
               RegionTreeForest *forest, const AddressSpaceID source);
     public:
@@ -2120,9 +2121,7 @@ namespace Legion {
                           // These are just for the case where the
                           // request comes from a remote node and
                           // we're waiting for the expression to load
-                          bool is_local=true, bool is_expr_s = false,
-                          IndexSpace expr_h = IndexSpace::NO_SPACE,
-                          IndexSpaceExprID expr_i = 0);
+                          const PendingRemoteExpression *pending = NULL);
       public:
         EquivalenceSet *const set;
         RayTracer *const target;
@@ -2132,10 +2131,7 @@ namespace Legion {
         const RtUserEvent done;
         const RtUserEvent deferral;
         FieldMask *const ray_mask;
-        const IndexSpace expr_handle;
-        const IndexSpaceExprID expr_id;
-        const bool is_local;
-        const bool is_expr_space;
+        const PendingRemoteExpression *const pending;
       };
       struct DeferRayTraceFinishArgs : 
         public LgTaskArgs<DeferRayTraceFinishArgs> {
@@ -2213,17 +2209,13 @@ namespace Legion {
       public:
         DeferResponseArgs(DistributedID id, AddressSpaceID src, 
                           AddressSpaceID log, IndexSpaceExpression *ex, 
-                          bool local, bool is_space, IndexSpace expr_h, 
-                          IndexSpaceExprID xid, IndexSpace h);
+                          const PendingRemoteExpression &pending, IndexSpace h);
       public:
         const DistributedID did;
         const AddressSpaceID source;
         const AddressSpaceID logical_owner;
         IndexSpaceExpression *const expr;
-        const bool is_local;
-        const bool is_index_space;
-        const IndexSpace expr_handle;
-        const IndexSpaceExprID expr_id;
+        const PendingRemoteExpression *const pending;
         const IndexSpace handle;
       };
       struct DeferRemoveRefArgs : public LgTaskArgs<DeferRemoveRefArgs> {

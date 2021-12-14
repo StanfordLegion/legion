@@ -1553,7 +1553,7 @@ namespace Legion {
     class Notifiable;
     class ReferenceMutator;
     class LocalReferenceMutator;
-    class NeverReferenceMutator;
+    class ImplicitReferenceTracker;
     class DistributedCollectable;
     class LayoutDescription;
     class InstanceManager; // base class for all instances
@@ -1590,6 +1590,7 @@ namespace Legion {
     class TreeClose;
     struct CloseInfo; 
     struct FieldDataDescriptor;
+    struct PendingRemoteExpression;
 
     // legion_spy.h
     class TreeStateLogger;
@@ -1629,9 +1630,10 @@ namespace Legion {
     // This data structure tracks references to any live
     // temporary index space expressions that have been
     // handed back by the region tree inside the execution
-    // of a meta-task or a runtime API call
-    extern __thread 
-      std::vector<IndexSpaceExpression*> *implicit_live_expressions;
+    // of a meta-task or a runtime API call. It also tracks
+    // changes to remote distributed collectable that can be
+    // delayed and batched together.
+    extern __thread ImplicitReferenceTracker *implicit_reference_tracker; 
 
     /**
      * \class LgTaskArgs
@@ -2384,11 +2386,10 @@ namespace Legion {
       UniqueID local_provenance = Internal::implicit_provenance;
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
-      // Save any local live expressions that we have
-      std::vector<IndexSpaceExpression*> *local_live_expressions = 
-        Internal::implicit_live_expressions;
+      // Save the reference tracker that we have
+      ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
 #ifdef DEBUG_LEGION
-      Internal::implicit_live_expressions = NULL;
+      Internal::implicit_reference_tracker = NULL;
 #endif
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
@@ -2429,10 +2430,10 @@ namespace Legion {
       // Write the registration callback information back
       Internal::inside_registration_callback = local_callback;
 #ifdef DEBUG_LEGION
-      assert(Internal::implicit_live_expressions == NULL);
+      assert(Internal::implicit_reference_tracker == NULL);
 #endif
-      // Write the local live expressions back
-      Internal::implicit_live_expressions = local_live_expressions;
+      // Write the local reference tracker back
+      Internal::implicit_reference_tracker = local_tracker;
     }
 
     //--------------------------------------------------------------------------
@@ -2445,11 +2446,10 @@ namespace Legion {
       UniqueID local_provenance = Internal::implicit_provenance;
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
-      // Save any local live expressions that we have
-      std::vector<IndexSpaceExpression*> *local_live_expressions = 
-        Internal::implicit_live_expressions;
+      // Save the reference tracker that we have
+      ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
 #ifdef DEBUG_LEGION
-      Internal::implicit_live_expressions = NULL;
+      Internal::implicit_reference_tracker = NULL;
 #endif
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
@@ -2490,10 +2490,10 @@ namespace Legion {
       // Write the registration callback information back
       Internal::inside_registration_callback = local_callback;
 #ifdef DEBUG_LEGION
-      assert(Internal::implicit_live_expressions == NULL);
+      assert(Internal::implicit_reference_tracker == NULL);
 #endif
-      // Write the local live expressions back
-      Internal::implicit_live_expressions = local_live_expressions;
+      // Write the local reference tracker back
+      Internal::implicit_reference_tracker = local_tracker;
     }
 
 #ifdef LEGION_SPY

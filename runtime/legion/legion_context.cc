@@ -5785,7 +5785,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, did,
                   runtime->address_space, RtEvent::NO_RT_EVENT);
-      LocalReferenceMutator mutator;
+      LocalReferenceMutator mutator(true/*waiter*/);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {

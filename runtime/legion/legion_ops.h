@@ -348,6 +348,7 @@ namespace Legion {
           const std::vector<StaticDependence> *dependences = NULL);
     public:
       // Inherited from ReferenceMutator
+      virtual bool is_waiting_mutator(void) const { return false; }
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       RtEvent execute_prepipeline_stage(GenerationID gen,
@@ -617,7 +618,7 @@ namespace Legion {
     protected:
       static inline void add_launch_space_reference(IndexSpaceNode *node)
       {
-        LocalReferenceMutator mutator;
+        LocalReferenceMutator mutator(true/*waiter*/);
         node->add_base_valid_ref(CONTEXT_REF, &mutator);
       }
       static inline bool remove_launch_space_reference(IndexSpaceNode *node)

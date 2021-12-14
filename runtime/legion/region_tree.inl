@@ -1534,25 +1534,42 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceOperationT<DIM,T>::pack_expression(Serializer &rez,
-                                                      AddressSpaceID target)
+                                     AddressSpaceID target, bool need_reference)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(this->is_valid());
+#endif
       if (target == this->local_space)
       {
         rez.serialize<bool>(true/*local*/);
+        rez.serialize<bool>(need_reference);
         rez.serialize(this);
+        // Add a live expression reference to keep this live through the message
+        if (need_reference)
+          this->add_base_expression_reference(LIVE_EXPR_REF);
       }
       else if (target == this->owner_space)
       {
         rez.serialize<bool>(true/*local*/);
+        rez.serialize<bool>(need_reference);
         rez.serialize(origin_expr);
+        // Add a reference here that we'll remove after we've added a reference
+        // on the target space expression
+        if (need_reference)
+          this->add_base_expression_reference(REMOTE_DID_REF);
       }
       else
       {
         rez.serialize<bool>(false/*local*/);
         rez.serialize<bool>(false/*index space*/);
+        rez.serialize<bool>(need_reference);
         rez.serialize(expr_id);
         rez.serialize(origin_expr);
+        // Add a reference here that we'll remove after we've added a reference
+        // on the target space expression
+        if (need_reference)
+          this->add_base_expression_reference(REMOTE_DID_REF);
       }
     }
 
@@ -2339,9 +2356,9 @@ namespace Legion {
     {
       // This is another kind of live expression made by the region tree
       this->add_base_expression_reference(LIVE_EXPR_REF);
-      if (implicit_live_expressions == NULL)
-        implicit_live_expressions = new std::vector<IndexSpaceExpression*>;
-      implicit_live_expressions->emplace_back(this);
+      if (implicit_reference_tracker == NULL)
+        implicit_reference_tracker = new ImplicitReferenceTracker;
+      implicit_reference_tracker->record_live_expression(this);
 #ifdef DEBUG_LEGION
       assert(num_rects > 0);
 #endif
@@ -2534,8 +2551,7 @@ namespace Legion {
     void RemoteExpression<DIM,T>::remove_operation(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // nothing to do here
     }
 
     /////////////////////////////////////////////////////////////

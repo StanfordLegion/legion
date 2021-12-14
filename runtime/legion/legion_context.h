@@ -2064,7 +2064,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(implicit_live_expressions == NULL);
+      assert(implicit_reference_tracker == NULL);
 #endif
       if (overhead_tracker == NULL)
         return;
@@ -2078,16 +2078,10 @@ namespace Legion {
     inline void TaskContext::end_runtime_call(void)
     //--------------------------------------------------------------------------
     {
-      if (implicit_live_expressions != NULL)
+      if (implicit_reference_tracker != NULL)
       {
-        // Remove references to any live index space expressions we have 
-        for (std::vector<IndexSpaceExpression*>::const_iterator it =
-              implicit_live_expressions->begin(); it !=
-              implicit_live_expressions->end(); it++)
-          if ((*it)->remove_base_expression_reference(LIVE_EXPR_REF))
-            delete (*it);
-        delete implicit_live_expressions;
-        implicit_live_expressions = NULL;
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
       }
       if (overhead_tracker == NULL)
         return;
