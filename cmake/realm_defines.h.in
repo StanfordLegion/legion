@@ -31,6 +31,7 @@
 
 #cmakedefine REALM_USE_CUDA
 #cmakedefine REALM_USE_CUDART_HIJACK
+#cmakedefine REALM_CUDA_DYNAMIC_LOAD
 
 #cmakedefine REALM_USE_HIP
 #cmakedefine REALM_USE_HIP_HIJACK

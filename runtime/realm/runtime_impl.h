@@ -361,12 +361,25 @@ namespace Realm {
 
       const std::vector<CodeTranslator *>& get_code_translators(void) const;
 
+      template <typename T>
+      T *get_module(const char *name) const
+      {
+        Module *mod = get_module_untyped(name);
+        if(mod)
+          return checked_cast<T *>(mod);
+        else
+          return 0;
+      }
+
     protected:
+      Module *get_module_untyped(const char *name) const;
+
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
       NetworkSegment reg_ib_mem_segment;
       NetworkSegment reg_mem_segment;
 
       ModuleRegistrar module_registrar;
+      bool modules_created;
       std::vector<Module *> modules;
       std::vector<CodeTranslator *> code_translators;
 

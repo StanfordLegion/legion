@@ -16,13 +16,18 @@
 #ifndef REALM_CUDA_INTERNAL_H
 #define REALM_CUDA_INTERNAL_H
 
+#include "realm/realm_config.h"
+
 #include <cuda.h>
 
 // We don't actually use the cuda runtime, but
 // we need all its declarations so we have all the right types
 #include <cuda_runtime.h>
 
-#include "realm/realm_config.h"
+#if defined(REALM_CUDA_DYNAMIC_LOAD) && (CUDA_VERSION >= 11030)
+#include <cudaTypedefs.h>
+#endif
+
 #include "realm/operation.h"
 #include "realm/threads.h"
 #include "realm/circ_queue.h"
@@ -35,7 +40,7 @@
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
   if(ret != cudaSuccess) { \
-    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, cudaGetErrorString(ret)); \
+    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, CUDA_RUNTIME_FNPTR(cudaGetErrorString)(ret)); \
     assert(0); \
     exit(1); \
   } \
@@ -46,8 +51,8 @@
 #define REPORT_CU_ERROR(cmd, ret) \
   do { \
     const char *name, *str; \
-    cuGetErrorName(ret, &name); \
-    cuGetErrorString(ret, &str); \
+    CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &name);      \
+    CUDA_DRIVER_FNPTR(cuGetErrorString)(ret, &str);                 \
     fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } while(0)
@@ -985,6 +990,100 @@ namespace Realm {
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
     };
+
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+  // cuda driver and/or runtime entry points
+  #define CUDA_DRIVER_FNPTR(name) (name ## _fnptr)
+  #define CUDA_RUNTIME_FNPTR(name) (name ## _fnptr)
+
+  #define CUDA_DRIVER_APIS(__op__) \
+    __op__(cuCtxEnablePeerAccess); \
+    __op__(cuCtxGetFlags); \
+    __op__(cuCtxPopCurrent); \
+    __op__(cuCtxPushCurrent); \
+    __op__(cuCtxSynchronize); \
+    __op__(cuDeviceCanAccessPeer); \
+    __op__(cuDeviceGet); \
+    __op__(cuDeviceGetAttribute); \
+    __op__(cuDeviceGetCount); \
+    __op__(cuDeviceGetName); \
+    __op__(cuDevicePrimaryCtxRelease); \
+    __op__(cuDevicePrimaryCtxRetain); \
+    __op__(cuDevicePrimaryCtxSetFlags); \
+    __op__(cuDeviceTotalMem); \
+    __op__(cuEventCreate); \
+    __op__(cuEventDestroy); \
+    __op__(cuEventQuery); \
+    __op__(cuEventRecord); \
+    __op__(cuGetErrorName); \
+    __op__(cuGetErrorString); \
+    __op__(cuInit); \
+    __op__(cuLaunchKernel); \
+    __op__(cuMemAllocManaged); \
+    __op__(cuMemAlloc); \
+    __op__(cuMemcpy2DAsync); \
+    __op__(cuMemcpy3DAsync); \
+    __op__(cuMemcpyAsync); \
+    __op__(cuMemcpyDtoDAsync); \
+    __op__(cuMemcpyDtoHAsync); \
+    __op__(cuMemcpyHtoDAsync); \
+    __op__(cuMemFreeHost); \
+    __op__(cuMemFree); \
+    __op__(cuMemGetInfo); \
+    __op__(cuMemHostAlloc); \
+    __op__(cuMemHostGetDevicePointer); \
+    __op__(cuMemHostRegister); \
+    __op__(cuMemHostUnregister); \
+    __op__(cuMemsetD16Async); \
+    __op__(cuMemsetD2D16Async); \
+    __op__(cuMemsetD2D32Async); \
+    __op__(cuMemsetD2D8Async); \
+    __op__(cuMemsetD32Async); \
+    __op__(cuMemsetD8Async); \
+    __op__(cuModuleLoadDataEx); \
+    __op__(cuStreamAddCallback); \
+    __op__(cuStreamCreate); \
+    __op__(cuStreamDestroy); \
+    __op__(cuStreamSynchronize); \
+    __op__(cuStreamWaitEvent)
+
+  #if CUDA_VERSION >= 11030
+    // cuda 11.3+ gives us handy PFN_... types
+    #define DECL_FNPTR_EXTERN(name) \
+      extern PFN_ ## name name ## _fnptr;
+  #else
+    // before cuda 11.3, we have to rely on typeof/decltype
+    #define DECL_FNPTR_EXTERN(name) \
+      extern decltype(&name) name ## _fnptr;
+  #endif
+    CUDA_DRIVER_APIS(DECL_FNPTR_EXTERN);
+  #undef DECL_FNPTR_EXTERN
+
+  #define CUDA_RUNTIME_APIS_PRE_11_0(__op__) \
+    __op__(cudaGetDevice, cudaError_t, (int *)); \
+    __op__(cudaGetErrorString, const char *, (cudaError_t)); \
+    __op__(cudaSetDevice, cudaError_t, (int)); \
+    __op__(cudaLaunchKernel, cudaError_t, (const void *, dim3, dim3, void **, size_t, cudaStream_t))
+  #if CUDA_VERSION >= 11000
+    #define CUDA_RUNTIME_APIS_11_0(__op__) \
+      __op__(cudaGetFuncBySymbol, cudaError_t, (cudaFunction_t *, const void *));
+  #else
+    #define CUDA_RUNTIME_APIS_11_0(__op__)
+  #endif
+
+  #define CUDA_RUNTIME_APIS(__op__) \
+    CUDA_RUNTIME_APIS_11_0(__op__) \
+    CUDA_RUNTIME_APIS_PRE_11_0(__op__)
+
+  #define DECL_FNPTR_EXTERN(name, retval, params) \
+    extern retval (*name ## _fnptr) params;
+    CUDA_RUNTIME_APIS(DECL_FNPTR_EXTERN);
+  #undef DECL_FNPTR_EXTERN
+
+#else
+  #define CUDA_DRIVER_FNPTR(name) (name)
+  #define CUDA_RUNTIME_FNPTR(name) (name)
+#endif
 
   }; // namespace Cuda
 

@@ -810,7 +810,8 @@ namespace Realm {
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
-	module_registrar(this)
+	module_registrar(this),
+        modules_created(false)
     {
       machine = new MachineImpl;
     }
@@ -905,6 +906,30 @@ namespace Realm {
     const std::vector<CodeTranslator *>& RuntimeImpl::get_code_translators(void) const
     {
       return code_translators;
+    }
+
+    Module *RuntimeImpl::get_module_untyped(const char *name) const
+    {
+      if(!modules_created) {
+        log_runtime.fatal() << "request for '" << name
+                            << "' module before all modules have been created";
+        abort();
+      }
+
+      // TODO: worth building a map here instead?
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+          it != modules.end();
+          ++it)
+        if(!strcmp(name, (*it)->get_name().c_str()))
+          return *it;
+
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+          it != network_modules.end();
+          ++it)
+        if(!strcmp(name, (*it)->get_name().c_str()))
+          return *it;
+
+      return 0;
     }
 
     static void add_proc_mem_affinities(MachineImpl *machine,
@@ -1187,6 +1212,7 @@ namespace Realm {
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
+      modules_created = true;
 
       PartitioningOpQueue::configure_from_cmdline(cmdline);
 
