@@ -1534,7 +1534,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceOperationT<DIM,T>::pack_expression(Serializer &rez,
-                                     AddressSpaceID target, bool need_reference)
+                                                      AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1543,33 +1543,26 @@ namespace Legion {
       if (target == this->local_space)
       {
         rez.serialize<bool>(true/*local*/);
-        rez.serialize<bool>(need_reference);
         rez.serialize(this);
-        // Add a live expression reference to keep this live through the message
-        if (need_reference)
-          this->add_base_expression_reference(LIVE_EXPR_REF);
+        this->add_base_expression_reference(LIVE_EXPR_REF);
       }
       else if (target == this->owner_space)
       {
         rez.serialize<bool>(true/*local*/);
-        rez.serialize<bool>(need_reference);
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        if (need_reference)
-          this->add_base_expression_reference(REMOTE_DID_REF);
+        this->add_base_expression_reference(REMOTE_DID_REF);
       }
       else
       {
         rez.serialize<bool>(false/*local*/);
         rez.serialize<bool>(false/*index space*/);
-        rez.serialize<bool>(need_reference);
         rez.serialize(expr_id);
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        if (need_reference)
-          this->add_base_expression_reference(REMOTE_DID_REF);
+        this->add_base_expression_reference(REMOTE_DID_REF);
       }
     }
 

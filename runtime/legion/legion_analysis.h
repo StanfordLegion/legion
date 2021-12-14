@@ -705,8 +705,7 @@ namespace Legion {
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
     public:
-      void pack_user(Serializer &rez, const AddressSpaceID target,
-                     bool need_reference = true) const;
+      void pack_user(Serializer &rez, const AddressSpaceID target) const;
       static PhysicalUser* unpack_user(Deserializer &derez, 
               RegionTreeForest *forest, const AddressSpaceID source);
     public:

@@ -1480,7 +1480,7 @@ namespace Legion {
         rez.serialize(instance);
         rez.serialize(instance_footprint);
         // No need for a reference here since we know we'll continue holding it
-        instance_domain->pack_expression(rez, target, false/*need reference*/);
+        instance_domain->pack_expression(rez, target);
         rez.serialize(piece_list_size);
         if (piece_list_size > 0)
           rez.serialize(piece_list, piece_list_size);
@@ -2902,7 +2902,7 @@ namespace Legion {
         rez.serialize(point_space->handle);
         rez.serialize(instance_footprint);
         // No need for a reference here since we know we'll continue holding it
-        instance_domain->pack_expression(rez, target, false/*need reference*/);
+        instance_domain->pack_expression(rez, target);
         rez.serialize(field_space_node->handle);
         rez.serialize(tree_id);
         rez.serialize(redop);

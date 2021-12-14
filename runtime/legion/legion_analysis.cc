@@ -130,8 +130,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalUser::pack_user(Serializer &rez, const AddressSpaceID target,
-                                 bool need_reference) const
+    void PhysicalUser::pack_user(Serializer &rez, 
+                                 const AddressSpaceID target) const
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
@@ -139,7 +139,7 @@ namespace Legion {
       rez.serialize(collect_event);
 #endif
       rez.serialize(usage);
-      expr->pack_expression(rez, target, need_reference);
+      expr->pack_expression(rez, target);
       rez.serialize(op_id);
       rez.serialize(index);
       rez.serialize<bool>(copy_user);
@@ -13558,8 +13558,7 @@ namespace Legion {
           else
             rez.serialize(logical_owner_space);
         }
-        // No need for a reference here since we know we'll continue holding it
-        set_expr->pack_expression(rez, target, false/*need reference*/);
+        set_expr->pack_expression(rez, target);
         if (index_space_node != NULL)
           rez.serialize(index_space_node->handle);
         else

@@ -71,13 +71,12 @@ namespace Legion {
     public:
       PendingRemoteExpression(void)
         : handle(IndexSpace::NO_SPACE), remote_expr_id(0),
-          source(0), is_index_space(false), has_reference(false) { }
+          source(0), is_index_space(false) { }
     public:
       IndexSpace handle;
       IndexSpaceExprID remote_expr_id;
       AddressSpaceID source;
       bool is_index_space;
-      bool has_reference;
     };
 
     /**
@@ -1128,8 +1127,7 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
-                                   bool need_reference = true) = 0;
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
@@ -1251,6 +1249,8 @@ namespace Legion {
       }
       inline size_t get_num_dims(void) const
         { return NT_TemplateHelper::get_dim(type_tag); }
+      inline void record_remote_owner_valid_reference(void)
+        { remote_owner_valid_references.fetch_add(1); }
     public:
       // Convert this index space expression to the canonical one that
       // represents all expressions that are all congruent
@@ -1359,6 +1359,7 @@ namespace Legion {
     protected:
       std::set<IndexSpaceOperation*> derived_operations;
       IndexSpaceExpression *canonical;
+      std::atomic<unsigned> remote_owner_valid_references;
       size_t volume;
       bool has_volume;
       bool empty, has_empty;
@@ -1470,8 +1471,7 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
-                                   bool need_reference = true) = 0;
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
@@ -1531,8 +1531,7 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
-                                   bool need_reference = true);
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
       virtual bool invalidate_operation(void) = 0;
@@ -2100,8 +2099,7 @@ namespace Legion {
       virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target,
-                                   bool need_reference);
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
     public:
 #ifdef DEBUG_LEGION

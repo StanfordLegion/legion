@@ -2388,9 +2388,7 @@ namespace Legion {
       unsigned local_callback = Internal::inside_registration_callback;
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
-#ifdef DEBUG_LEGION
       Internal::implicit_reference_tracker = NULL;
-#endif
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -2448,9 +2446,7 @@ namespace Legion {
       unsigned local_callback = Internal::inside_registration_callback;
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
-#ifdef DEBUG_LEGION
       Internal::implicit_reference_tracker = NULL;
-#endif
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {

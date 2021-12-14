@@ -1580,9 +1580,7 @@ namespace Legion {
             {
               const unsigned index = indexes.size();
               rez.serialize(index);
-              // No need for a reference since we're replicating so we know
-              // that we'll continue holding this reference
-              it->first->pack_user(rez, target, false/*need reference*/);
+              it->first->pack_user(rez, target);
               indexes[it->first] = index;
             }
             else
@@ -1623,9 +1621,7 @@ namespace Legion {
             {
               const unsigned index = indexes.size();
               rez.serialize(index);
-              // No need for a reference since we're replicating so we know
-              // that we'll continue holding the reference to keep it alive
-              it->first->pack_user(rez, target, false/*need reference*/);
+              it->first->pack_user(rez, target);
               indexes[it->first] = index;
             }
             else
@@ -1650,8 +1646,7 @@ namespace Legion {
       for (FieldMaskSet<ExprView>::const_iterator it = 
             needed_subviews.begin(); it != needed_subviews.end(); it++)
       {
-        // No need for the reference since we're replicating this
-        it->first->view_expr->pack_expression(rez, target, false/*need ref*/);
+        it->first->view_expr->pack_expression(rez, target);
         rez.serialize(it->second);
         it->first->pack_replication(rez, indexes, it->second, target);
       }
