@@ -2276,6 +2276,25 @@ namespace Realm {
     return TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
   }
 
+  // address splitters need to be able to read addresses from sysmem
+  // TODO: query this from channel in order to support heterogeneity?
+  static Memory find_sysmem_ib_memory(NodeID node)
+  {
+    Node& n = get_runtime()->nodes[node];
+    for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+        it != n.ib_memories.end();
+        ++it)
+      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM))
+        return (*it)->me;
+
+    log_dma.fatal() << "no sysmem ib memory on node " << node;
+    abort();
+    return Memory::NO_MEMORY;
+  }
+
   void IndirectionInfoBase::generate_gather_paths(Memory dst_mem,
                                                   TransferGraph::XDTemplate::IO dst_edge,
                                                   unsigned indirect_idx,
@@ -2328,7 +2347,7 @@ namespace Realm {
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
       // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[0]->node, 0).convert<Memory>();
+      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[0]->node);
       // do we have to do anything to get the addresses into a cpu-readable
       //  memory on that node?
       MemPathInfo addr_path;
@@ -2383,7 +2402,7 @@ namespace Realm {
       //  the data to where a cpu can look at it
       NodeID addr_node = ID(inst).instance_owner_node();
       // HACK!
-      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
+      Memory addr_ib_mem = find_sysmem_ib_memory(addr_node);
       MemPathInfo addr_path;
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
@@ -2429,7 +2448,7 @@ namespace Realm {
       //  data instances live
       for(size_t i = 0; i < spaces_size; i++) {
 	// HACK!
-	Memory src_ib_mem = ID::make_ib_memory(ID(insts[i]).instance_owner_node(), 0).convert<Memory>();
+	Memory src_ib_mem = find_sysmem_ib_memory(ID(insts[i]).instance_owner_node());
 	if(src_ib_mem != addr_ib_mem) {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
@@ -2446,7 +2465,7 @@ namespace Realm {
       // control information has to get to the merge at the end
       // HACK!
       NodeID dst_node = ID(dst_mem).memory_owner_node();
-      Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
+      Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
       if(dst_ib_mem != addr_ib_mem) {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
@@ -2626,7 +2645,7 @@ namespace Realm {
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
       // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node, 0).convert<Memory>();
+      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node);
       // do we have to do anything to get the addresses into a cpu-readable
       //  memory on that node?
       MemPathInfo addr_path;
@@ -2683,7 +2702,7 @@ namespace Realm {
       //  the data to where a cpu can look at it
       NodeID addr_node = ID(inst).instance_owner_node();
       // HACK!
-      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
+      Memory addr_ib_mem = find_sysmem_ib_memory(addr_node);
       MemPathInfo addr_path;
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
@@ -2730,7 +2749,7 @@ namespace Realm {
       for(size_t i = 0; i < spaces_size; i++) {
 	// HACK!
 	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
-	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
+	Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
 	if(dst_ib_mem != addr_ib_mem) {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
@@ -2746,7 +2765,7 @@ namespace Realm {
 
       // control information has to get to the split at the start
       // HACK!
-      Memory src_ib_mem = ID::make_ib_memory(ID(src_mem).memory_owner_node(), 0).convert<Memory>();
+      Memory src_ib_mem = find_sysmem_ib_memory(ID(src_mem).memory_owner_node());
       if(src_ib_mem != addr_ib_mem) {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
