@@ -49,6 +49,7 @@ namespace Realm {
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
       static const int EVENT_GENERATION_WIDTH = REALM_EVENT_GENERATION_BITS; // fom realm_c.h
+      static const int MEMORY_INDEX_WIDTH = 8;
       static const int INSTANCE_INDEX_WIDTH = 22;
 
 #define ACCESSOR(structname, name, field) \
@@ -105,9 +106,9 @@ namespace Realm {
       struct FMT_Memory {
 	typedef bitfield<8, 56> type_tag;
 	typedef bitfield<NODE_FIELD_WIDTH,
-			 56-NODE_FIELD_WIDTH> owner_node;
+			 64-NODE_FIELD_WIDTH-MEMORY_INDEX_WIDTH> owner_node;
 	// middle bits unused
-	typedef bitfield<8, 0> mem_idx;
+	typedef bitfield<MEMORY_INDEX_WIDTH, 0> mem_idx;
 
 	static const IDType TAG_VALUE = 0x1e;
       };
@@ -127,7 +128,7 @@ namespace Realm {
 			 62-NODE_FIELD_WIDTH> owner_node;
 	typedef bitfield<NODE_FIELD_WIDTH,
 			 62-2*NODE_FIELD_WIDTH> creator_node;
-	typedef bitfield<8, INSTANCE_INDEX_WIDTH> mem_idx;
+	typedef bitfield<MEMORY_INDEX_WIDTH, INSTANCE_INDEX_WIDTH> mem_idx;
 	typedef bitfield<INSTANCE_INDEX_WIDTH, 0> inst_idx;
 
 	static const IDType TAG_VALUE = 1;
