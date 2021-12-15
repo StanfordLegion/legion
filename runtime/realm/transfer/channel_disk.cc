@@ -244,11 +244,6 @@ namespace Realm {
       fsync(fd);
     }
 
-      static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
-						    Memory::REGDMA_MEM,
-						    Memory::Z_COPY_MEM };
-      static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
-
     FileChannel::FileChannel(BackgroundWorkManager *bgwork)
       : SingleXDQChannel<FileChannel, FileXferDes>(bgwork,
 						   XFER_NONE /*FIXME*/,
@@ -257,16 +252,18 @@ namespace Realm {
       unsigned bw = 10; // HACK - estimate 10 MB/s
       unsigned latency = 10000; // HACK - estimate 10 us
       unsigned frag_overhead = 10000; // HACK - estimate 10 us
-      // any combination of SYSTEM/REGDMA/Z_COPY_MEM
-      for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
-	add_path(Memory::FILE_MEM, false,
-		 cpu_mem_kinds[i], false,
-		 bw, latency, frag_overhead, XFER_FILE_READ);
 
-	add_path(cpu_mem_kinds[i], false,
-		 Memory::FILE_MEM, false,
-		 bw, latency, frag_overhead, XFER_FILE_WRITE);
-      }
+      // all local cpu memories are valid sources/dests
+      std::vector<Memory> local_cpu_mems;
+      MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+
+      add_path(Memory::FILE_MEM, false,
+               local_cpu_mems,
+               bw, latency, frag_overhead, XFER_FILE_READ);
+
+      add_path(local_cpu_mems,
+               Memory::FILE_MEM, false,
+               bw, latency, frag_overhead, XFER_FILE_WRITE);
     }
 
     FileChannel::~FileChannel()
@@ -321,16 +318,18 @@ namespace Realm {
       unsigned bw = 10; // HACK - estimate 10 MB/s
       unsigned latency = 10000; // HACK - estimate 10 us
       unsigned frag_overhead = 10000; // HACK - estimate 10 us
-      // any combination of SYSTEM/REGDMA/Z_COPY_MEM
-      for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
-	add_path(Memory::DISK_MEM, false,
-		 cpu_mem_kinds[i], false,
-		 bw, latency, frag_overhead, XFER_DISK_READ);
 
-	add_path(cpu_mem_kinds[i], false,
-		 Memory::DISK_MEM, false,
-		 bw, latency, frag_overhead, XFER_DISK_WRITE);
-      }
+      // all local cpu memories are valid sources/dests
+      std::vector<Memory> local_cpu_mems;
+      MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+
+      add_path(Memory::DISK_MEM, false,
+               local_cpu_mems,
+               bw, latency, frag_overhead, XFER_DISK_READ);
+
+      add_path(local_cpu_mems,
+               Memory::DISK_MEM, false,
+               bw, latency, frag_overhead, XFER_DISK_WRITE);
     }
 
     DiskChannel::~DiskChannel()

@@ -577,12 +577,6 @@ namespace Realm {
     //
     // class HDF5Channel
 
-      static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
-						    Memory::REGDMA_MEM,
-						    Memory::Z_COPY_MEM,
-                                                    Memory::SOCKET_MEM };
-      static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
-
       HDF5Channel::HDF5Channel(BackgroundWorkManager *bgwork)
 	: SingleXDQChannel<HDF5Channel, HDF5XferDes>(bgwork,
 						     XFER_NONE /*FIXME*/,
@@ -591,16 +585,18 @@ namespace Realm {
         unsigned bw = 10; // HACK - estimate 10 MB/s
         unsigned latency = 10000; // HACK - estimate 10 us
         unsigned frag_overhead = 10000; // HACK - estimate 10 us
-	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
-	for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
-	  add_path(Memory::HDF_MEM, false,
-		   cpu_mem_kinds[i], false,
-		   bw, latency, frag_overhead, XFER_HDF5_READ);
 
-	  add_path(cpu_mem_kinds[i], false,
-		   Memory::HDF_MEM, false,
-		   bw, latency, frag_overhead, XFER_HDF5_WRITE);
-	}
+        // all local cpu memories are valid sources/dests
+        std::vector<Memory> local_cpu_mems;
+        MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+
+        add_path(Memory::HDF_MEM, false,
+                 local_cpu_mems,
+                 bw, latency, frag_overhead, XFER_HDF5_READ);
+
+        add_path(local_cpu_mems,
+                 Memory::HDF_MEM, false,
+                 bw, latency, frag_overhead, XFER_HDF5_WRITE);
 
         // also indicate willingness to handle fills to HDF5 (src == NO_MEMORY)
         add_path(Memory::NO_MEMORY,
