@@ -5361,7 +5361,7 @@ namespace Legion {
       Realm::ExternalMemoryResource res(base, ilg->bytes_used,
 					false /*!read_only*/);
       ready_event = ApEvent(PhysicalInstance::create_external_instance(result,
-                                        memory, ilg, res, requests));
+                                   res.suggested_memory(), ilg, res, requests));
       return result;
     }
 
