@@ -3533,6 +3533,11 @@ namespace Realm {
         // TODO: these should go through pktbufs - see issue 1138
         //  disabled for now
         limit = 0;
+        // actually, make this a hard error for now - all source addresses should
+        //  be registered because we don't know that the cpu can copy data into a
+        //  pktbuf
+        log_gex.fatal() << "request for max payload with non-registered src = " << data;
+        abort();
 #if 0
 	// data will have to be copied into an outbuf, so don't exceed that
 	limit = std::min(limit, size_t(16384 /*TODO*/));
