@@ -1428,6 +1428,15 @@ namespace Realm {
     , read_only(true)
   {}
 
+  // returns the suggested memory in which this resource should be created
+  Memory ExternalMemoryResource::suggested_memory() const
+  {
+    // TODO: some way to ask for external memory resources on other ranks?
+    CoreModule *mod = get_runtime()->get_module<CoreModule>("core");
+    assert(mod);
+    return mod->ext_sysmem->me;
+  }
+
   ExternalInstanceResource *ExternalMemoryResource::clone(void) const
   {
     return new ExternalMemoryResource(base, size_in_bytes, read_only);

@@ -517,7 +517,7 @@ namespace Realm {
 	  // automatic success - make the "offset" be the difference between the
 	  //  base address we were given and our own allocation's base
 	  void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
-	  assert(mem_base != 0);
+	  // assert(mem_base != 0);
 	  // underflow is ok here - it'll work itself out when we add the mem_base
 	  //  back in on accesses
 	  inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
@@ -1197,28 +1197,33 @@ namespace Realm {
       base = (char *)prealloc_base;
       prealloced = true;
     } else {
-      // allocate our own space
-      // enforce alignment on the whole memory range
-      base_orig = static_cast<char *>(malloc(_size + ALIGNMENT - 1));
-      if(!base_orig) {
-	log_malloc.fatal() << "insufficient system memory: "
-			   << size << " bytes needed (from -ll:csize)";
-	abort();
-      }
-      size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
-      if(ofs > 0) {
-	base = base_orig + (ALIGNMENT - ofs);
-      } else {
-	base = base_orig;
-      }
-      prealloced = false;
+      if(_size > 0) {
+        // allocate our own space
+        // enforce alignment on the whole memory range
+        base_orig = static_cast<char *>(malloc(_size + ALIGNMENT - 1));
+        if(!base_orig) {
+          log_malloc.fatal() << "insufficient system memory: "
+                             << size << " bytes needed (from -ll:csize)";
+          abort();
+        }
+        size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
+        if(ofs > 0) {
+          base = base_orig + (ALIGNMENT - ofs);
+        } else {
+          base = base_orig;
+        }
+        prealloced = false;
 
-      // we should not have been given a NetworkSegment by our caller
-      assert(!segment);
-      // advertise our allocation in case the network can register it
-      local_segment.assign(NetworkSegmentInfo::HostMem,
-			   base, _size);
-      segment = &local_segment;
+        // we should not have been given a NetworkSegment by our caller
+        assert(!segment);
+        // advertise our allocation in case the network can register it
+        local_segment.assign(NetworkSegmentInfo::HostMem,
+                             base, _size);
+        segment = &local_segment;
+      } else {
+        base = 0;
+        prealloced = true;
+      }
     }
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
 		     prealloced ? " (prealloced)" : "",

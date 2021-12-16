@@ -683,6 +683,7 @@ namespace Realm {
       .add_option_bool("-ll:pin_util", m->pin_util_procs)
       .add_option_int("-ll:cpu_bgwork", m->cpu_bgwork_timeslice)
       .add_option_int("-ll:util_bgwork", m->util_bgwork_timeslice)
+      .add_option_int("-ll:ext_sysmem", m->use_ext_sysmem)
       .parse_command_line(cmdline);
 
     return m;
@@ -694,12 +695,27 @@ namespace Realm {
   {
     Module::create_memories(runtime);
 
+    MemoryImpl *sysmem;
     if(sysmem_size > 0) {
       Memory m = runtime->next_local_memory_id();
-      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size,
-          -1/*don't care numa domain*/, Memory::SYSTEM_MEM);
-      runtime->add_memory(mi);
-    }
+      sysmem = new LocalCPUMemory(m, sysmem_size,
+                                  -1/*don't care numa domain*/,
+                                  Memory::SYSTEM_MEM);
+      runtime->add_memory(sysmem);
+    } else
+      sysmem = 0;
+
+    // create a memory that will hold external instances (the sysmem above
+    //  might get registered with network and/or gpus, but external instances
+    //  usually won't have those affinities)
+    if(use_ext_sysmem || !sysmem) {
+      Memory m = runtime->next_local_memory_id();
+      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/,
+                                      -1 /*don't care numa domain*/,
+                                      Memory::SYSTEM_MEM);
+      runtime->add_memory(ext_sysmem);
+    } else
+      ext_sysmem = sysmem;
   }
 
   // create any processors provided by the module (default == do nothing)

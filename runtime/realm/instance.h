@@ -295,6 +295,9 @@ namespace Realm {
     ExternalMemoryResource(void *_base, size_t _size_in_bytes);
     ExternalMemoryResource(const void *_base, size_t _size_in_bytes);
 
+    // returns the suggested memory in which this resource should be created
+    Memory suggested_memory() const;
+
     virtual ExternalInstanceResource *clone(void) const;
 
     template <typename S>

@@ -181,6 +181,10 @@ namespace Realm {
       size_t sysmem_size, stack_size;
       bool pin_util_procs;
       long long cpu_bgwork_timeslice, util_bgwork_timeslice;
+      bool use_ext_sysmem;
+
+    public:
+      MemoryImpl *ext_sysmem;
     };
 
     template <typename K, typename V, typename LT = Mutex>
