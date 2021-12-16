@@ -484,20 +484,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_index_space(IndexSpace handle,
-                                               std::set<RtEvent> &applied)
+                              AddressSpaceID source, std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = 
-        IndexSpaceNode::get_owner_space(handle, runtime);
-      if (owner_space == runtime->address_space)
+      IndexSpaceNode *node = get_node(handle);
+      WrapperReferenceMutator mutator(applied);
+      if (node->is_owner())
       {
-        IndexSpaceNode *node = get_node(handle);
-        WrapperReferenceMutator mutator(applied);
+        node->invalidate_root(source, applied);  
         if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
           delete node;
       }
       else
-        runtime->send_index_space_destruction(handle, owner_space, applied);
+      {
+        runtime->send_index_space_destruction(handle,node->owner_space,applied);
+        if (node->remove_base_valid_ref(REMOTE_DID_REF, &mutator))
+          delete node;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3511,7 +3514,7 @@ namespace Legion {
                                                   ApEvent is_ready,
                                                   IndexSpaceExprID expr_id,
                                                   std::set<RtEvent> *applied,
-                                                  bool add_remote_reference,
+                                                  bool add_root_reference,
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
@@ -3557,19 +3560,37 @@ namespace Legion {
         // If we are the root then the valid ref comes from the application
         // Otherwise the valid ref comes from parent partition
         if (!result->is_owner())
-        {
-          // We only add this if requested
-          if (add_remote_reference)
-            result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        }
-        else if (parent == NULL)
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        else
-          result->add_nested_valid_ref(parent->did, &mutator);
+          // Always add a base gc ref for all index spaces
+          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
         result->register_with_runtime(&mutator);
         if (parent != NULL)
-          parent->add_child(result);
-      } 
+        {
+#ifdef DEBUG_LEGION
+          assert(!add_root_reference);
+#endif
+          // Always add a valid reference from the parent
+          result->add_nested_valid_ref(parent->did, &mutator);
+          // Check to see if the parent is still tree valid
+          if (!parent->add_child(result))
+          {
+            result->invalidate_tree();
+            // If the parent is tree invalid then remove the reference
+            result->remove_nested_valid_ref(parent->did, &mutator);
+          }
+        }
+        else 
+        {
+          if (result->is_owner())
+          {
+#ifdef DEBUG_LEGION
+            assert(!add_root_reference);
+#endif
+            result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          }
+          else if (add_root_reference)
+            result->add_base_valid_ref(REMOTE_DID_REF, &mutator);
+        }
+      }
       if (local_initialized.exists())
       {
         if (!local_applied.empty())
@@ -3644,13 +3665,26 @@ namespace Legion {
         // Otherwise the valid ref comes from parent partition
         if (!result->is_owner())
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        else if (parent == NULL)
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        else
-          result->add_nested_valid_ref(parent->did, &mutator);
         result->register_with_runtime(&mutator);
         if (parent != NULL)
-          parent->add_child(result);
+        {
+          // Always add a valid reference from the parent
+          result->add_nested_valid_ref(parent->did, &mutator);
+          // Check to see if the parent is still tree valid
+          if (!parent->add_child(result))
+          {
+            result->invalidate_tree();
+            // If the parent is tree invalid then remove the reference
+            result->remove_nested_valid_ref(parent->did, &mutator);
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(result->is_owner());
+#endif
+          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        }
       } 
       if (local_initialized.exists())
       {
@@ -7918,10 +7952,11 @@ namespace Legion {
         send_references((parent != NULL) ? 1 : 0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        tight_index_space(false), tree_valid(is_owner())
+        tight_index_space(false), tree_valid(true),
 #ifdef DEBUG_LEGION
-        , tree_active(true)
+        tree_active(true),
 #endif
+        root_valid(parent == NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8009,10 +8044,13 @@ namespace Legion {
     {
       if (is_owner())
       {
-        AutoLock n_lock(node_lock);
-        // First time we become invalid then the tree is no longer valid
-        // Any later valid states are just for expression references
-        tree_valid = false;
+        if (parent == NULL)
+        {
+          // If we're a root index space node and this is the first time
+          // we have become invalid then the tree is no longer valid
+          AutoLock n_lock(node_lock);
+          tree_valid = false;
+        }
       }
       else
         send_remote_valid_decrement(owner_space, mutator,
@@ -8673,11 +8711,12 @@ namespace Legion {
       // At this point we are the owner
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(tree_active);
 #endif
       bool pack_space = false;
       bool still_valid = false;
       bool has_reference = false;
-      bool add_remote_reference = false;
+      bool add_root_reference = false;
       // Do our check to see if we're still valid
       {
         AutoLock n_lock(node_lock);
@@ -8711,13 +8750,14 @@ namespace Legion {
         if (tree_valid && ((parent == NULL) || (send_references > 0)))
         {
           still_valid = true; 
-          add_remote_reference = true;
           // Grab a reference on the parent to keep it from being deleted
           if (parent != NULL)
           {
             send_references++;
             has_reference = true;
           }
+          else if (root_valid)
+            add_root_reference = true;
         }
         else if (above)
         {
@@ -8728,13 +8768,6 @@ namespace Legion {
 #endif
           send_precondition = finder->second;
           return false;
-        }
-        else if (tree_valid || (send_references > 0))
-        {
-          // Technically this invalid, but we still need to send a 
-          // remote reference because we haven't issued the invalidates
-          // yet so we need one to be there when it arrives
-          add_remote_reference = true;
         }
         // Record this as an effect for when the node is no longer valid
 #ifdef DEBUG_LEGION
@@ -8777,7 +8810,7 @@ namespace Legion {
       }
       // Record that we're going to send this node
       nodes_to_send.emplace_back(SendNodeRecord(this, still_valid,
-            add_remote_reference, pack_space, has_reference));
+            add_root_reference, pack_space, has_reference));
       return still_valid;
     }
 
@@ -8808,7 +8841,7 @@ namespace Legion {
           rez.serialize(expr_id);
           rez.serialize(initialized);
           rez.serialize(depth);
-          rez.serialize<bool>(record.add_remote_reference);
+          rez.serialize<bool>(record.add_root_reference);
           if (record.pack_space)
             pack_index_space(rez, true/*include size*/);
           else
@@ -8836,16 +8869,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::remove_send_reference(void)
+    void IndexSpaceNode::invalidate_tree(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(parent != NULL);
+#endif
       bool remove_reference;
       {
         AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(tree_valid);
+#endif
+        tree_valid = false;
         remove_reference = (--send_references == 0);
       }
       if (remove_reference && parent->remove_nested_resource_ref(did))
         delete parent;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::InvalidateRootFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target == source)
+        return;
+      std::map<AddressSpaceID,RtEvent>::const_iterator finder = 
+        effects.find(target);
+#ifdef DEBUG_LEGION
+      assert(finder != effects.end());
+#endif
+      node->send_remote_valid_decrement(target, &mutator, finder->second);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::invalidate_root(AddressSpaceID source,
+                                         std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      assert(root_valid);
+#endif
+      root_valid = false;
+      if (has_remote_instances())
+      {
+        WrapperReferenceMutator mutator(applied);
+        InvalidateRootFunctor functor(source, this, mutator, 
+                                      runtime, send_effects);
+        map_over_remote_instances(functor);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8870,8 +8946,8 @@ namespace Legion {
       derez.deserialize(initialized);
       unsigned depth;
       derez.deserialize(depth);
-      bool is_remote_valid;
-      derez.deserialize(is_remote_valid);
+      bool add_root_reference;
+      derez.deserialize(add_root_reference);
       size_t index_space_size;
       derez.deserialize(index_space_size);
       const void *index_space_ptr = 
@@ -8883,7 +8959,7 @@ namespace Legion {
                         true/*can fail*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized,
-          ready_event, expr_id, NULL/*applied*/, is_remote_valid, depth);
+          ready_event, expr_id, NULL/*applied*/, add_root_reference, depth);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -9476,7 +9552,7 @@ namespace Legion {
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial), disjoint(dis), 
-        has_complete(comp >= 0), complete(comp != 0), tree_valid(is_owner()), 
+        has_complete(comp >= 0), complete(comp != 0), tree_valid(true), 
         send_count(0)
     //--------------------------------------------------------------------------
     { 
@@ -9632,13 +9708,6 @@ namespace Legion {
     {
       if (is_owner())
       {
-        {
-          AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-          assert(tree_valid);
-#endif
-          tree_valid = false;
-        }
         // Remove gc references from our remote nodes
         if (has_remote_instances())
         {
@@ -9675,12 +9744,25 @@ namespace Legion {
       // We still hold resource references to the node so we don't need to
       // worry about the child nodes being deleted
       parent->remove_child(color);
-      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
+      std::vector<IndexSpaceNode*> to_invalidate;
       {
-        it->second->remove_send_reference();
-        if (it->second->is_owner())
-          it->second->remove_nested_valid_ref(did, mutator);
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(tree_valid);
+#endif
+        tree_valid = false;
+        to_invalidate.reserve(color_map.size());
+        for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+              color_map.begin(); it != color_map.end(); it++)
+          to_invalidate.push_back(it->second);
+      }
+      for (std::vector<IndexSpaceNode*>::const_iterator it =
+            to_invalidate.begin(); it != to_invalidate.end(); it++)
+      {
+        (*it)->invalidate_tree();
+        // Remove the nested valid reference on this index space node
+        if ((*it)->remove_nested_valid_ref(did, mutator))
+          assert(false); // still holding resource ref so should never be hit 
       }
       if (!partition_trackers.empty())
       {
@@ -10023,14 +10105,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::add_child(IndexSpaceNode *child) 
+    bool IndexPartNode::add_child(IndexSpaceNode *child) 
     //--------------------------------------------------------------------------
     {
       // This child should live as long as we are alive
       child->add_nested_resource_ref(did);
       RtUserEvent to_trigger;
+      bool result;
       {
         AutoLock n_lock(node_lock);
+        result = tree_valid;
 #ifdef DEBUG_LEGION
         assert(color_map.find(child->color) == color_map.end());
 #endif
@@ -10038,11 +10122,12 @@ namespace Legion {
         std::map<LegionColor,RtUserEvent>::iterator finder = 
           pending_child_map.find(child->color);
         if (finder == pending_child_map.end())
-          return;
+          return result;
         to_trigger = finder->second;
         pending_child_map.erase(finder);
       }
       Runtime::trigger_event(to_trigger);
+      return result;
     }
 
     //--------------------------------------------------------------------------

@@ -8542,7 +8542,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(deletion_req_indexes.empty());
 #endif
-            runtime->forest->destroy_index_space(index_space, preconditions);
+            runtime->forest->destroy_index_space(index_space, 
+                        runtime->address_space, preconditions);
             if (!sub_partitions.empty())
             {
               for (std::vector<IndexPartition>::const_iterator it = 

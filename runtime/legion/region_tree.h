@@ -207,7 +207,7 @@ namespace Legion {
                                         std::set<RtEvent> &safe_events);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
-      void destroy_index_space(IndexSpace handle,
+      void destroy_index_space(IndexSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &preconditions);
       void destroy_index_partition(IndexPartition handle, 
                                    std::set<RtEvent> &preconditions);
@@ -668,7 +668,7 @@ namespace Legion {
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
                                   std::set<RtEvent> *applied = NULL,
-                                  bool add_remote_reference = true,
+                                  bool add_root_reference = false,
                                   unsigned depth = UINT_MAX);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
@@ -1861,12 +1861,12 @@ namespace Legion {
       public:
         SendNodeRecord(IndexTreeNode *n, bool valid = false,
             bool add = false, bool pack = false, bool has_ref = false)
-          : node(n), still_valid(valid), add_remote_reference(add),
+          : node(n), still_valid(valid), add_root_reference(add),
             pack_space(pack), has_reference(has_ref) { }
       public:
         IndexTreeNode *node;
         bool still_valid;
-        bool add_remote_reference;
+        bool add_root_reference;
         bool pack_space;
         bool has_reference;
       };
@@ -2003,6 +2003,21 @@ namespace Legion {
         ReferenceMutator *const mutator;
         std::map<AddressSpaceID,RtEvent> &send_effects;
       };
+      class InvalidateRootFunctor {
+      public:
+        InvalidateRootFunctor(AddressSpaceID src, IndexSpaceNode *n, 
+                              ReferenceMutator &m, Runtime *rt,
+                              const std::map<AddressSpaceID,RtEvent> &e)
+          : source(src), node(n), runtime(rt), mutator(m), effects(e) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const AddressSpaceID source;
+        IndexSpaceNode *const node;
+        Runtime *const runtime;
+        ReferenceMutator &mutator;
+        const std::map<AddressSpaceID,RtEvent> &effects;
+      };
     public:
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
                      IndexPartNode *parent, LegionColor color,
@@ -2065,7 +2080,9 @@ namespace Legion {
                              const bool above = false);
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
                              const SendNodeRecord &record);
-      void remove_send_reference(void);
+      void invalidate_tree(void);
+      void invalidate_root(AddressSpaceID source,
+                           std::set<RtEvent> &applied);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -2273,6 +2290,9 @@ namespace Legion {
       // Keep track of whether we are active, should only happen once
       bool                      tree_active;
 #endif
+      // Keep track of whether we've had our application 
+      // reference removed if this is a root node 
+      bool                      root_valid;
     };
 
     /**
@@ -2960,7 +2980,7 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void add_child(IndexSpaceNode *child);
+      bool add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
