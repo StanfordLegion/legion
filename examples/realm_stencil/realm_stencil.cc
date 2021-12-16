@@ -662,6 +662,11 @@ void top_level_task(const void *args, size_t arglen,
 
     for (size_t i = 0; i < proc_mem_affinities.size(); ++i) {
       Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[i];
+
+      // skip memories with no capacity for creating instances
+      if(affinity.m.capacity() == 0)
+        continue;
+
       if (affinity.p.kind() == Processor::LOC_PROC) {
         if (affinity.m.kind() == Memory::SYSTEM_MEM) {
           proc_sysmems[affinity.p] = affinity.m;

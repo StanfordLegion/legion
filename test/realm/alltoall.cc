@@ -82,6 +82,7 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
 {
   const size_t total_memories = Machine::MemoryQuery(Machine::get_machine())
     .only_kind(memkind)
+    .has_capacity(1)
     .count();
   if (total_memories <= 1) {
     fprintf(stdout,"Skipping %s: found only %zd memories\n\n", description, total_memories);
@@ -92,7 +93,7 @@ void measure_all_to_all(Memory::Kind memkind, const char *description,
   local_memories.clear();
   for (Machine::MemoryQuery::iterator it = 
         Machine::MemoryQuery(Machine::get_machine())
-          .only_kind(memkind).local_address_space().begin(); it; ++it)
+         .only_kind(memkind).local_address_space().has_capacity(1).begin(); it; ++it)
     local_memories.push_back(*it);
 
   // make a user event to delay the execution of this program

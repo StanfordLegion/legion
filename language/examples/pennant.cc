@@ -1314,6 +1314,11 @@ static void create_mappers(Machine machine, Runtime *runtime, const std::set<Pro
 
   for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
     Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+
+    // skip memories with no capacity for creating instances
+    if(affinity.m.capacity() == 0)
+      continue;
+
     if (affinity.p.kind() == Processor::LOC_PROC ||
         affinity.p.kind() == Processor::IO_PROC) {
       if (affinity.m.kind() == Memory::SYSTEM_MEM) {
