@@ -10081,7 +10081,7 @@ namespace Legion {
       if (is_logical_owner() || initial_refinement)
       {
         // We're the owner so we can do the merge
-        LocalReferenceMutator mutator(false/*waiter*/);
+        LocalReferenceMutator mutator;
         for (FieldMaskSet<LogicalView>::const_iterator it =
               new_views.begin(); it != new_views.end(); it++)
           if (valid_instances.insert(it->first, it->second))
@@ -10610,7 +10610,7 @@ namespace Legion {
         transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
       eq_state = MAPPING_STATE;
-      LocalReferenceMutator mutator(false/*waiter*/);
+      LocalReferenceMutator mutator;
       // Add references to all the views that we've loaded
       for (FieldMaskSet<LogicalView>::const_iterator it =
             valid_instances.begin(); it != valid_instances.end(); it++)
@@ -13885,7 +13885,7 @@ namespace Legion {
       const RemoteRefTaskArgs *rargs = (const RemoteRefTaskArgs*)args;
       if (rargs->done_event.exists())
       {
-        LocalReferenceMutator mutator(false/*waiter*/); 
+        LocalReferenceMutator mutator; 
         if (rargs->add_references)
         {
           for (std::map<LogicalView*,unsigned>::const_iterator it = 

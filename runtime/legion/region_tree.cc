@@ -5665,7 +5665,7 @@ namespace Legion {
       // Add the live reference 
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
@@ -5705,7 +5705,7 @@ namespace Legion {
       }
       if (expressions.empty())
         return *(exprs.begin());
-      LocalReferenceMutator local_mutator(true/*waiter*/);
+      LocalReferenceMutator local_mutator;
       if (expressions.size() == 1)
       {
         IndexSpaceExpression *result = expressions.back();
@@ -5984,7 +5984,7 @@ namespace Legion {
       // Add the live reference 
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
@@ -6028,7 +6028,7 @@ namespace Legion {
       // remove duplicates
       std::vector<IndexSpaceExpression*>::iterator last =
         std::unique(expressions.begin(), expressions.end());
-      LocalReferenceMutator local_mutator(true/*waiter*/);
+      LocalReferenceMutator local_mutator;
       if (last != expressions.end())
       {
         expressions.erase(last, expressions.end());
@@ -6383,7 +6383,7 @@ namespace Legion {
       }
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
       }
       else
@@ -6607,7 +6607,7 @@ namespace Legion {
       if (pending.is_index_space)
       {
         IndexSpaceNode *node = get_node(pending.handle);
-        LocalReferenceMutator mutator(false/*waiter*/);
+        LocalReferenceMutator mutator;
         node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
         const RtEvent added = mutator.get_done_event();
         // Special case here: if the source was the owner and we didn't
@@ -6643,7 +6643,7 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        LocalReferenceMutator mutator(false/*waiter*/);
+        LocalReferenceMutator mutator;
         result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
         const RtEvent added = mutator.get_done_event();
         // Special case here: if the source was the owner and we didn't
@@ -6914,7 +6914,7 @@ namespace Legion {
 #endif
           // Make this valid and then send the removal of the 
           // remote did expression
-          LocalReferenceMutator mutator(false/*waiter*/);
+          LocalReferenceMutator mutator;
           op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
           // Always need to send this reference removal back immediately
           // in order to avoid reference counting deadlock
@@ -6934,7 +6934,7 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         IndexSpaceNode *node = forest->get_node(handle);
-        LocalReferenceMutator mutator(false/*waiter*/);
+        LocalReferenceMutator mutator;
         node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
         const RtEvent added = mutator.get_done_event();
         // Special case here: if the source was the owner and we didn't
@@ -6966,7 +6966,7 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        LocalReferenceMutator mutator(false/*waiter*/);
+        LocalReferenceMutator mutator;
         result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
         const RtEvent added = mutator.get_done_event();
         // Special case here: if the source was the owner and we didn't
@@ -7010,7 +7010,7 @@ namespace Legion {
 #endif
           // Make this valid and then send the removal of the 
           // remote did expression
-          LocalReferenceMutator mutator(false/*waiter*/);
+          LocalReferenceMutator mutator;
           op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
           // Always need to send this reference removal back immediately
           // in order to avoid reference counting deadlock
@@ -7033,7 +7033,7 @@ namespace Legion {
           pending.source = source;
           return node;
         }
-        LocalReferenceMutator mutator(false/*waiter*/);
+        LocalReferenceMutator mutator;
         node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
         const RtEvent added = mutator.get_done_event();
         // Special case here: if the source was the owner and we didn't
@@ -7068,7 +7068,7 @@ namespace Legion {
 #else
       IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-      LocalReferenceMutator mutator(false/*waiter*/);
+      LocalReferenceMutator mutator;
       result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
       const RtEvent added = mutator.get_done_event();
       // Special case here: if the source was the owner and we didn't
@@ -7264,7 +7264,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         add_base_valid_ref(source, &local_mutator, count);
       }
       else
@@ -7287,7 +7287,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         add_nested_valid_ref(source, &local_mutator, count);
       }
       else
@@ -8789,7 +8789,7 @@ namespace Legion {
           // If this is above then we don't care about it if it
           // is not still valid
           bool remove_reference = false;
-          LocalReferenceMutator mutator(true/*waiter*/);
+          LocalReferenceMutator mutator;
           if (has_reference)
           {
             AutoLock n_lock(node_lock);
@@ -8823,7 +8823,7 @@ namespace Legion {
       assert(record.node == this);
 #endif
       bool remove_reference = false;
-      LocalReferenceMutator mutator(true/*waiter*/);
+      LocalReferenceMutator mutator;
       {
         AutoLock n_lock(node_lock); 
         {
@@ -9281,7 +9281,7 @@ namespace Legion {
       // This could be a performance bug since it will block if we
       // have to send a reference to a remote node, but that should
       // never actually happen
-      LocalReferenceMutator mutator(true/*waiter*/);
+      LocalReferenceMutator mutator;
       add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
@@ -9320,7 +9320,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         add_base_valid_ref(source, &local_mutator, count);
       }
       else
@@ -9343,7 +9343,7 @@ namespace Legion {
     {
       if (mutator == NULL)
       {
-        LocalReferenceMutator local_mutator(true/*waiter*/);
+        LocalReferenceMutator local_mutator;
         add_nested_valid_ref(source, &local_mutator, count);
       }
       else

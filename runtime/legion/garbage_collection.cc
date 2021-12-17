@@ -31,7 +31,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LocalReferenceMutator::LocalReferenceMutator(
                                                const LocalReferenceMutator &rhs)
-      : waiter(rhs.waiter)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -44,9 +43,6 @@ namespace Legion {
     {
       if (!mutation_effects.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(waiter);
-#endif
         RtEvent wait_on = Runtime::merge_events(mutation_effects);
         wait_on.wait();
       }
@@ -73,9 +69,6 @@ namespace Legion {
     RtEvent LocalReferenceMutator::get_done_event(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!waiter);
-#endif
       if (mutation_effects.empty())
         return RtEvent::NO_RT_EVENT;
       RtEvent result = Runtime::merge_events(mutation_effects);
@@ -1822,23 +1815,6 @@ namespace Legion {
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
-#if 0
-      // If there is no mutator or it is a non-waiting mutator then we 
-      // can buffer this up in the implicit reference tracker and send it
-      // at the end of the runtime call or meta-task
-      if ((mutator == NULL) || !mutator->is_waiting_mutator())
-      {
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        const RtEvent send_event =
-          implicit_reference_tracker->record_valid_increment(did, target,
-                                                    precondition, count);
-        if (mutator != NULL)
-          mutator->record_reference_mutation_effect(
-              implicit_reference_tracker->get_effects_event());
-        return send_event;
-      }
-#endif
       RtUserEvent done_event;
       if (mutator != NULL)
       {
@@ -1875,23 +1851,6 @@ namespace Legion {
       assert(count != 0);
       assert(registered_with_runtime);
 #endif 
-#if 0
-      // If there is no mutator or it is a non-waiting mutator then we 
-      // can buffer this up in the implicit reference tracker and send it
-      // at the end of the runtime call or meta-task
-      if ((mutator == NULL) || !mutator->is_waiting_mutator())
-      {
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        const RtEvent send_event =
-          implicit_reference_tracker->record_valid_decrement(did, target,
-                                                    precondition, count);
-        if (mutator != NULL)
-          mutator->record_reference_mutation_effect(
-              implicit_reference_tracker->get_effects_event());
-        return send_event;
-      }
-#endif
       RtUserEvent done_event;
       if (mutator != NULL)
       {
@@ -1928,23 +1887,6 @@ namespace Legion {
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
-#if 0
-      // If there is no mutator or it is a non-waiting mutator then we 
-      // can buffer this up in the implicit reference tracker and send it
-      // at the end of the runtime call or meta-task
-      if ((mutator == NULL) || !mutator->is_waiting_mutator())
-      {
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        const RtEvent send_event =
-          implicit_reference_tracker->record_gc_increment(did, target,
-                                                  precondition, count);
-        if (mutator != NULL)
-          mutator->record_reference_mutation_effect(
-              implicit_reference_tracker->get_effects_event());
-        return send_event;
-      }
-#endif
       RtUserEvent done_event;
       if (mutator != NULL)
       {
@@ -1980,23 +1922,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
-#endif
-#if 0
-      // If there is no mutator or it is a non-waiting mutator then we 
-      // can buffer this up in the implicit reference tracker and send it
-      // at the end of the runtime call or meta-task
-      if ((mutator == NULL) || !mutator->is_waiting_mutator())
-      {
-        if (implicit_reference_tracker == NULL)
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        const RtEvent send_event =
-          implicit_reference_tracker->record_gc_increment(did, target,
-                                                  precondition, count);
-        if (mutator != NULL)
-          mutator->record_reference_mutation_effect(
-              implicit_reference_tracker->get_effects_event());
-        return send_event;
-      }
 #endif
       RtUserEvent done_event;
       if (mutator != NULL)

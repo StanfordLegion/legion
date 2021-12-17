@@ -182,7 +182,6 @@ namespace Legion {
      */
     class ReferenceMutator {
     public:
-      virtual bool is_waiting_mutator(void) const = 0;
       virtual void record_reference_mutation_effect(RtEvent event) = 0;
     };
 
@@ -194,19 +193,17 @@ namespace Legion {
      */
     class LocalReferenceMutator : public ReferenceMutator {
     public:
-      LocalReferenceMutator(bool wait) : waiter(wait) { }
+      LocalReferenceMutator(void) { }
       LocalReferenceMutator(const LocalReferenceMutator &rhs);
       ~LocalReferenceMutator(void);
     public:
       LocalReferenceMutator& operator=(const LocalReferenceMutator &rhs);
     public:
-      virtual bool is_waiting_mutator(void) const { return waiter; }
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       RtEvent get_done_event(void);
     private:
       std::set<RtEvent> mutation_effects;
-      const bool waiter;
     };
 
     /**
@@ -222,7 +219,6 @@ namespace Legion {
     public:
       WrapperReferenceMutator& operator=(const WrapperReferenceMutator &rhs);
     public:
-      virtual bool is_waiting_mutator(void) const { return false; }
       virtual void record_reference_mutation_effect(RtEvent event);
     private:
       std::set<RtEvent> &mutation_effects;
@@ -245,21 +241,6 @@ namespace Legion {
     public:
       inline void record_live_expression(IndexSpaceExpression *expr) 
         { live_expressions.emplace_back(expr); }
-#if 0
-    public:
-      RtEvent record_valid_increment(DistributedID did,
-                                     AddressSpaceID target,
-                                     unsigned count);
-      RtEvent record_valid_decrement(DistributedID did,
-                                     AddressSpaceID target,
-                                     unsigned count);
-      RtEvent record_gc_increment(DistributedID did,
-                                  AddressSpaceID target,
-                                  unsigned count);
-      RtEvent record_gc_decrement(DistributedID did,
-                                  AddressSpaceID target,
-                                  unsigned count);
-#endif
     private:
       std::vector<IndexSpaceExpression*> live_expressions;
     };

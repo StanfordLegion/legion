@@ -1379,7 +1379,7 @@ namespace Legion {
         {
           if (m == NULL)
           {
-            LocalReferenceMutator local_mutator(true/*waiting*/);
+            LocalReferenceMutator local_mutator;
             expr->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
           }
           else

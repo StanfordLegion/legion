@@ -3093,7 +3093,7 @@ namespace Legion {
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator(false/*waiter*/);;
+            LocalReferenceMutator mutator;
             manager->activate_collective(&mutator);
             Runtime::trigger_event(to_trigger, mutator.get_done_event()); 
             break;
@@ -3102,7 +3102,7 @@ namespace Legion {
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator(false/*waiter*/);
+            LocalReferenceMutator mutator;
             manager->deactivate_collective(&mutator);
             Runtime::trigger_event(to_trigger, mutator.get_done_event());
             break;
@@ -3111,7 +3111,7 @@ namespace Legion {
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator(false/*waiter*/);
+            LocalReferenceMutator mutator;
             manager->validate_collective(&mutator);
             Runtime::trigger_event(to_trigger, mutator.get_done_event());
             break;
@@ -3120,7 +3120,7 @@ namespace Legion {
           {
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
-            LocalReferenceMutator mutator(false/*waiter*/);
+            LocalReferenceMutator mutator;
             manager->invalidate_collective(&mutator);
             Runtime::trigger_event(to_trigger, mutator.get_done_event());
             break;

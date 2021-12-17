@@ -9473,7 +9473,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != future_handles->handles.end());
 #endif
-        LocalReferenceMutator mutator(false/*not waiting*/);
+        LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
                                 parent_ctx->get_context_uid(), &mutator);
         if (functor != NULL)

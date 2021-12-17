@@ -5254,7 +5254,7 @@ namespace Legion {
           bool remove_duplicate = false;
           if (success.load())
           {
-            LocalReferenceMutator local_mutator(true/*waiter*/);
+            LocalReferenceMutator local_mutator;
             // Add our local reference
             manager->add_base_valid_ref(NEVER_GC_REF, &local_mutator);
             const RtEvent reference_effects = local_mutator.get_done_event();
@@ -5969,7 +5969,7 @@ namespace Legion {
         // and then remove the remote DID
         if (acquire)
         {
-          LocalReferenceMutator local_mutator(false/*waiter*/);
+          LocalReferenceMutator local_mutator;
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
           const RtEvent reference_effects = local_mutator.get_done_event();
           manager->send_remote_valid_decrement(source, NULL,
@@ -6103,7 +6103,7 @@ namespace Legion {
             // and then remove the remote DID
             if (acquire)
             {
-              LocalReferenceMutator local_mutator(true/*waiter*/);
+              LocalReferenceMutator local_mutator;
               manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
               const RtEvent reference_effects = local_mutator.get_done_event();
               manager->send_remote_valid_decrement(source, NULL,
@@ -6323,7 +6323,7 @@ namespace Legion {
         (*target)[index] = true;
         PhysicalManager *manager;
         derez.deserialize(manager);
-        LocalReferenceMutator local_mutator(false/*waiter*/);
+        LocalReferenceMutator local_mutator;
         manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
         const RtEvent reference_effects = local_mutator.get_done_event();
         manager->send_remote_valid_decrement(source, NULL, reference_effects);
