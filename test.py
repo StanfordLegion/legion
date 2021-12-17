@@ -381,7 +381,8 @@ def run_test_external1(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     makefile = os.path.join(root_dir, 'apps/Makefile.template')
     cmd([make_exe, '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
-    cmd([stencil, '4', '10', '1000'], timelimit=timelimit)
+    # HACK: work around stencil mapper issue with -ll:ext_sysmem 0
+    cmd([stencil, '4', '10', '1000', '-ll:ext_sysmem', '0'], timelimit=timelimit)
 
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
