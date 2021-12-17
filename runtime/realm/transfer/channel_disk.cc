@@ -254,17 +254,18 @@ namespace Realm {
 						   XFER_NONE /*FIXME*/,
 						   "file channel")
     {
-      unsigned bw = 0; // TODO
-      unsigned latency = 0;
+      unsigned bw = 10; // HACK - estimate 10 MB/s
+      unsigned latency = 10000; // HACK - estimate 10 us
+      unsigned frag_overhead = 10000; // HACK - estimate 10 us
       // any combination of SYSTEM/REGDMA/Z_COPY_MEM
       for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
 	add_path(Memory::FILE_MEM, false,
 		 cpu_mem_kinds[i], false,
-		 bw, latency, false, false, XFER_FILE_READ);
+		 bw, latency, frag_overhead, XFER_FILE_READ);
 
 	add_path(cpu_mem_kinds[i], false,
 		 Memory::FILE_MEM, false,
-		 bw, latency, false, false, XFER_FILE_WRITE);
+		 bw, latency, frag_overhead, XFER_FILE_WRITE);
       }
     }
 
@@ -317,17 +318,18 @@ namespace Realm {
 						   XFER_NONE /*FIXME*/,
 						   "disk channel")
     {
-      unsigned bw = 0; // TODO
-      unsigned latency = 0;
+      unsigned bw = 10; // HACK - estimate 10 MB/s
+      unsigned latency = 10000; // HACK - estimate 10 us
+      unsigned frag_overhead = 10000; // HACK - estimate 10 us
       // any combination of SYSTEM/REGDMA/Z_COPY_MEM
       for(size_t i = 0; i < num_cpu_mem_kinds; i++) {
 	add_path(Memory::DISK_MEM, false,
 		 cpu_mem_kinds[i], false,
-		 bw, latency, false, false, XFER_DISK_READ);
+		 bw, latency, frag_overhead, XFER_DISK_READ);
 
 	add_path(cpu_mem_kinds[i], false,
 		 Memory::DISK_MEM, false,
-		 bw, latency, false, false, XFER_DISK_WRITE);
+		 bw, latency, frag_overhead, XFER_DISK_WRITE);
       }
     }
 

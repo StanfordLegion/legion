@@ -34,6 +34,7 @@ typedef char* hipDeviceCharptr_t;
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #define CHECK_CUDART(cmd) do { \
   hipError_t ret = (cmd); \
@@ -94,6 +95,7 @@ namespace Realm {
     class GPUStream;
     class GPUFBMemory;
     class GPUZCMemory;
+    class GPUFBIBMemory;
     class GPU;
     class HipModule;
 
@@ -321,7 +323,7 @@ namespace Realm {
     //  with when async work needs doing
     class GPUStream {
     public:
-      GPUStream(GPU *_gpu, GPUWorker *_worker);
+      GPUStream(GPU *_gpu, GPUWorker *_worker, int rel_priority = 0);
       ~GPUStream(void);
 
       GPU *get_gpu(void) const;
@@ -483,8 +485,7 @@ namespace Realm {
     class GPU {
     public:
       GPU(HipModule *_module, GPUInfo *_info, GPUWorker *worker,
-	        int _device_id,
-          int num_streams);
+	  int _device_id);
       ~GPU(void);
 
       void push_context(void);
@@ -500,7 +501,7 @@ namespace Realm {
 #endif
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
-      void create_fb_memory(RuntimeImpl *runtime, size_t size);
+      void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
@@ -591,6 +592,7 @@ namespace Realm {
       GPUStream *find_stream(hipStream_t stream) const;
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
+      GPUStream *get_next_d2d_stream();
     protected:
       hipModule_t load_hip_module(const void *data);
 
@@ -600,10 +602,11 @@ namespace Realm {
       GPUWorker *worker;
       GPUProcessor *proc;
       GPUFBMemory *fbmem;
+      GPUFBIBMemory *fb_ibmem;
 
       //hipCtx_t context;
       int device_id;
-      hipDeviceCharptr_t fbmem_base;
+      hipDeviceCharptr_t fbmem_base, fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -615,11 +618,16 @@ namespace Realm {
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
+      std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_stream;
+      atomic<unsigned> next_task_stream, next_d2d_stream;
 
       GPUEventPool event_pool;
+
+      // this can technically be different in each context (but probably isn't
+      //  in practice)
+      int least_stream_priority, greatest_stream_priority;
 
 #ifdef REALM_USE_HIP_HIJACK
       std::map<const FatBin *, hipModule_t> device_modules;
@@ -751,6 +759,16 @@ namespace Realm {
     public:
       hipDeviceCharptr_t gpu_base;
       char *cpu_base;
+      NetworkSegment local_segment;
+    };
+    
+    class GPUFBIBMemory : public IBMemory {
+    public:
+      GPUFBIBMemory(Memory _me, GPU *_gpu, hipDeviceCharptr_t _base, size_t _size);
+
+    public:
+      GPU *gpu;
+      hipDeviceCharptr_t base;
       NetworkSegment local_segment;
     };
     

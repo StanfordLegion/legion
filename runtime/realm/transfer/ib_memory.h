@@ -73,7 +73,6 @@ namespace Realm {
     Mutex mutex; // protection for resizing vectors
     std::map<off_t, off_t> free_blocks;
     char *base;
-    NetworkSegment *segment;
     PendingIBRequests *ibreq_head;
     PendingIBRequests **ibreq_tail;
   };

@@ -36,6 +36,7 @@
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -103,6 +104,7 @@ namespace Realm {
     class GPUStream;
     class GPUFBMemory;
     class GPUZCMemory;
+    class GPUFBIBMemory;
     class GPU;
     class CudaModule;
 
@@ -330,7 +332,7 @@ namespace Realm {
     //  with when async work needs doing
     class GPUStream {
     public:
-      GPUStream(GPU *_gpu, GPUWorker *_worker);
+      GPUStream(GPU *_gpu, GPUWorker *_worker, int rel_priority = 0);
       ~GPUStream(void);
 
       GPU *get_gpu(void) const;
@@ -491,8 +493,7 @@ namespace Realm {
     class GPU {
     public:
       GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
-	  CUcontext _context,
-	  int num_streams);
+	  CUcontext _context);
       ~GPU(void);
 
       void push_context(void);
@@ -508,7 +509,7 @@ namespace Realm {
 #endif
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
-      void create_fb_memory(RuntimeImpl *runtime, size_t size);
+      void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
@@ -599,6 +600,7 @@ namespace Realm {
       GPUStream *find_stream(CUstream stream) const;
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
+      GPUStream *get_next_d2d_stream();
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -608,9 +610,10 @@ namespace Realm {
       GPUWorker *worker;
       GPUProcessor *proc;
       GPUFBMemory *fbmem;
+      GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
-      CUdeviceptr fbmem_base;
+      CUdeviceptr fbmem_base, fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -625,11 +628,16 @@ namespace Realm {
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
+      std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_stream;
+      atomic<unsigned> next_task_stream, next_d2d_stream;
 
       GPUEventPool event_pool;
+
+      // this can technically be different in each context (but probably isn't
+      //  in practice)
+      int least_stream_priority, greatest_stream_priority;
 
 #ifdef REALM_USE_CUDART_HIJACK
       std::map<const FatBin *, CUmodule> device_modules;
@@ -768,6 +776,16 @@ namespace Realm {
     public:
       CUdeviceptr gpu_base;
       char *cpu_base;
+      NetworkSegment local_segment;
+    };
+
+    class GPUFBIBMemory : public IBMemory {
+    public:
+      GPUFBIBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
+
+    public:
+      GPU *gpu;
+      CUdeviceptr base;
       NetworkSegment local_segment;
     };
 
@@ -931,13 +949,16 @@ namespace Realm {
 
       // override this because we have to be picky about which reduction ops
       //  we support
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 
@@ -982,13 +1003,16 @@ namespace Realm {
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
 
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
     };
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
@@ -999,6 +1023,7 @@ namespace Realm {
   #define CUDA_DRIVER_APIS(__op__) \
     __op__(cuCtxEnablePeerAccess); \
     __op__(cuCtxGetFlags); \
+    __op__(cuCtxGetStreamPriorityRange); \
     __op__(cuCtxPopCurrent); \
     __op__(cuCtxPushCurrent); \
     __op__(cuCtxSynchronize); \
@@ -1043,6 +1068,7 @@ namespace Realm {
     __op__(cuModuleLoadDataEx); \
     __op__(cuStreamAddCallback); \
     __op__(cuStreamCreate); \
+    __op__(cuStreamCreateWithPriority); \
     __op__(cuStreamDestroy); \
     __op__(cuStreamSynchronize); \
     __op__(cuStreamWaitEvent)

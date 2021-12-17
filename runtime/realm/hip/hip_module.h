@@ -71,8 +71,8 @@ namespace Realm {
 
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
-      size_t cfg_fb_mem_size;
-      unsigned cfg_num_gpus, cfg_gpu_streams;
+      size_t cfg_fb_mem_size, cfg_fb_ib_size;
+      unsigned cfg_num_gpus, cfg_task_streams, cfg_d2d_streams;
       bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
       bool cfg_suppress_hijack_warning;
@@ -82,6 +82,7 @@ namespace Realm {
       int cfg_max_ctxsync_threads;
       bool cfg_multithread_dma;
       size_t cfg_hostreg_limit;
+      int cfg_d2d_stream_priority;
 
       // "global" variables live here too
       GPUWorker *shared_worker;

@@ -559,6 +559,7 @@ namespace Realm {
 	if((*it)->supports_path(src_mem, dst_mem,
 				src_serdez_id, dst_serdez_id,
 				redop_id,
+                                0, 0, 0, // FIXME
 				&kind, &bw, &latency)) {
 	  channel = *it;
 	  break;
@@ -576,6 +577,7 @@ namespace Realm {
 	  if((*it)->supports_path(src_mem, dst_mem,
 				  src_serdez_id, dst_serdez_id,
 				  redop_id,
+                                  0, 0, 0, // FIXME
 				  &kind, &bw, &latency)) {
 	    channel = *it;
 	    break;

@@ -4160,6 +4160,44 @@ namespace Realm {
 	return true;
       }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Channel::SupportedPath
+  //
+
+  Channel::SupportedPath& Channel::SupportedPath::set_max_dim(int src_and_dst_dim)
+  {
+    max_src_dim = max_dst_dim = src_and_dst_dim;
+    return *this;
+  }
+
+  Channel::SupportedPath& Channel::SupportedPath::set_max_dim(int src_dim,
+                                                              int dst_dim)
+  {
+    max_src_dim = src_dim;
+    max_dst_dim = dst_dim;
+    return *this;
+  }
+
+  Channel::SupportedPath& Channel::SupportedPath::allow_redops()
+  {
+    redops_allowed = true;
+    return *this;
+  }
+
+  Channel::SupportedPath& Channel::SupportedPath::allow_serdez()
+  {
+    serdez_allowed = true;
+    return *this;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Channel
+  //
+
       std::ostream& operator<<(std::ostream& os, const Channel::SupportedPath& p)
       {
 	switch(p.src_type) {
@@ -4223,13 +4261,16 @@ namespace Realm {
 	return paths;
       }
 	  
-      bool Channel::supports_path(Memory src_mem, Memory dst_mem,
-				  CustomSerdezID src_serdez_id,
-				  CustomSerdezID dst_serdez_id,
-				  ReductionOpID redop_id,
-				  XferDesKind *kind_ret /*= 0*/,
-				  unsigned *bw_ret /*= 0*/,
-				  unsigned *lat_ret /*= 0*/)
+      uint64_t Channel::supports_path(Memory src_mem, Memory dst_mem,
+                                      CustomSerdezID src_serdez_id,
+                                      CustomSerdezID dst_serdez_id,
+                                      ReductionOpID redop_id,
+                                      size_t total_bytes,
+                                      const std::vector<size_t> *src_frags,
+                                      const std::vector<size_t> *dst_frags,
+                                      XferDesKind *kind_ret /*= 0*/,
+                                      unsigned *bw_ret /*= 0*/,
+                                      unsigned *lat_ret /*= 0*/)
       {
 	for(std::vector<SupportedPath>::const_iterator it = paths.begin();
 	    it != paths.end();
@@ -4342,16 +4383,29 @@ namespace Realm {
 	  if(kind_ret) *kind_ret = it->xd_kind;
 	  if(bw_ret) *bw_ret = it->bandwidth;
 	  if(lat_ret) *lat_ret = it->latency;
-	  return true;
+
+          // estimate transfer time
+          uint64_t xfer_time = uint64_t(total_bytes) * 1000 / it->bandwidth;
+          size_t frags = 1;
+          if(src_frags)
+            frags = std::max(frags, (*src_frags)[std::min<size_t>(src_frags->size()-1,
+                                                                  it->max_src_dim)]);
+          if(dst_frags)
+            frags = std::max(frags, (*dst_frags)[std::min<size_t>(dst_frags->size()-1,
+                                                                  it->max_dst_dim)]);
+          xfer_time += uint64_t(frags) * it->frag_overhead;
+
+          // make sure returned value is strictly positive
+	  return std::max<uint64_t>(xfer_time, 1);
 	}
 
-	return false;
+	return 0;
       }
 
-      void Channel::add_path(Memory src_mem, Memory dst_mem,
-			     unsigned bandwidth, unsigned latency,
-			     bool redops_allowed, bool serdez_allowed,
-			     XferDesKind xd_kind)
+      Channel::SupportedPath& Channel::add_path(Memory src_mem, Memory dst_mem,
+                                                unsigned bandwidth, unsigned latency,
+                                                unsigned frag_overhead,
+                                                XferDesKind xd_kind)
       {
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
@@ -4362,15 +4416,18 @@ namespace Realm {
 	p.dst_mem = dst_mem;
 	p.bandwidth = bandwidth;
 	p.latency = latency;
-	p.redops_allowed = redops_allowed;
-	p.serdez_allowed = serdez_allowed;
+        p.frag_overhead = frag_overhead;
+        p.max_src_dim = p.max_dst_dim = 1; // default
+	p.redops_allowed = false; // default
+	p.serdez_allowed = false; // default
 	p.xd_kind = xd_kind;
+        return p;
       }
 
-      void Channel::add_path(Memory src_mem, Memory::Kind dst_kind, bool dst_global,
-			     unsigned bandwidth, unsigned latency,
-			     bool redops_allowed, bool serdez_allowed,
-			     XferDesKind xd_kind)
+      Channel::SupportedPath& Channel::add_path(Memory src_mem, Memory::Kind dst_kind, bool dst_global,
+                                                unsigned bandwidth, unsigned latency,
+                                                unsigned frag_overhead,
+                                                XferDesKind xd_kind)
       {
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
@@ -4382,16 +4439,19 @@ namespace Realm {
 	p.dst_kind = dst_kind;
 	p.bandwidth = bandwidth;
 	p.latency = latency;
-	p.redops_allowed = redops_allowed;
-	p.serdez_allowed = serdez_allowed;
+        p.frag_overhead = frag_overhead;
+        p.max_src_dim = p.max_dst_dim = 1; // default
+	p.redops_allowed = false; // default
+	p.serdez_allowed = false; // default
 	p.xd_kind = xd_kind;
+        return p;
       }
 
-      void Channel::add_path(Memory::Kind src_kind, bool src_global,
-			     Memory::Kind dst_kind, bool dst_global,
-			     unsigned bandwidth, unsigned latency,
-			     bool redops_allowed, bool serdez_allowed,
-			     XferDesKind xd_kind)
+      Channel::SupportedPath& Channel::add_path(Memory::Kind src_kind, bool src_global,
+                                                Memory::Kind dst_kind, bool dst_global,
+                                                unsigned bandwidth, unsigned latency,
+                                                unsigned frag_overhead,
+                                                XferDesKind xd_kind)
       {
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
@@ -4404,16 +4464,19 @@ namespace Realm {
 	p.dst_kind = dst_kind;
 	p.bandwidth = bandwidth;
 	p.latency = latency;
-	p.redops_allowed = redops_allowed;
-	p.serdez_allowed = serdez_allowed;
+        p.frag_overhead = frag_overhead;
+        p.max_src_dim = p.max_dst_dim = 1; // default
+	p.redops_allowed = false; // default
+	p.serdez_allowed = false; // default
 	p.xd_kind = xd_kind;
+        return p;
       }
 
       // TODO: allow rdma path to limit by kind?
-      void Channel::add_path(bool local_loopback,
-			     unsigned bandwidth, unsigned latency,
-			     bool redops_allowed, bool serdez_allowed,
-			     XferDesKind xd_kind)
+      Channel::SupportedPath& Channel::add_path(bool local_loopback,
+                                                unsigned bandwidth, unsigned latency,
+                                                unsigned frag_overhead,
+                                                XferDesKind xd_kind)
       {
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
@@ -4423,9 +4486,12 @@ namespace Realm {
 		                       SupportedPath::REMOTE_RDMA);
 	p.bandwidth = bandwidth;
 	p.latency = latency;
-	p.redops_allowed = redops_allowed;
-	p.serdez_allowed = serdez_allowed;
+        p.frag_overhead = frag_overhead;
+        p.max_src_dim = p.max_dst_dim = 1; // default
+	p.redops_allowed = false; // default
+	p.serdez_allowed = false; // default
 	p.xd_kind = xd_kind;
+        return p;
       }
 
       long Channel::progress_xd(XferDes *xd, long max_nr)
@@ -4669,23 +4735,26 @@ namespace Realm {
 	return 0;
       }
 
-      bool RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
-					CustomSerdezID src_serdez_id,
-					CustomSerdezID dst_serdez_id,
-					ReductionOpID redop_id,
-					XferDesKind *kind_ret /*= 0*/,
-					unsigned *bw_ret /*= 0*/,
-					unsigned *lat_ret /*= 0*/)
+      uint64_t RemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                            CustomSerdezID src_serdez_id,
+                                            CustomSerdezID dst_serdez_id,
+                                            ReductionOpID redop_id,
+                                            size_t total_bytes,
+                                            const std::vector<size_t> *src_frags,
+                                            const std::vector<size_t> *dst_frags,
+                                            XferDesKind *kind_ret /*= 0*/,
+                                            unsigned *bw_ret /*= 0*/,
+                                            unsigned *lat_ret /*= 0*/)
       {
 	// simultaneous serialization/deserialization not
 	//  allowed anywhere right now
 	if((src_serdez_id != 0) && (dst_serdez_id != 0))
-	  return false;
+	  return 0;
 
 	// fall through to normal checks
 	return Channel::supports_path(src_mem, dst_mem,
-				      src_serdez_id, dst_serdez_id,
-				      redop_id,
+				      src_serdez_id, dst_serdez_id, redop_id,
+                                      total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
       }
 
@@ -4708,14 +4777,17 @@ namespace Realm {
 							"memcpy channel")
       {
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
-	unsigned bw = 0; // TODO
-	unsigned latency = 0;
+	unsigned bw = 5000; // HACK - estimate at 5 GB/s
+	unsigned latency = 100; // HACK - estimate at 100ns
+        unsigned frag_overhead = 100; // HACK - estimate at 100ns
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
 	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
 	  for(size_t j = 0; j < num_cpu_mem_kinds; j++)
 	    add_path(cpu_mem_kinds[i], false,
 		     cpu_mem_kinds[j], false,
-		     bw, latency, false, true, XFER_MEM_CPY);
+		     bw, latency, frag_overhead, XFER_MEM_CPY)
+              .set_max_dim(3)
+              .allow_serdez();
 
 	xdq.add_to_manager(bgwork);
       }
@@ -4725,23 +4797,26 @@ namespace Realm {
         //free(cbs);
       }
 
-      bool MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
-					CustomSerdezID src_serdez_id,
-					CustomSerdezID dst_serdez_id,
-					ReductionOpID redop_id,
-					XferDesKind *kind_ret /*= 0*/,
-					unsigned *bw_ret /*= 0*/,
-					unsigned *lat_ret /*= 0*/)
+      uint64_t MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                            CustomSerdezID src_serdez_id,
+                                            CustomSerdezID dst_serdez_id,
+                                            ReductionOpID redop_id,
+                                            size_t total_bytes,
+                                            const std::vector<size_t> *src_frags,
+                                            const std::vector<size_t> *dst_frags,
+                                            XferDesKind *kind_ret /*= 0*/,
+                                            unsigned *bw_ret /*= 0*/,
+                                            unsigned *lat_ret /*= 0*/)
       {
 	// simultaneous serialization/deserialization not
 	//  allowed anywhere right now
 	if((src_serdez_id != 0) && (dst_serdez_id != 0))
-	  return false;
+	  return 0;
 
 	// fall through to normal checks
 	return Channel::supports_path(src_mem, dst_mem,
-				      src_serdez_id, dst_serdez_id,
-				      redop_id,
+				      src_serdez_id, dst_serdez_id, redop_id,
+                                      total_bytes, src_frags, dst_frags,
 				      kind_ret, bw_ret, lat_ret);
       }
 
@@ -5230,13 +5305,15 @@ namespace Realm {
 						      XFER_MEM_FILL,
 						      "memfill channel")
   {
-    unsigned bw = 0; // TODO
-    unsigned latency = 0;
+    unsigned bw = 10000; // HACK - estimate at 10 GB/s
+    unsigned latency = 100; // HACK - estimate at 100ns
+    unsigned frag_overhead = 100; // HACK - estimate at 100ns
     // any of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM is a valid destination
     for(size_t i = 0; i < num_cpu_mem_kinds; i++)
       add_path(Memory::NO_MEMORY,
 	       cpu_mem_kinds[i], false,
-	       bw, latency, false, false, XFER_MEM_FILL);
+	       bw, latency, frag_overhead, XFER_MEM_FILL)
+        .set_max_dim(3);
 
     xdq.add_to_manager(bgwork);
   }
@@ -5279,33 +5356,41 @@ namespace Realm {
                                                           XFER_MEM_CPY,
                                                           "memreduce channel")
   {
-    unsigned bw = 0; // TODO
-    unsigned latency = 0;
+    unsigned bw = 1000; // HACK - estimate at 1 GB/s
+    unsigned latency = 100; // HACK - estimate at 100ns
+    unsigned frag_overhead = 100; // HACK - estimate at 100ns
     // any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
     for(size_t i = 0; i < num_cpu_mem_kinds; i++)
       for(size_t j = 0; j < num_cpu_mem_kinds; j++)
         add_path(cpu_mem_kinds[i], false,
                  cpu_mem_kinds[j], false,
-                 bw, latency, true, false, XFER_MEM_CPY);
+                 bw, latency, frag_overhead, XFER_MEM_CPY)
+          .set_max_dim(3)
+          .allow_redops();
 
     xdq.add_to_manager(bgwork);
   }
 
-  bool MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                       CustomSerdezID src_serdez_id,
-                                       CustomSerdezID dst_serdez_id,
-                                       ReductionOpID redop_id,
-                                       XferDesKind *kind_ret /*= 0*/,
-                                       unsigned *bw_ret /*= 0*/,
-                                       unsigned *lat_ret /*= 0*/)
+  uint64_t MemreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                           CustomSerdezID src_serdez_id,
+                                           CustomSerdezID dst_serdez_id,
+                                           ReductionOpID redop_id,
+                                           size_t total_bytes,
+                                           const std::vector<size_t> *src_frags,
+                                           const std::vector<size_t> *dst_frags,
+                                           XferDesKind *kind_ret /*= 0*/,
+                                           unsigned *bw_ret /*= 0*/,
+                                           unsigned *lat_ret /*= 0*/)
   {
     // if it's not a reduction, we don't want it
     if(redop_id == 0)
-      return false;
+      return 0;
 
     // otherwise consult the normal supports_path logic
-    return Channel::supports_path(src_mem, dst_mem, src_serdez_id, dst_serdez_id,
-                                  redop_id, kind_ret, bw_ret, lat_ret);
+    return Channel::supports_path(src_mem, dst_mem,
+                                  src_serdez_id, dst_serdez_id, redop_id,
+                                  total_bytes, src_frags, dst_frags,
+                                  kind_ret, bw_ret, lat_ret);
   }
 
   XferDes *MemreduceChannel::create_xfer_des(uintptr_t dma_op,
@@ -5343,18 +5428,19 @@ namespace Realm {
 							 _kind,
 							 stringbuilder() << "gasnet channel (kind= " << _kind << ")")
       {
-	unsigned bw = 0; // TODO
-	unsigned latency = 0;
+	unsigned bw = 1000;  // HACK - estimate at 1 GB/s
+	unsigned latency = 5000; // HACK - estimate at 5 us
+        unsigned frag_overhead = 1000; // HACK - estimate at 1 us
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
 	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
 	  if(_kind == XFER_GASNET_READ)
 	    add_path(Memory::GLOBAL_MEM, true,
 		     cpu_mem_kinds[i], false,
-		     bw, latency, false, false, XFER_GASNET_READ);
+		     bw, latency, frag_overhead, XFER_GASNET_READ);
 	  else
 	    add_path(cpu_mem_kinds[i], false,
 		     Memory::GLOBAL_MEM, true,
-		     bw, latency, false, false, XFER_GASNET_WRITE);
+		     bw, latency, frag_overhead, XFER_GASNET_WRITE);
       }
 
       GASNetChannel::~GASNetChannel()
@@ -5413,17 +5499,18 @@ namespace Realm {
 								   XFER_REMOTE_WRITE,
 								   "remote write channel")
       {
-	unsigned bw = 0; // TODO
-	unsigned latency = 0;
+	unsigned bw = 5000;  // HACK - estimate at 5 GB/s
+	unsigned latency = 2000;  // HACK - estimate at 2 us
+        unsigned frag_overhead = 1000; // HACK - estimate at 1 us
 	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
 	// for(size_t i = 0; i < num_cpu_mem_kinds; i++)
 	//   add_path(cpu_mem_kinds[i], false,
 	// 	   Memory::REGDMA_MEM, true,
 	// 	   bw, latency, false, false, XFER_REMOTE_WRITE);
 	add_path(false /*!local_loopback*/,
-		 bw, latency,
-		 false /*!redops*/, false /*!serdez*/,
+		 bw, latency, frag_overhead,
 		 XFER_REMOTE_WRITE);
+        // TODO: permit 2d sources?
       }
 
       RemoteWriteChannel::~RemoteWriteChannel() {}
