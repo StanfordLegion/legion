@@ -1,6 +1,19 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 21.12.0 (December ??, 2021)
+  * Realm
+     - Performance improvements for multi-dimensional copies, especially
+        inter-process transfers
+     - Support for loading CUDA driver (if present) at runtime instead of
+        link time, allowing same binary to be used on systems with and without
+        CUDA-capable GPUs (enabled with -DLegion_CUDA_DYNAMIC_LOAD=ON in
+        cmake build)
+  * Build
+     - Cmake allows control of max nodes (-DLegion_MAX_NUM_NODES=...) and
+        max processors/node (-DLegion_MAX_NUM_PROCS=...) supported by
+        Legion build
+
 Version 21.09.0 (September 28, 2021)
   * Realm
      - Numerous bug fixes in the `gasnetex` network layer
