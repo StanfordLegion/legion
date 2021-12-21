@@ -2063,6 +2063,9 @@ namespace Legion {
     inline void TaskContext::begin_runtime_call(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
       if (overhead_tracker == NULL)
         return;
       const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -2075,6 +2078,11 @@ namespace Legion {
     inline void TaskContext::end_runtime_call(void)
     //--------------------------------------------------------------------------
     {
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
       if (overhead_tracker == NULL)
         return;
       const long long current = Realm::Clock::current_time_in_nanoseconds();

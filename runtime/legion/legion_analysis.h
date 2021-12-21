@@ -1233,9 +1233,8 @@ namespace Legion {
       class Update {
       public:
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
-               CopyAcrossHelper *helper)
-          : expr(exp), src_mask(mask), across_helper(helper) { }
-        virtual ~Update(void) { }
+               CopyAcrossHelper *helper);
+        virtual ~Update(void); 
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;
@@ -2121,9 +2120,7 @@ namespace Legion {
                           // These are just for the case where the
                           // request comes from a remote node and
                           // we're waiting for the expression to load
-                          bool is_local=true, bool is_expr_s = false,
-                          IndexSpace expr_h = IndexSpace::NO_SPACE,
-                          IndexSpaceExprID expr_i = 0);
+                          const PendingRemoteExpression *pending = NULL);
       public:
         EquivalenceSet *const set;
         RayTracer *const target;
@@ -2133,10 +2130,7 @@ namespace Legion {
         const RtUserEvent done;
         const RtUserEvent deferral;
         FieldMask *const ray_mask;
-        const IndexSpace expr_handle;
-        const IndexSpaceExprID expr_id;
-        const bool is_local;
-        const bool is_expr_space;
+        const PendingRemoteExpression *const pending;
       };
       struct DeferRayTraceFinishArgs : 
         public LgTaskArgs<DeferRayTraceFinishArgs> {
@@ -2214,28 +2208,26 @@ namespace Legion {
       public:
         DeferResponseArgs(DistributedID id, AddressSpaceID src, 
                           AddressSpaceID log, IndexSpaceExpression *ex, 
-                          bool local, bool is_space, IndexSpace expr_h, 
-                          IndexSpaceExprID xid, IndexSpace h);
+                          const PendingRemoteExpression &pending, IndexSpace h);
       public:
         const DistributedID did;
         const AddressSpaceID source;
         const AddressSpaceID logical_owner;
         IndexSpaceExpression *const expr;
-        const bool is_local;
-        const bool is_index_space;
-        const IndexSpace expr_handle;
-        const IndexSpaceExprID expr_id;
+        const PendingRemoteExpression *const pending;
         const IndexSpace handle;
       };
       struct DeferRemoveRefArgs : public LgTaskArgs<DeferRemoveRefArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_REMOVE_EQ_REF_TASK_ID;
       public:
-        DeferRemoveRefArgs(std::vector<IndexSpaceExpression*> *refs)
+        DeferRemoveRefArgs(std::vector<IndexSpaceExpression*> *refs,
+                           DistributedID src)
           : LgTaskArgs<DeferRemoveRefArgs>(implicit_provenance),
-            references(refs) { }
+            references(refs), source(src) { }
       public:
         std::vector<IndexSpaceExpression*> *const references;
+        const DistributedID source;
       };
     protected:
       enum EqState {

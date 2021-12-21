@@ -2520,7 +2520,8 @@ namespace Legion {
                                            AddressSpaceID source);
       void handle_top_level_region_return(Deserializer &derez,
                                           AddressSpaceID source);
-      void handle_index_space_destruction(Deserializer &derez);
+      void handle_index_space_destruction(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_index_partition_destruction(Deserializer &derez);
       void handle_field_space_destruction(Deserializer &derez);
       void handle_logical_region_destruction(Deserializer &derez);

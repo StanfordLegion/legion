@@ -993,7 +993,8 @@ namespace Legion {
             REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
                 "Index space %x was leaked out of task tree rooted by task %s",
                 it->first.id, get_task_name())
-          runtime->forest->destroy_index_space(it->first, preconditions);
+          runtime->forest->destroy_index_space(it->first, 
+                  runtime->address_space, preconditions);
         }
         created_index_spaces.clear();
       } 
@@ -11115,7 +11116,8 @@ namespace Legion {
                       handle.id, get_task_name(), get_unique_id());
 #endif
       std::set<RtEvent> preconditions;
-      runtime->forest->destroy_index_space(handle, preconditions);
+      runtime->forest->destroy_index_space(handle,
+            runtime->address_space, preconditions);
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);

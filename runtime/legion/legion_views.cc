@@ -749,16 +749,22 @@ namespace Legion {
                        InstanceView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
         view_expr(exp), view_volume(view_expr->get_volume()),
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+        view_did(view->did),
+#endif
         invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES))
     //--------------------------------------------------------------------------
     {
-      view_expr->add_expression_reference();
+      view_expr->add_nested_expression_reference(view->did);
     }
 
     //--------------------------------------------------------------------------
     ExprView::ExprView(const ExprView &rhs)
       : context(rhs.context), manager(rhs.manager), inst_view(rhs.inst_view),
         view_expr(rhs.view_expr), view_volume(rhs.view_volume)
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+        , view_did(rhs.view_did)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -769,8 +775,14 @@ namespace Legion {
     ExprView::~ExprView(void)
     //--------------------------------------------------------------------------
     {
-      if (view_expr->remove_expression_reference())
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+      if (view_expr->remove_nested_expression_reference(view_did))
         delete view_expr;
+#else
+      // We can lie about the did here since its not actually used
+      if (view_expr->remove_nested_expression_reference(0/*bogus did*/))
+        delete view_expr;
+#endif
       if (!subviews.empty())
       {
         for (FieldMaskSet<ExprView>::iterator it = subviews.begin();

@@ -1126,11 +1126,11 @@ namespace Legion {
     {
       if (rects == NULL)
       {
-        if (!space.dense())
+        if (space.dense())
+          return this;
+        else
           // Make a new expression for the bounding box
           return new InstanceExpression<DIM,T>(&space.bounds,1/*size*/,context);
-        else // if we're dense we can just use ourselves
-          return this;
       }
       else
       {
@@ -1238,6 +1238,7 @@ namespace Legion {
       // No need to wait for the event, we know it is already triggered
       // because we called get_volume on this before we got here
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
+      const DistributedID local_did = get_distributed_id();
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             expressions.begin(); it != expressions.end(); it++)
       {
@@ -1258,7 +1259,7 @@ namespace Legion {
           // We know that things are the same here
           // Try to add the expression reference, we can race with deletions
           // here though so handle the case we're we can't add a reference
-          if ((*it)->try_add_canonical_reference())
+          if ((*it)->try_add_canonical_reference(local_did))
             return (*it);
           else
             continue;
@@ -1380,7 +1381,7 @@ namespace Legion {
         // If we get here that means we are congruent
         // Try to add the expression reference, we can race with deletions
         // here though so handle the case we're we can't add a reference
-        if ((*it)->try_add_canonical_reference())
+        if ((*it)->try_add_canonical_reference(local_did))
           return (*it);
       }
       // Did not find any congruences so add ourself
@@ -1536,15 +1537,22 @@ namespace Legion {
                                                       AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(this->is_valid());
+#endif
       if (target == this->local_space)
       {
         rez.serialize<bool>(true/*local*/);
         rez.serialize(this);
+        this->add_base_expression_reference(LIVE_EXPR_REF);
       }
       else if (target == this->owner_space)
       {
         rez.serialize<bool>(true/*local*/);
         rez.serialize(origin_expr);
+        // Add a reference here that we'll remove after we've added a reference
+        // on the target space expression
+        this->add_base_expression_reference(REMOTE_DID_REF);
       }
       else
       {
@@ -1552,6 +1560,9 @@ namespace Legion {
         rez.serialize<bool>(false/*index space*/);
         rez.serialize(expr_id);
         rez.serialize(origin_expr);
+        // Add a reference here that we'll remove after we've added a reference
+        // on the target space expression
+        this->add_base_expression_reference(REMOTE_DID_REF);
       }
     }
 
@@ -1866,6 +1877,8 @@ namespace Legion {
         sub_expressions(to_union)
     //--------------------------------------------------------------------------
     {
+      // Add an resource ref that will be removed by the OperationCreator
+      this->add_base_resource_ref(REGION_TREE_REF);
       std::set<ApEvent> preconditions;
       std::vector<Realm::IndexSpace<DIM,T> > spaces(sub_expressions.size());
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
@@ -1875,8 +1888,8 @@ namespace Legion {
         assert(sub->get_canonical_expression(this->context) == sub);
 #endif
         // Add the parent and the reference
-        sub->add_parent_operation(this);
-        sub->add_expression_reference(true/*expr tree*/);
+        sub->add_derived_operation(this);
+        sub->add_tree_expression_reference(this->did);
         // Then get the realm index space expression
         ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
@@ -1899,7 +1912,7 @@ namespace Legion {
       if (!this->realm_index_space_ready.has_triggered() || 
           !valid_event.has_triggered())
       {
-        IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+        IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
         if (!this->realm_index_space_ready.has_triggered())
         {
           if (!valid_event.has_triggered())
@@ -1946,7 +1959,7 @@ namespace Legion {
     {
       // Remove references from our sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        if (sub_expressions[idx]->remove_expression_reference(true/*exprtree*/))
+        if (sub_expressions[idx]->remove_tree_expression_reference(this->did))
           delete sub_expressions[idx];
     }
 
@@ -1986,18 +1999,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceUnion<DIM,T>::remove_operation(RegionTreeForest *forest)
+    bool IndexSpaceUnion<DIM,T>::invalidate_operation(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure we only do this one time
+      if (this->invalidated.fetch_add(1) > 0)
+        return false;
       // Remove the parent operation from all the sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        sub_expressions[idx]->remove_parent_operation(this);
-      // Then remove ourselves from the tree
-      if (forest != NULL)
-        forest->remove_union_operation(this, sub_expressions);
-      // Remove our expression reference added by invalidate_operation
-      // and return true if we should be deleted
-      return this->remove_expression_reference(true/*expr tree*/);
+        sub_expressions[idx]->remove_derived_operation(this);
+      // We were successfully removed
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceUnion<DIM,T>::remove_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      this->context->remove_union_operation(this, sub_expressions);
     }
 
     //--------------------------------------------------------------------------
@@ -2009,6 +2029,8 @@ namespace Legion {
         sub_expressions(to_inter)
     //--------------------------------------------------------------------------
     {
+      // Add an resource ref that will be removed by the OperationCreator
+      this->add_base_resource_ref(REGION_TREE_REF);
       std::set<ApEvent> preconditions;
       std::vector<Realm::IndexSpace<DIM,T> > spaces(sub_expressions.size());
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
@@ -2018,8 +2040,8 @@ namespace Legion {
         assert(sub->get_canonical_expression(this->context) == sub);
 #endif
         // Add the parent and the reference
-        sub->add_parent_operation(this);
-        sub->add_expression_reference(true/*expr tree*/);
+        sub->add_derived_operation(this);
+        sub->add_tree_expression_reference(this->did);
         ApEvent precondition = sub->get_expr_index_space(
             &spaces[idx], this->type_tag, false/*need tight result*/);
         if (precondition.exists())
@@ -2041,7 +2063,7 @@ namespace Legion {
       if (!this->realm_index_space_ready.has_triggered() || 
           !valid_event.has_triggered())
       {
-        IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+        IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
         if (!this->realm_index_space_ready.has_triggered())
         {
           if (!valid_event.has_triggered())
@@ -2089,7 +2111,7 @@ namespace Legion {
     {
       // Remove references from our sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        if (sub_expressions[idx]->remove_expression_reference(true/*exprtree*/))
+        if (sub_expressions[idx]->remove_tree_expression_reference(this->did))
           delete sub_expressions[idx];
     }
 
@@ -2129,19 +2151,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceIntersection<DIM,T>::remove_operation(
-                                                       RegionTreeForest *forest)
+    bool IndexSpaceIntersection<DIM,T>::invalidate_operation(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure we only do this one time
+      if (this->invalidated.fetch_add(1) > 0)
+        return false;
       // Remove the parent operation from all the sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        sub_expressions[idx]->remove_parent_operation(this);
-      // Then remove ourselves from the tree
-      if (forest != NULL)
-        forest->remove_intersection_operation(this, sub_expressions);
-      // Remove our expression reference added by invalidate_operation
-      // and return true if we should be deleted
-      return this->remove_expression_reference(true/*expr tree*/);
+        sub_expressions[idx]->remove_derived_operation(this);
+      // We were successfully removed
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceIntersection<DIM,T>::remove_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      this->context->remove_intersection_operation(this, sub_expressions);
     }
 
     //--------------------------------------------------------------------------
@@ -2152,6 +2180,8 @@ namespace Legion {
         , lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
+      // Add an resource ref that will be removed by the OperationCreator
+      this->add_base_resource_ref(REGION_TREE_REF);
 #ifdef DEBUG_LEGION
       assert(lhs->get_canonical_expression(this->context) == lhs);
       assert(rhs->get_canonical_expression(this->context) == rhs);
@@ -2159,8 +2189,8 @@ namespace Legion {
       if (lhs == rhs)
       {
         // Special case for when the expressions are the same
-        lhs->add_parent_operation(this);
-        lhs->add_expression_reference(true/*expr tree*/);
+        lhs->add_derived_operation(this);
+        lhs->add_tree_expression_reference(this->did);
         this->realm_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->tight_index_space = Realm::IndexSpace<DIM,T>::make_empty();
         this->realm_index_space_ready = ApEvent::NO_AP_EVENT;
@@ -2170,10 +2200,10 @@ namespace Legion {
       {
         Realm::IndexSpace<DIM,T> lhs_space, rhs_space;
         // Add the parent and the references
-        lhs->add_parent_operation(this);
-        rhs->add_parent_operation(this);
-        lhs->add_expression_reference(true/*expr tree*/);
-        rhs->add_expression_reference(true/*expr tree*/);
+        lhs->add_derived_operation(this);
+        rhs->add_derived_operation(this);
+        lhs->add_tree_expression_reference(this->did);
+        rhs->add_tree_expression_reference(this->did);
         ApEvent left_ready = 
           lhs->get_expr_index_space(&lhs_space, this->type_tag, false/*tight*/);
         ApEvent right_ready = 
@@ -2194,7 +2224,7 @@ namespace Legion {
         if (!this->realm_index_space_ready.has_triggered() || 
             !valid_event.has_triggered())
         {
-          IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+          IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
           if (!this->realm_index_space_ready.has_triggered())
           {
             if (!valid_event.has_triggered())
@@ -2239,9 +2269,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((rhs != NULL) && (lhs != rhs) && 
-          rhs->remove_expression_reference(true/*expr tree*/))
+          rhs->remove_tree_expression_reference(this->did))
         delete rhs;
-      if ((lhs != NULL) && lhs->remove_expression_reference(true/*expr tree*/))
+      if ((lhs != NULL) && lhs->remove_tree_expression_reference(this->did))
         delete lhs;
     }
 
@@ -2281,20 +2311,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceDifference<DIM,T>::remove_operation(RegionTreeForest *forest)
+    bool IndexSpaceDifference<DIM,T>::invalidate_operation(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure we only do this one time
+      if (this->invalidated.fetch_add(1) > 0)
+        return false;
       // Remove the parent operation from all the sub expressions
       if (lhs != NULL)
-        lhs->remove_parent_operation(this);
+        lhs->remove_derived_operation(this);
       if ((rhs != NULL) && (lhs != rhs))
-        rhs->remove_parent_operation(this);
-      // Then remove ourselves from the tree
-      if ((forest != NULL) && (lhs != NULL) && (rhs != NULL))
-        forest->remove_subtraction_operation(this, lhs, rhs);
-      // Remove our expression reference added by invalidate_operation
-      // and return true if we should be deleted
-      return this->remove_expression_reference(true/*expr tree*/);
+        rhs->remove_derived_operation(this);
+      // We were successfully removed
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceDifference<DIM,T>::remove_operation(void)
+    //--------------------------------------------------------------------------
+    {
+       if ((lhs != NULL) && (rhs != NULL))
+        this->context->remove_subtraction_operation(this, lhs, rhs);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2309,6 +2347,11 @@ namespace Legion {
           IndexSpaceOperation::INSTANCE_EXPRESSION_KIND, forest)
     //--------------------------------------------------------------------------
     {
+      // This is another kind of live expression made by the region tree
+      this->add_base_expression_reference(LIVE_EXPR_REF);
+      if (implicit_reference_tracker == NULL)
+        implicit_reference_tracker = new ImplicitReferenceTracker;
+      implicit_reference_tracker->record_live_expression(this);
 #ifdef DEBUG_LEGION
       assert(num_rects > 0);
 #endif
@@ -2321,7 +2364,7 @@ namespace Legion {
         const RtEvent valid_event(this->realm_index_space.make_valid());
         if (!valid_event.has_triggered())
         {
-          IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+          IndexSpaceExpression::TightenIndexSpaceArgs args(this, this);
           this->tight_index_space_ready = 
             forest->runtime->issue_runtime_meta_task(args, 
                 LG_LATENCY_WORK_PRIORITY, valid_event);
@@ -2417,12 +2460,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool InstanceExpression<DIM,T>::remove_operation(RegionTreeForest *forest)
+    bool InstanceExpression<DIM,T>::invalidate_operation(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void InstanceExpression<DIM,T>::remove_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do here since we're not in the region tree
     }
 
     /////////////////////////////////////////////////////////////
@@ -2480,12 +2531,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool RemoteExpression<DIM,T>::remove_operation(RegionTreeForest *forest)
+    bool RemoteExpression<DIM,T>::invalidate_operation(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void RemoteExpression<DIM,T>::remove_operation(void)
+    //--------------------------------------------------------------------------
+    {
+      // nothing to do here
     }
 
     /////////////////////////////////////////////////////////////
@@ -2687,7 +2746,7 @@ namespace Legion {
       if (!index_space_ready.has_triggered() || !valid_event.has_triggered())
       {
         // If this index space isn't ready yet, then we have to defer this 
-        TightenIndexSpaceArgs args(this);
+        TightenIndexSpaceArgs args(this, this);
         if (!index_space_ready.has_triggered())
         {
           if (!valid_event.has_triggered())

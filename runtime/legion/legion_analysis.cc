@@ -80,7 +80,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
 #else
     //--------------------------------------------------------------------------
@@ -92,7 +92,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
 #endif
 
@@ -116,7 +116,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
     }
 
@@ -144,7 +144,6 @@ namespace Legion {
       rez.serialize(index);
       rez.serialize<bool>(copy_user);
       rez.serialize<bool>(covers);
-
     }
 
     //--------------------------------------------------------------------------
@@ -3973,8 +3972,41 @@ namespace Legion {
       // Remove references from any views that we have
       for (std::set<LogicalView*>::const_iterator it = 
             all_views.begin(); it != all_views.end(); it++)
-        if ((*it)->remove_base_valid_ref(AGGREGATORE_REF))
+        if ((*it)->remove_base_valid_ref(AGGREGATOR_REF))
           delete (*it);
+      all_views.clear();
+      // Remove source precondition expression references
+      for (std::map<InstanceView*,EventFieldExprs>::iterator vit =
+            src_pre.begin(); vit != src_pre.end(); vit++)
+      {
+        for (EventFieldExprs::iterator eit =
+              vit->second.begin(); eit != vit->second.end(); eit++)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            if (it->first->remove_base_expression_reference(AGGREGATOR_REF))
+              delete it->first;
+          eit->second.clear();
+        }
+        vit->second.clear();
+      }
+      src_pre.clear();
+      // Remove destination precondition expression references
+      for (std::map<InstanceView*,EventFieldExprs>::iterator vit =
+            dst_pre.begin(); vit != dst_pre.end(); vit++)
+      {
+        for (EventFieldExprs::iterator eit =
+              vit->second.begin(); eit != vit->second.end(); eit++)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            if (it->first->remove_base_expression_reference(AGGREGATOR_REF))
+              delete it->first;
+          eit->second.clear();
+        }
+        vit->second.clear();
+      }
+      dst_pre.clear();
       // Delete all our copy updates
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
             const_iterator mit = sources.begin(); mit != sources.end(); mit++)
@@ -4012,6 +4044,23 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::Update::Update(IndexSpaceExpression *exp,
+                                const FieldMask &mask, CopyAcrossHelper *helper)
+      : expr(exp), src_mask(mask), across_helper(helper)
+    //--------------------------------------------------------------------------
+    {
+      expr->add_base_expression_reference(AGGREGATOR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::Update::~Update(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_base_expression_reference(AGGREGATOR_REF))
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -4458,6 +4507,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!preconditions.empty());
 #endif
+      WrapperReferenceMutator mutator(effects);
       AutoLock p_lock(pre_lock);
       EventFieldExprs &pre = reading ? src_pre[view] : dst_pre[view]; 
       for (EventFieldExprs::iterator eit = preconditions.begin();
@@ -4473,13 +4523,23 @@ namespace Legion {
             FieldMaskSet<IndexSpaceExpression>::iterator finder = 
               event_finder->second.find(it->first);
             if (finder == event_finder->second.end())
+            {
+              // Keep a reference in case we are deferred
+              it->first->add_base_expression_reference(AGGREGATOR_REF,&mutator);
               event_finder->second.insert(it->first, it->second);
+            }
             else
               finder.merge(it->second);
           }
         }
         else // We can just swap this over
+        {
+          // Keep references in case we are deferred
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                eit->second.begin(); it != eit->second.end(); it++)
+            it->first->add_base_expression_reference(AGGREGATOR_REF, &mutator);
           pre[eit->first].swap(eit->second);
+        }
       }
     }
 
@@ -4496,7 +4556,12 @@ namespace Legion {
       FieldMaskSet<IndexSpaceExpression>::iterator finder = 
         event_pre.find(expr);
       if (finder == event_pre.end())
+      {
         event_pre.insert(expr, mask);
+        // Keep a reference in case we are deferred
+        WrapperReferenceMutator mutator(effects);
+        expr->add_base_expression_reference(AGGREGATOR_REF, &mutator);
+      }
       else
         finder.merge(mask);
     }
@@ -4608,7 +4673,7 @@ namespace Legion {
       std::pair<std::set<LogicalView*>::iterator,bool> result = 
         all_views.insert(new_view);
       if (result.second)
-        new_view->add_base_valid_ref(AGGREGATORE_REF, this);
+        new_view->add_base_valid_ref(AGGREGATOR_REF, this);
     }
 
     //--------------------------------------------------------------------------
@@ -8666,7 +8731,7 @@ namespace Legion {
         pending_analyses(0)
     //--------------------------------------------------------------------------
     {
-      set_expr->add_expression_reference();
+      set_expr->add_nested_expression_reference(did);
       if (index_space_node != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -8702,7 +8767,7 @@ namespace Legion {
     EquivalenceSet::~EquivalenceSet(void)
     //--------------------------------------------------------------------------
     {
-      if (set_expr->remove_expression_reference())
+      if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
       if ((index_space_node != NULL) && 
           index_space_node->remove_nested_resource_ref(did))
@@ -8754,7 +8819,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               unrefined_remainders.begin(); it != 
               unrefined_remainders.end(); it++)
-          if (it->first->remove_expression_reference())
+          if (it->first->remove_nested_expression_reference(did))
             delete it->first;
       }
       if (subset_exprs != NULL)
@@ -9028,7 +9093,7 @@ namespace Legion {
                     to_delete.begin(); it != to_delete.end(); it++)
               {
                 unrefined_remainders.erase(*it);
-                if ((*it)->remove_expression_reference())
+                if ((*it)->remove_nested_expression_reference(did))
                   delete (*it);
               }
               unrefined_remainders.tighten_valid_mask();
@@ -9266,7 +9331,7 @@ namespace Legion {
                         assert(unrefined_remainders.get_valid_mask() * overlap);
 #endif
                         if (unrefined_remainders.insert(diff_expr, overlap))
-                          diff_expr->add_expression_reference();
+                          diff_expr->add_nested_expression_reference(did);
                       }
                     }
                     // Remove these fields from the overlap indicating
@@ -9455,7 +9520,7 @@ namespace Legion {
                               it->set_mask);
 #endif
                       if (unrefined_remainders.insert(remainder, it->set_mask))
-                        remainder->add_expression_reference();
+                        remainder->add_nested_expression_reference(did);
                     }
                   }
                 }
@@ -9499,7 +9564,7 @@ namespace Legion {
                             to_filter);
 #endif
                     if (unrefined_remainders.insert(remainder, to_filter))
-                      remainder->add_expression_reference();
+                      remainder->add_nested_expression_reference(did);
                   }
                 }
               }
@@ -9596,7 +9661,7 @@ namespace Legion {
                 forest->subtract_index_spaces(set_expr, expr);
 #endif
               if (unrefined_remainders.insert(diff, ray_mask))
-                diff->add_expression_reference();
+                diff->add_nested_expression_reference(did);
               ray_mask.clear();
             }
           }
@@ -9685,6 +9750,10 @@ namespace Legion {
           std::map<EquivalenceSet*,IndexSpaceExpression*> *copy_exprs = 
             new std::map<EquivalenceSet*,IndexSpaceExpression*>();
           copy_exprs->swap(to_traverse_exprs);
+          WrapperReferenceMutator mutator(done_events);
+          for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator
+                it = copy_exprs->begin(); it != copy_exprs->end(); it++)
+            it->second->add_base_expression_reference(META_TASK_REF, &mutator);
           const RtUserEvent done = Runtime::create_rt_user_event();
           DeferRayTraceFinishArgs args(target, source, copy_traverse,
               copy_exprs, expr->get_volume(), handle, done);
@@ -10245,7 +10314,7 @@ namespace Legion {
         unrefined_remainders.clear();
         // Defer removing the references on these expressions until
         // the migration has been done
-        DeferRemoveRefArgs args(references);
+        DeferRemoveRefArgs args(references, did);
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_WORK_PRIORITY, done_migration);
       }
@@ -10426,7 +10495,7 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);
         if (unrefined_remainders.insert(expr, mask))
-          expr->add_expression_reference();
+          expr->add_nested_expression_reference(did);
       }
       size_t num_disjoint_refinements;
       derez.deserialize(num_disjoint_refinements);
@@ -13395,7 +13464,7 @@ namespace Legion {
         assert(unrefined_remainders.get_valid_mask() * finalize_mask);
 #endif
         if (unrefined_remainders.insert(diff_expr, finalize_mask))
-          diff_expr->add_expression_reference();
+          diff_expr->add_nested_expression_reference(did);
       }
     }
 
@@ -13438,7 +13507,7 @@ namespace Legion {
               it = to_delete.begin(); it != to_delete.end(); it++)
         {
           unrefined_remainders.erase(*it);
-          if ((*it)->remove_expression_reference())
+          if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
         unrefined_remainders.tighten_valid_mask();
@@ -13448,7 +13517,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator
               it = to_add.begin(); it != to_add.end(); it++)
           if (unrefined_remainders.insert(it->first, it->second))
-            it->first->add_expression_reference();
+            it->first->add_nested_expression_reference(did);
       }
     }
 
@@ -13855,17 +13924,15 @@ namespace Legion {
                           RayTracer *t, IndexSpaceExpression *e, 
                           IndexSpace h, AddressSpaceID o, RtUserEvent d,
                           RtUserEvent def, const FieldMask &m,
-                          bool local, bool is_expr_s, IndexSpace expr_h,
-                          IndexSpaceExprID expr_i)
+                          const PendingRemoteExpression *p)
       : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
-          set(s), target(t), expr(local ? e : NULL), handle(h), origin(o), 
+          set(s), target(t), expr(e), handle(h), origin(o), 
           done(d), deferral(def), ray_mask(new FieldMask(m)),
-          expr_handle(expr_h), expr_id(expr_i), is_local(local),
-          is_expr_space(is_expr_s)
+          pending((p == NULL) ? NULL : new PendingRemoteExpression(*p))
     //--------------------------------------------------------------------------
     {
-      if (local)
-        expr->add_expression_reference();
+      if (expr != NULL)
+        expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -13876,17 +13943,20 @@ namespace Legion {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
 
       // See if we need to load the expression or not
-      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
-        (dargs->is_expr_space) ? runtime->forest->get_node(dargs->expr_handle) 
-        : runtime->forest->find_remote_expression(dargs->expr_id);
+      IndexSpaceExpression *expr = dargs->expr;
+      if (expr == NULL)
+        expr = runtime->forest->find_remote_expression(*(dargs->pending));
       dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
                           *(dargs->ray_mask), dargs->handle, dargs->origin,
                           dargs->done, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
       // Remove our expression reference too
-      if (dargs->is_local && dargs->expr->remove_expression_reference())
+      if ((dargs->expr != NULL) &&
+          dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
+      if (dargs->pending != NULL)
+        delete dargs->pending;
     }
 
     //--------------------------------------------------------------------------
@@ -13917,6 +13987,10 @@ namespace Legion {
         Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
       else
         Runtime::trigger_event(dargs->done);
+      for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator it =
+            dargs->exprs->begin(); it != dargs->exprs->end(); it++)
+        if (it->second->remove_base_expression_reference(META_TASK_REF))
+          delete it->second;
       delete dargs->to_traverse;
       delete dargs->exprs;
     }
@@ -13974,15 +14048,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferResponseArgs::DeferResponseArgs(DistributedID id, 
                           AddressSpaceID src, AddressSpaceID log, 
-                          IndexSpaceExpression *ex, bool local, bool is_space, 
-                          IndexSpace expr_h, IndexSpaceExprID xid, IndexSpace h)
+                          IndexSpaceExpression *ex,
+                          const PendingRemoteExpression &p, IndexSpace h)
       : LgTaskArgs<DeferResponseArgs>(implicit_provenance),
-        did(id), source(src), logical_owner(log), expr(ex), is_local(local), 
-        is_index_space(is_space), expr_handle(expr_h), expr_id(xid), handle(h) 
+        did(id), source(src), logical_owner(log), expr(ex),
+        pending((expr != NULL) ? NULL : new PendingRemoteExpression(p)),
+        handle(h)
     //--------------------------------------------------------------------------
     {
-      if (is_local)
-        expr->add_expression_reference();
+      if (expr != NULL)
+        expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -13995,11 +14070,11 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      bool is_local, is_index_space;
-      IndexSpace expr_handle; IndexSpaceExprID expr_id; RtEvent wait_for;
+      PendingRemoteExpression pending;
+      RtEvent wait_for;
       IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-        is_local, is_index_space, expr_handle, expr_id, wait_for);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+                                                source, pending, wait_for);
       IndexSpace handle;
       derez.deserialize(handle);
       IndexSpaceNode *node = NULL; RtEvent wait_on;
@@ -14021,16 +14096,15 @@ namespace Legion {
           precondition = wait_on;
         if (precondition.exists() && !precondition.has_triggered())
         {
-          DeferResponseArgs args(did, source, logical_owner, expr, is_local,
-                        is_index_space, expr_handle, expr_id, handle);
+          DeferResponseArgs args(did, source, logical_owner, expr,
+                                 pending, handle);
           runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
                                            precondition);
           return;
         }
         // If we fall through we need to refetch things that we didn't get  
         if (expr == NULL)
-          expr = is_index_space ? runtime->forest->get_node(expr_handle) :
-            runtime->forest->find_remote_expression(expr_id);
+          expr = runtime->forest->find_remote_expression(pending);
         if (handle.exists() && (node == NULL))
           node = runtime->forest->get_node(handle);
       }
@@ -14053,9 +14127,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferResponseArgs *dargs = (const DeferResponseArgs*)args;
-      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
-        (dargs->is_index_space) ? runtime->forest->get_node(dargs->expr_handle)
-        : runtime->forest->find_remote_expression(dargs->expr_id);
+      IndexSpaceExpression *expr = dargs->expr;
+      if (expr == NULL)
+        expr = runtime->forest->find_remote_expression(*(dargs->pending));
       IndexSpaceNode *node = NULL;
       if (dargs->handle.exists() && 
           (dargs->logical_owner == runtime->address_space))
@@ -14072,8 +14146,11 @@ namespace Legion {
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
       // Remove our expression reference too
-      if (dargs->is_local && dargs->expr->remove_expression_reference())
+      if ((dargs->expr != NULL) &&
+          dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
+      if (dargs->pending != NULL)
+        delete dargs->pending;
     }
 
     //--------------------------------------------------------------------------
@@ -14083,7 +14160,7 @@ namespace Legion {
       const DeferRemoveRefArgs *dargs = (const DeferRemoveRefArgs*)args;
       for (std::vector<IndexSpaceExpression*>::const_iterator it = 
             dargs->references->begin(); it != dargs->references->end(); it++)
-        if ((*it)->remove_expression_reference())
+        if ((*it)->remove_nested_expression_reference(dargs->source))
           delete (*it);
       delete dargs->references;
     }
@@ -14157,13 +14234,11 @@ namespace Legion {
 
       RayTracer *target;
       derez.deserialize(target);
-      bool is_local, is_expr_space;
-      IndexSpace expr_handle;
-      IndexSpaceExprID expr_id;
+      PendingRemoteExpression pending;
       RtEvent expr_ready;
       IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-                    is_local, is_expr_space, expr_handle, expr_id, expr_ready);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest,
+                                                source, pending, expr_ready);
       FieldMask ray_mask;
       derez.deserialize(ray_mask);
       IndexSpace handle;
@@ -14181,15 +14256,13 @@ namespace Legion {
           DeferRayTraceArgs args(set, target, expr, 
                                  handle, origin, done_event,
                                  RtUserEvent::NO_RT_USER_EVENT,
-                                 ray_mask, is_local, is_expr_space, 
-                                 expr_handle, expr_id);
+                                 ray_mask, &pending); 
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 
           return;
         }
         if (expr_ready.exists())
-          expr = (is_expr_space) ? runtime->forest->get_node(expr_handle) :
-            runtime->forest->find_remote_expression(expr_id);
+          expr = runtime->forest->find_remote_expression(pending);
         // Fall through and actually do the operation now
       }
       set->ray_trace_equivalence_sets(target, expr, ray_mask, handle, 
@@ -14238,7 +14311,6 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
 
-      LocalReferenceMutator mutator; 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       set->unpack_migration(derez, source, done);
