@@ -132,7 +132,8 @@ inline float __convert_halfint_to_float(uint16_t __x)
 }
 
 #ifdef __CUDACC__
-// This brings in __half from
+// The CUDA Toolkit only provides device versions for half precision operators,
+// so we have to provide custom implementations below.
 #define __CUDA_NO_HALF_OPERATORS__
 #if defined(LEGION_USE_CUDA)
 #include <cuda_fp16.h>
@@ -140,8 +141,6 @@ inline float __convert_halfint_to_float(uint16_t __x)
 #include <hip/hip_fp16.h>
 #endif
 
-// Cuda finally got around to implementing these operators in half precision in 11.5
-#if !defined(LEGION_USE_CUDA) || (__CUDACC_VER_MAJOR__ < 11) || ((__CUDACC_VER_MAJOR__ == 11) && (__CUDACC_VER_MINOR__ < 5))
 __CUDA_HD__
 inline __half operator-(const __half &one)
 {
@@ -297,7 +296,6 @@ inline bool operator>=(const __half &one, const __half &two)
   return (float(one) >= float(two));
 #endif
 }
-#endif // Not cuda or version is < 11.5
 
 __CUDA_HD__
 inline __half asin(const __half &one)
