@@ -17423,11 +17423,40 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(pointer.is_valid);
 #endif
-            result = node->create_external_instance(pointer.memory, pointer.ptr,
-                                                    ilg, ready_event);
+            Realm::ExternalMemoryResource res(pointer.ptr, ilg->bytes_used,
+                                              false /*!read_only*/);
+
+            const Memory memory = res.suggested_memory();
+            if ((memory != pointer.memory) && pointer.memory.exists())
+            {
+              const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+                REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+              };
+              REPORT_LEGION_WARNING(LEGION_WARNING_IMPRECISE_ATTACH_MEMORY,
+                  "WARNING: %s memory " IDFMT " in pointer constraint for "
+                  "attach operation %lld in parent task %s (UID %lld) differs "
+                  "from the Realm-suggested %s memory " IDFMT " for the "
+                  "external instance. Legion is going to use the more precise "
+                  "Realm-specified memory. Please make sure that you do not "
+                  "have any code in your application or your mapper that "
+                  "relies on the instance being in the originally specified "
+                  "memory. To silence this warning you can pass in a NO_MEMORY "
+                  "to the pointer constraint.",
+                  mem_names[pointer.memory.kind()], pointer.memory.id,
+                  unique_op_id, parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id(), mem_names[memory.kind()],
+                  memory.id);
+            }
+            // No profiling for these kinds of instances currently
+            Realm::ProfilingRequestSet requests;
+            ready_event = ApEvent(PhysicalInstance::create_external_instance(
+                                          result, memory, ilg, res, requests));
             constraints = layout_constraint_set;
-            constraints.specialized_constraint = 
+            constraints.specialized_constraint =
               SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
+            constraints.memory_constraint = MemoryConstraint(memory.kind());
             break;
           }
         default:

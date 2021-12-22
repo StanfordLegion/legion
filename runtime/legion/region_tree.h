@@ -2258,9 +2258,6 @@ namespace Legion {
                                    const std::vector<const char*> &field_files,
                                    const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event) = 0;
-      virtual PhysicalInstance create_external_instance(Memory memory,
-                             uintptr_t base, Realm::InstanceLayoutGeneric *ilg,
-                             ApEvent &ready_event) = 0;
     public:
       virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -2490,9 +2487,6 @@ namespace Legion {
                                    const std::vector<const char*> &field_files,
                                    const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event);
-      virtual PhysicalInstance create_external_instance(Memory memory,
-                             uintptr_t base, Realm::InstanceLayoutGeneric *ilg,
-                             ApEvent &ready_event);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,

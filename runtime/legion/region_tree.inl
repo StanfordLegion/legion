@@ -5345,28 +5345,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_external_instance(
-                                          Memory memory, uintptr_t base,
-                                          Realm::InstanceLayoutGeneric *ilg,
-                                          ApEvent &ready_event)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
-      // Have to wait for the index space to be ready if necessary
-      Realm::IndexSpace<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      // No profiling for these kinds of instances currently
-      Realm::ProfilingRequestSet requests;
-      PhysicalInstance result;
-      Realm::ExternalMemoryResource res(base, ilg->bytes_used,
-					false /*!read_only*/);
-      ready_event = ApEvent(PhysicalInstance::create_external_instance(result,
-                                   res.suggested_memory(), ilg, res, requests));
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
