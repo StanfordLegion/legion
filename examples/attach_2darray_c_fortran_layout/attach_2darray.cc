@@ -94,10 +94,6 @@ void top_level_task(const Task *task,
       val += 1.0;
   }
   
-  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
-      .has_affinity_to(runtime->get_executing_processor(ctx))
-      .only_kind(Memory::SYSTEM_MEM)
-      .first();
   /* attach array */
   PhysicalRegion pr_x;
   {
@@ -107,8 +103,7 @@ void top_level_task(const Task *task,
     std::vector<FieldID> fields(2);
     fields[0] = FID_X;
     fields[1] = FID_Y;
-    launcher.attach_array_aos(xy_ptr, true/*column major*/,
-                              fields, local_sysmem);
+    launcher.attach_array_aos(xy_ptr, true/*column major*/, fields);
     launcher.privilege_fields.erase(FID_Y);
     pr_x = runtime->attach_external_resource(ctx, launcher);
   }
@@ -120,8 +115,7 @@ void top_level_task(const Task *task,
     std::vector<FieldID> fields(2);
     fields[0] = FID_X;
     fields[1] = FID_Y;
-    launcher.attach_array_aos(xy_ptr, false/*column major*/,
-                              fields, local_sysmem);
+    launcher.attach_array_aos(xy_ptr, false/*column major*/, fields);
     launcher.privilege_fields.erase(FID_X);
     pr_y = runtime->attach_external_resource(ctx, launcher);
   }
@@ -131,8 +125,7 @@ void top_level_task(const Task *task,
             FID_A, a_ptr);
     AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
     std::vector<FieldID> fields(1, FID_A);
-    launcher.attach_array_soa(a_ptr, true/*column major*/,
-                              fields, local_sysmem);
+    launcher.attach_array_soa(a_ptr, true/*column major*/, fields);
     pr_a = runtime->attach_external_resource(ctx, launcher);
   }
   PhysicalRegion pr_b;
@@ -140,8 +133,7 @@ void top_level_task(const Task *task,
     printf("Attach SOA array in c layout, fid %d, ptr %p\n", FID_B, b_ptr);
     AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
     std::vector<FieldID> fields(1, FID_B);
-    launcher.attach_array_soa(b_ptr, false/*column major*/,
-                              fields, local_sysmem);
+    launcher.attach_array_soa(b_ptr, false/*column major*/, fields);
     pr_b = runtime->attach_external_resource(ctx, launcher);
   }
 

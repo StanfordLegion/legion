@@ -110,10 +110,6 @@ void top_level_task(const Task *task,
   std::vector<int*>   z_ptrs;
   std::vector<int*>  xy_ptrs;
   std::vector<int*> xyz_ptrs;
-  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
-      .has_affinity_to(runtime->get_executing_processor(ctx))
-      .only_kind(Memory::SYSTEM_MEM)
-      .first();
 
   IndexAttachLauncher xy_launcher(LEGION_EXTERNAL_INSTANCE, input_lr, false/*restricted*/);
   IndexAttachLauncher z_launcher(LEGION_EXTERNAL_INSTANCE, output_lr, false/*restricted*/); 
@@ -151,14 +147,14 @@ void top_level_task(const Task *task,
         attach_fields[0] = FID_X;
         attach_fields[1] = FID_Y;
         xy_launcher.attach_array_soa(input_handle, xy_ptr, false/*column major*/,
-                                     attach_fields, local_sysmem);
+                                     attach_fields);
       }
       xy_ptrs.push_back(xy_ptr);
       { 
         std::vector<FieldID> attach_fields(1);
         attach_fields[0] = FID_Z;
         z_launcher.attach_array_soa(output_handle, z_ptr, false/*column major*/,
-                                    attach_fields, local_sysmem);
+                                    attach_fields);
       }
       z_ptrs.push_back(z_ptr);
     } 
@@ -176,11 +172,11 @@ void top_level_task(const Task *task,
       layout_constraint_fields[2] = FID_Z;
       {
         xy_launcher.attach_array_aos(input_handle, xyz_ptr, false/*column major*/,
-                                     layout_constraint_fields, local_sysmem);
+                                     layout_constraint_fields);
       }
       {
         z_launcher.attach_array_aos(output_handle, xyz_ptr, false/*column major*/,
-                                    layout_constraint_fields, local_sysmem);
+                                    layout_constraint_fields);
       }
       xyz_ptrs.push_back(xyz_ptr);
     }
