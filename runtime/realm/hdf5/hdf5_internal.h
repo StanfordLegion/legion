@@ -79,6 +79,12 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+
+      // HDF5Memory supports ExternalHDF5Resource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
     };
 
     class HDF5Request : public Request {

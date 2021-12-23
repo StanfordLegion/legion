@@ -97,32 +97,40 @@ namespace Realm {
       return 0; // cannot provide a pointer for it.
     }
 
+    // HDF5Memory supports ExternalHDF5Resource
+    bool HDF5Memory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t& inst_offset)
+    {
+      {
+        ExternalHDF5Resource *res = dynamic_cast<ExternalHDF5Resource *>(inst->metadata.ext_resource);
+        if(res) {
+          // instant success - we won't try to open the file until it's accessed
+          inst_offset = 0;
+          return true;
+        }
+      }
+
+      // not a kind we recognize
+      return false;
+    }
+
+    void HDF5Memory::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // nothing to do here
+    }
+
     MemoryImpl::AllocationResult HDF5Memory::allocate_storage_immediate(RegionInstanceImpl *inst,
 							    bool need_alloc_result,
 							    bool poisoned,
 							    TimeLimit work_until)
     {
-      // if the allocation request doesn't include an external HDF5 resource,
-      //  we fail it immediately
-      ExternalHDF5Resource *res = dynamic_cast<ExternalHDF5Resource *>(inst->metadata.ext_resource);
-      if(res == 0) {
-	if(inst->metadata.ext_resource)
-	  log_inst.warning() << "attempt to register non-hdf5 resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
-	else
-	  log_inst.warning() << "attempt to allocate memory in hdf5 memory: layout=" << *(inst->metadata.layout);
-	inst->notify_allocation(ALLOC_INSTANT_FAILURE, 0, work_until);
-	return ALLOC_INSTANT_FAILURE;
-      }
+      // we can't actually allocate anything in an HDF5Memory
+      if(inst->metadata.ext_resource)
+        log_inst.warning() << "attempt to register non-hdf5 resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+      else
+        log_inst.warning() << "attempt to allocate memory in hdf5 memory: layout=" << *(inst->metadata.layout);
 
-      // poisoned preconditions cancel the allocation request
-      if(poisoned) {
-	inst->notify_allocation(ALLOC_CANCELLED, 0, work_until);
-	return ALLOC_CANCELLED;
-      }
-
-      // TODO: try to open the file once here to make sure it exists?
-
-      AllocationResult result = ALLOC_INSTANT_SUCCESS;
+      AllocationResult result = ALLOC_INSTANT_FAILURE;
       size_t inst_offset = 0;
       inst->notify_allocation(result, inst_offset, work_until);
 
@@ -137,8 +145,15 @@ namespace Realm {
       if(poisoned)
 	return;
 
-      // we didn't save anything on the instance, so just ack and return
-      inst->notify_deallocation();
+      // for external instances, all we have to do is ack the destruction
+      if(inst->metadata.ext_resource != 0) {
+        unregister_external_resource(inst);
+        inst->notify_deallocation();
+	return;
+      }
+
+      // shouldn't get here - no allocation
+      assert(0);
     }
 
 

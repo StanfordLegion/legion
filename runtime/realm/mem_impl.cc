@@ -135,19 +135,48 @@ namespace Realm {
 
       // check precondition on allocation
       bool alloc_poisoned = false;
+      AllocationResult result;
+      size_t inst_offset = 0;
       if(precondition.has_triggered_faultaware(alloc_poisoned)) {
-	// attempt immediate allocation (it'll handle poison)
-	return allocate_storage_immediate(inst, need_alloc_result,
-					  alloc_poisoned,
-					  TimeLimit::responsive());
+	if(alloc_poisoned) {
+	  // a poisoned creation works a lot like a failed creation
+	  inst->notify_allocation(ALLOC_CANCELLED,
+				  RegionInstanceImpl::INSTOFFSET_FAILED,
+				  TimeLimit::responsive());
+	  return ALLOC_INSTANT_FAILURE;
+        }
+
+        if(inst->metadata.ext_resource != 0) {
+          // hopefully this memory can handle this kind of external resource
+          if(attempt_register_external_resource(inst, inst_offset)) {
+            result = ALLOC_INSTANT_SUCCESS;
+          } else {
+            log_inst.warning() << "attempt to register unsupported external resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+            result = ALLOC_INSTANT_FAILURE;
+          }
+        } else {
+          // attempt immediate allocation (this will notify as needed on
+          //  its own)
+          return allocate_storage_immediate(inst, need_alloc_result,
+                                            false /*!alloc_poisoned*/,
+                                            TimeLimit::responsive());
+        }
       } else {
 	// defer allocation attempt
 	inst->metadata.inst_offset = RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC;
 	inst->deferred_create.defer(inst, this,
 				    need_alloc_result,
 				    precondition);
-	return ALLOC_DEFERRED /*asynchronous notification*/;
+	result = ALLOC_DEFERRED /*asynchronous notification*/;
       }
+
+      // if we needed an alloc result, send deferred responses too
+      if((result != ALLOC_DEFERRED) || need_alloc_result) {
+        inst->notify_allocation(result, inst_offset,
+                                TimeLimit::responsive());
+      }
+
+      return result;
     }
 
     void MemoryImpl::release_storage_deferrable(RegionInstanceImpl *inst,
@@ -167,6 +196,18 @@ namespace Realm {
 	// ask the instance to tell us when the precondition is satisified
 	inst->deferred_destroy.defer(inst, this, precondition);
       }
+    }
+
+    bool MemoryImpl::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t& inst_offset)
+    {
+      // nothing supported in base memory implementation
+      return false;
+    }
+
+    void MemoryImpl::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // nothing to do
     }
 
 #if 0
@@ -535,19 +576,11 @@ namespace Realm {
       AllocationResult result;
       size_t inst_offset = 0;
       if(inst->metadata.ext_resource != 0) {
-	// this is an external allocation - it had better be a memory resource
-	ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
-	if(res != 0) {
-	  // automatic success - make the "offset" be the difference between the
-	  //  base address we were given and our own allocation's base
-	  void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
-	  // assert(mem_base != 0);
-	  // underflow is ok here - it'll work itself out when we add the mem_base
-	  //  back in on accesses
-	  inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+        // hopefully this memory can handle this kind of external resource
+        if(attempt_register_external_resource(inst, inst_offset)) {
 	  result = ALLOC_INSTANT_SUCCESS;
 	} else {
-	  log_inst.warning() << "attempt to register non-memory resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
+	  log_inst.warning() << "attempt to register unsupported external resource: mem=" << me << " resource=" << *(inst->metadata.ext_resource);
 	  result = ALLOC_INSTANT_FAILURE;
 	}
       } else {
@@ -658,7 +691,9 @@ namespace Realm {
 
       // ignore external instances here - we can't reuse their memory for
       //  future allocations
-      if(inst->metadata.ext_resource == 0) {
+      if(inst->metadata.ext_resource != 0) {
+        unregister_external_resource(inst);
+      } else {
 	// this release may satisfy pending allocation requests
 	std::vector<std::pair<RegionInstanceImpl *, size_t> > successful_allocs;
 
@@ -955,8 +990,10 @@ namespace Realm {
       // for external instances, all we have to do is ack the destruction (assuming
       //  it wasn't poisoned)
       if(inst->metadata.ext_resource != 0) {
-	if(!poisoned)
+	if(!poisoned) {
+          unregister_external_resource(inst);
 	  inst->notify_deallocation();
+        }
 	return;
       }
 
@@ -1258,6 +1295,30 @@ namespace Realm {
   {
     if(!prealloced)
       free(base_orig);
+  }
+
+  // LocalCPUMemory supports ExternalMemoryResource
+  bool LocalCPUMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                          size_t& inst_offset)
+  {
+    ExternalMemoryResource *res = dynamic_cast<ExternalMemoryResource *>(inst->metadata.ext_resource);
+    if(res != 0) {
+      // automatic success - make the "offset" be the difference between the
+      //  base address we were given and our own allocation's base
+      void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
+      // underflow is ok here - it'll work itself out when we add the mem_base
+      //  back in on accesses
+      inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
+      return true;
+    }
+
+    // not a kind we recognize
+    return false;
+  }
+
+  void LocalCPUMemory::unregister_external_resource(RegionInstanceImpl *inst)
+  {
+    // nothing actually to clean up
   }
 
   void LocalCPUMemory::get_bytes(off_t offset, void *dst, size_t size)
