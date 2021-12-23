@@ -17457,6 +17457,8 @@ namespace Legion {
             constraints.specialized_constraint =
               SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
             constraints.memory_constraint = MemoryConstraint(memory.kind());
+            constraints.pointer_constraint = 
+              PointerConstraint(memory, pointer.ptr);
             break;
           }
         default:
@@ -18456,8 +18458,6 @@ namespace Legion {
                   parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                   launcher.handles.size(), launcher.pointers.size())
             layout_constraint_set.pointer_constraint = launcher.pointers[index];
-            layout_constraint_set.memory_constraint = MemoryConstraint(
-                layout_constraint_set.pointer_constraint.memory.kind());
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handles[index], 
                 LEGION_WRITE_DISCARD, LEGION_EXCLUSIVE, launcher.parent);

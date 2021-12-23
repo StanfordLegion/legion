@@ -2081,11 +2081,13 @@ namespace Legion {
       // acceptable to fill in the layout constraint set manually
       inline void attach_array_aos(LogicalRegion handle, 
                              void *base, bool column_major,
-                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::vector<FieldID> &fields,
+                             Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
       inline void attach_array_soa(LogicalRegion handle,
                              void *base, bool column_major,
-                             const std::vector<FieldID> &fields, Memory mem,
+                             const std::vector<FieldID> &fields,
+                             Memory memory = Memory::NO_MEMORY,
                              const std::map<FieldID,size_t> *alignments = NULL);
     public:
       ExternalResource                              resource;
