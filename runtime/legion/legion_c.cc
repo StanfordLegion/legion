@@ -5509,12 +5509,7 @@ legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
   AttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   std::vector<FieldID> fields(1, fid);
-  // Find the memory that we are using
-  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
-      .has_affinity_to(Processor::get_executing_processor())
-      .only_kind(Memory::SYSTEM_MEM)
-      .first();
-  launcher->attach_array_soa(base_ptr, column_major, fields, local_sysmem);
+  launcher->attach_array_soa(base_ptr, column_major, fields);
 }
 
 legion_future_t

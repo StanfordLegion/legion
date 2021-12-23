@@ -19532,7 +19532,8 @@ namespace Legion {
       assert(resource == LEGION_EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
-      constraints.add_constraint(MemoryConstraint(mem.kind()));
+      if (mem.exists())
+        constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiugous*/, true/*inorder*/));
       const int dims = handle.get_index_space().get_dim();
@@ -19570,7 +19571,8 @@ namespace Legion {
       assert(resource == LEGION_EXTERNAL_INSTANCE);
 #endif
       constraints.add_constraint(PointerConstraint(mem, uintptr_t(base)));
-      constraints.add_constraint(MemoryConstraint(mem.kind()));
+      if (mem.exists())
+        constraints.add_constraint(MemoryConstraint(mem.kind()));
       constraints.add_constraint(
           FieldConstraint(fields, true/*contiguous*/, true/*inorder*/));
       const int dims = handle.get_index_space().get_dim();
