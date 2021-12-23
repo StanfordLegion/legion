@@ -1340,7 +1340,7 @@ function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_s
     else
       [grid].x, [grid].y, [grid].z =
         MAX_NUM_BLOCK, MAX_NUM_BLOCK,
-        [round_exp(num_blocks, MAX_NUM_BLOCK, MAX_NUM_BLOCK)]
+        [round_exp(num_blocks, MAX_NUM_BLOCK * MAX_NUM_BLOCK)]
     end
   end
 

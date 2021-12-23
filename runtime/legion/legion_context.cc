@@ -629,10 +629,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::destroy_field_allocator(FieldSpaceNode *node)
+    void TaskContext::destroy_field_allocator(FieldSpaceNode *node,
+                                              bool from_application)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (from_application)
+      {
+        AutoRuntimeCall call(this);
+        destroy_field_allocator(node, false/*from application*/);
+        return;
+      }
       const RtEvent ready = node->destroy_allocator(runtime->address_space);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
@@ -1150,7 +1156,8 @@ namespace Legion {
             REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
                 "Index space %x was leaked out of task tree rooted by task %s",
                 it->first.id, get_task_name())
-          runtime->forest->destroy_index_space(it->first, preconditions);
+          runtime->forest->destroy_index_space(it->first, 
+                  runtime->address_space, preconditions);
         }
         created_index_spaces.clear();
       } 
@@ -16495,10 +16502,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::destroy_field_allocator(FieldSpaceNode *node)
+    void ReplicateContext::destroy_field_allocator(FieldSpaceNode *node,
+                                                   bool from_application)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (from_application)
+      {
+        AutoRuntimeCall call(this);
+        destroy_field_allocator(node, false/*from application*/);
+        return;
+      }
       if (runtime->safe_control_replication &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
@@ -21523,7 +21536,8 @@ namespace Legion {
                       handle.id, get_task_name(), get_unique_id());
 #endif
       std::set<RtEvent> preconditions;
-      runtime->forest->destroy_index_space(handle, preconditions);
+      runtime->forest->destroy_index_space(handle,
+            runtime->address_space, preconditions);
       if (!preconditions.empty())
       {
         AutoLock l_lock(leaf_lock);

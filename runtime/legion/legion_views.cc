@@ -558,7 +558,7 @@ namespace Legion {
       // added to it when we sent the request
       IndexSpaceExpression *copy_expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      if (copy_expr->remove_expression_reference())
+      if (copy_expr->remove_base_expression_reference(DEFERRED_TASK_REF))
         delete copy_expr;
     }
 
@@ -742,17 +742,23 @@ namespace Legion {
     ExprView::ExprView(RegionTreeForest *ctx, PhysicalManager *man, 
                        InstanceView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
-        view_expr(exp), view_volume(-1U),
+        view_expr(exp), view_volume(SIZE_MAX),
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+        view_did(view->did),
+#endif
         invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES))
     //--------------------------------------------------------------------------
     {
-      view_expr->add_expression_reference();
+      view_expr->add_nested_expression_reference(view->did);
     }
 
     //--------------------------------------------------------------------------
     ExprView::ExprView(const ExprView &rhs)
       : context(rhs.context), manager(rhs.manager), inst_view(rhs.inst_view),
-        view_expr(rhs.view_expr), view_volume(rhs.view_volume)
+        view_expr(rhs.view_expr), view_volume(rhs.view_volume.load())
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+        , view_did(rhs.view_did)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -763,8 +769,14 @@ namespace Legion {
     ExprView::~ExprView(void)
     //--------------------------------------------------------------------------
     {
-      if (view_expr->remove_expression_reference())
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+      if (view_expr->remove_nested_expression_reference(view_did))
         delete view_expr;
+#else
+      // We can lie about the did here since its not actually used
+      if (view_expr->remove_nested_expression_reference(0/*bogus did*/))
+        delete view_expr;
+#endif
       if (!subviews.empty())
       {
         for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
@@ -812,9 +824,15 @@ namespace Legion {
     size_t ExprView::get_view_volume(void)
     //--------------------------------------------------------------------------
     {
-      if (view_volume == -1U)
-        view_volume = view_expr->get_volume();
-      return view_volume;
+      size_t result = view_volume.load();
+      if (result != SIZE_MAX)
+        return result;
+      result = view_expr->get_volume();
+#ifdef DEBUG_LEGION
+      assert(result != SIZE_MAX);
+#endif
+      view_volume.store(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2908,7 +2926,7 @@ namespace Legion {
             rez.serialize(redop);
             rez.serialize(copy_mask);
             // Add an expression reference that will be removed by the response
-            copy_expr->add_expression_reference();
+            copy_expr->add_base_expression_reference(DEFERRED_TASK_REF);
             copy_expr->pack_expression(rez, logical_owner);
             rez.serialize(op_id);
             rez.serialize(index);
@@ -4823,7 +4841,7 @@ namespace Legion {
           rez.serialize(redop);
           rez.serialize(copy_mask);
           // Add an expression reference that will be removed by the response
-          copy_expr->add_expression_reference();
+          copy_expr->add_base_expression_reference(DEFERRED_TASK_REF);
           copy_expr->pack_expression(rez, logical_owner);
           rez.serialize(op_id);
           rez.serialize(index);

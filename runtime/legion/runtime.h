@@ -168,10 +168,14 @@ namespace Legion {
                            CustomSerdezID serdez_id, bool local);
       void free_fields(const std::set<FieldID> &to_free, const bool unordered);
     public:
+      inline void free_from_runtime(void) { free_from_application = false; }
+    public:
       FieldSpace field_space;
       FieldSpaceNode *const node;
       TaskContext *const context;
       const RtEvent ready_event;
+    protected:
+      bool free_from_application;
     };
 
     /**
@@ -3368,7 +3372,8 @@ namespace Legion {
                                            AddressSpaceID source);
       void handle_top_level_region_return(Deserializer &derez,
                                           AddressSpaceID source);
-      void handle_index_space_destruction(Deserializer &derez);
+      void handle_index_space_destruction(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_index_partition_destruction(Deserializer &derez);
       void handle_field_space_destruction(Deserializer &derez);
       void handle_logical_region_destruction(Deserializer &derez);

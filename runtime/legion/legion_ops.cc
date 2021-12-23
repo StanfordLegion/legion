@@ -8974,7 +8974,10 @@ namespace Legion {
       // We can remove the reference to the allocator once we are
       // done with all of our free operations
       if ((allocator != NULL) && allocator->remove_reference())
+      {
+        allocator->free_from_runtime();
         delete allocator;
+      }
       deactivate_operation();
       sub_partitions.clear();
       free_fields.clear();
@@ -9193,7 +9196,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(deletion_req_indexes.empty());
 #endif
-            runtime->forest->destroy_index_space(index_space, preconditions);
+            runtime->forest->destroy_index_space(index_space, 
+                        runtime->address_space, preconditions);
             if (!sub_partitions.empty())
             {
               for (std::vector<IndexPartition>::const_iterator it = 

@@ -43,7 +43,7 @@ namespace Legion {
 
     /**
      * \struct IndirectRecord
-     * A small helper calss for performing exchanges of
+     * A small helper class for performing exchanges of
      * instances for indirection copies
      */
     struct IndirectRecord : public LegionHeapify<IndirectRecord> {
@@ -63,18 +63,37 @@ namespace Legion {
     };
 
     /**
+     * \struct PendingRemoteExpression
+     * A small helper class for passing arguments associated
+     * with deferred calls to unpack remote expressions
+     */
+    struct PendingRemoteExpression {
+    public:
+      PendingRemoteExpression(void)
+        : handle(IndexSpace::NO_SPACE), remote_expr_id(0),
+          source(0), is_index_space(false) { }
+    public:
+      IndexSpace handle;
+      IndexSpaceExprID remote_expr_id;
+      AddressSpaceID source;
+      bool is_index_space;
+    };
+
+    /**
      * \class OperationCreator
      * A base class for handling the creation of index space operations
      */
     class OperationCreator {
     public:
-      OperationCreator(void);
+      OperationCreator(RegionTreeForest *f);
       virtual ~OperationCreator(void); 
     public: 
       void produce(IndexSpaceOperation *op);
       IndexSpaceExpression* consume(void);
     public:
       virtual void create_operation(void) = 0;
+    public:
+      RegionTreeForest *const forest;
     protected:
       IndexSpaceOperation *result;
     };
@@ -216,7 +235,8 @@ namespace Legion {
                                              ShardMapping &mapping,
                                              RtEvent creation_ready,
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
-      void destroy_index_space(IndexSpace handle, std::set<RtEvent> &applied,
+      void destroy_index_space(IndexSpace handle, AddressSpaceID source,
+                               std::set<RtEvent> &applied_events,
                                const bool total_sharding_collective = false);
       void destroy_index_partition(IndexPartition handle, 
                                std::set<RtEvent> &applied,
@@ -716,7 +736,7 @@ namespace Legion {
                                   IndexSpaceExprID expr_id = 0,
                                   const bool notify_remote = true,
                                   std::set<RtEvent> *applied = NULL,
-                                  bool add_remote_reference = true,
+                                  bool add_root_reference = false,
                                   unsigned depth = UINT_MAX);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
@@ -893,10 +913,19 @@ namespace Legion {
       // if these operations have been requested before and if so will 
       // return the common sub-expression, if not we will actually do 
       // the computation and memoize it for the future
+      //
+      // Note that you do not need to worry about reference counting
+      // expressions returned from these methods inside of tasks because 
+      // we implicitly add references to them and store them in the 
+      // implicit_live_expression data structure and then remove the 
+      // references after the meta-task or runtime call is done executing.
+
       IndexSpaceExpression* union_index_spaces(IndexSpaceExpression *lhs,
-                                               IndexSpaceExpression *rhs);
+                                              IndexSpaceExpression *rhs,
+                                              ReferenceMutator *mutator = NULL);
       IndexSpaceExpression* union_index_spaces(
-                                 const std::set<IndexSpaceExpression*> &exprs);
+                                 const std::set<IndexSpaceExpression*> &exprs,
+                                 ReferenceMutator *mutator = NULL);
     protected:
       // Internal version
       IndexSpaceExpression* union_index_spaces(
@@ -904,27 +933,36 @@ namespace Legion {
                                OperationCreator *creator = NULL);
     public:
       IndexSpaceExpression* intersect_index_spaces(
-                                               IndexSpaceExpression *lhs,
-                                               IndexSpaceExpression *rhs);
+                                              IndexSpaceExpression *lhs,
+                                              IndexSpaceExpression *rhs,
+                                              ReferenceMutator *mutator = NULL);
       IndexSpaceExpression* intersect_index_spaces(
-                                 const std::set<IndexSpaceExpression*> &exprs);
+                                 const std::set<IndexSpaceExpression*> &exprs,
+                                 ReferenceMutator *mutator = NULL);
     protected:
       IndexSpaceExpression* intersect_index_spaces(
                                const std::vector<IndexSpaceExpression*> &exprs,
                                OperationCreator *creator = NULL);
     public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs,
-                  IndexSpaceExpression *rhs, OperationCreator *creator = NULL);
+                  IndexSpaceExpression *rhs, OperationCreator *creator = NULL,
+                  ReferenceMutator *mutator = NULL);
     public:
       IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
       void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
     private:
       static inline bool compare_expressions(IndexSpaceExpression *one,
                                              IndexSpaceExpression *two);
+      struct CompareExpressions {
+      public:
+        inline bool operator()(IndexSpaceExpression *one,
+                               IndexSpaceExpression *two) const
+        { return compare_expressions(one, two); }
+      };
     public:
       // Methods for removing index space expression when they are done
-      void invalidate_index_space_expression(
-                            const std::vector<IndexSpaceOperation*> &parents);
+      void invalidate_index_space_operations(
+                            const std::vector<IndexSpaceOperation*> &derived);
       void remove_union_operation(IndexSpaceOperation *expr, 
                             const std::vector<IndexSpaceExpression*> &exprs);
       void remove_intersection_operation(IndexSpaceOperation *expr, 
@@ -937,7 +975,7 @@ namespace Legion {
               IndexSpaceExprID remote_expr_id, 
               IndexSpaceExpression *origin, RtEvent *wait_for = NULL);
       IndexSpaceExpression* find_remote_expression(
-              IndexSpaceExprID remote_expr_id);
+              const PendingRemoteExpression &pending_expression);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
       void handle_remote_expression_request(Deserializer &derez,
                                             AddressSpaceID source);
@@ -1110,12 +1148,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = 
           LG_TIGHTEN_INDEX_SPACE_TASK_ID;
       public:
-        TightenIndexSpaceArgs(IndexSpaceExpression *proxy)
+        TightenIndexSpaceArgs(IndexSpaceExpression *proxy, 
+                              DistributedCollectable *dc)
           : LgTaskArgs<TightenIndexSpaceArgs>(implicit_provenance),
-            proxy_this(proxy) 
-          { proxy->add_expression_reference(); }
+            proxy_this(proxy), proxy_dc(dc)
+          { proxy_dc->add_base_resource_ref(META_TASK_REF); }
       public:
         IndexSpaceExpression *const proxy_this;
+        DistributedCollectable *const proxy_dc;
       };
     public:
       template<int N1, typename T1>
@@ -1176,15 +1216,32 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
-      virtual bool try_add_canonical_reference(void) = 0;
-      virtual bool remove_canonical_reference(void) = 0;
-      virtual void add_expression_reference(unsigned cnt = 1,
-                                            bool expr_tree = false) = 0;
-      virtual bool remove_expression_reference(unsigned cnt = 1,
-                                               bool expr_tree = false) = 0;
-      virtual bool remove_operation(RegionTreeForest *forest) = 0;
+    public:
+#ifdef DEBUG_LEGION
+      virtual bool is_valid(void) const = 0;
+#endif
+      virtual DistributedID get_distributed_id(void) const = 0;
+      virtual bool try_add_canonical_reference(DistributedID source) = 0;
+      virtual bool remove_canonical_reference(DistributedID source) = 0;
+      virtual bool try_add_live_reference(ReferenceSource source) = 0;
+      virtual bool remove_live_reference(ReferenceSource source) = 0;
+      virtual void add_base_expression_reference(ReferenceSource source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
+      virtual void add_nested_expression_reference(DistributedID source,
+          std::set<RtEvent> &applied_events, unsigned count = 1) = 0;
+      virtual void add_nested_expression_reference(DistributedID source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
+      virtual bool remove_base_expression_reference(ReferenceSource source,
+                                                    unsigned count = 1) = 0;
+      virtual bool remove_nested_expression_reference(DistributedID source,
+                                                      unsigned count = 1) = 0;
+      virtual void add_tree_expression_reference(DistributedID source,
+                                                 unsigned count = 1) = 0;
+      virtual bool remove_tree_expression_reference(DistributedID source,
+                                                    unsigned count = 1) = 0;
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
+    public:
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
           const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
@@ -1253,6 +1310,7 @@ namespace Legion {
                            bool compact,LayoutConstraintKind *unsat_kind = NULL,
                            unsigned *unsat_index = NULL,void **piece_list =NULL,
                            size_t *piece_list_size = NULL) = 0;
+      // Return the expression with a resource ref on the expression
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size) = 0;
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
@@ -1264,8 +1322,10 @@ namespace Legion {
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
     public:
-      void add_parent_operation(IndexSpaceOperation *op);
-      void remove_parent_operation(IndexSpaceOperation *op);
+      void add_derived_operation(IndexSpaceOperation *op);
+      void remove_derived_operation(IndexSpaceOperation *op);
+      void invalidate_derived_operations(DistributedID did,
+                                         RegionTreeForest *context);
     public:
       inline bool is_empty(void)
       {
@@ -1279,6 +1339,8 @@ namespace Legion {
       }
       inline size_t get_num_dims(void) const
         { return NT_TemplateHelper::get_dim(type_tag); }
+      inline void record_remote_owner_valid_reference(void)
+        { remote_owner_valid_references.fetch_add(1); }
     public:
       // Convert this index space expression to the canonical one that
       // represents all expressions that are all congruent
@@ -1375,25 +1437,88 @@ namespace Legion {
                         std::set<IndexSpaceExpression*> &expressions);
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
-                         RegionTreeForest *forest, AddressSpaceID source);
+                         RegionTreeForest *forest, AddressSpaceID source); 
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source,
-                         bool &is_local,bool &is_index_space,IndexSpace &handle,
-                         IndexSpaceExprID &remote_expr_id, RtEvent &wait_for);
-      static void finalize_canonical(size_t volume, RegionTreeForest *forest,
-                                     IndexSpaceExpression *original,
-                                     IndexSpaceExpression *canonical);
+                         PendingRemoteExpression &pending, RtEvent &wait_for);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
     private:
       LocalLock &expr_lock;
     protected:
-      std::set<IndexSpaceOperation*> parent_operations;
+      std::set<IndexSpaceOperation*> derived_operations;
       std::atomic<IndexSpaceExpression*> canonical;
+      std::atomic<unsigned> remote_owner_valid_references;
       size_t volume;
       bool has_volume;
       bool empty, has_empty;
+    };
+
+    /**
+     * This is a move-only object that tracks temporary references to
+     * index space expressions that are returned from region tree ops
+     */
+    class IndexSpaceExprRef {
+    public:
+      IndexSpaceExprRef(void) : expr(NULL) { }
+      IndexSpaceExprRef(IndexSpaceExpression *e, ReferenceMutator *m = NULL)
+        : expr(e)
+      { 
+        if (expr != NULL)
+        {
+          if (m == NULL)
+          {
+            LocalReferenceMutator local_mutator;
+            expr->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
+          }
+          else
+            expr->add_base_expression_reference(LIVE_EXPR_REF, m);
+        }
+      }
+      IndexSpaceExprRef(const IndexSpaceExprRef &rhs) = delete;
+      IndexSpaceExprRef(IndexSpaceExprRef &&rhs)
+        : expr(rhs.expr)
+      {
+        rhs.expr = NULL;
+      }
+      ~IndexSpaceExprRef(void)
+      {
+        if ((expr != NULL) && 
+            expr->remove_base_expression_reference(LIVE_EXPR_REF))
+          delete expr;
+      }
+      IndexSpaceExprRef& operator=(const IndexSpaceExprRef &rhs) = delete;
+      inline IndexSpaceExprRef& operator=(IndexSpaceExprRef &&rhs)
+      {
+        if ((expr != NULL) && 
+            expr->remove_base_expression_reference(LIVE_EXPR_REF))
+          delete expr;
+        expr = rhs.expr;
+        rhs.expr = NULL;
+        return *this;
+      }
+    public:
+      inline bool operator==(const IndexSpaceExprRef &rhs) const
+      {
+        if (expr == NULL)
+          return (rhs.expr == NULL);
+        if (rhs.expr == NULL)
+          return false;
+        return (expr->expr_id == rhs.expr->expr_id);
+      }
+      inline bool operator<(const IndexSpaceExprRef &rhs) const
+      {
+        if (expr == NULL)
+          return (rhs.expr != NULL);
+        if (rhs.expr == NULL)
+          return false;
+        return (expr->expr_id < rhs.expr->expr_id);
+      }
+      inline IndexSpaceExpression* operator->(void) { return expr; }
+      inline IndexSpaceExpression* operator&(void) { return expr; }
+    protected:
+      IndexSpaceExpression *expr;
     };
 
     class IndexSpaceOperation : public IndexSpaceExpression,
@@ -1407,6 +1532,17 @@ namespace Legion {
         INSTANCE_EXPRESSION_KIND,
       };
     public:
+      class InactiveFunctor {
+      public:
+        InactiveFunctor(IndexSpaceOperation *o, ReferenceMutator *m)
+          : op(o), mutator(m) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        IndexSpaceOperation *const op;
+        ReferenceMutator *const mutator;
+      };
+    public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
                           RegionTreeForest *ctx);
       IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
@@ -1416,9 +1552,8 @@ namespace Legion {
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
-      // We should never be using valid references for index space expressions
-      virtual void notify_valid(ReferenceMutator *mutator) { assert(false); }
-      virtual void notify_invalid(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
@@ -1426,29 +1561,49 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
+      virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
-      virtual bool try_add_canonical_reference(void);
-      virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(unsigned cnt = 1,
-                                            bool expr_tree = false);
-      virtual bool remove_expression_reference(unsigned cnt = 1,
-                                               bool expr_tree = false);
-      virtual bool remove_operation(RegionTreeForest *forest) = 0;
+    public:
+#ifdef DEBUG_LEGION
+      virtual bool is_valid(void) const { return check_valid(); }
+#endif
+      virtual DistributedID get_distributed_id(void) const { return did; }
+      virtual bool try_add_canonical_reference(DistributedID source);
+      virtual bool remove_canonical_reference(DistributedID source);
+      virtual bool try_add_live_reference(ReferenceSource source);
+      virtual bool remove_live_reference(ReferenceSource source);
+      virtual void add_base_expression_reference(ReferenceSource source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          std::set<RtEvent> &applied_events, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual bool remove_base_expression_reference(ReferenceSource source,
+                                                    unsigned count = 1);
+      virtual bool remove_nested_expression_reference(DistributedID source,
+                                                      unsigned count = 1);
+      virtual void add_tree_expression_reference(DistributedID source,
+                                                 unsigned count = 1);
+      virtual bool remove_tree_expression_reference(DistributedID source,
+                                                    unsigned count = 1);
+    public:
+      virtual bool invalidate_operation(void) = 0;
+      virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
           const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
-    public:
-      void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
     public:
       RegionTreeForest *const context;
       IndexSpaceOperation *const origin_expr;
       const OperationKind op_kind;
     protected:
       mutable LocalLock inter_lock;
+      std::atomic<int> invalidated;
+#ifdef DEBUG_LEGION
     private:
-      int invalidated;
+      bool tree_active;
+#endif
     };
 
     template<int DIM, typename T>
@@ -1469,7 +1624,8 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
-      virtual bool remove_operation(RegionTreeForest *forest) = 0;
+      virtual bool invalidate_operation(void) = 0;
+      virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
           const bool notify_remote = true, IndexSpaceExprID expr_id = 0);
@@ -1567,7 +1723,8 @@ namespace Legion {
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
-      virtual bool remove_operation(RegionTreeForest *forest);
+      virtual bool invalidate_operation(void);
+      virtual void remove_operation(void);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     }; 
@@ -1576,7 +1733,7 @@ namespace Legion {
     public:
       UnionOpCreator(RegionTreeForest *f, TypeTag t,
                      const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) { }
+        : OperationCreator(f), type_tag(t), exprs(e) { }
     public:
       template<typename N, typename T>
       static inline void demux(UnionOpCreator *creator)
@@ -1588,7 +1745,6 @@ namespace Legion {
       virtual void create_operation(void)
         { NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this); }
     public:
-      RegionTreeForest *const forest;
       const TypeTag type_tag;
       const std::vector<IndexSpaceExpression*> &exprs;
     };
@@ -1607,7 +1763,8 @@ namespace Legion {
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
-      virtual bool remove_operation(RegionTreeForest *forest);
+      virtual bool invalidate_operation(void);
+      virtual void remove_operation(void);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
@@ -1616,7 +1773,7 @@ namespace Legion {
     public:
       IntersectionOpCreator(RegionTreeForest *f, TypeTag t,
                             const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) { }
+        : OperationCreator(f), type_tag(t), exprs(e) { }
     public:
       template<typename N, typename T>
       static inline void demux(IntersectionOpCreator *creator)
@@ -1628,7 +1785,6 @@ namespace Legion {
       virtual void create_operation(void)
         { NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this); }
     public:
-      RegionTreeForest *const forest;
       const TypeTag type_tag;
       const std::vector<IndexSpaceExpression*> &exprs;
     };
@@ -1647,7 +1803,8 @@ namespace Legion {
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
-      virtual bool remove_operation(RegionTreeForest *forest);
+      virtual bool invalidate_operation(void);
+      virtual void remove_operation(void);
     protected:
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
@@ -1657,7 +1814,7 @@ namespace Legion {
     public:
       DifferenceOpCreator(RegionTreeForest *f, TypeTag t,
                           IndexSpaceExpression *l, IndexSpaceExpression *r)
-        : forest(f), type_tag(t), lhs(l), rhs(r) { }
+        : OperationCreator(f), type_tag(t), lhs(l), rhs(r) { }
     public:
       template<typename N, typename T>
       static inline void demux(DifferenceOpCreator *creator)
@@ -1669,7 +1826,6 @@ namespace Legion {
       virtual void create_operation(void)
         { NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this); }
     public:
-      RegionTreeForest *const forest;
       const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
@@ -1694,7 +1850,8 @@ namespace Legion {
       InstanceExpression& operator=(const InstanceExpression &rhs);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
-      virtual bool remove_operation(RegionTreeForest *forest);
+      virtual bool invalidate_operation(void);
+      virtual void remove_operation(void);
     };
 
     /**
@@ -1716,14 +1873,14 @@ namespace Legion {
       RemoteExpression& operator=(const RemoteExpression &op);
     public:
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
-      virtual bool remove_operation(RegionTreeForest *forest);
+      virtual bool invalidate_operation(void);
+      virtual void remove_operation(void);
     };
 
-    class RemoteExpressionCreator : public OperationCreator {
+    class RemoteExpressionCreator {
     public:
-      RemoteExpressionCreator(RegionTreeForest *f, Deserializer &d)
-        : forest(f), type_tag(unpack_type_tag(d)), derez(d)
-      { NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, this); }
+      RemoteExpressionCreator(RegionTreeForest *f, TypeTag t, Deserializer &d)
+        : forest(f), type_tag(t), derez(d), operation(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(RemoteExpressionCreator *creator)
@@ -1736,24 +1893,18 @@ namespace Legion {
         creator->derez.deserialize(owner_space);
         IndexSpaceOperation *origin;
         creator->derez.deserialize(origin);
-        creator->produce(
+#ifdef DEBUG_LEGION
+        assert(creator->operation == NULL);
+#endif
+        creator->operation =
             new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
-              owner_space, origin, creator->type_tag, creator->derez));
-      }
-    public:
-      // Nothing to do for this
-      virtual void create_operation(void) { }
-    public:
-      static inline TypeTag unpack_type_tag(Deserializer &derez)
-      {
-        TypeTag tag;
-        derez.deserialize(tag);
-        return tag;
+              owner_space, origin, creator->type_tag, creator->derez);
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       Deserializer &derez;
+      IndexSpaceOperation *operation;
     };
 
     /**
@@ -1800,12 +1951,12 @@ namespace Legion {
       public:
         SendNodeRecord(IndexTreeNode *n, bool valid = false,
             bool add = false, bool pack = false, bool has_ref = false)
-          : node(n), still_valid(valid), add_remote_reference(add),
+          : node(n), still_valid(valid), add_root_reference(add),
             pack_space(pack), has_reference(has_ref) { }
       public:
         IndexTreeNode *node;
         bool still_valid;
-        bool add_remote_reference;
+        bool add_root_reference;
         bool pack_space;
         bool has_reference;
       };
@@ -1934,10 +2085,10 @@ namespace Legion {
         Serializer &rez;
         ShardMapping *const mapping;
       };
-      class InvalidFunctor {
+      class InactiveFunctor {
       public:
-        InvalidFunctor(IndexSpaceNode *n, ReferenceMutator *m,
-                       std::map<AddressSpaceID,RtEvent> &effects)
+        InactiveFunctor(IndexSpaceNode *n, ReferenceMutator *m,
+                        std::map<AddressSpaceID,RtEvent> &effects)
           : node(n), mutator(m), send_effects(effects) { }
       public:
         void apply(AddressSpaceID target);
@@ -1945,6 +2096,21 @@ namespace Legion {
         IndexSpaceNode *const node;
         ReferenceMutator *const mutator;
         std::map<AddressSpaceID,RtEvent> &send_effects;
+      };
+      class InvalidateRootFunctor {
+      public:
+        InvalidateRootFunctor(AddressSpaceID src, IndexSpaceNode *n, 
+                              ReferenceMutator &m, Runtime *rt,
+                              const std::map<AddressSpaceID,RtEvent> &e)
+          : source(src), node(n), runtime(rt), mutator(m), effects(e) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const AddressSpaceID source;
+        IndexSpaceNode *const node;
+        Runtime *const runtime;
+        ReferenceMutator &mutator;
+        const std::map<AddressSpaceID,RtEvent> &effects;
       };
     public:
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
@@ -1959,6 +2125,7 @@ namespace Legion {
     public:
       inline bool is_set(void) const { return index_space_set; }
     public:
+      virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -2009,7 +2176,10 @@ namespace Legion {
                              const bool above = false);
       virtual void pack_node(Serializer &rez, AddressSpaceID target,
                              const SendNodeRecord &record);
-      void remove_send_reference(void);
+      void invalidate_tree(void);
+      void invalidate_root(AddressSpaceID source,
+                           std::set<RtEvent> &applied,
+                           bool total_sharding_functor);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -2048,13 +2218,30 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
-      virtual bool try_add_canonical_reference(void);
-      virtual bool remove_canonical_reference(void);
-      virtual void add_expression_reference(unsigned cnt = 1,
-                                            bool expr_tree = false); 
-      virtual bool remove_expression_reference(unsigned cntx = 1,
-                                               bool expr_tree = false);
-      virtual bool remove_operation(RegionTreeForest *forest);
+    public:
+#ifdef DEBUG_LEGION
+      virtual bool is_valid(void) const { return check_valid(); }
+#endif
+      virtual DistributedID get_distributed_id(void) const { return did; }
+      virtual bool try_add_canonical_reference(DistributedID source);
+      virtual bool remove_canonical_reference(DistributedID source);
+      virtual bool try_add_live_reference(ReferenceSource source);
+      virtual bool remove_live_reference(ReferenceSource source);
+      virtual void add_base_expression_reference(ReferenceSource source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          std::set<RtEvent> &applied_events, unsigned count = 1);
+      virtual void add_nested_expression_reference(DistributedID source,
+          ReferenceMutator *mutator = NULL, unsigned count = 1);
+      virtual bool remove_base_expression_reference(ReferenceSource source,
+                                                    unsigned count = 1);
+      virtual bool remove_nested_expression_reference(DistributedID source,
+                                                      unsigned count = 1);
+      virtual void add_tree_expression_reference(DistributedID source,
+                                                 unsigned count = 1);
+      virtual bool remove_tree_expression_reference(DistributedID source,
+                                                    unsigned count = 1);
+    public:
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
           RtEvent initialized, std::set<RtEvent> *applied,
           const bool notify_remote = true, IndexSpaceExprID expr_id = 0) = 0;
@@ -2248,6 +2435,13 @@ namespace Legion {
       bool                      tight_index_space;
       // Keep track of whether we're still valid on the owner
       bool                      tree_valid;
+#ifdef DEBUG_LEGION
+      // Keep track of whether we are active, should only happen once
+      bool                      tree_active;
+#endif
+      // Keep track of whether we've had our application 
+      // reference removed if this is a root node 
+      bool                      root_valid;
     };
 
     /**
@@ -3037,7 +3231,7 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void add_child(IndexSpaceNode *child);
+      bool add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
       void compute_disjointness(ValueBroadcast<bool> *collective, bool owner);

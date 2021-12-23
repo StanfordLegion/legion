@@ -75,6 +75,7 @@ namespace Legion {
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
     __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
+    __thread ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 #ifdef DEBUG_LEGION_WAITS
     __thread int meta_task_id = -1;
 #endif
@@ -114,7 +115,7 @@ namespace Legion {
       if (future_map.impl != NULL)
       {
         point_set = future_map.impl->future_map_domain;
-        point_set->add_expression_reference();
+        point_set->add_base_expression_reference(RUNTIME_REF);
         dimensionality = point_set->get_num_dims();
       }
       else
@@ -137,7 +138,8 @@ namespace Legion {
     ArgumentMapImpl::~ArgumentMapImpl(void)
     //--------------------------------------------------------------------------
     {
-      if ((point_set != NULL) && point_set->remove_expression_reference())
+      if ((point_set != NULL) && 
+          point_set->remove_base_expression_reference(RUNTIME_REF))
         delete point_set;
     }
 
@@ -388,7 +390,8 @@ namespace Legion {
       // Compute the point set if needed
       if (update_point_set)
       {
-        if ((point_set != NULL) && point_set->remove_expression_reference())
+        if ((point_set != NULL) &&
+            point_set->remove_base_expression_reference(RUNTIME_REF))
           delete point_set;
         if (!arguments.empty())
         {
@@ -418,7 +421,7 @@ namespace Legion {
           }
           IndexSpace point_space = ctx->find_index_launch_space(point_domain);
           point_set = runtime->forest->get_node(point_space);
-          point_set->add_expression_reference();
+          point_set->add_base_expression_reference(RUNTIME_REF);
         }
         else
           point_set = NULL;
@@ -459,10 +462,11 @@ namespace Legion {
         return;
       // Otherwise we need to make them equivalent
       future_map.impl->get_all_futures(arguments);
-      if ((point_set != NULL) && point_set->remove_expression_reference())
+      if ((point_set != NULL) && 
+          point_set->remove_base_expression_reference(RUNTIME_REF))
         delete point_set;
       point_set = future_map.impl->future_map_domain;
-      point_set->add_expression_reference();
+      point_set->add_base_expression_reference(RUNTIME_REF);
       update_point_set = false;
       // Count how many dependent futures we have
 #ifdef DEBUG_LEGION
@@ -482,7 +486,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldAllocatorImpl::FieldAllocatorImpl(FieldSpaceNode *n, TaskContext *ctx,
                                            RtEvent ready)
-      : field_space(n->handle), node(n), context(ctx), ready_event(ready)
+      : field_space(n->handle), node(n), context(ctx), ready_event(ready),
+        free_from_application(true)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -507,7 +512,7 @@ namespace Legion {
     FieldAllocatorImpl::~FieldAllocatorImpl(void)
     //--------------------------------------------------------------------------
     {
-      context->destroy_field_allocator(node);
+      context->destroy_field_allocator(node, free_from_application);
       if (context->remove_reference())
         delete context;
       if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
@@ -8516,7 +8521,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     { 
       bool remove_min_reference = false;
-      IgnoreReferenceMutator mutator;
       if (!is_owner)
       {
         RtUserEvent never_gc_wait;
@@ -8602,7 +8606,7 @@ namespace Legion {
             manager->send_remote_valid_decrement(owner_space, NULL,
                                                  reference_effects);
             if (reference_effects.exists())
-              mutator.record_reference_mutation_effect(reference_effects);
+              local_mutator.record_reference_mutation_effect(reference_effects);
             // Then record it
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -8619,7 +8623,7 @@ namespace Legion {
             info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
           }
           if (remove_duplicate && 
-              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+              manager->remove_base_valid_ref(NEVER_GC_REF))
             delete manager; 
         }
       }
@@ -8628,7 +8632,7 @@ namespace Legion {
         // If this a max priority, try adding the reference beforehand, if
         // it fails then we know the instance is already deleted so whatever
         if ((priority == LEGION_GC_NEVER_PRIORITY) &&
-            !manager->acquire_instance(NEVER_GC_REF, &mutator))
+            !manager->acquire_instance(NEVER_GC_REF, NULL/*mutator*/))
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
@@ -8703,8 +8707,7 @@ namespace Legion {
           }
         }
       }
-      if (remove_min_reference && 
-          manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+      if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
         delete manager;
     }
 
@@ -12184,7 +12187,8 @@ namespace Legion {
             }
           case INDEX_SPACE_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_index_space_destruction(derez); 
+              runtime->handle_index_space_destruction(derez,
+                                                      remote_address_space);
               break;
             }
           case INDEX_PARTITION_DESTRUCTION_MESSAGE:
@@ -18164,11 +18168,19 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      bool result = forest->is_index_partition_disjoint(p);
+      const bool result = forest->is_index_partition_disjoint(p);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+      else if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
       return result;
     }
 
@@ -18176,18 +18188,35 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_disjoint(p);
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
+      const bool result = forest->is_index_partition_disjoint(p);
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
       bool result = forest->is_index_partition_complete(p);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+      else if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
       return result;
     }
 
@@ -18195,7 +18224,16 @@ namespace Legion {
     bool Runtime::is_index_partition_complete(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_complete(p);
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
+      const bool result = forest->is_index_partition_complete(p);
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -23745,7 +23783,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_destruction(Deserializer &derez)
+    void Runtime::handle_index_space_destruction(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -23757,7 +23796,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_index_space(handle, applied);
+      forest->destroy_index_space(handle, source, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -26431,7 +26470,7 @@ namespace Legion {
       std::set<RtEvent> applied;
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, applied);
+        forest->destroy_index_space(it->second, address_space, applied);
       for (std::map<ProjectionID,ProjectionFunction*>::const_iterator it =
            projection_functions.begin(); it != projection_functions.end(); it++)
         it->second->prepare_for_shutdown();
@@ -31096,6 +31135,7 @@ namespace Legion {
       if (!runtime->local_utils.empty())
         assert(implicit_context == NULL); // this better hold
 #endif
+      assert(implicit_reference_tracker == NULL);
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -31747,6 +31787,11 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
 #ifdef DEBUG_LEGION
       if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
@@ -31824,6 +31869,7 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
+      assert(implicit_reference_tracker == NULL);
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -31881,6 +31927,11 @@ namespace Legion {
 #endif
         default:
           assert(false); // should never get here
+      }
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
       }
 #ifdef DEBUG_LEGION
       runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);

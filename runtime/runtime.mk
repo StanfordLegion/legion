@@ -1311,19 +1311,19 @@ $(MAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 
 ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
 $(filter %.cpp.o,$(APP_OBJS)) : %.cpp.o : %.cpp $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
+	$(HIPCC) -o $<.d -M -MT $@ $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
 $(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
+	$(HIPCC) -o $<.d -M -MT $@ $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(USE_CUDA)),1)
 $(filter %.cu.o,$(APP_OBJS)) : %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(NVCC) -o $<.d -M $< $(NVCC_FLAGS) $(INC_FLAGS)
+	$(NVCC) -o $<.d -M -MT $@ $< $(NVCC_FLAGS) $(INC_FLAGS)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 endif
 
@@ -1331,19 +1331,19 @@ ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
 $(filter %.cpp,$(LEGION_HIP_SRC)): %.cpp : %.cu
 	hipify-perl $< > $@
 $(filter %.cpp.o,$(LEGION_OBJS)): %.cpp.o : %.cpp $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
+	$(HIPCC) -o $<.d -M -MT $@ $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
 $(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(HIPCC) -o $<.d -M $< $(HIPCC_FLAGS) $(INC_FLAGS)
+	$(HIPCC) -o $<.d -M -MT $@ $< $(HIPCC_FLAGS) $(INC_FLAGS)
 	$(HIPCC) -o $@ -c $< $(HIPCC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(USE_CUDA)),1)
 $(filter %.cu.o,$(LEGION_OBJS)): %.cu.o : %.cu $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
-	$(NVCC) -o $<.d -M $< $(NVCC_FLAGS) $(INC_FLAGS)
+	$(NVCC) -o $<.d -M -MT $@ $< $(NVCC_FLAGS) $(INC_FLAGS)
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 endif
 

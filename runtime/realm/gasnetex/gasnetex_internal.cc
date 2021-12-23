@@ -1711,7 +1711,7 @@ namespace Realm {
 	      // no more completion replies, but do pushing if there are
 	      //  ready packets
 	      ncomps = 0;
-	      do_push = has_ready_packets;
+	      do_push = has_ready_packets || !put_head.load();
 	    }
 	  }
 	} else {

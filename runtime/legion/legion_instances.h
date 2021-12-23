@@ -392,11 +392,10 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID;
       public:
         DeferIndividualManagerArgs(DistributedID d, AddressSpaceID own, 
-            Memory m, PhysicalInstance i, size_t f, bool local, 
-            IndexSpaceExpression *lx, bool is, IndexSpace dh, 
-            IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid, 
-            LayoutConstraintID l, ApEvent use, InstanceKind kind,
-            ReductionOpID redop, const void *piece_list,
+            Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
+            const PendingRemoteExpression &pending, FieldSpace h, 
+            RegionTreeID tid, LayoutConstraintID l, ApEvent use,
+            InstanceKind kind, ReductionOpID redop, const void *piece_list,
             size_t piece_list_size, bool shadow_instance);
       public:
         const DistributedID did;
@@ -404,11 +403,8 @@ namespace Legion {
         const Memory mem;
         const PhysicalInstance inst;
         const size_t footprint;
-        const bool local_is;
-        const bool domain_is;
+        const PendingRemoteExpression pending;
         IndexSpaceExpression *local_expr;
-        const IndexSpace domain_handle;
-        const IndexSpaceExprID domain_expr;
         const FieldSpace handle;
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
@@ -592,20 +588,18 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MANAGER_TASK_ID;
       public:
         DeferCollectiveManagerArgs(DistributedID d, AddressSpaceID own, 
-            IndexSpace p, size_t f, bool local, IndexSpaceExpression *lx, 
-            bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
+            IndexSpace p, size_t f, IndexSpaceExpression *lx, 
+            const PendingRemoteExpression &pending, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use, 
-            ReductionOpID redop, const void *piece_list,size_t piece_list_size);
+            ReductionOpID redop, const void *piece_list,
+            size_t piece_list_size, AddressSpaceID source);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
         IndexSpace point_space;
         const size_t footprint;
-        const bool local_is;
-        const bool domain_is;
         IndexSpaceExpression *const local_expr;
-        const IndexSpace domain_handle;
-        const IndexSpaceExprID domain_expr;
+        const PendingRemoteExpression pending;
         const FieldSpace handle;
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
@@ -613,6 +607,7 @@ namespace Legion {
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
+        const AddressSpaceID source;
       };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,

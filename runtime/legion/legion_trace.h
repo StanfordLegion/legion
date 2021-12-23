@@ -1205,11 +1205,7 @@ namespace Legion {
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
                              LogicalView *view, Deserializer &derez,
-                             IndexSpace handle);
-        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
-                             UpdateKind kind, RtUserEvent done, 
-                             LogicalView *view, Deserializer &derez,
-                             IndexSpaceExprID expr_id);
+                             const PendingRemoteExpression &pending);
         DeferTraceUpdateArgs(const DeferTraceUpdateArgs &args,
                              RtUserEvent deferral);
       public:
@@ -1218,8 +1214,7 @@ namespace Legion {
         const RtUserEvent done;
         LogicalView *const view;
         IndexSpaceExpression *const expr;
-        const IndexSpaceExprID remote_expr_id;
-        const IndexSpace handle;
+        const PendingRemoteExpression pending;
         const size_t buffer_size;
         void *const buffer;
         const RtUserEvent deferral_event;

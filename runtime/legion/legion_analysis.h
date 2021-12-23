@@ -1320,9 +1320,8 @@ namespace Legion {
       class Update {
       public:
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
-               CopyAcrossHelper *helper)
-          : expr(exp), src_mask(mask), across_helper(helper) { }
-        virtual ~Update(void) { }
+               CopyAcrossHelper *helper);
+        virtual ~Update(void); 
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;

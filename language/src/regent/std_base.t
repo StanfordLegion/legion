@@ -898,11 +898,11 @@ local symbol = {}
 function symbol:__index(field)
   local value = symbol[field]
   if value ~= nil then return value end
-  error("symbol has no field '" .. field .. "' (in lookup)", 2)
+  error("symbol has no field '" .. tostring(field) .. "' (in lookup)", 2)
 end
 
 function symbol:__newindex(field, value)
-  error("symbol has no field '" .. field .. "' (in assignment)", 2)
+  error("symbol has no field '" .. tostring(field) .. "' (in assignment)", 2)
 end
 
 do

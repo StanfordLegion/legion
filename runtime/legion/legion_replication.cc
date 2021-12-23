@@ -3499,7 +3499,7 @@ namespace Legion {
               assert(deletion_req_indexes.empty());
 #endif
               runtime->forest->destroy_index_space(index_space,
-                                                   applied, true/*collective*/);
+                  runtime->address_space, applied, true/*collective*/);
               if (!sub_partitions.empty())
               {
                 for (std::vector<IndexPartition>::const_iterator it = 
@@ -3561,7 +3561,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(deletion_req_indexes.empty());
 #endif
-              runtime->forest->destroy_index_space(index_space, applied);
+              runtime->forest->destroy_index_space(index_space,
+                              runtime->address_space, applied);
               if (!sub_partitions.empty())
               {
                 for (std::vector<IndexPartition>::const_iterator it = 

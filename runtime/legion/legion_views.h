@@ -448,7 +448,10 @@ namespace Legion {
       PhysicalManager *const manager;
       InstanceView *const inst_view;
       IndexSpaceExpression *const view_expr;
-      size_t view_volume;
+      std::atomic<size_t> view_volume;
+#if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
+      const DistributedID view_did;
+#endif
       // This is publicly mutable and protected by expr_lock from
       // the owner inst_view
       FieldMask invalid_fields;
