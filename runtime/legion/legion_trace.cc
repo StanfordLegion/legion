@@ -2282,9 +2282,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::insert(
-                              LogicalView *view, IndexSpaceExpression *expr, 
-                              const FieldMask &mask, std::set<RtEvent> *applied)
+    void TraceViewSet::insert(LogicalView *view, IndexSpaceExpression *expr, 
+                              const FieldMask &mask, ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
@@ -2313,15 +2312,7 @@ namespace Legion {
             // Handle the difference fields first before we mutate set_overlap
             FieldMask diff = mask - set_overlap;
             if (finder->second.insert(expr, mask) && (owner_did > 0))
-            {
-              if (applied != NULL)
-              {
-                WrapperReferenceMutator mutator(*applied);
-                expr->add_base_expression_reference(TRACE_REF);
-              }
-              else
-                expr->add_base_expression_reference(TRACE_REF);
-            }
+                expr->add_base_expression_reference(TRACE_REF, &mutator);
           }
           FieldMaskSet<IndexSpaceExpression> to_add;
           std::vector<IndexSpaceExpression*> to_delete;
@@ -2359,24 +2350,11 @@ namespace Legion {
             if (!set_overlap)
               break;
           }
-          if (applied != NULL)
-          {
-            WrapperReferenceMutator mutator(*applied);
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  to_add.begin(); it != to_add.end(); it++)
-              if (finder->second.insert(it->first, it->second) && 
-                  (owner_did > 0))
-                it->first->add_base_expression_reference(TRACE_REF, &mutator);
-          }
-          else
-          {
-            LocalReferenceMutator mutator;
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  to_add.begin(); it != to_add.end(); it++)
-              if (finder->second.insert(it->first, it->second) && 
-                  (owner_did > 0))
-                it->first->add_base_expression_reference(TRACE_REF, &mutator);
-          }
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                to_add.begin(); it != to_add.end(); it++)
+            if (finder->second.insert(it->first, it->second) && 
+                (owner_did > 0))
+              it->first->add_base_expression_reference(TRACE_REF, &mutator);
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
@@ -2389,24 +2367,12 @@ namespace Legion {
           }
         }
         else if (finder->second.insert(expr, mask) && (owner_did > 0))
-        {
-          if (applied != NULL)
-          {
-            WrapperReferenceMutator mutator(*applied);
-            expr->add_base_expression_reference(TRACE_REF, &mutator);
-          }
-          else
-            expr->add_base_expression_reference(TRACE_REF);
-        }
+          expr->add_base_expression_reference(TRACE_REF, &mutator);
       }
       else
       {
         if (owner_did > 0)
         {
-#ifdef DEBUG_LEGION
-          assert(applied != NULL);
-#endif
-          WrapperReferenceMutator mutator(*applied);
           view->add_nested_valid_ref(owner_did, &mutator);
           expr->add_base_expression_reference(TRACE_REF, &mutator);
         }
@@ -3081,7 +3047,8 @@ namespace Legion {
     void TraceViewSet::find_overlaps(TraceViewSet &target, 
                                      IndexSpaceExpression *expr, 
                                      const bool expr_covers, 
-                                     const FieldMask &mask) const
+                                     const FieldMask &mask,
+                                     ReferenceMutator &mutator) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3097,7 +3064,7 @@ namespace Legion {
             // sending everything
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                   vit->second.begin(); it != vit->second.end(); it++)
-              target.insert(vit->first, it->first, it->second, NULL);
+              target.insert(vit->first, it->first, it->second, mutator);
           }
           else
           {
@@ -3108,7 +3075,7 @@ namespace Legion {
               const FieldMask overlap = mask & it->second;
               if (!overlap)
                 continue;
-              target.insert(vit->first, it->first, overlap, NULL);
+              target.insert(vit->first, it->first, overlap, mutator);
             }
           }
         }
@@ -3133,11 +3100,11 @@ namespace Legion {
             if (volume > 0)
             {
               if (volume == expr->get_volume())
-                target.insert(vit->first, expr, overlap, NULL);
+                target.insert(vit->first, expr, overlap, mutator);
               else if (volume == it->first->get_volume())
-                target.insert(vit->first, it->first, overlap, NULL);
+                target.insert(vit->first, it->first, overlap, mutator);
               else
-                target.insert(vit->first, expr_overlap, overlap, NULL);
+                target.insert(vit->first, expr_overlap, overlap, mutator);
             }
             view_overlap -= overlap;
             if (!view_overlap)
@@ -3159,11 +3126,12 @@ namespace Legion {
                              std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
     {
+      WrapperReferenceMutator mutator(applied_events);
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); it++)
-          target.insert(vit->first, it->first, it->second, &applied_events);
+          target.insert(vit->first, it->first, it->second, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3566,11 +3534,12 @@ namespace Legion {
 #endif
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(regions.front()->handle.get_tree_id()));
+      LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second, NULL);
+          dump_view_set.insert(it->first, eit->first, it->second, mutator);
       dump_view_set.dump();
     }
 
@@ -3583,11 +3552,12 @@ namespace Legion {
 #endif
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(regions.front()->handle.get_tree_id()));
+      LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second, NULL);
+          dump_view_set.insert(it->first, eit->first, it->second, mutator);
       dump_view_set.dump();
     }
 
@@ -3600,11 +3570,12 @@ namespace Legion {
 #endif
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(regions.front()->handle.get_tree_id()));
+      LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second, NULL);
+          dump_view_set.insert(it->first, eit->first, it->second, mutator);
       dump_view_set.dump();
     }
 

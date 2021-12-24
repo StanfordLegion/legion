@@ -530,6 +530,9 @@ namespace Legion {
 
     /**
      * \class TraceViewSet
+     * The trace view set stores a temporary collection of instance views
+     * with valid expressions and fields for each instance. Note that we
+     * use private inheritance with LegionHeapify to ensure that 
      */
     class TraceViewSet {
     public:
@@ -551,7 +554,7 @@ namespace Legion {
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
                   const FieldMask &mask,
-                  std::set<RtEvent> *ready_events);
+                  ReferenceMutator &mutator);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
@@ -579,7 +582,8 @@ namespace Legion {
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                             FieldMaskSet<LogicalView> >::aligned &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
-                         const bool expr_covers, const FieldMask &mask) const;
+                         const bool expr_covers, const FieldMask &mask,
+                         ReferenceMutator &mutator) const;
       bool empty(void) const;
     public:
       void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
