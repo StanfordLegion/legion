@@ -342,11 +342,6 @@ if(Legion_USE_CUDA)
   if(Legion_HIJACK_CUDART)
     set(REALM_USE_CUDART_HIJACK ON)
   endif()
-<<<<<<< HEAD
-
-  # runtime.cc uses cuda.h
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CUDA_INCLUDE_DIRS}")
-=======
   if(Legion_CUDA_DYNAMIC_LOAD)
     # not compatible with runtime hijack
     if(Legion_HIJACK_CUDART)
@@ -354,7 +349,6 @@ if(Legion_USE_CUDA)
     endif()
     set(REALM_CUDA_DYNAMIC_LOAD ON)
   endif()
->>>>>>> master
 endif()
 
 #------------------------------------------------------------------------------#
