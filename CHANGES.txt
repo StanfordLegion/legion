@@ -13,6 +13,7 @@ Version 21.12.0 (December ??, 2021)
      - Cmake allows control of max nodes (-DLegion_MAX_NUM_NODES=...) and
         max processors/node (-DLegion_MAX_NUM_PROCS=...) supported by
         Legion build
+     - Added dependency tracking to make-based builds
 
 Version 21.09.0 (September 28, 2021)
   * Realm
