@@ -3203,6 +3203,7 @@ namespace Legion {
     public:
       IndexPartNode& operator=(const IndexPartNode &rhs);
     public:
+      virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

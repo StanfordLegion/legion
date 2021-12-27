@@ -101,7 +101,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return create_node(handle, domain, true/*is domain*/, NULL/*parent*/, 
-             0/*color*/, did, init, ready, expr_id, notify_remote, applied);
+                         0/*color*/, did, init, ready, expr_id, notify_remote,
+                         applied, !notify_remote); 
     }
 
     //--------------------------------------------------------------------------
@@ -3844,7 +3845,7 @@ namespace Legion {
         if (!result->is_owner())
           // Always add a base gc ref for all index spaces
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime(&mutator, notify_remote);
         if (parent != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -3863,12 +3864,7 @@ namespace Legion {
         else 
         {
           if (result->is_owner())
-          {
-#ifdef DEBUG_LEGION
-            assert(!add_root_reference);
-#endif
             result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          }
           else if (add_root_reference)
             result->add_base_valid_ref(REMOTE_DID_REF, &mutator);
         }
@@ -3948,7 +3944,7 @@ namespace Legion {
         // Otherwise the valid ref comes from parent partition
         if (!result->is_owner())
           result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime(&mutator);
+        result->register_with_runtime(&mutator, notify_remote);
         if (parent != NULL)
         {
           // Always add a valid reference from the parent
@@ -10217,7 +10213,7 @@ namespace Legion {
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part), shard_mapping(map),
         disjoint_ready(dis_ready), disjoint(false), 
-        has_complete(comp >= 0), complete(comp != 0), tree_valid(is_owner()), 
+        has_complete(comp >= 0), complete(comp != 0), tree_valid(true), 
         send_count(0), first_entry(NULL), shard_collective_map(NULL)
     //--------------------------------------------------------------------------
     {
@@ -10304,6 +10300,16 @@ namespace Legion {
             node->send_remote_gc_decrement(target, mutator, finder->second);
       else
         send_effects[target] = node->send_remote_gc_decrement(target, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // This should only happen once on each copy of the index part node
+      assert(tree_valid);
+#endif
     }
 
     //--------------------------------------------------------------------------
