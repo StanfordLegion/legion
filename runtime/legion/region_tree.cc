@@ -9495,10 +9495,10 @@ namespace Legion {
         return;
       std::map<AddressSpaceID,RtEvent>::const_iterator finder = 
         effects.find(target);
-#ifdef DEBUG_LEGION
-      assert(finder != effects.end());
-#endif
-      node->send_remote_valid_decrement(target, &mutator, finder->second);
+      if (finder != effects.end())
+        node->send_remote_valid_decrement(target, &mutator, finder->second);
+      else
+        node->send_remote_valid_decrement(target, &mutator);
     }
 
     //--------------------------------------------------------------------------
