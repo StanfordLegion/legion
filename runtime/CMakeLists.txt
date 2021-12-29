@@ -758,12 +758,8 @@ if(LEGION_CUDA_SRC)
     RELEASE -O2
     RELWITHDEBINFO -g -O2)
   target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
-  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
-
-  # complex reduction ops bring in a public dependency on cuda headers
-  if(Legion_REDOP_COMPLEX)
-    target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
-  endif()
+  target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(LEGION_HIP_SRC)

@@ -349,8 +349,6 @@ if(Legion_USE_CUDA)
     endif()
     set(REALM_CUDA_DYNAMIC_LOAD ON)
   endif()
-  # runtime.cc uses cuda.h
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CUDA_INCLUDE_DIRS}")
 endif()
 
 #------------------------------------------------------------------------------#
