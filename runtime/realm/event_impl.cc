@@ -43,7 +43,6 @@ namespace Realm {
 
   bool Event::has_triggered(void) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return true; // special case: NO_EVENT has always triggered
     EventImpl *e = get_runtime()->get_event_impl(*this);
     bool poisoned = false;
@@ -67,7 +66,6 @@ namespace Realm {
 
   bool Event::has_triggered_faultaware(bool& poisoned) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) {
       poisoned = false;
       return true; // special case: NO_EVENT has always triggered
@@ -92,13 +90,11 @@ namespace Realm {
   // creates an event that won't trigger until all input events have
   /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
   }
 
   /*static*/ Event Event::merge_events(const std::vector<Event>& wait_for)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
   }
 
@@ -106,25 +102,21 @@ namespace Realm {
 				       Event ev3 /*= NO_EVENT*/, Event ev4 /*= NO_EVENT*/,
 				       Event ev5 /*= NO_EVENT*/, Event ev6 /*= NO_EVENT*/)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
   }
 
   /*static*/ Event Event::merge_events_ignorefaults(const std::set<Event>& wait_for)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
   }
 
   /*static*/ Event Event::merge_events_ignorefaults(const std::vector<Event>& wait_for)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
   }
 
   /*static*/ Event Event::ignorefaults(Event wait_for)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::ignorefaults(wait_for);
   }
 
@@ -228,7 +220,6 @@ namespace Realm {
 
   void Event::wait_faultaware(bool& poisoned) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) {
       poisoned = false;
       return;  // special case: never wait for NO_EVENT
@@ -238,9 +229,6 @@ namespace Realm {
 
     // early out case too
     if(e->has_triggered(gen, poisoned)) return;
-
-    // waiting on an event does not count against the low level's time
-    DetailedTimer::ScopedPush sp2(TIME_NONE);
 
     // if not called from a task, use external_wait instead
     if(!ThreadLocal::current_processor.exists()) {
@@ -291,7 +279,6 @@ namespace Realm {
 
   void Event::external_wait_faultaware(bool& poisoned) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) {
       poisoned = false;
       return;  // special case: never wait for NO_EVENT
@@ -301,9 +288,6 @@ namespace Realm {
 
     // early out case too
     if(e->has_triggered(gen, poisoned)) return;
-    
-    // waiting on an event does not count against the low level's time
-    DetailedTimer::ScopedPush sp2(TIME_NONE);
     
     log_event.info() << "external thread blocked: event=" << *this;
     e->external_wait(gen, poisoned);
@@ -336,7 +320,6 @@ namespace Realm {
   bool Event::external_timedwait_faultaware(bool& poisoned,
 					    long long max_ns) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) {
       poisoned = false;
       return true;  // special case: never wait for NO_EVENT
@@ -346,9 +329,6 @@ namespace Realm {
 
     // early out case too
     if(e->has_triggered(gen, poisoned)) return true;
-
-    // waiting on an event does not count against the low level's time
-    DetailedTimer::ScopedPush sp2(TIME_NONE);
 
     log_event.info() << "external thread blocked: event=" << *this;
     bool triggered = e->external_timedwait(gen, poisoned, max_ns);
@@ -375,7 +355,6 @@ namespace Realm {
 
   /*static*/ UserEvent UserEvent::create_user_event(void)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     Event e = GenEventImpl::create_genevent()->current_event();
     assert(e.id != 0);
     UserEvent u;
@@ -392,8 +371,6 @@ namespace Realm {
 
   void UserEvent::trigger(Event wait_on, bool ignore_faults) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-
 #ifdef EVENT_GRAPH_TRACE
     Event enclosing = find_enclosing_termination_event();
     log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
@@ -430,8 +407,6 @@ namespace Realm {
 
   void UserEvent::cancel(void) const
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-
 #ifdef EVENT_GRAPH_TRACE
     // TODO: record cancellation?
     Event enclosing = find_enclosing_termination_event();
@@ -470,8 +445,6 @@ namespace Realm {
 					     const void *initial_value /*= 0*/,
 					     size_t initial_value_size /*= 0*/)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-
     BarrierImpl *impl = BarrierImpl::create_barrier(expected_arrivals, redop_id, initial_value, initial_value_size);
     Barrier b = impl->current_barrier();
 
@@ -1540,7 +1513,6 @@ namespace Realm {
 							const void *data, size_t datalen,
 							TimeLimit work_until)
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_event.debug() << "remote trigger of event " << args.event << " from node " << sender;
       GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
       impl->trigger(ID(args.event).event_generation(), sender, args.poisoned,

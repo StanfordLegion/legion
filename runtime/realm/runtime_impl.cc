@@ -1000,8 +1000,6 @@ namespace Realm {
 
     bool RuntimeImpl::network_init(int *argc, char ***argv)
     {
-      DetailedTimer::init_timers();
-
       // if we're given empty or non-existent argc/argv, start from a
       //  dummy command line with a single string (which is supposed to be
       //  the name of the binary) so that the network module and/or the

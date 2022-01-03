@@ -1454,8 +1454,6 @@ public:
 protected:
   void send_short(OutgoingMessage *hdr)
   {
-    Realm::DetailedTimer::ScopedPush sp(TIME_AM);
-
     if(hdr->msgid == MSGID_NEW_ACTIVEMSG) {
       // sanity check that we know where the frag/comp_info fields are
       int info_start;
@@ -1737,8 +1735,6 @@ protected:
   
   void send_long(OutgoingMessage *hdr, void *dest_ptr)
   {
-    Realm::DetailedTimer::ScopedPush sp(TIME_AM);
-
     // sanity check that we know where the frag/comp_info fields are
     int info_start;
     if(hdr->args[0] == BaseMedium::FRAG_INFO_MAGIC) {

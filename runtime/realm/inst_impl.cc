@@ -459,8 +459,6 @@ namespace Realm {
       // we can immediately turn this into a (possibly-preconditioned) request to
       //  deallocate the instance's storage - the eventual callback from that
       //  will be what actually destroys the instance
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-
       log_inst.info() << "instance destroyed: inst=" << *this << " wait_on=" << wait_on;
 
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);

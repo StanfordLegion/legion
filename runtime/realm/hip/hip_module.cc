@@ -506,7 +506,6 @@ namespace Realm {
 
     void GPUMemcpy1D::execute(GPUStream *stream)
     {
-      DetailedTimer::ScopedPush sp(TIME_COPY);
       log_gpudma.info("gpu memcpy: dst=%p src=%p bytes=%zd kind=%d",
                    dst, src, elmt_size, kind);
       // save stream into local variable for do_spam (which may be called indirectly
@@ -762,7 +761,6 @@ namespace Realm {
 
     void GPUMemset1D::execute(GPUStream *stream)
     {
-      DetailedTimer::ScopedPush sp(TIME_COPY);
       log_gpudma.info("gpu memset: dst=%p bytes=%zd fill_data_size=%zd",
 		      dst, bytes, fill_data_size);
 
@@ -878,7 +876,6 @@ namespace Realm {
 
     void GPUMemset2D::execute(GPUStream *stream)
     {
-      DetailedTimer::ScopedPush sp(TIME_COPY);
       log_gpudma.info("gpu memset 2d: dst=%p dst_str=%ld bytes=%zd lines=%zd fill_data_size=%zd",
 		      dst, dst_stride, bytes, lines, fill_data_size);
 
@@ -981,7 +978,6 @@ namespace Realm {
 
     void GPUMemset3D::execute(GPUStream *stream)
     {
-      DetailedTimer::ScopedPush sp(TIME_COPY);
       log_gpudma.info("gpu memset 3d: dst=%p dst_str=%ld dst_pstr=%ld bytes=%zd height=%zd depth=%zd fill_data_size=%zd",
 		      dst, dst_stride, dst_pstride,
 		      bytes, height, depth, fill_data_size);

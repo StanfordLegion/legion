@@ -80,7 +80,6 @@ namespace Realm {
 			   //std::set<RegionInstance> instances_needed,
 			   Event wait_on, int priority) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
@@ -105,7 +104,6 @@ namespace Realm {
                            const ProfilingRequestSet &reqs,
 			   Event wait_on, int priority) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
@@ -1389,7 +1387,6 @@ namespace Realm {
 						      const void *data,
 						      size_t datalen)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
 
     log_task.debug() << "received remote spawn request:"
