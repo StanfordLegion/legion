@@ -176,12 +176,12 @@ namespace Realm {
       if(manager->cfg.worker_spin_interval > 0) {
         if(spin_until < 0) {
           spin_until = (manager->cfg.worker_spin_interval +
-                        Clock::current_time_in_nanoseconds());
+                        Clock::current_time_in_nanoseconds(true /*absolute*/));
           Thread::yield();
           continue;
         } else {
           // if we haven't exhausted the spin timer, spin more
-	  if(Clock::current_time_in_nanoseconds() < spin_until) {
+	  if(Clock::current_time_in_nanoseconds(true /*absolute*/) < spin_until) {
 	    Thread::yield();
             continue;
           }
@@ -557,7 +557,8 @@ namespace Realm {
   {
     // set our deadline for returning
     long long work_until_time = ((max_time_in_ns > 0) ?
-				   (Clock::current_time_in_nanoseconds() + max_time_in_ns) :
+                                   (Clock::current_time_in_nanoseconds(true /*absolute*/) +
+                                    max_time_in_ns) :
 				   -1);
 
     bool did_work = true;
@@ -642,7 +643,7 @@ namespace Realm {
 	  log_bgwork.info() << "work claimed: manager=" << manager
 			    << " slot=" << slot
 			    << " worker=" << this;
-	  long long t_start = Clock::current_time_in_nanoseconds();
+	  long long t_start = Clock::current_time_in_nanoseconds(true /*absolute*/);
 	  // don't spend more than 1ms on any single task before going on to the
 	  //  next thing - TODO: pull this out as a config variable
 	  long long t_quantum = (manager->cfg.work_item_timeslice + t_start);
@@ -667,7 +668,7 @@ namespace Realm {
               //  of time and if there's nothing else to do
               uint32_t other_work_items = (manager->worker_state.load() >> BackgroundWorkManager::STATE_ACTIVE_ITEMS_SHIFT);
               if(other_work_items == 0) {
-                long long now = Clock::current_time_in_nanoseconds();
+                long long now = Clock::current_time_in_nanoseconds(true /*absolute*/);
                 if((work_until_time <= 0) || (work_until_time > now)) {
                   // update t_quantum and then loop back around
                   t_quantum = (manager->cfg.work_item_timeslice + now);
@@ -684,7 +685,7 @@ namespace Realm {
               break;
           }
 #ifdef REALM_BGWORK_PROFILE
-	  long long t_stop = Clock::current_time_in_nanoseconds();
+	  long long t_stop = Clock::current_time_in_nanoseconds(true /*absolute*/);
 	  long long elapsed = t_stop - t_start;
 	  long long overshoot = ((t_stop > t_quantum) ?
 	                           (t_stop - t_quantum) :
@@ -714,7 +715,7 @@ namespace Realm {
 	  return true;
       }
       if(work_until_time > 0) {
-	long long now = Clock::current_time_in_nanoseconds();
+	long long now = Clock::current_time_in_nanoseconds(true /*absolute*/);
 	if(now >= work_until_time)
 	  return true;
       }
