@@ -2362,12 +2362,6 @@ namespace Realm {
                rt->local_proc_group_free_list->next_alloc);
       }
 #endif
-#ifdef EVENT_GRAPH_TRACE
-      {
-        //FILE *log_file = Logger::get_log_file();
-        show_event_waiters(/*log_file*/);
-      }
-#endif
       cleanup_query_caches();
       // delete processors, memories, nodes, etc.
       {

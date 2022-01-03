@@ -251,10 +251,6 @@ namespace Realm {
     log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
 	     "task start: %d (%p) (%s)", func_id, fptr, argstr);
 #endif
-#ifdef EVENT_GRAPH_TRACE
-    start_enclosing(finish_event);
-    unsigned long long start = TimeStamp::get_current_time_in_micros();
-#endif
 
     // does the profiler want to know where it was run?
     if(measurements.wants_measurement<ProfilingMeasurements::OperationProcessorUsage>()) {
@@ -314,14 +310,6 @@ namespace Realm {
       // and clear the TLS when we're done
       // TODO: get this right when using user threads
       //ThreadLocal::current_processor = Processor::NO_PROC;
-
-#ifdef EVENT_GRAPH_TRACE
-      unsigned long long stop = TimeStamp::get_current_time_in_micros();
-      finish_enclosing();
-      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
-			    finish_event.id, finish_event.gen,
-			    (stop - start));
-#endif
     } else {
       // !ok_to_run
       thread->stop_operation(this);

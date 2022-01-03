@@ -72,9 +72,6 @@ namespace Realm {
     Logger log_cudart("cudart");
     Logger log_cudaipc("cudaipc");
 
-#ifdef EVENT_GRAPH_TRACE
-    extern Logger log_event_graph;
-#endif
     Logger log_stream("gpustream");
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD

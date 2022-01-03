@@ -54,9 +54,6 @@ namespace Realm {
     Logger log_cudart("cudart");
     Logger log_hipipc("hipipc");
 
-#ifdef EVENT_GRAPH_TRACE
-    extern Logger log_event_graph;
-#endif
     Logger log_stream("hipstream");
 
 #ifdef HIP_DLOPEN

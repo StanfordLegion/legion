@@ -371,14 +371,6 @@ namespace Realm {
 
   void UserEvent::trigger(Event wait_on, bool ignore_faults) const
   {
-#ifdef EVENT_GRAPH_TRACE
-    Event enclosing = find_enclosing_termination_event();
-    log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
-			 ",%d) (" IDFMT ",%d)",
-			 id, gen, wait_on.id, wait_on.gen,
-			 enclosing.id, enclosing.gen);
-#endif
-
     bool poisoned = false;
     if(wait_on.has_triggered_faultaware(poisoned)) {
       log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on
@@ -407,15 +399,6 @@ namespace Realm {
 
   void UserEvent::cancel(void) const
   {
-#ifdef EVENT_GRAPH_TRACE
-    // TODO: record cancellation?
-    Event enclosing = find_enclosing_termination_event();
-    log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
-			 ",%d) (" IDFMT ",%d)",
-			 id, gen, wait_on.id, wait_on.gen,
-			 enclosing.id, enclosing.gen);
-#endif
-
     log_event.info() << "user event cancelled: event=" << *this;
     GenEventImpl::trigger(*this, true /*poisoned*/);
   }
@@ -448,10 +431,6 @@ namespace Realm {
     BarrierImpl *impl = BarrierImpl::create_barrier(expected_arrivals, redop_id, initial_value, initial_value_size);
     Barrier b = impl->current_barrier();
 
-#ifdef EVENT_GRAPH_TRACE
-    log_event_graph.info("Barrier Creation: " IDFMT " %d", b.id, expected_arrivals);
-#endif
-
     return b;
   }
 
@@ -481,11 +460,6 @@ namespace Realm {
   Barrier Barrier::alter_arrival_count(int delta) const
   {
     timestamp_t timestamp = BarrierImpl::barrier_adjustment_timestamp.fetch_add(1);
-#ifdef EVENT_GRAPH_TRACE
-    Event enclosing = find_enclosing_termination_event();
-    log_event_graph.info("Barrier Alter: (" IDFMT ",%d) (" IDFMT
-			 ",%d) %d", id, gen, enclosing.id, enclosing.gen, delta);
-#endif
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(ID(id).barrier_generation(), delta, timestamp, Event::NO_EVENT,
 			 Network::my_node_id, false /*!forwarded*/,
@@ -514,13 +488,6 @@ namespace Realm {
   void Barrier::arrive(unsigned count /*= 1*/, Event wait_on /*= Event::NO_EVENT*/,
 		       const void *reduce_value /*= 0*/, size_t reduce_value_size /*= 0*/) const
   {
-#ifdef EVENT_GRAPH_TRACE
-    Event enclosing = find_enclosing_termination_event();
-    log_event_graph.info("Barrier Arrive: (" IDFMT ",%d) (" IDFMT
-			 ",%d) (" IDFMT ",%d) %d",
-			 id, gen, wait_on.id, wait_on.gen,
-			 enclosing.id, enclosing.gen, count);
-#endif
     // arrival uses the timestamp stored in this barrier object
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(ID(id).barrier_generation(), -int(count), timestamp, wait_on,
@@ -1068,14 +1035,10 @@ namespace Realm {
       // Avoid these optimizations if we are doing event graph tracing
       // we also cannot return an input event directly in the (wait_count == 1) case
       //  if we're ignoring faults
-#ifndef EVENT_GRAPH_TRACE
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
       if((wait_count == 1) && !ignore_faults) return first_wait;
-#else
-      if((wait_for.size() == 1) && !ignore_faults)
-        return *(wait_for.begin());
-#endif
+
       // counts of 2+ require building a new event and a merger to trigger it
       GenEventImpl *event_impl = GenEventImpl::create_genevent();
       Event finish_event = event_impl->current_event();
@@ -1083,21 +1046,11 @@ namespace Realm {
       EventMerger *m = &(event_impl->merger);
       m->prepare_merger(finish_event, ignore_faults, wait_for.size());
 
-#ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
-			   finish_event.id, finish_event.gen, wait_for.size());
-#endif
-
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
 	  it++) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
 	m->add_precondition(*it);
-#ifdef EVENT_GRAPH_TRACE
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                             finish_event.id, finish_event.gen,
-                             it->id, it->gen);
-#endif
       }
 
       // once they're all added - arm the thing (it might go off immediately)
@@ -1168,18 +1121,9 @@ namespace Realm {
       Event finish_event = event_impl->current_event();
       EventMerger *m = &(event_impl->merger);
       m->prepare_merger(finish_event, true/*ignore faults*/, 1);
-#ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Event Merge: (" IDFMT ",%d) 1", 
-			   finish_event.id, finish_event.gen);
-#endif
       log_event.info() << "event merging: event=" << finish_event 
                        << " wait_on=" << wait_for;
       m->add_precondition(wait_for);
-#ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                           finish_event.id, finish_event.gen,
-                           wait_for.id, wait_for.gen);
-#endif
       m->arm_merger();
       return finish_event;
     }
@@ -1215,31 +1159,9 @@ namespace Realm {
 
       log_event.debug() << "merging events - at least " << wait_count << " not triggered";
 
-      // Avoid these optimizations if we are doing event graph tracing
-#ifndef EVENT_GRAPH_TRACE
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
       if(wait_count == 1) return first_wait;
-#else
-      int existential_count = 0;
-      if (ev1.exists()) existential_count++;
-      if (ev2.exists()) existential_count++;
-      if (ev3.exists()) existential_count++;
-      if (ev4.exists()) existential_count++;
-      if (ev5.exists()) existential_count++;
-      if (ev6.exists()) existential_count++;
-      if (existential_count == 0)
-        return Event::NO_EVENT;
-      if (existential_count == 1)
-      {
-        if (ev1.exists()) return ev1;
-        if (ev2.exists()) return ev2;
-        if (ev3.exists()) return ev3;
-        if (ev4.exists()) return ev4;
-        if (ev5.exists()) return ev5;
-        if (ev6.exists()) return ev6;
-      }
-#endif
 
       // counts of 2+ require building a new event and a merger to trigger it
       GenEventImpl *event_impl = GenEventImpl::create_genevent();
@@ -1271,29 +1193,6 @@ namespace Realm {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev6;
 	m->add_precondition(ev6);
       }
-
-#ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
-               finish_event->me.id(), finish_event->generation.load(), existential_count);
-      if (ev1.exists())
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation.load(), ev1.id, ev1.gen);
-      if (ev2.exists())
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation.load(), ev2.id, ev2.gen);
-      if (ev3.exists())
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation.load(), ev3.id, ev3.gen);
-      if (ev4.exists())
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation.load(), ev4.id, ev4.gen);
-      if (ev5.exists())
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation.load(), ev5.id, ev5.gen);
-      if (ev6.exists())
-        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-            finish_event->me.id(), finish_event->generation.load(), ev6.id, ev6.gen);
-#endif
 
       // once they're all added - arm the thing (it might go off immediately)
       m->arm_merger();
