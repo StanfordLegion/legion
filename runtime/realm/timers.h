@@ -20,6 +20,12 @@
 
 #include "realm/realm_config.h"
 
+#include <cstdint>
+
+#if defined(__i386__) || defined(__x86_64__)
+#define REALM_TIMERS_USE_RDTSC
+#endif
+
 namespace Realm {
 
   // Clock provides (static) methods for getting the current time, which can be either:
@@ -32,7 +38,11 @@ namespace Realm {
   //  seconds - uses a double to store fractional seconds
   //  microseconds - uses a 64-bit integer, no fractional microseconds
   //  nanoseconds - uses a 64-bit integer, no fractional nanoseconds
-  class Clock {
+  //
+  // Also provided is the "native" time, which is ideally super-low-overhead
+  //  to query (e.g. reading a cpu time stampe counter), but isn't necessarily
+  //  in units of nanoseconds, nor is it synchronized between processes
+  class REALM_PUBLIC_API Clock {
   public:
     static double current_time(bool absolute = false);
     static long long current_time_in_microseconds(bool absolute = false);
@@ -44,9 +54,56 @@ namespace Realm {
     // set_zero_time() should only be called by the runtime init code
     static void set_zero_time(void);
 
+    // inlined version when we're using CPU time stamp counter
+    static uint64_t native_time();
+
+    // conversion between native and nanoseconds
+    static uint64_t native_to_nanoseconds_absolute(uint64_t native);
+    static uint64_t nanoseconds_to_native_absolute(uint64_t nanoseconds);
+    static int64_t native_to_nanoseconds_delta(int64_t d_native);
+    static int64_t nanoseconds_to_native_delta(int64_t d_nanoseconds);
+
+    // initialization/calibration of timing
+    static void calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
+                          uint64_t force_cpu_tsc_freq);
+
+    class TimescaleConverter {
+    public:
+      // defaults to identity conversion
+      TimescaleConverter();
+
+      // learns an affine translation between two timescales based on two
+      //  samples from each timescale (ta1 and tb1 should be the "same time",
+      //  and ta2 and tb2 should be a (later) "same time")
+      // fails if the translation cannot be represented (i.e. if the
+      //  time intervals differ by a factor of more than 2^32)
+      bool set(uint64_t ta1, uint64_t tb1, uint64_t ta2, uint64_t tb2);
+
+      // conversion of absolute times ("forward" = A->B, "reverse" = B-A)
+      uint64_t convert_forward_absolute(uint64_t ta);
+      uint64_t convert_reverse_absolute(uint64_t tb);
+
+      // conversion of time deltas (slightly cheaper, but must fit in int64_t)
+      int64_t convert_forward_delta(int64_t da);
+      int64_t convert_reverse_delta(int64_t db);
+
+    protected:
+      uint64_t a_zero, b_zero, slope_a_to_b, slope_b_to_a;
+    };
+
   protected:
-    REALM_INTERNAL_API_EXTERNAL_LINKAGE
-    static long long zero_time;
+#ifdef REALM_TIMERS_USE_RDTSC
+    static uint64_t raw_cpu_tsc();
+#endif
+
+    // slower function-call version of native_time for platform portability
+    static uint64_t native_time_slower();
+
+    static uint64_t zero_time;
+    static TimescaleConverter native_to_nanoseconds;
+#ifdef REALM_TIMERS_USE_RDTSC
+    static bool cpu_tsc_enabled;
+#endif
   };
 
   class Logger;
@@ -62,7 +119,7 @@ namespace Realm {
     const char *message;
     bool difference;
     Logger *logger;
-    double start_time;
+    uint64_t start_native;
   };
   
 }; // namespace Realm

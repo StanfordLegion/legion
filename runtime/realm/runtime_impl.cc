@@ -1214,6 +1214,18 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
+      // calibrate timers
+      int use_cpu_tsc = -1; // dont care
+      uint64_t force_cpu_tsq_freq = 0; // no force
+      {
+        CommandLineParser cp;
+        cp.add_option_int("-ll:cputsc", use_cpu_tsc);
+        cp.add_option_int_units("-ll:tscfreq", force_cpu_tsq_freq, 'm', false/*!binary*/);
+        bool ok = cp.parse_command_line(cmdline);
+        assert(ok);
+      }
+      Clock::calibrate(use_cpu_tsc, force_cpu_tsq_freq);
+
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
 
