@@ -50,6 +50,7 @@
 #endif
 
 #ifdef REALM_ON_WINDOWS
+#include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
 

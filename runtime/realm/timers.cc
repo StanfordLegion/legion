@@ -74,6 +74,9 @@ namespace Realm {
     GetSystemTimePreciseAsFileTime(&ft);
     uint64_t t = ft.dwHighDateTime;
     t = (t << 32) + ft.dwLowDateTime;
+    // windows epoch starts at 1/1/1601, which is overkill and happens to
+    //  overflow int64_t, so shift to Unix epoch (1/1/1970)
+    t -= uint64_t(10000000) * 86400 * (369 * 365 + 89 /* leap days*/);
     t *= 100;  // FILETIME is in 100ns units
 #endif
     return t;
@@ -129,6 +132,9 @@ namespace Realm {
         GetSystemTimePreciseAsFileTime(&ft);
         nanoseconds2 = ft.dwHighDateTime;
         nanoseconds2 = (nanoseconds2 << 32) + ft.dwLowDateTime;
+        // windows epoch starts at 1/1/1601, which is overkill and happens to
+        //  overflow int64_t, so shift to Unix epoch (1/1/1970)
+        nanoseconds2 -= uint64_t(10000000) * 86400 * (369 * 365 + 89 /* leap days*/);
         nanoseconds2 *= 100;  // FILETIME is in 100ns units
 #endif
 

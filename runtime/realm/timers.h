@@ -20,6 +20,8 @@
 
 #include "realm/realm_config.h"
 
+#include "realm/atomics.h"
+
 #include <cstdint>
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -104,6 +106,31 @@ namespace Realm {
 #ifdef REALM_TIMERS_USE_RDTSC
     static bool cpu_tsc_enabled;
 #endif
+  };
+
+  // a central theme for a responsive runtime is to place limits on how long
+  //  is spent doing any one task - this is described using a TimeLimit object
+  class TimeLimit {
+  public:
+    // default constructor generates a time limit infinitely far in the future
+    TimeLimit();
+
+    // these constructors describe a limit in terms of Realm's clock
+    static TimeLimit absolute(long long absolute_time_in_nsec,
+			      atomic<bool> *_interrupt_flag = 0);
+    static TimeLimit relative(long long relative_time_in_nsec,
+			      atomic<bool> *_interrupt_flag = 0);
+
+    // often the desired time limit is "idk, something responsive", so
+    //  have a common way to pick a completely-made-up number
+    static TimeLimit responsive();
+
+    bool is_expired() const;
+    bool will_expire(long long additional_nsec) const;
+
+  protected:
+    uint64_t limit_native;
+    atomic<bool> *interrupt_flag;
   };
 
   class Logger;

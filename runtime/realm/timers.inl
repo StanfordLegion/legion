@@ -24,7 +24,13 @@
 
 #ifdef REALM_TIMERS_USE_RDTSC
   #if defined(__i386__) || defined(__x86_64__)
-    #include <x86intrin.h>
+    #if defined(REALM_COMPILER_IS_NVCC) && (__CUDACC_VER_MAJOR__ < 10)
+      // old versions of nvcc have trouble with avx512 intrinsic definitions,
+      //  which we cannot avoid in the include below
+      #define __rdtsc __builtin_ia32_rdtsc
+    #else
+      #include <x86intrin.h>
+    #endif
   #endif
 #endif
 
@@ -222,6 +228,64 @@ namespace Realm {
     int64_t da = uns_da; // is there a way to sanity-check this?
 #endif
     return da;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TimeLimit
+  //
+
+  inline TimeLimit::TimeLimit()
+    :
+      limit_native(~uint64_t(0))
+    , interrupt_flag(0)
+  {}
+
+  // these constructors describe a limit in terms of Realm's clock
+  /*static*/ inline TimeLimit TimeLimit::absolute(long long absolute_time_in_nsec,
+						  atomic<bool> *_interrupt_flag /*= 0*/)
+  {
+    TimeLimit t;
+    t.limit_native = Clock::nanoseconds_to_native_absolute(absolute_time_in_nsec);
+    t.interrupt_flag = _interrupt_flag;
+    return t;
+  }
+
+  /*static*/ inline TimeLimit TimeLimit::relative(long long relative_time_in_nsec,
+						  atomic<bool> *_interrupt_flag /*= 0*/)
+  {
+    TimeLimit t;
+    t.limit_native = (Clock::native_time() +
+                      Clock::nanoseconds_to_native_delta(relative_time_in_nsec));
+    t.interrupt_flag = _interrupt_flag;
+    return t;
+  }
+
+  // often the desired time limit is "idk, something responsive", so
+  //  have a common way to pick a completely-made-up number
+  /*static*/ inline TimeLimit TimeLimit::responsive()
+  {
+#ifdef REALM_RESPONSIVE_TIMELIMIT
+    return TimeLimit::relative(REALM_RESPONSIVE_TIMELIMIT);
+#else
+    // go with 10us as a default
+    return TimeLimit::relative(10000);
+#endif
+  }
+
+  inline bool TimeLimit::is_expired() const
+  {
+    return(((interrupt_flag != 0) && interrupt_flag->load()) ||
+	   (Clock::native_time() >= limit_native));
+  }
+
+  inline bool TimeLimit::will_expire(long long additional_nsec) const
+  {
+    return(((interrupt_flag != 0) && interrupt_flag->load()) ||
+           ((Clock::native_time() +
+             Clock::nanoseconds_to_native_delta(additional_nsec)) >=
+	    limit_native));
   }
 
 
