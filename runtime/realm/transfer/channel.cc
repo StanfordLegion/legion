@@ -4192,6 +4192,28 @@ namespace Realm {
     return *this;
   }
 
+  void Channel::SupportedPath::populate_memory_bitmask(span<const Memory> mems,
+                                                       Channel::SupportedPath::MemBitmask& bitmask)
+  {
+    NodeSet nodes;
+    for(size_t i = 0; i < mems.size(); i++)
+      if(mems[i].exists())
+        nodes.add(ID(mems[i]).memory_owner_node());
+    assert(nodes.size() == 1);
+    bitmask.node = *(nodes.begin());
+
+    for(size_t i = 0; i < SupportedPath::MemBitmask::BITMASK_SIZE; i++)
+      bitmask.mems[i] = bitmask.ib_mems[i] = 0;
+
+    for(size_t i = 0; i < mems.size(); i++)
+      if(mems[i].exists()) {
+        if(ID(mems[i]).is_memory())
+          bitmask.mems[ID(mems[i]).memory_mem_idx() >> 6] |= (uint64_t(1) << (ID(mems[i]).memory_mem_idx() & 63));
+        else if(ID(mems[i]).is_ib_memory())
+          bitmask.ib_mems[ID(mems[i]).memory_mem_idx() >> 6] |= (uint64_t(1) << (ID(mems[i]).memory_mem_idx() & 63));
+      }
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -4328,6 +4350,21 @@ namespace Realm {
 	      }
 	      break;
 	    }
+            case SupportedPath::MEMORY_BITMASK: {
+              ID src_id(src_mem);
+              if(NodeID(src_id.memory_owner_node()) == it->src_bitmask.node) {
+                if(src_id.is_memory())
+                  src_ok = ((it->src_bitmask.mems[src_id.memory_mem_idx() >> 6] &
+                             (uint64_t(1) << (src_id.memory_mem_idx() & 63))) != 0);
+                else if(src_id.is_ib_memory())
+                  src_ok = ((it->src_bitmask.ib_mems[src_id.memory_mem_idx() >> 6] &
+                             (uint64_t(1) << (src_id.memory_mem_idx() & 63))) != 0);
+                else
+                  src_ok = false;  // consider asserting on a non-memory ID?
+              } else
+                src_ok = false;
+              break;
+            }
 	  }
 	  if(!src_ok)
 	    continue;
@@ -4375,6 +4412,21 @@ namespace Realm {
 	      }
 	      break;
 	    }
+            case SupportedPath::MEMORY_BITMASK: {
+              ID dst_id(dst_mem);
+              if(NodeID(dst_id.memory_owner_node()) == it->dst_bitmask.node) {
+                if(dst_id.is_memory())
+                  dst_ok = ((it->dst_bitmask.mems[dst_id.memory_mem_idx() >> 6] &
+                             (uint64_t(1) << (dst_id.memory_mem_idx() & 63))) != 0);
+                else if(dst_id.is_ib_memory())
+                  dst_ok = ((it->dst_bitmask.ib_mems[dst_id.memory_mem_idx() >> 6] &
+                             (uint64_t(1) << (dst_id.memory_mem_idx() & 63))) != 0);
+                else
+                  dst_ok = false;  // consider asserting on a non-memory ID?
+              } else
+                dst_ok = false;
+              break;
+            }
 	  }
 	  if(!dst_ok)
 	    continue;
@@ -4402,18 +4454,41 @@ namespace Realm {
 	return 0;
       }
 
-      Channel::SupportedPath& Channel::add_path(Memory src_mem, Memory dst_mem,
+      // sometimes we need to return a reference to a SupportedPath that won't
+      //  actually be added to a channel
+      Channel::SupportedPath dummy_supported_path;
+
+      Channel::SupportedPath& Channel::add_path(span<const Memory> src_mems,
+                                                span<const Memory> dst_mems,
                                                 unsigned bandwidth, unsigned latency,
                                                 unsigned frag_overhead,
                                                 XferDesKind xd_kind)
       {
+        if(src_mems.empty() || dst_mems.empty()) {
+          // don't actually add a path
+          return dummy_supported_path;
+        }
+
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
 	SupportedPath &p = paths[idx];
-	p.src_type = SupportedPath::SPECIFIC_MEMORY;
-	p.src_mem = src_mem;
-	p.dst_type = SupportedPath::SPECIFIC_MEMORY;
-	p.dst_mem = dst_mem;
+
+        if(src_mems.size() == 1) {
+          p.src_type = SupportedPath::SPECIFIC_MEMORY;
+          p.src_mem = src_mems[0];
+        } else {
+          p.src_type = SupportedPath::MEMORY_BITMASK;
+          p.populate_memory_bitmask(src_mems, p.src_bitmask);
+        }
+
+        if(dst_mems.size() == 1) {
+          p.dst_type = SupportedPath::SPECIFIC_MEMORY;
+          p.dst_mem = dst_mems[0];
+        } else {
+          p.dst_type = SupportedPath::MEMORY_BITMASK;
+          p.populate_memory_bitmask(dst_mems, p.dst_bitmask);
+        }
+
 	p.bandwidth = bandwidth;
 	p.latency = latency;
         p.frag_overhead = frag_overhead;
@@ -4424,19 +4499,68 @@ namespace Realm {
         return p;
       }
 
-      Channel::SupportedPath& Channel::add_path(Memory src_mem, Memory::Kind dst_kind, bool dst_global,
+      Channel::SupportedPath& Channel::add_path(span<const Memory> src_mems,
+                                                Memory::Kind dst_kind, bool dst_global,
                                                 unsigned bandwidth, unsigned latency,
                                                 unsigned frag_overhead,
                                                 XferDesKind xd_kind)
       {
+        if(src_mems.empty()) {
+          // don't actually add a path
+          return dummy_supported_path;
+        }
+
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
 	SupportedPath &p = paths[idx];
-	p.src_type = SupportedPath::SPECIFIC_MEMORY;
-	p.src_mem = src_mem;
+
+        if(src_mems.size() == 1) {
+          p.src_type = SupportedPath::SPECIFIC_MEMORY;
+          p.src_mem = src_mems[0];
+        } else {
+          p.src_type = SupportedPath::MEMORY_BITMASK;
+          p.populate_memory_bitmask(src_mems, p.src_bitmask);
+        }
+
 	p.dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
 		                   SupportedPath::LOCAL_KIND);
 	p.dst_kind = dst_kind;
+	p.bandwidth = bandwidth;
+	p.latency = latency;
+        p.frag_overhead = frag_overhead;
+        p.max_src_dim = p.max_dst_dim = 1; // default
+	p.redops_allowed = false; // default
+	p.serdez_allowed = false; // default
+	p.xd_kind = xd_kind;
+        return p;
+      }
+
+      Channel::SupportedPath& Channel::add_path(Memory::Kind src_kind, bool src_global,
+                                                span<const Memory> dst_mems,
+                                                unsigned bandwidth, unsigned latency,
+                                                unsigned frag_overhead,
+                                                XferDesKind xd_kind)
+      {
+        if(dst_mems.empty()) {
+          // don't actually add a path
+          return dummy_supported_path;
+        }
+
+	size_t idx = paths.size();
+	paths.resize(idx + 1);
+	SupportedPath &p = paths[idx];
+	p.src_type = (src_global ? SupportedPath::GLOBAL_KIND :
+		                   SupportedPath::LOCAL_KIND);
+	p.src_kind = src_kind;
+
+        if(dst_mems.size() == 1) {
+          p.dst_type = SupportedPath::SPECIFIC_MEMORY;
+          p.dst_mem = dst_mems[0];
+        } else {
+          p.dst_type = SupportedPath::MEMORY_BITMASK;
+          p.populate_memory_bitmask(dst_mems, p.dst_bitmask);
+        }
+
 	p.bandwidth = bandwidth;
 	p.latency = latency;
         p.frag_overhead = frag_overhead;
@@ -4758,13 +4882,6 @@ namespace Realm {
 				      kind_ret, bw_ret, lat_ret);
       }
 
-      static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
-						    Memory::REGDMA_MEM,
-						    Memory::Z_COPY_MEM,
-                                                    Memory::SOCKET_MEM,
-                                                    Memory::GPU_MANAGED_MEM };
-      static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -4780,14 +4897,15 @@ namespace Realm {
 	unsigned bw = 5000; // HACK - estimate at 5 GB/s
 	unsigned latency = 100; // HACK - estimate at 100ns
         unsigned frag_overhead = 100; // HACK - estimate at 100ns
-	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
-	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	  for(size_t j = 0; j < num_cpu_mem_kinds; j++)
-	    add_path(cpu_mem_kinds[i], false,
-		     cpu_mem_kinds[j], false,
-		     bw, latency, frag_overhead, XFER_MEM_CPY)
-              .set_max_dim(3)
-              .allow_serdez();
+
+        // all local cpu memories are valid sources and dests
+        std::vector<Memory> local_cpu_mems;
+        enumerate_local_cpu_memories(local_cpu_mems);
+
+        add_path(local_cpu_mems, local_cpu_mems,
+                 bw, latency, frag_overhead, XFER_MEM_CPY)
+          .set_max_dim(3)
+          .allow_serdez();
 
 	xdq.add_to_manager(bgwork);
       }
@@ -4796,6 +4914,32 @@ namespace Realm {
       {
         //free(cbs);
       }
+
+      /*static*/ void MemcpyChannel::enumerate_local_cpu_memories(std::vector<Memory>& mems)
+      {
+        Node& n = get_runtime()->nodes[Network::my_node_id];
+
+        for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+            it != n.memories.end();
+            ++it)
+          if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+             ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+             ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
+             ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+             ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
+            mems.push_back((*it)->me);
+
+        for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+            it != n.ib_memories.end();
+            ++it)
+          if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+             ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+             ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
+             ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+             ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
+            mems.push_back((*it)->me);
+      }
+
 
       uint64_t MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
                                             CustomSerdezID src_serdez_id,
@@ -5308,12 +5452,14 @@ namespace Realm {
     unsigned bw = 10000; // HACK - estimate at 10 GB/s
     unsigned latency = 100; // HACK - estimate at 100ns
     unsigned frag_overhead = 100; // HACK - estimate at 100ns
-    // any of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM is a valid destination
-    for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-      add_path(Memory::NO_MEMORY,
-	       cpu_mem_kinds[i], false,
-	       bw, latency, frag_overhead, XFER_MEM_FILL)
-        .set_max_dim(3);
+
+    // all local cpu memories are valid dests
+    std::vector<Memory> local_cpu_mems;
+    MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+
+    add_path(Memory::NO_MEMORY, local_cpu_mems,
+             bw, latency, frag_overhead, XFER_MEM_FILL)
+      .set_max_dim(3);
 
     xdq.add_to_manager(bgwork);
   }
@@ -5359,14 +5505,15 @@ namespace Realm {
     unsigned bw = 1000; // HACK - estimate at 1 GB/s
     unsigned latency = 100; // HACK - estimate at 100ns
     unsigned frag_overhead = 100; // HACK - estimate at 100ns
-    // any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
-    for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-      for(size_t j = 0; j < num_cpu_mem_kinds; j++)
-        add_path(cpu_mem_kinds[i], false,
-                 cpu_mem_kinds[j], false,
-                 bw, latency, frag_overhead, XFER_MEM_CPY)
-          .set_max_dim(3)
-          .allow_redops();
+
+    // all local cpu memories are valid sources and dests
+    std::vector<Memory> local_cpu_mems;
+    MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+
+    add_path(local_cpu_mems, local_cpu_mems,
+             bw, latency, frag_overhead, XFER_MEM_CPY)
+      .set_max_dim(3)
+      .allow_redops();
 
     xdq.add_to_manager(bgwork);
   }
@@ -5422,6 +5569,7 @@ namespace Realm {
   // class GASNetChannel
   //
 
+      // TODO: deprecate this channel/memory entirely
       GASNetChannel::GASNetChannel(BackgroundWorkManager *bgwork,
 				   XferDesKind _kind)
 	: SingleXDQChannel<GASNetChannel, GASNetXferDes>(bgwork,
@@ -5431,16 +5579,19 @@ namespace Realm {
 	unsigned bw = 1000;  // HACK - estimate at 1 GB/s
 	unsigned latency = 5000; // HACK - estimate at 5 us
         unsigned frag_overhead = 1000; // HACK - estimate at 1 us
-	// any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
-	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
-	  if(_kind == XFER_GASNET_READ)
-	    add_path(Memory::GLOBAL_MEM, true,
-		     cpu_mem_kinds[i], false,
-		     bw, latency, frag_overhead, XFER_GASNET_READ);
-	  else
-	    add_path(cpu_mem_kinds[i], false,
-		     Memory::GLOBAL_MEM, true,
-		     bw, latency, frag_overhead, XFER_GASNET_WRITE);
+
+        // all local cpu memories are valid sources/dests
+        std::vector<Memory> local_cpu_mems;
+        MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+
+        if(_kind == XFER_GASNET_READ)
+          add_path(Memory::GLOBAL_MEM, true,
+                   local_cpu_mems,
+                   bw, latency, frag_overhead, XFER_GASNET_READ);
+        else
+          add_path(local_cpu_mems,
+                   Memory::GLOBAL_MEM, true,
+                   bw, latency, frag_overhead, XFER_GASNET_WRITE);
       }
 
       GASNetChannel::~GASNetChannel()

@@ -59,9 +59,17 @@ REGENT_ARRAY_REDUCE_LIST(DECLARE_ARRAY_REDUCTION)
 
 #endif
 
-int64_t regent_generate_dynamic_kernel_id()
+static std::set<int64_t> registered_kernel_ids;
+
+void regent_register_kernel_id(int64_t kernel_id)
 {
-  static int64_t next_kernel_id = 12345;
-  int64_t kernel_id = next_kernel_id++;
-  return kernel_id;
+  if (registered_kernel_ids.find(kernel_id) != registered_kernel_ids.end())
+  {
+    fprintf(stderr,
+      "Some other CUDA kernel has already been registered with ID %ld. "
+      "This is a Regent compiler bug. Please report this on GibHub.",
+      kernel_id);
+    exit(-1);
+  }
+  registered_kernel_ids.insert(kernel_id);
 }

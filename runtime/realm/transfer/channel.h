@@ -38,6 +38,7 @@
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
 #include "realm/bgwork.h"
+#include "realm/utils.h"
 
 namespace Realm {
 
@@ -768,15 +769,23 @@ namespace Realm {
 	  GLOBAL_KIND,
 	  LOCAL_RDMA,
 	  REMOTE_RDMA,
+          MEMORY_BITMASK,
 	};
 	SrcDstType src_type, dst_type;
+        struct MemBitmask {
+          NodeID node;
+          static const int BITMASK_SIZE = (1 << ID::MEMORY_INDEX_WIDTH) >> 6;
+          uint64_t mems[BITMASK_SIZE], ib_mems[BITMASK_SIZE];
+        };
 	union {
 	  Memory src_mem;
 	  Memory::Kind src_kind;
+          MemBitmask src_bitmask;
 	};
 	union {
 	  Memory dst_mem;
 	  Memory::Kind dst_kind;
+          MemBitmask dst_bitmask;
 	};
 	XferDesKind xd_kind;
 	unsigned bandwidth; // units = MB/s = B/us
@@ -791,6 +800,9 @@ namespace Realm {
         SupportedPath& set_max_dim(int src_dim, int dst_dim);
         SupportedPath& allow_redops();
         SupportedPath& allow_serdez();
+
+        void populate_memory_bitmask(span <const Memory> mems,
+                                     MemBitmask& bitmask);
       };
 
       const std::vector<SupportedPath>& get_paths(void) const;
@@ -819,12 +831,18 @@ namespace Realm {
     protected:
       // returns the added path for further modification, but reference is
       //  only valid until the next call to 'add_path'
-      SupportedPath& add_path(Memory src_mem, Memory dst_mem,
+      SupportedPath& add_path(span<const Memory> src_mems,
+                              span<const Memory> dst_mems,
                               unsigned bandwidth, unsigned latency,
                               unsigned frag_overhead,
                               XferDesKind xd_kind);
-      SupportedPath& add_path(Memory src_mem,
+      SupportedPath& add_path(span<const Memory> src_mems,
                               Memory::Kind dst_kind, bool dst_global,
+                              unsigned bandwidth, unsigned latency,
+                              unsigned frag_overhead,
+                              XferDesKind xd_kind);
+      SupportedPath& add_path(Memory::Kind src_kind, bool src_global,
+                              span<const Memory> dst_mems,
                               unsigned bandwidth, unsigned latency,
                               unsigned frag_overhead,
                               XferDesKind xd_kind);
@@ -999,6 +1017,10 @@ namespace Realm {
       static const bool is_ordered = false;
 
       ~MemcpyChannel();
+
+      // helper to list all memories that can be reached by load/store instructions
+      //  on the cpu in the current process
+      static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
 
       virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
                                      CustomSerdezID src_serdez_id,

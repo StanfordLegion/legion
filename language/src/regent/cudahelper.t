@@ -415,7 +415,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     [register]
     [kernels:map(function(kernel)
       return quote
-        [kernel.kernel_id] = [&int8]([c.regent_generate_dynamic_kernel_id]())
+        [c.regent_register_kernel_id]([int64]([kernel.kernel_id]))
         [HijackAPI.hijackCudaRegisterFunction]([handle], [kernel.kernel_id], [kernel.name])
       end
     end)]

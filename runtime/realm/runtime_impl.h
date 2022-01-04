@@ -181,6 +181,10 @@ namespace Realm {
       size_t sysmem_size, stack_size;
       bool pin_util_procs;
       long long cpu_bgwork_timeslice, util_bgwork_timeslice;
+      bool use_ext_sysmem;
+
+    public:
+      MemoryImpl *ext_sysmem;
     };
 
     template <typename K, typename V, typename LT = Mutex>
@@ -313,7 +317,7 @@ namespace Realm {
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
       Mutex shutdown_mutex;
-      CondVar shutdown_condvar;
+      Mutex::CondVar shutdown_condvar;
       bool shutdown_request_received;  // has a request for shutdown arrived
       Event shutdown_precondition;
       int shutdown_result_code;

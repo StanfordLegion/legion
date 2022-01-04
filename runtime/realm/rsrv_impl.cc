@@ -781,7 +781,7 @@ namespace Realm {
     Event rsrv_ready;             // ready event for a pending rsrv request
     unsigned sleeper_count;
     Event sleeper_event;
-    CondVar condvar;        // for external waiters
+    Mutex::CondVar condvar;        // for external waiters
 
     // pointer math to obtain FastRsrvState reference
     static FastRsrvState& get_frs(FastReservation& frsv);
@@ -861,7 +861,7 @@ namespace Realm {
     }
     // mutex, condvar must be manually constructed
     new(&frs.mutex) Mutex;
-    new(&frs.condvar) CondVar(frs.mutex);
+    new(&frs.condvar) Mutex::CondVar(frs.mutex);
     frs.rsrv_ready = Event::NO_EVENT;
     frs.sleeper_count = 0;
     frs.sleeper_event = Event::NO_EVENT;
@@ -889,8 +889,8 @@ namespace Realm {
       }
     }
     // mutex, condvar must be manually destroyed
-    frs.condvar.~CondVar();
-    frs.mutex.~Mutex();
+    call_destructor(&frs.condvar);
+    call_destructor(&frs.mutex);
   }
 
   // NOT copyable

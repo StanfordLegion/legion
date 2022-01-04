@@ -61,7 +61,7 @@ public:
     std::vector<Memory> sys_mem;
     machine.get_all_memories(all_mem);
     for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
-      if (it->kind() == Memory::SYSTEM_MEM)
+      if ((it->kind() == Memory::SYSTEM_MEM) && (it->capacity() > 0))
         sys_mem.push_back(*it);
     }
     //printf("num sys_mem = %lu\n", sys_mem.size());
@@ -103,7 +103,7 @@ public:
     //printf("task_idx = %d, target_proc = %d\n", task->index_point.point_data[0], task->target_proc.id);
     machine.get_visible_memories(task->target_proc, vis_mems);
     for (std::set<Memory>::iterator it = vis_mems.begin(); it != vis_mems.end(); it++) {
-      if (it->kind() == Memory::SYSTEM_MEM)
+      if ((it->kind() == Memory::SYSTEM_MEM) && (it->capacity() > 0))
         sys_mem.push_back(*it);
     }
     assert(sys_mem.size() == 1);

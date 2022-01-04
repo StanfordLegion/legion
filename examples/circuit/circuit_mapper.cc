@@ -211,6 +211,11 @@ void update_mappers(Machine machine, Runtime *runtime,
 
   for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
     Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+
+    // skip memories with no capacity for creating instances
+    if(affinity.m.capacity() == 0)
+      continue;
+
     if (affinity.p.kind() == Processor::LOC_PROC) {
       if (affinity.m.kind() == Memory::SYSTEM_MEM) {
         (*proc_sysmems)[affinity.p] = affinity.m;
@@ -233,6 +238,11 @@ void update_mappers(Machine machine, Runtime *runtime,
   //   a processor doesn't have sysmem for some reason
   for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
     Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+
+    // skip memories with no capacity for creating instances
+    if(affinity.m.capacity() == 0)
+      continue;
+
     if ((affinity.p.kind() == Processor::LOC_PROC) &&
 	((affinity.m.kind() == Memory::SOCKET_MEM) ||
 	 (affinity.m.kind() == Memory::REGDMA_MEM)) &&

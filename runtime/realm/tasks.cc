@@ -588,7 +588,8 @@ namespace Realm {
   //
 
   ThreadedTaskScheduler::WorkCounter::WorkCounter(void)
-    : counter(0), wait_value(-1), interrupt_flag(0), condvar(mutex)
+    : counter(0)
+    , interrupt_flag(0)
   {}
 
   ThreadedTaskScheduler::WorkCounter::~WorkCounter(void)
@@ -605,125 +606,84 @@ namespace Realm {
     if(interrupt_flag)
       interrupt_flag->store(true);
 
-    // common case is that we'll bump the counter and nobody cares, so do
-    //  this without a lock - if the LSB is set, we'll need to look at the
-    //  wait value (and the RMW on counter makes that read synchronize
-    //  properly with the write)
-    long long old_value = counter.fetch_add_acqrel(2);
-    if(REALM_LIKELY((old_value & 1) == 0)) return;
+    // bump the counter and atomically see if any sleepers exist
+    uint64_t old_value = counter.fetch_add_acqrel(1 << SLEEPER_BITS);
+    uint64_t sleepers = (old_value & ((1 << SLEEPER_BITS) - 1));
 
-    // second non-locked check - read the wait_value and skip out if it's
-    //  not our job to signal it
-    long long wv_snapshot = wait_value.load();
-    if(REALM_LIKELY(wv_snapshot != old_value)) return;
+    // no sleepers?  all done
+    if(REALM_LIKELY(sleepers == 0))
+      return;
 
-    {
-      AutoLock<> al(mutex);
+    // try to claim sleepers to wake up
+    uint64_t expected = old_value + (1 << SLEEPER_BITS);
+    while(true) {
+      uint64_t newval = expected - sleepers;
 
-      // now that we hold the lock, wait_value cannot change - it might not
-      //  be the one expect though if a later waiter signaled ours for us
-      long long wv_reread = wait_value.load();
-#ifdef DEBUG_REALM
-      assert(wv_reread >= old_value);
-#endif
-      if(wv_reread == old_value) {
-	long long check = counter.fetch_add(1);  // clear LSB, moving it forward
-	assert((check & 1) != 0);
-	wait_value.store(-1);
-	condvar.broadcast();
+      if(counter.compare_exchange(expected, newval)) {
+        // success - we must now notify exactly that many sleepers on the
+        //   doorbell list, but we have to get exclusive popping access first
+
+        uint64_t tstate;
+        uint64_t act_pops = db_mutex.attempt_enter(sleepers, tstate);
+        while(act_pops != 0) {
+          db_list.notify_newest(act_pops, true /*prefer_spinning*/);
+
+          // try to release mutex, but loop in case work was delegated to us
+          act_pops = db_mutex.attempt_exit(tstate);
+        }
+
+        break;
+      } else {
+        // two failure cases:
+        //  1) somebody else has bumped the work counter in the mean time -
+        //      this is great, because waking the sleepers is now their problem
+        //  2) additional sleepers (on the _post-incremented_) count have shown
+        //      up - it's probably futile to wake the older sleepers, but let's
+        //      try it anyway
+        if((expected >> SLEEPER_BITS) != ((old_value >> SLEEPER_BITS) + 1)) {
+          // case 1
+          break;
+        } else {
+          // case 2
+          continue;
+        }
       }
     }
   }
 
-  // waits until new work arrives - this will possibly take the counter lock and 
-  // sleep, so should not be called while holding another lock
-  void ThreadedTaskScheduler::WorkCounter::wait_for_work(long long old_counter)
+  // waits until new work arrives - this will possibly go to sleep,
+  //  so should not be called while holding another lock
+  void ThreadedTaskScheduler::WorkCounter::wait_for_work(uint64_t old_counter)
   {
-    // the old counter with the LSB set will be our wait value
-    long long oc_w_lsb = old_counter | 1;
-    
-    // we assume the caller tried check_for_work() before dropping
-    //  their locks and calling us, so take and hold the lock the entire time
-    AutoLock<> al(mutex);
+    // use a CAS to add to the sleeper count, but only if the counter hasn't
+    //  moved on
+    uint64_t oldval = counter.load_acquire();
+    while(true) {
+      if((oldval >> SLEEPER_BITS) != old_counter) {
+        // counter moved - no need to wait
+        return;
+      }
 
-    // see if there's already a waiter
-    long long wv_read = wait_value.load();
-
-    // unlikely case - there's a waiter on a FUTURE counter
-    if(wv_read > oc_w_lsb) {
-#ifdef DEBUG_REALM
-      assert(counter.load() > oc_w_lsb);
-#endif
-      return;
+      if(counter.compare_exchange(oldval, oldval + 1)) {
+        // success - we can add our doorbell to the list and wait on it below
+        break;
+      }
     }
 
-    // waiters on an older counter should be woken before we go to sleep
-    if((wv_read >= 0) && (wv_read < oc_w_lsb)) {
-      condvar.broadcast();
-#ifdef DEBUG_REALM
-      // LSB should already be set, but we still have to do the fetch_or below
-      assert((counter.load() & 1) == 1);
-#endif
-    }
-
-    if(wv_read == oc_w_lsb) {
-      // somebody's already waiting on this counter, and the eventual waker
-      //   is already going to know it, so we can just sleep along with them
-      long long wc_reread = counter.load();
-#ifdef DEBUG_REALM
-      assert((wc_reread & 1) == 1);
-#endif
-      // if we observe the count has moved on, we can return early - somebody
-      //  else will still signal the other waiters and clear wait_value
-      if(wc_reread > oc_w_lsb)
-	return;
+    Doorbell *db = Doorbell::get_thread_doorbell();
+    db->prepare();
+    if(db_list.add_doorbell(db)) {
+      db->wait();
     } else {
-      wait_value.store(oc_w_lsb);
-      long long wc_prev = counter.fetch_or_acqrel(1);
+      // signal came first, so cancel our wait
+      db->cancel();
+    }
 #ifdef DEBUG_REALM
-      // LSB should not have already been set
-      assert((wc_prev & 1) == 0);
+    // sanity-check that counter did move
+    uint64_t checkval = counter.load();
+    assert((checkval >> SLEEPER_BITS) != old_counter);
+    (void)checkval;
 #endif
-      // if the counter has already moved on, cancel the wait ourselves
-      if(wc_prev > oc_w_lsb) {
-	wait_value.store(-1);
-	counter.fetch_add(1);
-	return;
-      }
-    }
-
-    // we've already done our early out on a counter bump, so just spin here
-    //  until the wait_value is changed by somebody else
-    while(wait_value.load() == oc_w_lsb) {
-#define WORK_COUNTER_TIMEOUT_CHECK
-#ifdef WORK_COUNTER_TIMEOUT_CHECK
-      bool awakened = condvar.timedwait(1000000000LL);
-      if(!awakened && (counter.load() != oc_w_lsb)) {
-	static atomic<int> warncount(0);
-	static const int MAX_WARNINGS = 10;
-	int c = warncount.fetch_add(1) + 1;
-	if(c <= MAX_WARNINGS)
-	  log_task.warning() << "missed work counter wakeup?"
-			     << ((c == MAX_WARNINGS) ? " - suppressing further messages" : "");
-	// don't clear wait_value, since there may be other threads that did
-	//  want to get waken up, but we don't want to fall through to the
-	//  checks below either, so just return
-	return;
-      }
-#else
-      condvar.wait();
-#endif
-    }
-
-//#ifdef DEBUG_REALM
-    // wait value should have moved on, or been set back to -1
-    long long wv_check = wait_value.load();
-    if(!((wv_check == -1) || (wv_check > oc_w_lsb))) {
-      log_task.fatal() << "HELP: wv_check=" << wv_check << " oc_w_lsb=" << oc_w_lsb << " wv_read=" << wv_read << " counter=" << counter.load();
-      abort();
-    }
-    assert((wv_check == -1) || (wv_check > oc_w_lsb));
-//#endif
   }
 
 
@@ -846,7 +806,7 @@ namespace Realm {
       log_sched.debug() << "thread w/ scheduler lock spinning: " << thread;
       spinning_workers.insert(thread);
       while(true) {
-	long long old_work_counter = work_counter.read_counter();
+	uint64_t old_work_counter = work_counter.read_counter();
 	switch(thread->get_state()) {
 	case Thread::STATE_READY:
 	  {
@@ -901,7 +861,7 @@ namespace Realm {
 
       // remember the work counter value before we start so that we don't iterate
       //   unnecessarily
-      //long long old_work_counter = work_counter.read_counter();
+      //uint64_t old_work_counter = work_counter.read_counter();
 
       // first choice - is there a resumable worker we can yield to?
       if(!resumable_workers.empty()) {
@@ -1049,7 +1009,7 @@ namespace Realm {
       while(true) {
 	// remember the work counter value before we start so that we don't iterate
 	//   unnecessarily
-	long long old_work_counter = work_counter.read_counter();
+	uint64_t old_work_counter = work_counter.read_counter();
 
 	// internal tasks always take precedence
 	while(!internal_tasks.empty()) {
@@ -1231,7 +1191,7 @@ namespace Realm {
     scheduler_loop();
   }
 
-  void ThreadedTaskScheduler::wait_for_work(long long old_work_counter)
+  void ThreadedTaskScheduler::wait_for_work(uint64_t old_work_counter)
   {
     // clear the interrupt flag (if we use it) before we check the work counter
     //  to avoid a missed interrupt
@@ -1329,7 +1289,7 @@ namespace Realm {
 
       if(active_workers.count(thread) == 0) {
 	// nope, sleep on a CV until we are
-	CondVar my_cv(lock);
+        Mutex::CondVar my_cv(lock);
 	sleeping_threads[thread] = &my_cv;
 
 	while(active_workers.count(thread) == 0)
@@ -1416,7 +1376,7 @@ namespace Realm {
       active_workers.erase(Thread::self());
     assert(count == 1);
 
-    CondVar my_cv(lock);
+    Mutex::CondVar my_cv(lock);
     sleeping_threads[Thread::self()] = &my_cv;
 
     // with kernel threads, sleeping and waking are separable actions
@@ -1438,7 +1398,7 @@ namespace Realm {
     active_workers.insert(to_wake);
 
     // if they have a CV (they might not yet), poke that
-    std::map<Thread *, CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
+    std::map<Thread *, Mutex::CondVar *>::const_iterator it = sleeping_threads.find(to_wake);
     if(it != sleeping_threads.end())
       it->second->signal();
   }
@@ -1469,7 +1429,7 @@ namespace Realm {
       worker_wake(switch_to);
   }
   
-  void KernelThreadTaskScheduler::wait_for_work(long long old_work_counter)
+  void KernelThreadTaskScheduler::wait_for_work(uint64_t old_work_counter)
   {
     // if we have a dedicated core and we don't care about power, we can spin-wait here
     bool spin_wait = false;
@@ -1736,7 +1696,7 @@ namespace Realm {
     assert(0);
   }
 
-  void UserThreadTaskScheduler::wait_for_work(long long old_work_counter)
+  void UserThreadTaskScheduler::wait_for_work(uint64_t old_work_counter)
   {
     // if we have a dedicated core and we don't care about power, we can spin-wait here
     bool spin_wait = false;

@@ -213,7 +213,7 @@ namespace Realm {
     PartitioningOperation::OpList op_list;
     PartitioningMicroOp::MicroOpList uop_list;
     Mutex mutex;
-    CondVar condvar;
+    Mutex::CondVar condvar;
     std::vector<Thread *> workers;
     bool work_advertised;
   };

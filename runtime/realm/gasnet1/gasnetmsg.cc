@@ -230,7 +230,7 @@ protected:
 
   friend class SrcDataPool::Lock;
   Realm::Mutex mutex;
-  Realm::CondVar condvar;
+  Realm::Mutex::CondVar condvar;
   size_t total_size;
   std::map<char *, size_t> free_list;
   std::queue<OutgoingMessage *> pending_allocations;
@@ -1946,7 +1946,7 @@ protected:
   gasnet_node_t peer;
   
   Realm::Mutex mutex;
-  Realm::CondVar cond;
+  Realm::Mutex::CondVar cond;
 public:
   std::queue<OutgoingMessage *> out_short_hdrs;
   std::queue<OutgoingMessage *> out_long_hdrs;
@@ -2390,7 +2390,7 @@ private:
   const int total_endpoints, dedicated_workers;
   ActiveMessageEndpoint **endpoints;
   Realm::Mutex mutex;
-  Realm::CondVar condvar;
+  Realm::Mutex::CondVar condvar;
   bool bgworker_active;
   int *todo_list;
   int todo_oldest, todo_newest;
