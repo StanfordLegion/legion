@@ -4168,45 +4168,46 @@ namespace Realm {
 
   Channel::SupportedPath& Channel::SupportedPath::set_max_dim(int src_and_dst_dim)
   {
-    max_src_dim = max_dst_dim = src_and_dst_dim;
+    for(SupportedPath *p = this; p; p = p->chain)
+      p->max_src_dim = p->max_dst_dim = src_and_dst_dim;
     return *this;
   }
 
   Channel::SupportedPath& Channel::SupportedPath::set_max_dim(int src_dim,
                                                               int dst_dim)
   {
-    max_src_dim = src_dim;
-    max_dst_dim = dst_dim;
+    for(SupportedPath *p = this; p; p = p->chain) {
+      p->max_src_dim = src_dim;
+      p->max_dst_dim = dst_dim;
+    }
     return *this;
   }
 
   Channel::SupportedPath& Channel::SupportedPath::allow_redops()
   {
-    redops_allowed = true;
+    for(SupportedPath *p = this; p; p = p->chain)
+      p->redops_allowed = true;
     return *this;
   }
 
   Channel::SupportedPath& Channel::SupportedPath::allow_serdez()
   {
-    serdez_allowed = true;
+    for(SupportedPath *p = this; p; p = p->chain)
+      p->serdez_allowed = true;
     return *this;
   }
 
   void Channel::SupportedPath::populate_memory_bitmask(span<const Memory> mems,
+                                                       NodeID node,
                                                        Channel::SupportedPath::MemBitmask& bitmask)
   {
-    NodeSet nodes;
-    for(size_t i = 0; i < mems.size(); i++)
-      if(mems[i].exists())
-        nodes.add(ID(mems[i]).memory_owner_node());
-    assert(nodes.size() == 1);
-    bitmask.node = *(nodes.begin());
+    bitmask.node = node;
 
     for(size_t i = 0; i < SupportedPath::MemBitmask::BITMASK_SIZE; i++)
       bitmask.mems[i] = bitmask.ib_mems[i] = 0;
 
     for(size_t i = 0; i < mems.size(); i++)
-      if(mems[i].exists()) {
+      if(mems[i].exists() && (NodeID(ID(mems[i]).memory_owner_node()) == node)) {
         if(ID(mems[i]).is_memory())
           bitmask.mems[ID(mems[i]).memory_mem_idx() >> 6] |= (uint64_t(1) << (ID(mems[i]).memory_mem_idx() & 63));
         else if(ID(mems[i]).is_ib_memory())
@@ -4464,39 +4465,79 @@ namespace Realm {
                                                 unsigned frag_overhead,
                                                 XferDesKind xd_kind)
       {
-        if(src_mems.empty() || dst_mems.empty()) {
+        NodeSet src_nodes;
+        for(size_t i = 0; i < src_mems.size(); i++)
+          if(src_mems[i].exists())
+            src_nodes.add(ID(src_mems[i]).memory_owner_node());
+          else
+            src_nodes.add(Network::max_node_id + 1);  // src fill placeholder
+
+        NodeSet dst_nodes;
+        for(size_t i = 0; i < dst_mems.size(); i++)
+          if(dst_mems[i].exists())
+            dst_nodes.add(ID(dst_mems[i]).memory_owner_node());
+
+        if(src_nodes.empty() || dst_nodes.empty()) {
           // don't actually add a path
           return dummy_supported_path;
         }
 
-	size_t idx = paths.size();
-	paths.resize(idx + 1);
-	SupportedPath &p = paths[idx];
+        size_t num_new = src_nodes.size() * dst_nodes.size();
+	size_t first_idx = paths.size();
+	paths.resize(first_idx + num_new);
 
-        if(src_mems.size() == 1) {
-          p.src_type = SupportedPath::SPECIFIC_MEMORY;
-          p.src_mem = src_mems[0];
-        } else {
-          p.src_type = SupportedPath::MEMORY_BITMASK;
-          p.populate_memory_bitmask(src_mems, p.src_bitmask);
+        SupportedPath *cur_sp = &paths[first_idx];
+        NodeSetIterator src_iter = src_nodes.begin();
+        NodeSetIterator dst_iter = dst_nodes.begin();
+
+        while(true) {
+          if(src_mems.size() == 1) {
+            cur_sp->src_type = SupportedPath::SPECIFIC_MEMORY;
+            cur_sp->src_mem = src_mems[0];
+          } else if(*src_iter > Network::max_node_id) {
+            cur_sp->src_type = SupportedPath::SPECIFIC_MEMORY;
+            cur_sp->src_mem = Memory::NO_MEMORY; // src fill
+          } else {
+            cur_sp->src_type = SupportedPath::MEMORY_BITMASK;
+            cur_sp->populate_memory_bitmask(src_mems, *src_iter, cur_sp->src_bitmask);
+          }
+
+          if(dst_mems.size() == 1) {
+            cur_sp->dst_type = SupportedPath::SPECIFIC_MEMORY;
+            cur_sp->dst_mem = dst_mems[0];
+          } else {
+            cur_sp->dst_type = SupportedPath::MEMORY_BITMASK;
+            cur_sp->populate_memory_bitmask(dst_mems, *dst_iter, cur_sp->dst_bitmask);
+          }
+
+          cur_sp->bandwidth = bandwidth;
+          cur_sp->latency = latency;
+          cur_sp->frag_overhead = frag_overhead;
+          cur_sp->max_src_dim = cur_sp->max_dst_dim = 1; // default
+          cur_sp->redops_allowed = false; // default
+          cur_sp->serdez_allowed = false; // default
+          cur_sp->xd_kind = xd_kind;
+
+          // bump iterators, wrapping dst if not done with src
+          ++dst_iter;
+          if(dst_iter == dst_nodes.end()) {
+            ++src_iter;
+            if(src_iter == src_nodes.end()) {
+              // end of chain and of loop
+              cur_sp->chain = 0;
+              break;
+            }
+            dst_iter = dst_nodes.begin();
+          }
+          // not end of chain, so connect to next before bumping current pointer
+          cur_sp->chain = cur_sp + 1;
+          ++cur_sp;
         }
-
-        if(dst_mems.size() == 1) {
-          p.dst_type = SupportedPath::SPECIFIC_MEMORY;
-          p.dst_mem = dst_mems[0];
-        } else {
-          p.dst_type = SupportedPath::MEMORY_BITMASK;
-          p.populate_memory_bitmask(dst_mems, p.dst_bitmask);
-        }
-
-	p.bandwidth = bandwidth;
-	p.latency = latency;
-        p.frag_overhead = frag_overhead;
-        p.max_src_dim = p.max_dst_dim = 1; // default
-	p.redops_allowed = false; // default
-	p.serdez_allowed = false; // default
-	p.xd_kind = xd_kind;
-        return p;
+#ifdef DEBUG_REALM
+        assert(cur_sp == (paths.data() + paths.size() - 1));
+#endif
+        // return reference to beginning of chain
+        return paths[first_idx];
       }
 
       Channel::SupportedPath& Channel::add_path(span<const Memory> src_mems,
@@ -4505,34 +4546,65 @@ namespace Realm {
                                                 unsigned frag_overhead,
                                                 XferDesKind xd_kind)
       {
-        if(src_mems.empty()) {
+        NodeSet src_nodes;
+        for(size_t i = 0; i < src_mems.size(); i++)
+          if(src_mems[i].exists())
+            src_nodes.add(ID(src_mems[i]).memory_owner_node());
+          else
+            src_nodes.add(Network::max_node_id + 1);  // src fill placeholder
+
+        if(src_nodes.empty()) {
           // don't actually add a path
           return dummy_supported_path;
         }
 
-	size_t idx = paths.size();
-	paths.resize(idx + 1);
-	SupportedPath &p = paths[idx];
+        size_t num_new = src_nodes.size();
+	size_t first_idx = paths.size();
+	paths.resize(first_idx + num_new);
 
-        if(src_mems.size() == 1) {
-          p.src_type = SupportedPath::SPECIFIC_MEMORY;
-          p.src_mem = src_mems[0];
-        } else {
-          p.src_type = SupportedPath::MEMORY_BITMASK;
-          p.populate_memory_bitmask(src_mems, p.src_bitmask);
+        SupportedPath *cur_sp = &paths[first_idx];
+        NodeSetIterator src_iter = src_nodes.begin();
+
+        while(true) {
+          if(src_mems.size() == 1) {
+            cur_sp->src_type = SupportedPath::SPECIFIC_MEMORY;
+            cur_sp->src_mem = src_mems[0];
+          } else if(*src_iter > Network::max_node_id) {
+            cur_sp->src_type = SupportedPath::SPECIFIC_MEMORY;
+            cur_sp->src_mem = Memory::NO_MEMORY; // src fill
+          } else {
+            cur_sp->src_type = SupportedPath::MEMORY_BITMASK;
+            cur_sp->populate_memory_bitmask(src_mems, *src_iter, cur_sp->src_bitmask);
+          }
+
+          cur_sp->dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
+                                           SupportedPath::LOCAL_KIND);
+          cur_sp->dst_kind = dst_kind;
+
+          cur_sp->bandwidth = bandwidth;
+          cur_sp->latency = latency;
+          cur_sp->frag_overhead = frag_overhead;
+          cur_sp->max_src_dim = cur_sp->max_dst_dim = 1; // default
+          cur_sp->redops_allowed = false; // default
+          cur_sp->serdez_allowed = false; // default
+          cur_sp->xd_kind = xd_kind;
+
+          ++src_iter;
+          if(src_iter == src_nodes.end()) {
+            // end of chain and of loop
+            cur_sp->chain = 0;
+            break;
+          }
+
+          // not end of chain, so connect to next before bumping current pointer
+          cur_sp->chain = cur_sp + 1;
+          ++cur_sp;
         }
-
-	p.dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
-		                   SupportedPath::LOCAL_KIND);
-	p.dst_kind = dst_kind;
-	p.bandwidth = bandwidth;
-	p.latency = latency;
-        p.frag_overhead = frag_overhead;
-        p.max_src_dim = p.max_dst_dim = 1; // default
-	p.redops_allowed = false; // default
-	p.serdez_allowed = false; // default
-	p.xd_kind = xd_kind;
-        return p;
+#ifdef DEBUG_REALM
+        assert(cur_sp == (paths.data() + paths.size() - 1));
+#endif
+        // return reference to beginning of chain
+        return paths[first_idx];
       }
 
       Channel::SupportedPath& Channel::add_path(Memory::Kind src_kind, bool src_global,
@@ -4541,34 +4613,60 @@ namespace Realm {
                                                 unsigned frag_overhead,
                                                 XferDesKind xd_kind)
       {
-        if(dst_mems.empty()) {
+        NodeSet dst_nodes;
+        for(size_t i = 0; i < dst_mems.size(); i++)
+          if(dst_mems[i].exists())
+            dst_nodes.add(ID(dst_mems[i]).memory_owner_node());
+
+        if(dst_nodes.empty()) {
           // don't actually add a path
           return dummy_supported_path;
         }
 
-	size_t idx = paths.size();
-	paths.resize(idx + 1);
-	SupportedPath &p = paths[idx];
-	p.src_type = (src_global ? SupportedPath::GLOBAL_KIND :
-		                   SupportedPath::LOCAL_KIND);
-	p.src_kind = src_kind;
+        size_t num_new = dst_nodes.size();
+	size_t first_idx = paths.size();
+	paths.resize(first_idx + num_new);
 
-        if(dst_mems.size() == 1) {
-          p.dst_type = SupportedPath::SPECIFIC_MEMORY;
-          p.dst_mem = dst_mems[0];
-        } else {
-          p.dst_type = SupportedPath::MEMORY_BITMASK;
-          p.populate_memory_bitmask(dst_mems, p.dst_bitmask);
+        SupportedPath *cur_sp = &paths[first_idx];
+        NodeSetIterator dst_iter = dst_nodes.begin();
+
+        while(true) {
+          cur_sp->src_type = (src_global ? SupportedPath::GLOBAL_KIND :
+                                           SupportedPath::LOCAL_KIND);
+          cur_sp->src_kind = src_kind;
+
+          if(dst_mems.size() == 1) {
+            cur_sp->dst_type = SupportedPath::SPECIFIC_MEMORY;
+            cur_sp->dst_mem = dst_mems[0];
+          } else {
+            cur_sp->dst_type = SupportedPath::MEMORY_BITMASK;
+            cur_sp->populate_memory_bitmask(dst_mems, *dst_iter, cur_sp->dst_bitmask);
+          }
+
+          cur_sp->bandwidth = bandwidth;
+          cur_sp->latency = latency;
+          cur_sp->frag_overhead = frag_overhead;
+          cur_sp->max_src_dim = cur_sp->max_dst_dim = 1; // default
+          cur_sp->redops_allowed = false; // default
+          cur_sp->serdez_allowed = false; // default
+          cur_sp->xd_kind = xd_kind;
+
+          ++dst_iter;
+          if(dst_iter == dst_nodes.end()) {
+            // end of chain and of loop
+            cur_sp->chain = 0;
+            break;
+          }
+
+          // not end of chain, so connect to next before bumping current pointer
+          cur_sp->chain = cur_sp + 1;
+          ++cur_sp;
         }
-
-	p.bandwidth = bandwidth;
-	p.latency = latency;
-        p.frag_overhead = frag_overhead;
-        p.max_src_dim = p.max_dst_dim = 1; // default
-	p.redops_allowed = false; // default
-	p.serdez_allowed = false; // default
-	p.xd_kind = xd_kind;
-        return p;
+#ifdef DEBUG_REALM
+        assert(cur_sp == (paths.data() + paths.size() - 1));
+#endif
+        // return reference to beginning of chain
+        return paths[first_idx];
       }
 
       Channel::SupportedPath& Channel::add_path(Memory::Kind src_kind, bool src_global,
@@ -4580,6 +4678,8 @@ namespace Realm {
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
 	SupportedPath &p = paths[idx];
+        p.chain = 0;
+
 	p.src_type = (src_global ? SupportedPath::GLOBAL_KIND :
 		                   SupportedPath::LOCAL_KIND);
 	p.src_kind = src_kind;
@@ -4605,6 +4705,8 @@ namespace Realm {
 	size_t idx = paths.size();
 	paths.resize(idx + 1);
 	SupportedPath &p = paths[idx];
+        p.chain = 0;
+
 	p.src_type = SupportedPath::LOCAL_RDMA;
 	p.dst_type = (local_loopback ? SupportedPath::LOCAL_RDMA :
 		                       SupportedPath::REMOTE_RDMA);

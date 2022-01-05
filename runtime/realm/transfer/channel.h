@@ -801,7 +801,12 @@ namespace Realm {
         SupportedPath& allow_redops();
         SupportedPath& allow_serdez();
 
+        // only valid when a SupportedPath is modifiable by the above methods
+        //  (i.e. only on the creator node and only until another path is added)
+        SupportedPath *chain;
+
         void populate_memory_bitmask(span <const Memory> mems,
+                                     NodeID node,
                                      MemBitmask& bitmask);
       };
 
