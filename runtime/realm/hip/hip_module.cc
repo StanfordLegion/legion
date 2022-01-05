@@ -52,6 +52,7 @@ namespace Realm {
     Logger log_gpu("hip");
     Logger log_gpudma("hipdma");
     Logger log_cudart("cudart");
+    Logger log_hipipc("hipipc");
 
 #ifdef EVENT_GRAPH_TRACE
     extern Logger log_event_graph;
@@ -1081,7 +1082,7 @@ namespace Realm {
     {
       // if we don't have any framebuffer memory, we can't do any DMAs
       if(!fbmem)
-	return;
+	      return;
       
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
@@ -1090,41 +1091,50 @@ namespace Realm {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
 
-	// TODO: move into the dma channels themselves
-	for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
-	    it != pinned_sysmems.end();
-	    ++it) {
-	  // don't create affinities for IB memories right now
-	  if(!ID(*it).is_memory()) continue;
+        // TODO: move into the dma channels themselves
+        for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
+            it != pinned_sysmems.end();
+            ++it) {
+          // don't create affinities for IB memories right now
+          if(!ID(*it).is_memory()) continue;
 
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = fbmem->me;
-	  mma.m2 = *it;
-	  mma.bandwidth = 20; // "medium"
-	  mma.latency = 200;  // "bad"
-	  r->add_mem_mem_affinity(mma);
-	}
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = *it;
+          mma.bandwidth = 20; // "medium"
+          mma.latency = 200;  // "bad"
+          r->add_mem_mem_affinity(mma);
+        }
       } else {
-	log_gpu.warning() << "GPU " << proc->me << " has no pinned system memories!?";
+        log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
       }
 
-      //r->add_dma_channel(new GPUDMAChannel_D2D(this));
-
       // only create a p2p channel if we have peers (and an fb)
-      if(!peer_fbs.empty()) {
+      if(!peer_fbs.empty() || !hipipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
 
-	// TODO: move into the dma channels themselves
-	for(std::set<Memory>::const_iterator it = peer_fbs.begin();
-	    it != peer_fbs.end();
-	    ++it) {
-	  Machine::MemoryMemoryAffinity mma;
-	  mma.m1 = fbmem->me;
-	  mma.m2 = *it;
-	  mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
-	  mma.latency = 400;  // ~twice the latency as zcmem
-	  r->add_mem_mem_affinity(mma);
-	}
+        // TODO: move into the dma channels themselves
+        for(std::set<Memory>::const_iterator it = peer_fbs.begin();
+            it != peer_fbs.end();
+            ++it) {
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = *it;
+          mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
+          mma.latency = 400;  // ~twice the latency as zcmem
+          r->add_mem_mem_affinity(mma);
+        }
+
+        for(std::vector<HipIpcMapping>::const_iterator it = hipipc_mappings.begin();
+            it != hipipc_mappings.end();
+            ++it) {
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = it->mem;
+          mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
+          mma.latency = 400;  // ~twice the latency as zcmem
+          r->add_mem_mem_affinity(mma);
+        }     
       }
     }
 
@@ -1824,28 +1834,48 @@ namespace Realm {
     }
 
     void GPU::copy_to_peer(GPU *dst, off_t dst_offset,
-			   off_t src_offset, size_t bytes,
-			   GPUCompletionNotification *notification /*= 0*/)
+                           off_t src_offset, size_t bytes,
+                           GPUCompletionNotification *notification /*= 0*/)
     {
+      void *dptr;
+      GPUStream *stream;
+      if(dst) {
+        dptr = (void *)(dst->fbmem->base + dst_offset);
+        stream = peer_to_peer_streams[dst->info->index];
+      } else {
+        dptr = reinterpret_cast<void *>(dst_offset);
+        // HACK!
+        stream = hipipc_streams.begin()->second;
+      }
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					(void *)(dst->fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					bytes, GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_streams[dst->info->index]->add_copy(copy);
+                                        dptr,
+                                        (const void *)(fbmem->base + src_offset),
+                                        bytes, GPU_MEMCPY_PEER_TO_PEER, notification);
+      stream->add_copy(copy);
     }
 
     void GPU::copy_to_peer_2d(GPU *dst,
-			      off_t dst_offset, off_t src_offset,
-			      off_t dst_stride, off_t src_stride,
-			      size_t bytes, size_t lines,
-			      GPUCompletionNotification *notification /*= 0*/)
+                              off_t dst_offset, off_t src_offset,
+                              off_t dst_stride, off_t src_stride,
+                              size_t bytes, size_t lines,
+                              GPUCompletionNotification *notification /*= 0*/)
     {
+      void *dptr;
+      GPUStream *stream;
+      if(dst) {
+        dptr = (void *)(dst->fbmem->base + dst_offset);
+        stream = peer_to_peer_streams[dst->info->index];
+      } else {
+        dptr = reinterpret_cast<void *>(dst_offset);
+        // HACK!
+        stream = hipipc_streams.begin()->second;
+      }
       GPUMemcpy *copy = new GPUMemcpy2D(this,
-					(void *)(dst->fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					dst_stride, src_stride, bytes, lines,
-					GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_streams[dst->info->index]->add_copy(copy);
+                                        dptr,
+                                        (const void *)(fbmem->base + src_offset),
+                                        dst_stride, src_stride, bytes, lines,
+                                        GPU_MEMCPY_PEER_TO_PEER, notification);
+      stream->add_copy(copy);
     }
 
     void GPU::copy_to_peer_3d(GPU *dst, off_t dst_offset, off_t src_offset,
@@ -1854,14 +1884,24 @@ namespace Realm {
                               size_t bytes, size_t height, size_t depth,
                               GPUCompletionNotification *notification /*= 0*/)
     {
+      void *dptr;
+      GPUStream *stream;
+      if(dst) {
+        dptr = (void *)(dst->fbmem->base + dst_offset);
+        stream = peer_to_peer_streams[dst->info->index];
+      } else {
+        dptr = reinterpret_cast<void *>(dst_offset);
+        // HACK!
+        stream = hipipc_streams.begin()->second;
+      }
       GPUMemcpy *copy = new GPUMemcpy3D(this,
-					(void *)(dst->fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					dst_stride, src_stride,
+                                        dptr,
+                                        (const void *)(fbmem->base + src_offset),
+                                        dst_stride, src_stride,
                                         dst_height, src_height,
                                         bytes, height, depth,
-					GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_streams[dst->info->index]->add_copy(copy);
+                                        GPU_MEMCPY_PEER_TO_PEER, notification);
+      stream->add_copy(copy);
     }
 
     static size_t reduce_fill_size(const void *fill_data, size_t fill_data_size)
@@ -2015,6 +2055,17 @@ namespace Realm {
       unsigned d2d_stream_index = (next_d2d_stream.fetch_add(1) %
                                    module->cfg_d2d_streams);
       return device_to_device_streams[d2d_stream_index];
+    }
+
+    const GPU::HipIpcMapping *GPU::find_ipc_mapping(Memory mem) const
+    {
+      for(std::vector<HipIpcMapping>::const_iterator it = hipipc_mappings.begin();
+          it != hipipc_mappings.end();
+          ++it)
+        if(it->mem == mem)
+          return &*it;
+
+      return 0;
     }
 
     void GPUProcessor::shutdown(void)
@@ -2757,10 +2808,15 @@ namespace Realm {
       delete_container_contents(device_to_device_streams);
 
       for(std::vector<GPUStream *>::iterator it = peer_to_peer_streams.begin();
-	  it != peer_to_peer_streams.end();
-	  ++it)
-	if(*it)
-	  delete *it;
+          it != peer_to_peer_streams.end();
+          ++it)
+        if(*it)
+          delete *it;
+
+      for(std::map<NodeID, GPUStream *>::iterator it = hipipc_streams.begin();
+          it != hipipc_streams.end();
+          ++it)
+        delete it->second;
 
       delete_container_contents(task_streams);
 
@@ -3082,6 +3138,8 @@ namespace Realm {
 
     // our interface to the rest of the runtime
 
+    HipModule *hip_module_singleton = 0;
+
     HipModule::HipModule(void)
       : Module("hip")
       , cfg_zc_mem_size(64 << 20)
@@ -3103,13 +3161,23 @@ namespace Realm {
       , cfg_multithread_dma(false)
       , cfg_hostreg_limit(1 << 30)
       , cfg_d2d_stream_priority(-1)
+      , cfg_use_hip_ipc(false)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
-    {}
+      , hipipc_condvar(hipipc_mutex)
+      , hipipc_responses_needed(0)
+      , hipipc_releases_needed(0)
+      , hipipc_exports_remaining(0)
+    {
+      assert(!hip_module_singleton);
+      hip_module_singleton = this;
+    }
       
     HipModule::~HipModule(void)
     {
       delete_container_contents(gpu_info);
+      assert(hip_module_singleton == this);
+      hip_module_singleton = 0;
 #ifdef HIP_DLOPEN
       delete hip_api;
       if (dlclose(hiplib_handle)) {
@@ -3137,7 +3205,7 @@ namespace Realm {
           .add_option_int("-ll:streams", m->cfg_task_streams)
           .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
           .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
-	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
+          .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
       	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
       	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
       	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
@@ -3147,7 +3215,8 @@ namespace Realm {
       	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
           .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
           .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
-          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm');
+          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm')
+          .add_option_int("-cuda:ipc", m->cfg_use_hip_ipc);
 #ifdef REALM_USE_HIP_HIJACK
         cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif	
@@ -3521,76 +3590,104 @@ namespace Realm {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with HIP
       if(cfg_pin_sysmem && !gpus.empty()) {
-	const std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
-	// <NEW_DMA> also add intermediate buffers into local_mems
-	const std::vector<IBMemory *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
-	std::vector<MemoryImpl *> all_local_mems;
-	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
-	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
-	// </NEW_DMA>
-	for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
-	    it != all_local_mems.end();
-	    it++) {
-	  // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
-	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
-	     ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
-	    continue;
-    
-      // skip any memory that's over the max size limit for host
-      //  registration
-      if((cfg_hostreg_limit > 0) &&
-         ((*it)->size > cfg_hostreg_limit)) {
-	      log_gpu.info() << "memory " << (*it)->me
-                       << " is larger than hostreg limit ("
-                       << (*it)->size << " > " << cfg_hostreg_limit
-                       << ") - skipping registration";
-        continue;
+        const std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
+        // <NEW_DMA> also add intermediate buffers into local_mems
+        const std::vector<IBMemory *>& local_ib_mems = runtime->nodes[Network::my_node_id].ib_memories;
+        std::vector<MemoryImpl *> all_local_mems;
+        all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
+        all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
+        // </NEW_DMA>
+        for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
+            it != all_local_mems.end();
+            it++) {
+          // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
+          if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
+              ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
+            continue;
+          
+          // skip any memory that's over the max size limit for host
+          //  registration
+          if((cfg_hostreg_limit > 0) &&
+              ((*it)->size > cfg_hostreg_limit)) {
+            log_gpu.info() << "memory " << (*it)->me
+                            << " is larger than hostreg limit ("
+                            << (*it)->size << " > " << cfg_hostreg_limit
+                            << ") - skipping registration";
+            continue;
+          }
+
+          void *base = (*it)->get_direct_ptr(0, (*it)->size);
+          if(base == 0)
+            continue;
+
+          // using GPU 0's context, attempt a portable registration
+          hipError_t ret;
+          {
+            AutoGPUContext agc(gpus[0]);
+            ret = hipHostRegister(base, (*it)->size, 
+                  hipHostRegisterPortable |
+                  hipHostRegisterMapped);
+          }
+          if(ret != hipSuccess) {
+            log_gpu.info() << "failed to register mem " << (*it)->me << " (" << base << " + " << (*it)->size << ") : "
+                << ret;
+            continue;
+          }
+          registered_host_ptrs.push_back(base);
+
+          // now go through each GPU and verify that it got a GPU pointer (it may not match the CPU
+          //  pointer, but that's ok because we'll never refer to it directly)
+          for(unsigned i = 0; i < gpus.size(); i++) {
+            hipDeviceCharptr_t gpuptr;
+            hipError_t ret;
+            {
+              AutoGPUContext agc(gpus[i]);
+              ret = hipHostGetDevicePointer((void **)&gpuptr, base, 0);
+            }
+            if(ret == hipSuccess) {
+              // no test for && ((void *)gpuptr == base)) {
+              log_gpu.info() << "memory " << (*it)->me << " successfully registered with GPU " << gpus[i]->proc->me;
+              gpus[i]->pinned_sysmems.insert((*it)->me);
+            } else {
+              log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << (*it)->me << " at " << base << ") !?";
+            }
+          }
+        }
       }
 
-	  void *base = (*it)->get_direct_ptr(0, (*it)->size);
-	  if(base == 0)
-	    continue;
+      // ask any ipc-able nodes to share handles with us
+      if(cfg_use_hip_ipc) {
+        NodeSet ipc_peers = Network::all_peers;
 
-	  // using GPU 0's context, attempt a portable registration
-	  hipError_t ret;
-	  {
-	    AutoGPUContext agc(gpus[0]);
-	    ret = hipHostRegister(base, (*it)->size, 
-				    hipHostRegisterPortable |
-				    hipHostRegisterMapped);
-	  }
-	  if(ret != hipSuccess) {
-	    log_gpu.info() << "failed to register mem " << (*it)->me << " (" << base << " + " << (*it)->size << ") : "
-			   << ret;
-	    continue;
-	  }
-	  registered_host_ptrs.push_back(base);
+#ifdef REALM_ON_LINUX
+        if(!ipc_peers.empty()) {
+          log_hipipc.info() << "requesting hip ipc handles from "
+                             << ipc_peers.size() << " peers";
 
-	  // now go through each GPU and verify that it got a GPU pointer (it may not match the CPU
-	  //  pointer, but that's ok because we'll never refer to it directly)
-	  for(unsigned i = 0; i < gpus.size(); i++) {
-	    hipDeviceCharptr_t gpuptr;
-	    hipError_t ret;
-	    {
-	      AutoGPUContext agc(gpus[i]);
-	      ret = hipHostGetDevicePointer((void **)&gpuptr, base, 0);
-	    }
-	    if(ret == hipSuccess) {
-	      // no test for && ((void *)gpuptr == base)) {
-	      log_gpu.info() << "memory " << (*it)->me << " successfully registered with GPU " << gpus[i]->proc->me;
-	      gpus[i]->pinned_sysmems.insert((*it)->me);
-	    } else {
-	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << (*it)->me << " at " << base << ") !?";
-	    }
-	  }
-	}
+          // we'll need a reponse (and ultimately, a release) from each peer
+          hipipc_responses_needed.fetch_add(ipc_peers.size());
+          hipipc_releases_needed.fetch_add(ipc_peers.size());
+
+          ActiveMessage<HipIpcRequest> amsg(ipc_peers);
+          amsg->hostid = gethostid();
+          amsg.commit();
+
+          // wait for responses
+          {
+            AutoLock<> al(hipipc_mutex);
+            while(hipipc_responses_needed.load_acquire() > 0)
+              hipipc_condvar.wait();
+          }
+          log_hipipc.info() << "responses complete";
+        }
+#endif
       }
 
       // now actually let each GPU make its channels
       for(std::vector<GPU *>::iterator it = gpus.begin();
-	  it != gpus.end();
-	  it++)
-	(*it)->create_dma_channels(runtime);
+          it != gpus.end();
+          it++)
+        (*it)->create_dma_channels(runtime);
 
       Module::create_dma_channels(runtime);
     }
@@ -3599,6 +3696,45 @@ namespace Realm {
     void HipModule::create_code_translators(RuntimeImpl *runtime)
     {
       Module::create_code_translators(runtime);
+    }
+
+    // if a module has to do cleanup that involves sending messages to other
+    //  nodes, this must be done in the pre-detach cleanup
+    void HipModule::pre_detach_cleanup(void)
+    {
+      if(cfg_use_hip_ipc) {
+        // release all of our ipc mappings, notify our peers
+        NodeSet ipc_peers;
+
+        for(std::vector<GPU *>::iterator it = gpus.begin();
+            it != gpus.end();
+            ++it) {
+          if(!(*it)->hipipc_mappings.empty()) {
+            AutoGPUContext agc(*it);
+
+            for(std::vector<GPU::HipIpcMapping>::iterator it2 = (*it)->hipipc_mappings.begin();
+                it2 != (*it)->hipipc_mappings.end();
+                ++it2) {
+              ipc_peers.add(it2->owner);
+              CHECK_CU( hipIpcCloseMemHandle((void*)(it2->local_base)) );
+            }
+          }
+        }
+
+        if(!ipc_peers.empty()) {
+          ActiveMessage<HipIpcRelease> amsg(ipc_peers);
+          amsg.commit();
+        }
+
+        // now wait for similar notifications from any peers we gave mappings
+        //  to before we start freeing the underlying allocations
+        {
+          AutoLock<> al(hipipc_mutex);
+          while(hipipc_releases_needed.load_acquire() > 0)
+            hipipc_condvar.wait();
+        }
+        log_hipipc.info() << "releases complete";
+      }
     }
 
     // clean up any common resources created by the module - this will be called
@@ -3813,6 +3949,173 @@ namespace Realm {
 	(*it)->register_function(func);
     }
 #endif
+
+    // active messages for establishing cuda ipc mappings
+
+    struct HipIpcResponseEntry {
+      Memory mem;
+      uintptr_t base_ptr;
+      hipIpcMemHandle_t handle;
+    };
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct HipIpcRequest
+
+    /*static*/ void HipIpcRequest::handle_message(NodeID sender,
+                                                  const HipIpcRequest& args,
+                                                  const void *data,
+                                                  size_t datalen)
+    {
+      log_hipipc.info() << "request from node " << sender;
+      assert(hip_module_singleton);
+
+      std::vector<HipIpcResponseEntry> exported;
+
+      // only export if we've got ipc enabled locally
+      bool do_export = false;
+      if(hip_module_singleton->cfg_use_hip_ipc) {
+#ifdef REALM_ON_LINUX
+        // host id has to match as well
+        long hostid = gethostid();
+        if(hostid == args.hostid)
+          do_export = true;
+        else
+          log_hipipc.info() << "hostid mismatch - us=" << hostid << " them=" << args.hostid;
+#endif
+      }
+
+      if(do_export) {
+        for(std::vector<GPU *>::iterator it = hip_module_singleton->gpus.begin();
+            it != hip_module_singleton->gpus.end();
+            ++it) {
+          HipIpcResponseEntry entry;
+          {
+            AutoGPUContext agc(*it);
+
+            hipError_t ret = hipIpcGetMemHandle(&entry.handle,
+                                                (*it)->fbmem_base);
+            log_hipipc.info() << "getmem handle " << std::hex << (*it)->fbmem_base << std::dec << " -> " << ret;
+            if(ret == hipSuccess) {
+              entry.mem = (*it)->fbmem->me;
+              entry.base_ptr = reinterpret_cast<uintptr_t>((*it)->fbmem_base);
+              exported.push_back(entry);
+            }
+          }
+        }
+      }
+
+      // if we're not exporting anything to this requestor, don't wait for
+      //  a release either (having the count hit 0 here is a weird corner
+      //  case)
+      if(exported.empty()) {
+        AutoLock<> al(hip_module_singleton->hipipc_mutex);
+        int prev = hip_module_singleton->hipipc_releases_needed.fetch_sub(1);
+        if(prev == 1)
+          hip_module_singleton->hipipc_condvar.broadcast();
+      }
+
+      size_t bytes = exported.size() * sizeof(HipIpcResponseEntry);
+      ActiveMessage<HipIpcResponse> amsg(sender, bytes);
+      amsg->count = exported.size();
+      amsg.add_payload(exported.data(), bytes);
+      amsg.commit();
+    }
+
+    ActiveMessageHandlerReg<HipIpcRequest> hip_ipc_request_handler;
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct HipIpcResponse
+
+    /*static*/ void HipIpcResponse::handle_message(NodeID sender,
+                                                   const HipIpcResponse& args,
+                                                   const void *data,
+                                                   size_t datalen)
+    {
+      assert(hip_module_singleton);
+
+      assert(datalen == (args.count * sizeof(HipIpcResponseEntry)));
+      const HipIpcResponseEntry *entries = static_cast<const HipIpcResponseEntry *>(data);
+
+      if(args.count) {
+        for(std::vector<GPU *>::iterator it = hip_module_singleton->gpus.begin();
+            it != hip_module_singleton->gpus.end();
+            ++it) {
+          {
+            AutoGPUContext agc(*it);
+
+            // attempt to import each entry
+            for(unsigned i = 0; i < args.count; i++) {
+              void* dptr;
+              hipError_t ret = hipIpcOpenMemHandle(&dptr,
+                                                   entries[i].handle,
+                                                   hipIpcMemLazyEnablePeerAccess);
+              log_hipipc.info() << "open result " << entries[i].mem
+                                 << " orig=" << std::hex << entries[i].base_ptr
+                                 << " local=" << dptr << std::dec
+                                 << " ret=" << ret;
+
+              if(ret != hipSuccess)
+                continue; // complain louder?
+
+              // take the cudaipc mutex to actually add the mapping
+              GPU::HipIpcMapping mapping;
+              mapping.owner = sender;
+              mapping.mem = entries[i].mem;
+              mapping.local_base = reinterpret_cast<uintptr_t>(dptr);
+              mapping.address_offset = reinterpret_cast<uintptr_t>(entries[i].base_ptr) - reinterpret_cast<uintptr_t>(dptr);
+              {
+                AutoLock<> al(hip_module_singleton->hipipc_mutex);
+                (*it)->hipipc_mappings.push_back(mapping);
+
+                // do we have a stream for this target?
+                if((*it)->hipipc_streams.count(sender) == 0)
+                  (*it)->hipipc_streams[sender] = new GPUStream(*it,
+                                                                 (*it)->worker);
+              }
+            }
+          }
+        }
+      }
+
+      // decrement the number of responses needed and wake the requestor if
+      //  we're done
+      {
+        AutoLock<> al(hip_module_singleton->hipipc_mutex);
+        int prev = hip_module_singleton->hipipc_responses_needed.fetch_sub(1);
+        if(prev == 1)
+          hip_module_singleton->hipipc_condvar.broadcast();
+      }
+    }
+
+    ActiveMessageHandlerReg<HipIpcResponse> hip_ipc_response_handler;
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct HipIpcRelease
+
+    /*static*/ void HipIpcRelease::handle_message(NodeID sender,
+                                                  const HipIpcRelease& args,
+                                                  const void *data,
+                                                  size_t datalen)
+    {
+      assert(hip_module_singleton);
+
+      // no actual work to do - we're just waiting until all of our peers
+      //  have released ipc mappings before we continue
+      {
+        AutoLock<> al(hip_module_singleton->hipipc_mutex);
+        int prev = hip_module_singleton->hipipc_releases_needed.fetch_sub(1);
+        if(prev == 1)
+          hip_module_singleton->hipipc_condvar.broadcast();
+      }
+    }
+
+    ActiveMessageHandlerReg<HipIpcRelease> hip_ipc_release_handler;
     
 #ifndef REALM_USE_HIP_HIJACK
     extern "C" {

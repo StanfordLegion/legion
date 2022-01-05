@@ -20,7 +20,7 @@
 #include <hip/hip_runtime.h>
 #ifdef __HIP_PLATFORM_NVCC__
 #define hipDeviceScheduleBlockingSync CU_CTX_SCHED_BLOCKING_SYNC 
-typedef CUdeviceptr hipDeviceCharptr_t;
+typedef char* hipDeviceCharptr_t;
 #else
 typedef char* hipDeviceCharptr_t;
 #endif
@@ -98,6 +98,8 @@ namespace Realm {
     class GPUFBIBMemory;
     class GPU;
     class HipModule;
+
+    extern HipModule *hip_module_singleton;
 
     // an interface for receiving completion notification for a GPU operation
     //  (right now, just copies)
@@ -629,6 +631,17 @@ namespace Realm {
       //  in practice)
       int least_stream_priority, greatest_stream_priority;
 
+      struct HipIpcMapping {
+        NodeID owner;
+        Memory mem;
+        uintptr_t local_base;
+        uintptr_t address_offset; // add to convert from original to local base
+      };
+      std::vector<HipIpcMapping> hipipc_mappings;
+      std::map<NodeID, GPUStream *> hipipc_streams;
+
+      const HipIpcMapping *find_ipc_mapping(Memory mem) const;
+
 #ifdef REALM_USE_HIP_HIJACK
       std::map<const FatBin *, hipModule_t> device_modules;
       std::map<const void *, hipFunction_t> device_functions;
@@ -822,7 +835,8 @@ namespace Realm {
       bool progress_xd(GPUChannel *channel, TimeLimit work_until);
 
     private:
-      std::vector<GPU *> src_gpus, dst_gpus;;
+      std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> dst_is_ipc;
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
@@ -892,6 +906,30 @@ namespace Realm {
       friend class GPUfillXferDes;
 
       GPU* gpu;
+    };
+
+    // active messages for establishing cuda ipc mappings
+
+    struct HipIpcRequest {
+#ifdef REALM_ON_LINUX
+      long hostid;  // POSIX hostid
+#endif
+
+      static void handle_message(NodeID sender, const HipIpcRequest& args,
+                                 const void *data, size_t datalen);
+    };
+
+    struct HipIpcResponse {
+      unsigned count;
+
+      static void handle_message(NodeID sender, const HipIpcResponse& args,
+                                 const void *data, size_t datalen);
+    };
+
+    struct HipIpcRelease {
+
+      static void handle_message(NodeID sender, const HipIpcRelease& args,
+                                 const void *data, size_t datalen);
     };
 
   }; // namespace Hip
