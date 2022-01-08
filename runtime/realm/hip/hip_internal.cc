@@ -50,11 +50,17 @@ namespace Realm {
                            (checked_cast<GPUFBIBMemory *>(input_ports[i].mem))->gpu);
 
       dst_gpus.resize(outputs_info.size(), 0);
+      dst_is_ipc.resize(outputs_info.size(), false);
       for(size_t i = 0; i < output_ports.size(); i++)
-        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
+        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
           dst_gpus[i] = (ID(output_ports[i].mem->me).is_memory() ?
                            (checked_cast<GPUFBMemory *>(output_ports[i].mem))->gpu :
                            (checked_cast<GPUFBIBMemory *>(output_ports[i].mem))->gpu);
+        } else {
+          // assume a memory owned by another node is ipc
+          if(NodeID(ID(output_ports[i].mem->me).memory_owner_node()) != Network::my_node_id)
+            dst_is_ipc[i] = true;
+        }      
     }
 	
     long GPUXferDes::get_requests(Request** requests, long nr)
@@ -64,7 +70,7 @@ namespace Realm {
       return 0;
     }
 
-        bool GPUXferDes::progress_xd(GPUChannel *channel,
+    bool GPUXferDes::progress_xd(GPUChannel *channel,
                                  TimeLimit work_until)
     {
       bool did_work = false;
@@ -81,6 +87,8 @@ namespace Realm {
         XferPort *in_port = 0, *out_port = 0;
         size_t in_span_start = 0, out_span_start = 0;
         GPU *in_gpu = 0, *out_gpu = 0;
+        bool out_is_ipc = false;
+        int out_ipc_index = -1;
         if(input_control.current_io_port >= 0) {
           in_port = &input_ports[input_control.current_io_port];
           in_span_start = in_port->local_bytes_total;
@@ -90,6 +98,7 @@ namespace Realm {
           out_port = &output_ports[output_control.current_io_port];
           out_span_start = out_port->local_bytes_total;
           out_gpu = dst_gpus[output_control.current_io_port];
+          out_is_ipc = dst_is_ipc[output_control.current_io_port];
         }
 
         size_t total_bytes = 0;
@@ -100,13 +109,22 @@ namespace Realm {
                           << " max=" << max_bytes;
 
             uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
-            uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+            uintptr_t out_base;
+            const GPU::HipIpcMapping *out_mapping = 0;
+            if(out_is_ipc) {
+              out_mapping = in_gpu->find_ipc_mapping(out_port->mem->me);
+              assert(out_mapping);
+              out_base = out_mapping->local_base;
+            } else
+              out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
 
             // pick the correct stream for any memcpy's we generate
             GPUStream *stream;
             if(in_gpu) {
               if(out_gpu == in_gpu)
                 stream = in_gpu->get_next_d2d_stream();
+              else if(out_mapping)
+                stream = in_gpu->hipipc_streams[out_mapping->owner];
               else if(!out_gpu)
                 stream = in_gpu->device_to_host_stream;
               else {
@@ -138,7 +156,7 @@ namespace Realm {
               size_t bytes_left = max_bytes - total_bytes;
 
               // limit transfer size for host<->device copies
-              if((bytes_left > (4 << 20)) && (!in_gpu || !out_gpu))
+              if((bytes_left > (4 << 20)) && (!in_gpu || (!out_gpu && (out_ipc_index == -1))))
                 bytes_left = 4 << 20;
 
               assert(in_dim > 0);
@@ -164,11 +182,11 @@ namespace Realm {
                 // grr...  prototypes of these differ slightly...
                 hipMemcpyKind copy_type;
                 if(in_gpu) {
-                  if(out_gpu == in_gpu)
+                  if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                     copy_type = hipMemcpyDeviceToDevice;
-                  else if(!out_gpu)
+                  } else if(!out_gpu) {
                     copy_type = hipMemcpyDeviceToHost;
-                  else {
+                  } else {
                     copy_type = hipMemcpyDefault;
                   }
                 } else {
@@ -245,11 +263,11 @@ namespace Realm {
                   
                   hipMemcpyKind copy_type;
                   if(in_gpu) {
-                    if(out_gpu == in_gpu)
+                    if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                       copy_type = hipMemcpyDeviceToDevice;
-                    else if(!out_gpu)
+                    } else if(!out_gpu) {
                       copy_type = hipMemcpyDeviceToHost;
-                    else {
+                    } else {
                       copy_type = hipMemcpyDefault;
                     }
                   } else {
@@ -317,11 +335,11 @@ namespace Realm {
                   //  timeout
                   hipMemcpyKind copy_type;
                     if(in_gpu) {
-                    if(out_gpu == in_gpu)
+                    if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                       copy_type = hipMemcpyDeviceToDevice;
-                    else if(!out_gpu)
+                    } else if(!out_gpu) {
                       copy_type = hipMemcpyDeviceToHost;
-                    else {
+                    } else {
                       copy_type = hipMemcpyDefault;
                     }
                   } else {
@@ -461,6 +479,10 @@ namespace Realm {
       peer_gpu_mems.insert(peer_gpu_mems.end(),
                            src_gpu->peer_fbs.begin(),
                            src_gpu->peer_fbs.end());
+      for(std::vector<GPU::HipIpcMapping>::const_iterator it = src_gpu->hipipc_mappings.begin();
+          it != src_gpu->hipipc_mappings.end();
+          ++it)
+        peer_gpu_mems.push_back(it->mem);
 
       std::vector<Memory> mapped_cpu_mems;
       mapped_cpu_mems.insert(mapped_cpu_mems.end(),

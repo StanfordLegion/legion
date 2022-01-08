@@ -70,6 +70,8 @@ namespace Realm {
     bool add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
     bool add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
 
+    void update_kind_maps();
+
     int node;
 
     std::map<Processor, MachineProcInfo *> procs;

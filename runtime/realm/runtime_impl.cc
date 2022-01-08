@@ -1610,11 +1610,6 @@ namespace Realm {
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
 	  it++)
-	(*it)->create_dma_channels(this);
-
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
-	  it++)
 	(*it)->create_code_translators(this);
       
       // start dma system at the very ending of initialization
@@ -1638,6 +1633,11 @@ namespace Realm {
 	printf("HELP!  Could not satisfy all core reservations!\n");
 	exit(1);
       }
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_dma_channels(this);
 
       {
         // iterate over all local processors and add affinities for them
@@ -2307,6 +2307,13 @@ namespace Realm {
 	  ++it)
 	(*it)->shutdown();
       stop_dma_system();
+
+      // let network-dependent cleanup happen before we detach
+      for(std::vector<Module *>::iterator it = modules.begin();
+          it != modules.end();
+          it++) {
+        (*it)->pre_detach_cleanup();
+      }
 
       // detach from the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();

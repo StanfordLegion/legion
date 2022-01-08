@@ -3179,25 +3179,6 @@ namespace Realm {
 	ib_edges[ib_base + spaces_size].size = 65536; // TODO
       }
 
-      // next, see what work we need to get the addresses to where the
-      //  last step of each path is running
-      for(size_t i = 0; i < spaces_size; i++) {
-	// HACK!
-	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
-	Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
-	if(dst_ib_mem != addr_ib_mem) {
-	  MemPathInfo path;
-	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
-				       0 /*no serdez*/,
-                                       0 /*redop_id*/,
-				       path);
-	  assert(ok);
-	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
-						decoded_addr_edges[i],
-						path);
-	}
-      }
-
       // control information has to get to the split at the start
       // HACK!
       Memory src_ib_mem = find_sysmem_ib_memory(ID(src_mem).memory_owner_node());
@@ -3248,6 +3229,25 @@ namespace Realm {
 	  path_infos[i].path.insert(path_infos[i].path.begin(), src_mem);
 	  //path_infos[i].xd_target_nodes.insert(path_infos[i].xd_target_nodes.begin(),
 	  //				       ID(src_mem).memory_owner_node());
+	}
+      }
+
+      // next, see what work we need to get the addresses to where the
+      //  last step of each path is running
+      for(size_t i = 0; i < spaces_size; i++) {
+	// HACK!
+	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
+	Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
+	if(dst_ib_mem != addr_ib_mem) {
+	  MemPathInfo path;
+	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+				       path);
+	  assert(ok);
+	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
+						decoded_addr_edges[i],
+						path);
 	}
       }
 

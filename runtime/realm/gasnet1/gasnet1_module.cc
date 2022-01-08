@@ -617,6 +617,8 @@ namespace Realm {
     CHECK_GASNET( gasnet_init(argc, const_cast<char ***>(argv)) );
     Network::my_node_id = gasnet_mynode();
     Network::max_node_id = gasnet_nodes() - 1;
+    Network::all_peers.add_range(0, gasnet_nodes() - 1);
+    Network::all_peers.remove(gasnet_mynode());
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];

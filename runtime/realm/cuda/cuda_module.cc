@@ -70,6 +70,7 @@ namespace Realm {
     Logger log_gpu("gpu");
     Logger log_gpudma("gpudma");
     Logger log_cudart("cudart");
+    Logger log_cudaipc("cudaipc");
 
 #ifdef EVENT_GRAPH_TRACE
     extern Logger log_event_graph;
@@ -1120,7 +1121,7 @@ namespace Realm {
       }
 
       // only create a p2p channel if we have peers (and an fb)
-      if(!peer_fbs.empty()) {
+      if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
 	r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
 
 	// TODO: move into the dma channels themselves
@@ -1130,6 +1131,17 @@ namespace Realm {
 	  Machine::MemoryMemoryAffinity mma;
 	  mma.m1 = fbmem->me;
 	  mma.m2 = *it;
+	  mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
+	  mma.latency = 400;  // ~twice the latency as zcmem
+	  r->add_mem_mem_affinity(mma);
+	}
+
+	for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
+	    it != cudaipc_mappings.end();
+	    ++it) {
+	  Machine::MemoryMemoryAffinity mma;
+	  mma.m1 = fbmem->me;
+	  mma.m2 = it->mem;
 	  mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
 	  mma.latency = 400;  // ~twice the latency as zcmem
 	  r->add_mem_mem_affinity(mma);
@@ -1829,11 +1841,21 @@ namespace Realm {
 			   off_t src_offset, size_t bytes,
 			   GPUCompletionNotification *notification /*= 0*/)
     {
+      void *dptr;
+      GPUStream *stream;
+      if(dst) {
+        dptr = (void *)(dst->fbmem->base + dst_offset);
+        stream = peer_to_peer_streams[dst->info->index];
+      } else {
+        dptr = reinterpret_cast<void *>(dst_offset);
+        // HACK!
+        stream = cudaipc_streams.begin()->second;
+      }
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					(void *)(dst->fbmem->base + dst_offset),
+                                        dptr,
 					(const void *)(fbmem->base + src_offset),
 					bytes, GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_streams[dst->info->index]->add_copy(copy);
+      stream->add_copy(copy);
     }
 
     void GPU::copy_to_peer_2d(GPU *dst,
@@ -1842,12 +1864,22 @@ namespace Realm {
 			      size_t bytes, size_t lines,
 			      GPUCompletionNotification *notification /*= 0*/)
     {
+      void *dptr;
+      GPUStream *stream;
+      if(dst) {
+        dptr = (void *)(dst->fbmem->base + dst_offset);
+        stream = peer_to_peer_streams[dst->info->index];
+      } else {
+        dptr = reinterpret_cast<void *>(dst_offset);
+        // HACK!
+        stream = cudaipc_streams.begin()->second;
+      }
       GPUMemcpy *copy = new GPUMemcpy2D(this,
-					(void *)(dst->fbmem->base + dst_offset),
+                                        dptr,
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_streams[dst->info->index]->add_copy(copy);
+      stream->add_copy(copy);
     }
 
     void GPU::copy_to_peer_3d(GPU *dst, off_t dst_offset, off_t src_offset,
@@ -1856,14 +1888,24 @@ namespace Realm {
                               size_t bytes, size_t height, size_t depth,
                               GPUCompletionNotification *notification /*= 0*/)
     {
+      void *dptr;
+      GPUStream *stream;
+      if(dst) {
+        dptr = (void *)(dst->fbmem->base + dst_offset);
+        stream = peer_to_peer_streams[dst->info->index];
+      } else {
+        dptr = reinterpret_cast<void *>(dst_offset);
+        // HACK!
+        stream = cudaipc_streams.begin()->second;
+      }
       GPUMemcpy *copy = new GPUMemcpy3D(this,
-					(void *)(dst->fbmem->base + dst_offset),
+                                        dptr,
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride,
                                         dst_height, src_height,
                                         bytes, height, depth,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
-      peer_to_peer_streams[dst->info->index]->add_copy(copy);
+      stream->add_copy(copy);
     }
 
     static size_t reduce_fill_size(const void *fill_data, size_t fill_data_size)
@@ -2017,6 +2059,17 @@ namespace Realm {
       unsigned d2d_stream_index = (next_d2d_stream.fetch_add(1) %
                                    module->cfg_d2d_streams);
       return device_to_device_streams[d2d_stream_index];
+    }
+
+    const GPU::CudaIpcMapping *GPU::find_ipc_mapping(Memory mem) const
+    {
+      for(std::vector<CudaIpcMapping>::const_iterator it = cudaipc_mappings.begin();
+          it != cudaipc_mappings.end();
+          ++it)
+        if(it->mem == mem)
+          return &*it;
+
+      return 0;
     }
 
     void GPUProcessor::shutdown(void)
@@ -2850,6 +2903,11 @@ namespace Realm {
 	if(*it)
 	  delete *it;
 
+      for(std::map<NodeID, GPUStream *>::iterator it = cudaipc_streams.begin();
+          it != cudaipc_streams.end();
+	  ++it)
+        delete it->second;
+
       delete_container_contents(task_streams);
 
       // free memory
@@ -3240,6 +3298,8 @@ namespace Realm {
 
     // our interface to the rest of the runtime
 
+    CudaModule *cuda_module_singleton = 0;
+
     CudaModule::CudaModule(void)
       : Module("cuda")
       , cfg_zc_mem_size(64 << 20)
@@ -3263,14 +3323,24 @@ namespace Realm {
       , cfg_multithread_dma(false)
       , cfg_hostreg_limit(1 << 30)
       , cfg_d2d_stream_priority(-1)
+      , cfg_use_cuda_ipc(true)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
       , uvm_base(0), uvmmem(0)
-    {}
+      , cudaipc_condvar(cudaipc_mutex)
+      , cudaipc_responses_needed(0)
+      , cudaipc_releases_needed(0)
+      , cudaipc_exports_remaining(0)
+    {
+      assert(!cuda_module_singleton);
+      cuda_module_singleton = this;
+    }
       
     CudaModule::~CudaModule(void)
     {
       delete_container_contents(gpu_info);
+      assert(cuda_module_singleton == this);
+      cuda_module_singleton = 0;
     }
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
@@ -3420,7 +3490,8 @@ namespace Realm {
 	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
           .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max)
 	  .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
-          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm');
+          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm')
+          .add_option_int("-cuda:ipc", m->cfg_use_cuda_ipc);
 #ifdef REALM_USE_CUDART_HIJACK
 	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif
@@ -3948,6 +4019,34 @@ namespace Realm {
 	}
       }
 
+      // ask any ipc-able nodes to share handles with us
+      if(cfg_use_cuda_ipc) {
+        NodeSet ipc_peers = Network::all_peers;
+
+#ifdef REALM_ON_LINUX
+        if(!ipc_peers.empty()) {
+          log_cudaipc.info() << "requesting cuda ipc handles from "
+                             << ipc_peers.size() << " peers";
+
+          // we'll need a reponse (and ultimately, a release) from each peer
+          cudaipc_responses_needed.fetch_add(ipc_peers.size());
+          cudaipc_releases_needed.fetch_add(ipc_peers.size());
+
+          ActiveMessage<CudaIpcRequest> amsg(ipc_peers);
+          amsg->hostid = gethostid();
+          amsg.commit();
+
+          // wait for responses
+          {
+            AutoLock<> al(cudaipc_mutex);
+            while(cudaipc_responses_needed.load_acquire() > 0)
+              cudaipc_condvar.wait();
+          }
+          log_cudaipc.info() << "responses complete";
+        }
+#endif
+      }
+
       // now actually let each GPU make its channels
       for(std::vector<GPU *>::iterator it = gpus.begin();
 	  it != gpus.end();
@@ -3961,6 +4060,45 @@ namespace Realm {
     void CudaModule::create_code_translators(RuntimeImpl *runtime)
     {
       Module::create_code_translators(runtime);
+    }
+
+    // if a module has to do cleanup that involves sending messages to other
+    //  nodes, this must be done in the pre-detach cleanup
+    void CudaModule::pre_detach_cleanup(void)
+    {
+      if(cfg_use_cuda_ipc) {
+        // release all of our ipc mappings, notify our peers
+        NodeSet ipc_peers;
+
+        for(std::vector<GPU *>::iterator it = gpus.begin();
+            it != gpus.end();
+            ++it) {
+          if(!(*it)->cudaipc_mappings.empty()) {
+            AutoGPUContext agc(*it);
+
+            for(std::vector<GPU::CudaIpcMapping>::iterator it2 = (*it)->cudaipc_mappings.begin();
+                it2 != (*it)->cudaipc_mappings.end();
+                ++it2) {
+              ipc_peers.add(it2->owner);
+              CHECK_CU( CUDA_DRIVER_FNPTR(cuIpcCloseMemHandle)(it2->local_base) );
+            }
+          }
+        }
+
+        if(!ipc_peers.empty()) {
+          ActiveMessage<CudaIpcRelease> amsg(ipc_peers);
+          amsg.commit();
+        }
+
+        // now wait for similar notifications from any peers we gave mappings
+        //  to before we start freeing the underlying allocations
+        {
+          AutoLock<> al(cudaipc_mutex);
+          while(cudaipc_releases_needed.load_acquire() > 0)
+            cudaipc_condvar.wait();
+        }
+        log_cudaipc.info() << "releases complete";
+      }
     }
 
     // clean up any common resources created by the module - this will be called
@@ -4183,6 +4321,174 @@ namespace Realm {
 	(*it)->register_function(func);
     }
 #endif
+
+
+    // active messages for establishing cuda ipc mappings
+
+    struct CudaIpcResponseEntry {
+      Memory mem;
+      uintptr_t base_ptr;
+      CUipcMemHandle handle;
+    };
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct CudaIpcRequest
+
+    /*static*/ void CudaIpcRequest::handle_message(NodeID sender,
+                                                   const CudaIpcRequest& args,
+                                                   const void *data,
+                                                   size_t datalen)
+    {
+      log_cudaipc.info() << "request from node " << sender;
+      assert(cuda_module_singleton);
+
+      std::vector<CudaIpcResponseEntry> exported;
+
+      // only export if we've got ipc enabled locally
+      bool do_export = false;
+      if(cuda_module_singleton->cfg_use_cuda_ipc) {
+#ifdef REALM_ON_LINUX
+        // host id has to match as well
+        long hostid = gethostid();
+        if(hostid == args.hostid)
+          do_export = true;
+        else
+          log_cudaipc.info() << "hostid mismatch - us=" << hostid << " them=" << args.hostid;
+#endif
+      }
+
+      if(do_export) {
+        for(std::vector<GPU *>::iterator it = cuda_module_singleton->gpus.begin();
+            it != cuda_module_singleton->gpus.end();
+            ++it) {
+          CudaIpcResponseEntry entry;
+          {
+            AutoGPUContext agc(*it);
+
+            CUresult ret = CUDA_DRIVER_FNPTR(cuIpcGetMemHandle)(&entry.handle,
+                                                                (*it)->fbmem_base);
+            log_cudaipc.info() << "getmem handle " << std::hex << (*it)->fbmem_base << std::dec << " -> " << ret;
+            if(ret == CUDA_SUCCESS) {
+              entry.mem = (*it)->fbmem->me;
+              entry.base_ptr = (*it)->fbmem_base;
+              exported.push_back(entry);
+            }
+          }
+        }
+      }
+
+      // if we're not exporting anything to this requestor, don't wait for
+      //  a release either (having the count hit 0 here is a weird corner
+      //  case)
+      if(exported.empty()) {
+        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+        int prev = cuda_module_singleton->cudaipc_releases_needed.fetch_sub(1);
+        if(prev == 1)
+          cuda_module_singleton->cudaipc_condvar.broadcast();
+      }
+
+      size_t bytes = exported.size() * sizeof(CudaIpcResponseEntry);
+      ActiveMessage<CudaIpcResponse> amsg(sender, bytes);
+      amsg->count = exported.size();
+      amsg.add_payload(exported.data(), bytes);
+      amsg.commit();
+    }
+
+    ActiveMessageHandlerReg<CudaIpcRequest> cuda_ipc_request_handler;
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct CudaIpcResponse
+
+    /*static*/ void CudaIpcResponse::handle_message(NodeID sender,
+                                                    const CudaIpcResponse& args,
+                                                    const void *data,
+                                                    size_t datalen)
+    {
+      assert(cuda_module_singleton);
+
+      assert(datalen == (args.count * sizeof(CudaIpcResponseEntry)));
+      const CudaIpcResponseEntry *entries = static_cast<const CudaIpcResponseEntry *>(data);
+
+      if(args.count) {
+        for(std::vector<GPU *>::iterator it = cuda_module_singleton->gpus.begin();
+            it != cuda_module_singleton->gpus.end();
+            ++it) {
+          {
+            AutoGPUContext agc(*it);
+
+            // attempt to import each entry
+            for(unsigned i = 0; i < args.count; i++) {
+              CUdeviceptr dptr;
+              CUresult ret = CUDA_DRIVER_FNPTR(cuIpcOpenMemHandle)(&dptr,
+                                                                   entries[i].handle,
+                                                                   CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+              log_cudaipc.info() << "open result " << entries[i].mem
+                                 << " orig=" << std::hex << entries[i].base_ptr
+                                 << " local=" << dptr << std::dec
+                                 << " ret=" << ret;
+
+              if(ret != CUDA_SUCCESS)
+                continue; // complain louder?
+
+              // take the cudaipc mutex to actually add the mapping
+              GPU::CudaIpcMapping mapping;
+              mapping.owner = sender;
+              mapping.mem = entries[i].mem;
+              mapping.local_base = dptr;
+              mapping.address_offset = entries[i].base_ptr - dptr;
+              {
+                AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+                (*it)->cudaipc_mappings.push_back(mapping);
+
+                // do we have a stream for this target?
+                if((*it)->cudaipc_streams.count(sender) == 0)
+                  (*it)->cudaipc_streams[sender] = new GPUStream(*it,
+                                                                 (*it)->worker);
+              }
+            }
+          }
+        }
+      }
+
+      // decrement the number of responses needed and wake the requestor if
+      //  we're done
+      {
+        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+        int prev = cuda_module_singleton->cudaipc_responses_needed.fetch_sub(1);
+        if(prev == 1)
+          cuda_module_singleton->cudaipc_condvar.broadcast();
+      }
+    }
+
+    ActiveMessageHandlerReg<CudaIpcResponse> cuda_ipc_response_handler;
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct CudaIpcRelease
+
+    /*static*/ void CudaIpcRelease::handle_message(NodeID sender,
+                                                    const CudaIpcRelease& args,
+                                                    const void *data,
+                                                    size_t datalen)
+    {
+      assert(cuda_module_singleton);
+
+      // no actual work to do - we're just waiting until all of our peers
+      //  have released ipc mappings before we continue
+      {
+        AutoLock<> al(cuda_module_singleton->cudaipc_mutex);
+        int prev = cuda_module_singleton->cudaipc_releases_needed.fetch_sub(1);
+        if(prev == 1)
+          cuda_module_singleton->cudaipc_condvar.broadcast();
+      }
+    }
+
+    ActiveMessageHandlerReg<CudaIpcRelease> cuda_ipc_release_handler;
 
 
   }; // namespace Cuda

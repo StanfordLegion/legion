@@ -76,6 +76,10 @@ namespace Realm {
     // create any code translators provided by the module (default == do nothing)
     virtual void create_code_translators(RuntimeImpl *runtime);
 
+    // if a module has to do cleanup that involves sending messages to other
+    //  nodes, this must be done in the pre-detach cleanup
+    virtual void pre_detach_cleanup(void);
+
     // clean up any common resources created by the module - this will be called
     //  after all memories/processors/etc. have been shut down and destroyed
     virtual void cleanup(void);

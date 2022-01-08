@@ -108,6 +108,8 @@ namespace Realm {
     class GPU;
     class CudaModule;
 
+    extern CudaModule *cuda_module_singleton;
+
     // an interface for receiving completion notification for a GPU operation
     //  (right now, just copies)
     class GPUCompletionNotification {
@@ -639,6 +641,17 @@ namespace Realm {
       //  in practice)
       int least_stream_priority, greatest_stream_priority;
 
+      struct CudaIpcMapping {
+        NodeID owner;
+        Memory mem;
+        uintptr_t local_base;
+        uintptr_t address_offset; // add to convert from original to local base
+      };
+      std::vector<CudaIpcMapping> cudaipc_mappings;
+      std::map<NodeID, GPUStream *> cudaipc_streams;
+
+      const CudaIpcMapping *find_ipc_mapping(Memory mem) const;
+
 #ifdef REALM_USE_CUDART_HIJACK
       std::map<const FatBin *, CUmodule> device_modules;
       std::map<const void *, CUfunction> device_functions;
@@ -840,6 +853,7 @@ namespace Realm {
 
     private:
       std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> dst_is_ipc;
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
@@ -1015,6 +1029,32 @@ namespace Realm {
                                      unsigned *lat_ret = 0);
     };
 
+
+    // active messages for establishing cuda ipc mappings
+
+    struct CudaIpcRequest {
+#ifdef REALM_ON_LINUX
+      long hostid;  // POSIX hostid
+#endif
+
+      static void handle_message(NodeID sender, const CudaIpcRequest& args,
+                                 const void *data, size_t datalen);
+    };
+
+    struct CudaIpcResponse {
+      unsigned count;
+
+      static void handle_message(NodeID sender, const CudaIpcResponse& args,
+                                 const void *data, size_t datalen);
+    };
+
+    struct CudaIpcRelease {
+
+      static void handle_message(NodeID sender, const CudaIpcRelease& args,
+                                 const void *data, size_t datalen);
+    };
+
+
 #ifdef REALM_CUDA_DYNAMIC_LOAD
   // cuda driver and/or runtime entry points
   #define CUDA_DRIVER_FNPTR(name) (name ## _fnptr)
@@ -1043,6 +1083,9 @@ namespace Realm {
     __op__(cuGetErrorName); \
     __op__(cuGetErrorString); \
     __op__(cuInit); \
+    __op__(cuIpcCloseMemHandle); \
+    __op__(cuIpcGetMemHandle); \
+    __op__(cuIpcOpenMemHandle); \
     __op__(cuLaunchKernel); \
     __op__(cuMemAllocManaged); \
     __op__(cuMemAlloc); \
