@@ -2701,11 +2701,11 @@ namespace Legion {
                           get_unique_id(), this->target_proc.id);
           output.target_procs.push_back(this->target_proc);
         }
-        else if (runtime->separate_runtime_instances && 
-                  (output.target_procs.size() > 1))
+        else if (runtime->separate_runtime_instances)
         {
           // Ignore additional processors in separate runtime instances
           output.target_procs.resize(1);
+          output.target_procs[0] = current_proc;
         }
         if (!runtime->unsafe_mapper)
           validate_target_processors(output.target_procs);

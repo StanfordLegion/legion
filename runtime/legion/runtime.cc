@@ -1247,7 +1247,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(target.address_space() == runtime->address_space);
+      assert((target.address_space() == runtime->address_space) ||
+              runtime->separate_runtime_instances);
 #endif
       // Check to see if we have it
       {
@@ -6621,6 +6622,7 @@ namespace Legion {
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
       vis_mems.has_affinity_to(proc);
+      vis_mems.has_capacity(1/*at least one byte*/);
       for (Machine::MemoryQuery::iterator it = vis_mems.begin();
             it != vis_mems.end(); it++)
       {
@@ -28130,6 +28132,9 @@ namespace Legion {
     Memory Runtime::find_local_memory(Processor proc, Memory::Kind mem_kind)
     //--------------------------------------------------------------------------
     {
+      if ((mem_kind == Memory::SYSTEM_MEM) &&
+          (proc.address_space() == address_space))
+        return runtime_system_memory;
       // Check to see if this is a local processor in which case
       // we should be able to do this much faster
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
@@ -28138,6 +28143,10 @@ namespace Legion {
         return finder->second->find_best_visible_memory(mem_kind);
       // Otherwise look up the result
       Machine::MemoryQuery visible_memories(machine);
+      // Must be of the right kind
+      visible_memories.only_kind(mem_kind);
+      // Must not be empty
+      visible_memories.has_capacity(1/*at least one byte*/);
       // Have to handle the case where this is a processor group
       if (proc.kind() == Processor::PROC_GROUP)
       {
@@ -28149,7 +28158,6 @@ namespace Legion {
       }
       else
         visible_memories.best_affinity_to(proc);
-      visible_memories.only_kind(mem_kind);
       if (visible_memories.count() == 0)
       {
         const char *mem_names[] = {
