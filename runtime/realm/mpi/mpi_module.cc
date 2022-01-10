@@ -151,7 +151,6 @@ namespace Realm {
                                const off_t *offsets, void * const *dsts, 
                                const size_t *sizes)
     {
-        DetailedTimer::push_timer(10);
         for(size_t i = 0; i < batch_size; i++) {
             off_t offset = offsets[i];
             char *dst_c = (char *)(dsts[i]);
@@ -175,11 +174,8 @@ namespace Realm {
                 if(node == 0) blkid++;
             }
         }
-        DetailedTimer::pop_timer();
 
-        DetailedTimer::push_timer(11);
         CHECK_MPI( MPI_Win_flush_all(win) );
-        DetailedTimer::pop_timer();
     }
 
     void MPIMemory::put_batch(size_t batch_size,
@@ -187,7 +183,6 @@ namespace Realm {
                                const void * const *srcs, 
                                const size_t *sizes)
     {
-        DetailedTimer::push_timer(14);
         for(size_t i = 0; i < batch_size; i++) {
             off_t offset = offsets[i];
             const char *src_c = (char *)(srcs[i]);
@@ -211,11 +206,8 @@ namespace Realm {
                 if(node == 0) blkid++;
             }
         }
-        DetailedTimer::pop_timer();
 
-        DetailedTimer::push_timer(15);
         CHECK_MPI( MPI_Win_flush_all(win) );
-        DetailedTimer::pop_timer();
     }
 
     // gets info related to rdma access from other nodes

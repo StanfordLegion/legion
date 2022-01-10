@@ -22,52 +22,14 @@
 #include "realm/threads.h"
 #include "realm/mutex.h"
 #include "realm/cmdline.h"
+#include "realm/timers.h"
 
 #include <string>
-
-#if defined(__i386__) || defined(__x86_64__)
-#define REALM_TIMELIMIT_USE_RDTSC
-#endif
 
 namespace Realm {
 
   class BackgroundWorkItem;
   class BackgroundWorkThread;
-
-  // a central theme with background workers is to place limits on how long
-  //  they do any one task - this is described using a TimeLimit object
-  class TimeLimit {
-  public:
-    // default constructor generates a time limit infinitely far in the future
-    TimeLimit();
-
-    // these constructors describe a limit in terms of Realm's clock (or
-    //  RDTSC, if available)
-    static TimeLimit absolute(long long absolute_time_in_nsec,
-			      atomic<bool> *_interrupt_flag = 0);
-    static TimeLimit relative(long long relative_time_in_nsec,
-			      atomic<bool> *_interrupt_flag = 0);
-
-    // often the desired time limit is "idk, something responsive", so
-    //  have a common way to pick a completely-made-up number
-    static TimeLimit responsive();
-
-    bool is_expired() const;
-    bool will_expire(long long additional_nsec) const;
-
-#ifdef REALM_TIMELIMIT_USE_RDTSC
-    static void calibrate_rdtsc();
-#endif
-
-  protected:
-#ifdef REALM_TIMELIMIT_USE_RDTSC
-    static uint64_t rdtsc_per_64k_nanoseconds;
-    uint64_t limit_rdtsc;
-#else
-    long long limit_time;
-#endif
-    atomic<bool> *interrupt_flag;
-  };
 
   class BackgroundWorkManager {
   public:
@@ -207,7 +169,5 @@ namespace Realm {
   };
 
 };
-
-#include "realm/bgwork.inl"
 
 #endif

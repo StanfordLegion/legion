@@ -6968,30 +6968,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_index_space_operations(
-                               const std::vector<IndexSpaceOperation*> &derived)
-    //--------------------------------------------------------------------------
-    {
-      // Two phases here: in read-only made figure out the set of operations
-      // we are going to invalidate but don't remove them yet
-      std::vector<IndexSpaceOperation*> invalidated;
-      invalidated.reserve(derived.size());
-      {
-        AutoLock l_lock(lookup_is_op_lock);
-        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
-              derived.begin(); it != derived.end(); it++)
-        {
-          if ((*it)->invalidate_operation())
-            invalidated.push_back(*it);
-        }
-      }
-      for (std::vector<IndexSpaceOperation*>::const_iterator it = 
-            invalidated.begin(); it != invalidated.end(); it++)
-        if ((*it)->remove_base_gc_ref(REGION_TREE_REF))
-          delete (*it);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::remove_union_operation(IndexSpaceOperation *op,
                                 const std::vector<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
@@ -6999,9 +6975,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op->op_kind == IndexSpaceOperation::UNION_OP_KIND);
 #endif
-      // No need for the lock, we're holding it above
-      // from invalidate_index_space_expression
       const IndexSpaceExprID key = exprs[0]->expr_id;
+      AutoLock l_lock(lookup_is_op_lock);
       std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator 
         finder = union_ops.find(key);
 #ifdef DEBUG_LEGION
@@ -7022,9 +6997,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op->op_kind == IndexSpaceOperation::INTERSECT_OP_KIND);
 #endif
-      // No need for the lock, we're holding it above
-      // from invalidate_index_space_expression
       const IndexSpaceExprID key(exprs[0]->expr_id);
+      AutoLock l_lock(lookup_is_op_lock);
       std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator 
         finder = intersection_ops.find(key);
 #ifdef DEBUG_LEGION
@@ -7045,17 +7019,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(op->op_kind == IndexSpaceOperation::DIFFERENCE_OP_KIND);
 #endif
-      // No need for the lock, we're holding it above
-      // from invalidate_index_space_expression
       const IndexSpaceExprID key = lhs->expr_id;
+      std::vector<IndexSpaceExpression*> exprs(2);
+      exprs[0] = lhs;
+      exprs[1] = rhs;
+      AutoLock l_lock(lookup_is_op_lock);
       std::map<IndexSpaceExprID,ExpressionTrieNode*>::iterator 
         finder = difference_ops.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != difference_ops.end());
 #endif
-      std::vector<IndexSpaceExpression*> exprs(2);
-      exprs[0] = lhs;
-      exprs[1] = rhs;
       if (finder->second->remove_operation(exprs))
       {
         delete finder->second;
@@ -7389,12 +7362,17 @@ namespace Legion {
       }
       if (!derived.empty())
       {
-        context->invalidate_index_space_operations(derived);
-        // Remove any references that we have on the parents
         for (std::vector<IndexSpaceOperation*>::const_iterator it = 
               derived.begin(); it != derived.end(); it++)
+        {
+          // Try to invalidate it and remove the tree reference if we did
+          if ((*it)->invalidate_operation() &&
+              (*it)->remove_base_gc_ref(REGION_TREE_REF))
+            assert(false); // should never delete since we have an expr ref
+          // Remove any references that we have on the parents
           if ((*it)->remove_tree_expression_reference(did))
             delete (*it);
+        }
       }
     }
 

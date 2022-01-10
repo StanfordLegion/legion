@@ -158,7 +158,6 @@ namespace Realm {
 #ifdef USE_NBI_ACCESSREGION
     gasnet_begin_nbi_accessregion();
 #endif
-    DetailedTimer::push_timer(10);
     for(size_t i = 0; i < batch_size; i++) {
       off_t offset = offsets[i];
       char *dst_c = (char *)(dsts[i]);
@@ -187,20 +186,13 @@ namespace Realm {
 	if(node == 0) blkid++;
       }
     }
-    DetailedTimer::pop_timer();
 
 #ifdef USE_NBI_ACCESSREGION
-    DetailedTimer::push_timer(11);
     gasnet_handle_t handle = gasnet_end_nbi_accessregion();
-    DetailedTimer::pop_timer();
 
-    DetailedTimer::push_timer(12);
     gasnet_wait_syncnb(handle);
-    DetailedTimer::pop_timer();
 #else
-    DetailedTimer::push_timer(13);
     gasnet_wait_syncnbi_gets();
-    DetailedTimer::pop_timer();
 #endif
   }
 
@@ -211,7 +203,6 @@ namespace Realm {
   {
     gasnet_begin_nbi_accessregion();
 
-    DetailedTimer::push_timer(14);
     for(size_t i = 0; i < batch_size; i++) {
       off_t offset = offsets[i];
       const char *src_c = (char *)(srcs[i]);
@@ -241,15 +232,10 @@ namespace Realm {
 	if(node == 0) blkid++;
       }
     }
-    DetailedTimer::pop_timer();
 
-    DetailedTimer::push_timer(15);
     gasnet_handle_t handle = gasnet_end_nbi_accessregion();
-    DetailedTimer::pop_timer();
 
-    DetailedTimer::push_timer(16);
     gasnet_wait_syncnb(handle);
-    DetailedTimer::pop_timer();
   }
 
   // gets info related to rdma access from other nodes
