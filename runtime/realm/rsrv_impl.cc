@@ -168,7 +168,6 @@ namespace Realm {
     Event Reservation::acquire(unsigned mode /* = 0 */, bool exclusive /* = true */,
 		     Event wait_on /* = Event::NO_EVENT */) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       //printf("LOCK(" IDFMT ", %d, %d, " IDFMT ") -> ", id, mode, exclusive, wait_on.id);
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
@@ -190,8 +189,6 @@ namespace Realm {
     Event Reservation::try_acquire(bool retry, unsigned mode /* = 0 */, bool exclusive /* = true */,
 				   Event wait_on /* = Event::NO_EVENT */) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-
       ReservationImpl *impl = get_runtime()->get_lock_impl(*this);
 
       // if we have an unsatisfied precondition, we need to wait for that before actually trying
@@ -216,7 +213,6 @@ namespace Realm {
     // releases a held lock - release can be deferred until an event triggers
     void Reservation::release(Event wait_on /* = Event::NO_EVENT */) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
       if(wait_on.has_triggered()) {
@@ -231,9 +227,6 @@ namespace Realm {
     // Create a new lock, destroy an existing lock
     /*static*/ Reservation Reservation::create_reservation(size_t _data_size /*= 0*/)
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      //DetailedTimer::ScopedPush sp(18);
-
       // see if the freelist has an event we can reuse
       ReservationImpl *impl = get_runtime()->local_reservation_free_list->alloc_entry();
       assert(impl);
@@ -319,7 +312,6 @@ namespace Realm {
     /*static*/ void LockReleaseMessage::handle_message(NodeID sender, const LockReleaseMessage &msg,
 						       const void *data, size_t datalen)
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       assert(0);
     }
 
@@ -328,7 +320,6 @@ namespace Realm {
 						     const void *data, size_t datalen,
 						     TimeLimit work_until)
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_reservation.debug(          "reservation request granted: reservation=" IDFMT " mode=%d", // mask=%lx",
 	       args.lock.id, args.mode); //, args.remote_waiter_mask);
 
@@ -1483,7 +1474,6 @@ namespace Realm {
   void LockRequestMessage::handle_message(NodeID sender, const LockRequestMessage &args,
 					     const void *data, size_t datalen)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     ReservationImpl *impl = get_runtime()->get_lock_impl(args.lock);
 
     log_reservation.debug("reservation request: reservation=" IDFMT ", node=%d, mode=%d",

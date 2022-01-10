@@ -3108,7 +3108,6 @@ namespace Realm {
 						      const void *data, size_t datalen)
 
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info() << "received fragment from " << sender
                     << ": num_fragments=" << args.num_fragments;
     

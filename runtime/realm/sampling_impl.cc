@@ -31,6 +31,7 @@
 #include <fcntl.h>
 
 #ifdef REALM_ON_WINDOWS
+#include <windows.h>
 #include <io.h>
 #include <synchapi.h>
 

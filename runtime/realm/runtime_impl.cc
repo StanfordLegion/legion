@@ -50,6 +50,7 @@
 #endif
 
 #ifdef REALM_ON_WINDOWS
+#include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
 
@@ -1000,8 +1001,6 @@ namespace Realm {
 
     bool RuntimeImpl::network_init(int *argc, char ***argv)
     {
-      DetailedTimer::init_timers();
-
       // if we're given empty or non-existent argc/argv, start from a
       //  dummy command line with a single string (which is supposed to be
       //  the name of the binary) so that the network module and/or the
@@ -1215,6 +1214,18 @@ namespace Realm {
     {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
+
+      // calibrate timers
+      int use_cpu_tsc = -1; // dont care
+      uint64_t force_cpu_tsq_freq = 0; // no force
+      {
+        CommandLineParser cp;
+        cp.add_option_int("-ll:cputsc", use_cpu_tsc);
+        cp.add_option_int_units("-ll:tscfreq", force_cpu_tsq_freq, 'm', false/*!binary*/);
+        bool ok = cp.parse_command_line(cmdline);
+        assert(ok);
+      }
+      Clock::calibrate(use_cpu_tsc, force_cpu_tsq_freq);
 
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
@@ -2362,12 +2373,6 @@ namespace Realm {
                rt->local_reservation_free_list->next_alloc,
                rt->local_index_space_free_list->next_alloc,
                rt->local_proc_group_free_list->next_alloc);
-      }
-#endif
-#ifdef EVENT_GRAPH_TRACE
-      {
-        //FILE *log_file = Logger::get_log_file();
-        show_event_waiters(/*log_file*/);
       }
 #endif
       cleanup_query_caches();
