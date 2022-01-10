@@ -880,8 +880,6 @@ namespace Legion {
       };
     public:
       // Methods for removing index space expression when they are done
-      void invalidate_index_space_operations(
-                            const std::vector<IndexSpaceOperation*> &derived);
       void remove_union_operation(IndexSpaceOperation *expr, 
                             const std::vector<IndexSpaceExpression*> &exprs);
       void remove_intersection_operation(IndexSpaceOperation *expr, 
