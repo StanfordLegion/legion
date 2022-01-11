@@ -415,7 +415,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     [register]
     [kernels:map(function(kernel)
       return quote
-        [kernel.kernel_id] = [&int8]([c.regent_generate_dynamic_kernel_id]())
+        [c.regent_register_kernel_id]([int64]([kernel.kernel_id]))
         [HijackAPI.hijackCudaRegisterFunction]([handle], [kernel.kernel_id], [kernel.name])
       end
     end)]
@@ -1334,13 +1334,13 @@ function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_s
     [launch_domain_init]
     if [num_blocks] <= MAX_NUM_BLOCK then
       [grid].x, [grid].y, [grid].z = [num_blocks], 1, 1
-    elseif [count] / MAX_NUM_BLOCK <= MAX_NUM_BLOCK then
+    elseif [num_blocks] / MAX_NUM_BLOCK <= MAX_NUM_BLOCK then
       [grid].x, [grid].y, [grid].z =
         MAX_NUM_BLOCK, [round_exp(num_blocks, MAX_NUM_BLOCK)], 1
     else
       [grid].x, [grid].y, [grid].z =
         MAX_NUM_BLOCK, MAX_NUM_BLOCK,
-        [round_exp(num_blocks, MAX_NUM_BLOCK, MAX_NUM_BLOCK)]
+        [round_exp(num_blocks, MAX_NUM_BLOCK * MAX_NUM_BLOCK)]
     end
   end
 

@@ -81,7 +81,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
 #else
     //--------------------------------------------------------------------------
@@ -93,7 +93,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      expr->add_expression_reference();
+      expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
 #endif
 
@@ -117,7 +117,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      if (expr->remove_expression_reference())
+      if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
     }
 
@@ -4597,8 +4597,9 @@ namespace Legion {
       // Remove references from any views that we have
       for (std::set<LogicalView*>::const_iterator it = 
             all_views.begin(); it != all_views.end(); it++)
-        if ((*it)->remove_base_valid_ref(AGGREGATORE_REF))
+        if ((*it)->remove_base_valid_ref(AGGREGATOR_REF))
           delete (*it);
+      all_views.clear();
       // Delete all our copy updates
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
             const_iterator mit = sources.begin(); mit != sources.end(); mit++)
@@ -4636,6 +4637,23 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::Update::Update(IndexSpaceExpression *exp,
+                                const FieldMask &mask, CopyAcrossHelper *helper)
+      : expr(exp), src_mask(mask), across_helper(helper)
+    //--------------------------------------------------------------------------
+    {
+      expr->add_base_expression_reference(AGGREGATOR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::Update::~Update(void)
+    //--------------------------------------------------------------------------
+    {
+      if (expr->remove_base_expression_reference(AGGREGATOR_REF))
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -5411,6 +5429,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!preconditions.empty());
 #endif
+      WrapperReferenceMutator mutator(effects);
       AutoLock p_lock(pre_lock);
       std::map<InstanceView*,EventFieldMap>::iterator finder = 
         reading ? src_pre.find(view) : dst_pre.find(view);
@@ -5544,7 +5563,7 @@ namespace Legion {
       std::pair<std::set<LogicalView*>::iterator,bool> result = 
         all_views.insert(new_view);
       if (result.second)
-        new_view->add_base_valid_ref(AGGREGATORE_REF, this);
+        new_view->add_base_valid_ref(AGGREGATOR_REF, this);
     }
 
     //--------------------------------------------------------------------------
@@ -6225,6 +6244,7 @@ namespace Legion {
     {
       if (collective_mapping != NULL)
         collective_mapping->add_reference();
+      analysis_expr->add_base_expression_reference(PHYSICAL_ANALYSIS_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -6238,6 +6258,7 @@ namespace Legion {
         parallel_traversals(false), restricted(false), recorded_instances(NULL)
     //--------------------------------------------------------------------------
     {
+      analysis_expr->add_base_expression_reference(PHYSICAL_ANALYSIS_REF);
       if (collective_mapping != NULL)
         collective_mapping->add_reference();
     }
@@ -6258,6 +6279,9 @@ namespace Legion {
     PhysicalAnalysis::~PhysicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
+      if (analysis_expr->remove_base_expression_reference(
+                                    PHYSICAL_ANALYSIS_REF))
+        delete analysis_expr;
       if ((collective_mapping != NULL) && 
           collective_mapping->remove_reference())
         delete collective_mapping;
@@ -9893,7 +9917,7 @@ namespace Legion {
         init_collective_refs(false)
     //--------------------------------------------------------------------------
     {
-      set_expr->add_expression_reference();
+      set_expr->add_nested_expression_reference(did);
       region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
       if (replicated != NULL)
@@ -9913,7 +9937,7 @@ namespace Legion {
         add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d",
-          LEGION_DISTRIBUTED_ID_FILTER(id), local_space);
+          LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space);
 #endif
     }
 
@@ -9944,7 +9968,7 @@ namespace Legion {
       assert(tracing_anticonditions == NULL);
       assert(tracing_postconditions == NULL);
 #endif
-      if (set_expr->remove_expression_reference())
+      if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
       if (region_node->remove_nested_resource_ref(did))
         delete region_node;
@@ -10004,7 +10028,7 @@ namespace Legion {
         {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
                 pit->second.begin(); it != pit->second.end(); it++)
-            if (it->first->remove_expression_reference())
+            if (it->first->remove_nested_expression_reference(did))
               delete it->first;
           if (pit->first->remove_nested_valid_ref(did, mutator))
             delete pit->first;
@@ -10017,7 +10041,7 @@ namespace Legion {
       {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               initialized_data.begin(); it != initialized_data.end(); it++)
-          if (it->first->remove_expression_reference())
+          if (it->first->remove_nested_expression_reference(did))
             delete it->first;
         initialized_data.clear();
       }
@@ -10034,7 +10058,7 @@ namespace Legion {
               it->second.back();
             if (back.first->remove_nested_valid_ref(did, mutator))
               delete back.first;
-            if (back.second->remove_expression_reference())
+            if (back.second->remove_nested_expression_reference(did))
               delete back.second;
             it->second.pop_back();
           }
@@ -10053,7 +10077,7 @@ namespace Legion {
                 rit->second.begin(); it != rit->second.end(); it++)
             if (it->first->remove_nested_valid_ref(did, mutator))
               delete it->first;
-          if (rit->first->remove_expression_reference())
+          if (rit->first->remove_nested_expression_reference(did))
             delete rit->first;
           rit->second.clear();
         }
@@ -10071,7 +10095,7 @@ namespace Legion {
                 rit->second.begin(); it != rit->second.end(); it++)
             if (it->first->remove_nested_valid_ref(did, mutator))
               delete it->first;
-          if (rit->first->remove_expression_reference())
+          if (rit->first->remove_nested_expression_reference(did))
             delete rit->first;
           rit->second.clear();
         }
@@ -10254,7 +10278,7 @@ namespace Legion {
         }
       }
       // Record that this data is all valid
-      update_initialized_data(set_expr, true/*covers*/, user_mask);
+      update_initialized_data(set_expr, true/*covers*/, user_mask, mutator);
       // Update any restricted fields 
       if (restricted)
       {
@@ -10825,15 +10849,18 @@ namespace Legion {
                             IndexSpaceExpression *union_expr =
                               runtime->forest->union_index_spaces(expr,
                                                             it->second);
-                            union_expr->add_expression_reference();
-                            if (it->second->remove_expression_reference())
+                            union_expr->add_nested_expression_reference(did, 
+                                                                  &mutator);
+                            if (it->second->remove_nested_expression_reference(
+                                                                          did))
                               delete it->second;
                             it->second = union_expr;
                           }
                           else
                           {
-                            expr->add_expression_reference();
-                            if (it->second->remove_expression_reference())
+                            expr->add_nested_expression_reference(did,&mutator);
+                            if (it->second->remove_nested_expression_reference(
+                                                                          did))
                               delete it->second;
                             it->second = expr;
                           }
@@ -10851,8 +10878,8 @@ namespace Legion {
                       {
                         found_exprs.insert(it->second);
                         // Promote this up to the full set expression
-                        set_expr->add_expression_reference();
-                        if (it->second->remove_expression_reference())
+                        set_expr->add_nested_expression_reference(did,&mutator);
+                        if (it->second->remove_nested_expression_reference(did))
                           delete it->second;
                         it->second = set_expr;
                       }
@@ -10882,7 +10909,7 @@ namespace Legion {
                         runtime->forest->subtract_index_spaces(expr,union_expr);
                       fill_exprs.insert(diff_expr, fill_mask);
                       red_view->add_nested_valid_ref(did, &mutator);
-                      diff_expr->add_expression_reference();
+                      diff_expr->add_nested_expression_reference(did, &mutator);
                       field_views.push_back(std::make_pair(red_view,diff_expr));
                     }
                   }
@@ -10891,7 +10918,7 @@ namespace Legion {
                     fill_exprs.insert(expr, fill_mask);
                     // No previous exprs, so record the full thing
                     red_view->add_nested_valid_ref(did, &mutator);
-                    expr->add_expression_reference();
+                    expr->add_nested_expression_reference(did, &mutator);
                     field_views.push_back(std::make_pair(red_view, expr));
                   }
                 }
@@ -10903,7 +10930,7 @@ namespace Legion {
                 // This is already restricted, so just add it,
                 // we'll be flushing it here shortly
                 red_view->add_nested_valid_ref(did, &mutator);
-                expr->add_expression_reference();
+                expr->add_nested_expression_reference(did, &mutator);
                 field_views.push_back(std::make_pair(red_view, expr));
               }
 #ifdef DEBUG_LEGION
@@ -11041,10 +11068,10 @@ namespace Legion {
       {
         // Write-only
         // Update the initialized data before messing with the user mask
-        update_initialized_data(expr, expr_covers, user_mask);
+        update_initialized_data(expr, expr_covers, user_mask, mutator);
         const FieldMask reduce_filter = reduction_fields & user_mask;
         if (!!reduce_filter)
-          filter_reduction_instances(expr, expr_covers, reduce_filter);
+          filter_reduction_instances(expr, expr_covers, reduce_filter, mutator);
         FieldMaskSet<InstanceView> new_instances;
         for (unsigned idx = 0; idx < analysis.target_instances.size(); idx++)
         {
@@ -11229,7 +11256,7 @@ namespace Legion {
                             applied_events, analysis.record_valid);
         if (IS_WRITE(analysis.usage))
         {
-          update_initialized_data(expr, expr_covers, user_mask);
+          update_initialized_data(expr, expr_covers, user_mask, mutator);
           // Issue copy-out copies for any restricted fields if we wrote stuff
           if (!restricted_instances.empty())
           {
@@ -12468,7 +12495,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::update_initialized_data(IndexSpaceExpression *expr,
-                             const bool expr_covers, const FieldMask &user_mask)
+                                                 const bool expr_covers,
+                                                 const FieldMask &user_mask,
+                                                 ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       if (!expr_covers)
@@ -12547,7 +12576,7 @@ namespace Legion {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
             if (initialized_data.insert(it->first, it->second))
-              it->first->add_expression_reference();
+              it->first->add_nested_expression_reference(did, &mutator);
         }
         // Delete after adding to keep expressions valid 
         if (!to_delete.empty())
@@ -12558,13 +12587,13 @@ namespace Legion {
             if (to_add.find(*it) != to_add.end())
               continue;
             initialized_data.erase(*it);
-            if ((*it)->remove_expression_reference())
+            if ((*it)->remove_nested_expression_reference(did))
               delete (*it);
           }
         }
         // Add the new expression if we still have fields to add
         if (!!subinit && initialized_data.insert(expr, subinit))
-          expr->add_expression_reference();
+          expr->add_nested_expression_reference(did, &mutator);
       }
       else
       {
@@ -12587,13 +12616,13 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               initialized_data.erase(*it);
-              if ((*it)->remove_expression_reference())
+              if ((*it)->remove_nested_expression_reference(did))
                 delete (*it);
             }
           }
         }
         if (initialized_data.insert(set_expr, user_mask))
-          set_expr->add_expression_reference();
+          set_expr->add_nested_expression_reference(did, &mutator);
       }
     }
 
@@ -12640,7 +12669,7 @@ namespace Legion {
                       to_delete.begin(); eit != to_delete.end(); eit++)
                 {
                   finder->second.erase(*eit);
-                  if ((*eit)->remove_expression_reference())
+                  if ((*eit)->remove_nested_expression_reference(did))
                     delete (*eit);
                 }
                 if (finder->second.empty())
@@ -12658,7 +12687,7 @@ namespace Legion {
                 // We're pruning everything so remove them all now
                 for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
                      finder->second.begin(); eit != finder->second.end(); eit++)
-                  if (eit->first->remove_expression_reference())
+                  if (eit->first->remove_nested_expression_reference(did))
                     delete eit->first;
                 // Remove the reference, no need to check for deletion
                 // since we know we added the same reference above
@@ -12703,7 +12732,7 @@ namespace Legion {
                       to_delete.begin(); eit != to_delete.end(); eit++)
                 {
                   finder->second.erase(*eit);
-                  if ((*eit)->remove_expression_reference())
+                  if ((*eit)->remove_nested_expression_reference(did))
                     delete (*eit);
                 }
                 if (finder->second.empty())
@@ -12721,7 +12750,7 @@ namespace Legion {
                 // We're pruning everything so remove them all now
                 for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
                      finder->second.begin(); eit != finder->second.end(); eit++)
-                  if (eit->first->remove_expression_reference())
+                  if (eit->first->remove_nested_expression_reference(did))
                     delete eit->first;
                 // Remove the reference, no need to check for deletion
                 // since we know we added the same reference above
@@ -12936,18 +12965,18 @@ namespace Legion {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
             if (finder->second.insert(it->first, it->second))
-              it->first->add_expression_reference();
+              it->first->add_nested_expression_reference(did, &mutator);
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             if (to_add.find(*it) != to_add.end())
               continue;
             finder->second.erase(*it);
-            if ((*it)->remove_expression_reference())
+            if ((*it)->remove_nested_expression_reference(did))
               delete (*it);
           }
           if (!!valid_mask && finder->second.insert(expr, valid_mask))
-            expr->add_expression_reference();
+            expr->add_nested_expression_reference(did, &mutator);
           if (need_tighten)
           {
             if (finder->second.empty())
@@ -12966,13 +12995,13 @@ namespace Legion {
           }
         }
         else if (finder->second.insert(expr, valid_mask))
-          expr->add_expression_reference();
+          expr->add_nested_expression_reference(did, &mutator);
       }
       else
       {
         partial_valid_instances[target].insert(expr, valid_mask);
         target->add_nested_valid_ref(did, &mutator);
-        expr->add_expression_reference();
+        expr->add_nested_expression_reference(did, &mutator);
       }
       return need_rebuild;
     }
@@ -13053,7 +13082,7 @@ namespace Legion {
                   else
                     finder->second += 1;
                 }
-                else if (it->first->remove_expression_reference())
+                else if (it->first->remove_nested_expression_reference(did))
                   delete it->first;
               }
               to_delete.push_back(pit->first);
@@ -13084,7 +13113,7 @@ namespace Legion {
                     else
                       finder->second += 1;
                   }
-                  else if ((*it)->remove_expression_reference())
+                  else if ((*it)->remove_nested_expression_reference(did))
                     delete (*it);
                 }
               }
@@ -13163,7 +13192,7 @@ namespace Legion {
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                   to_add.begin(); it != to_add.end(); it++)
               if (pit->second.insert(it->first, it->second))
-                it->first->add_expression_reference();
+                it->first->add_nested_expression_reference(did, &mutator);
             // Deletions after adding to make sure to keep referenes around
             for (std::vector<IndexSpaceExpression*>::const_iterator it =
                   to_erase.begin(); it != to_erase.end(); it++)
@@ -13188,7 +13217,7 @@ namespace Legion {
                 else
                   finder2->second += 1;
               }
-              else if ((*it)->remove_expression_reference())
+              else if ((*it)->remove_nested_expression_reference(did))
                 delete (*it);
             }
             if (!pit->second.empty())
@@ -13352,6 +13381,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::filter_reduction_instances(IndexSpaceExpression *expr,
                   const bool expr_covers, const FieldMask &filter_mask,
+                  ReferenceMutator &mutator,
                   std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
                   std::map<LogicalView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
@@ -13390,7 +13420,7 @@ namespace Legion {
                 else
                   finder->second += 1;
               }
-              else if (it->second->remove_expression_reference())
+              else if (it->second->remove_nested_expression_reference(did))
                 delete it->second;
             }
             reduction_instances.erase(finder);
@@ -13413,7 +13443,7 @@ namespace Legion {
                   assert(!full_diff->is_empty());
 #endif
                 }
-                full_diff->add_expression_reference();
+                full_diff->add_nested_expression_reference(did, &mutator);
                 if (expr_refs_to_remove != NULL)
                 {
                   std::map<IndexSpaceExpression*,unsigned>::iterator finder =
@@ -13423,7 +13453,7 @@ namespace Legion {
                   else
                     finder->second += 1;
                 }
-                else if (it->second->remove_expression_reference())
+                else if (it->second->remove_nested_expression_reference(did))
                   delete it->second;
                 it->second = full_diff;
                 it++;
@@ -13436,7 +13466,7 @@ namespace Legion {
                 {
                   if (diff_expr->get_volume() < it->second->get_volume())
                   {
-                    diff_expr->add_expression_reference();
+                    diff_expr->add_nested_expression_reference(did, &mutator);
                     if (expr_refs_to_remove != NULL)
                     {
                       std::map<IndexSpaceExpression*,unsigned>::iterator finder =
@@ -13446,7 +13476,8 @@ namespace Legion {
                       else
                         finder->second += 1;
                     }
-                    else if (it->second->remove_expression_reference())
+                    else if (it->second->remove_nested_expression_reference(
+                                                                        did))
                       delete it->second;
                     it->second = diff_expr;
                   }
@@ -13475,7 +13506,7 @@ namespace Legion {
                     else
                       finder->second += 1;
                   }
-                  else if (it->second->remove_expression_reference())
+                  else if (it->second->remove_nested_expression_reference(did))
                     delete it->second;
                   it = finder->second.erase(it);
                 }
@@ -13553,7 +13584,7 @@ namespace Legion {
             if (!!finder->second)
               filter_valid_instances(expr, expr_covers, finder->second,mutator);
             // Remove the expression reference that flowed back
-            if (finder->first->remove_expression_reference())
+            if (finder->first->remove_nested_expression_reference(did))
               delete finder->first;
             applied_reductions.erase(finder);
           }
@@ -13591,7 +13622,7 @@ namespace Legion {
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                   applied_reductions.begin(); it != 
                   applied_reductions.end(); it++)
-              if (it->first->remove_expression_reference())
+              if (it->first->remove_nested_expression_reference(did))
                 delete it->first;
           }
         }
@@ -14074,6 +14105,7 @@ namespace Legion {
       assert(!!reduction_targets.get_valid_mask());
       assert(!set_expr->is_empty());
 #endif
+      WrapperReferenceMutator mutator(applied_events);
       const bool track_exprs = (applied_exprs != NULL);
       for (FieldMaskSet<InstanceView>::const_iterator rit =
             reduction_targets.begin(); rit != reduction_targets.end(); rit++)
@@ -14108,7 +14140,7 @@ namespace Legion {
                 {
                   if (it->first->remove_nested_valid_ref(did))
                     delete it->first;
-                  if (it->second->remove_expression_reference())
+                  if (it->second->remove_nested_expression_reference(did))
                     delete it->second;
                   it = finder->second.erase(it);
                 }
@@ -14142,7 +14174,8 @@ namespace Legion {
                 delete it->first;
               // Only remove expression references here if we're not
               // tracking expressions
-              if (!track_exprs && it->second->remove_expression_reference())
+              if (!track_exprs &&
+                  it->second->remove_nested_expression_reference(did))
                 delete it->second;
             }
             if (track_exprs)
@@ -14157,18 +14190,18 @@ namespace Legion {
                       IndexSpaceExpression*> >::const_iterator it =
                       finder->second.begin(); it != finder->second.end(); it++)
                   if (!applied_exprs->insert(it->second, expr_mask) &&
-                      it->second->remove_expression_reference())
+                      it->second->remove_nested_expression_reference(did))
                     assert(false); // should never hit this
               }
               else
               {
                 if (applied_exprs->insert(set_expr, expr_mask))
-                  set_expr->add_expression_reference();
+                  set_expr->add_nested_expression_reference(did, &mutator);
                 // Now we can remove the remaining expression references
                 for (std::list<std::pair<ReductionView*,
                       IndexSpaceExpression*> >::const_iterator it =
                       finder->second.begin(); it != finder->second.end(); it++)
-                  if (it->second->remove_expression_reference())
+                  if (it->second->remove_nested_expression_reference(did))
                     delete it->second;
               }
             }
@@ -14208,9 +14241,9 @@ namespace Legion {
                   has_cover = true;
                 IndexSpaceExpression *remainder = 
                   runtime->forest->subtract_index_spaces(set_expr, expr);
-                remainder->add_expression_reference();
+                remainder->add_nested_expression_reference(did, &mutator);
                 it->second = remainder;
-                if (set_expr->remove_expression_reference())
+                if (set_expr->remove_nested_expression_reference(did))
                   assert(false); // should never hit this
                 it++;
               }
@@ -14241,8 +14274,8 @@ namespace Legion {
                 {
                   IndexSpaceExpression *remainder = 
                     runtime->forest->subtract_index_spaces(it->second, expr);
-                  remainder->add_expression_reference();
-                  if (it->second->remove_expression_reference())
+                  remainder->add_nested_expression_reference(did, &mutator);
+                  if (it->second->remove_nested_expression_reference(did))
                     delete it->second;
                   it->second = remainder;
                   it++;
@@ -14269,10 +14302,10 @@ namespace Legion {
                         IndexSpaceExpression*> >::const_iterator it = 
                         to_record.begin(); it != to_record.end(); it++)
                     if (applied_exprs->insert(it->second, expr_mask))
-                      it->second->add_expression_reference();
+                      it->second->add_nested_expression_reference(did, &mutator);
                 }
                 else if (applied_exprs->insert(expr, expr_mask))
-                  expr->add_expression_reference();
+                  expr->add_nested_expression_reference(did, &mutator);
               }
             }
             if (!to_delete.empty())
@@ -14283,7 +14316,7 @@ namespace Legion {
               {
                 if (it->first->remove_nested_valid_ref(did))
                   delete it->first;
-                if (it->second->remove_expression_reference())
+                if (it->second->remove_nested_expression_reference(did))
                   delete it->second;
               }
             }
@@ -14414,7 +14447,7 @@ namespace Legion {
             released_instances.find(overlap_expr);
         if (release_finder == released_instances.end())
         {
-          overlap_expr->add_expression_reference();
+          overlap_expr->add_nested_expression_reference(did, &mutator);
           released_instances[overlap_expr];
           release_finder = released_instances.find(overlap_expr);
         }
@@ -14511,7 +14544,7 @@ namespace Legion {
             eit = to_add.begin(); eit != to_add.end(); eit++)
       {
         if (restricted_instances.find(eit->second) ==restricted_instances.end())
-          eit->second->add_expression_reference();
+          eit->second->add_nested_expression_reference(did, &mutator);
         FieldMaskSet<InstanceView> &old_insts =restricted_instances[eit->first];
         FieldMaskSet<InstanceView> &new_insts=restricted_instances[eit->second];
         if (!new_insts.empty() || !!(old_insts.get_valid_mask() & acquire_mask))
@@ -14551,7 +14584,7 @@ namespace Legion {
             to_delete.begin(); it != to_delete.end(); it++)
       {
         restricted_instances.erase(*it);
-        if ((*it)->remove_expression_reference())
+        if ((*it)->remove_nested_expression_reference(did))
           delete (*it);
       }
       restricted_fields.clear();
@@ -14679,7 +14712,7 @@ namespace Legion {
               eit = to_add.begin(); eit != to_add.end(); eit++)
         {
           if (released_instances.find(eit->first) == released_instances.end())
-            eit->first->add_expression_reference();
+            eit->first->add_nested_expression_reference(did, &mutator);
           FieldMaskSet<InstanceView> &new_insts = released_instances[eit->first];
           FieldMaskSet<InstanceView> &old_insts = released_instances[eit->second];
           if (!new_insts.empty() || !!(old_insts.get_valid_mask() & release_mask))
@@ -14719,7 +14752,7 @@ namespace Legion {
               to_delete.begin(); it != to_delete.end(); it++)
         {
           released_instances.erase(*it);
-          if ((*it)->remove_expression_reference())
+          if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
       }
@@ -14728,9 +14761,9 @@ namespace Legion {
         // If we're not restoring the released instance then we should
         // record the actual instances that we are making restricted
         // Make sure that we don't have any overlapping restrictions
-        filter_restricted_instances(expr, expr_covers, release_mask);
+        filter_restricted_instances(expr, expr_covers, release_mask, mutator);
         // Make sure that we remove any old released instances
-        filter_released_instances(expr, expr_covers, release_mask);
+        filter_released_instances(expr, expr_covers, release_mask, mutator);
         FieldMaskSet<InstanceView> &updates = to_update[expr];
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
@@ -14791,7 +14824,7 @@ namespace Legion {
             restricted_finder = restricted_instances.find(set_expr);
         if (restricted_finder == restricted_instances.end())
         {
-          set_expr->add_expression_reference();
+          set_expr->add_nested_expression_reference(did, &mutator);
           restrict_view->add_nested_valid_ref(did, &mutator);
           restricted_instances[set_expr].insert(restrict_view, restrict_mask);
         }
@@ -14845,7 +14878,7 @@ namespace Legion {
                   restricted_finder = restricted_instances.find(union_expr);
               if (restricted_finder == restricted_instances.end())
               {
-                union_expr->add_expression_reference();
+                union_expr->add_nested_expression_reference(did, &mutator);
                 restrict_view->add_nested_valid_ref(did, &mutator);
                 restricted_instances[union_expr].insert(restrict_view, 
                                                       it->set_mask);
@@ -14861,7 +14894,7 @@ namespace Legion {
                   restricted_finder = restricted_instances.find(set_expr);
               if (restricted_finder == restricted_instances.end())
               {
-                set_expr->add_expression_reference();
+                set_expr->add_nested_expression_reference(did, &mutator);
                 restrict_view->add_nested_valid_ref(did, &mutator);
                 restricted_instances[set_expr].insert(restrict_view, 
                                                       it->set_mask);
@@ -14879,7 +14912,7 @@ namespace Legion {
                 restricted_finder = restricted_instances.find(expr);
             if (restricted_finder == restricted_instances.end())
             {
-              expr->add_expression_reference();
+              expr->add_nested_expression_reference(did, &mutator);
               restrict_view->add_nested_valid_ref(did, &mutator);
               restricted_instances[expr].insert(restrict_view, remainder);
             }
@@ -14895,7 +14928,7 @@ namespace Legion {
               restricted_finder = restricted_instances.find(expr);
           if (restricted_finder == restricted_instances.end())
           {
-            expr->add_expression_reference();
+            expr->add_nested_expression_reference(did, &mutator);
             restrict_view->add_nested_valid_ref(did, &mutator);
             restricted_instances[expr].insert(restrict_view, restrict_mask);
           }
@@ -14907,7 +14940,7 @@ namespace Legion {
               to_delete.begin(); it != to_delete.end(); it++)
         {
           restricted_instances.erase(*it);
-          if ((*it)->remove_expression_reference())
+          if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
       }
@@ -14934,7 +14967,7 @@ namespace Legion {
         it->first->add_nested_valid_ref(did, &mutator);
         if (it->second->get_volume() == volume)
           it->second = set_expr;
-        it->second->add_expression_reference();
+        it->second->add_nested_expression_reference(did, &mutator);
       }
       std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &current =
         reduction_instances[fidx];
@@ -14961,7 +14994,7 @@ namespace Legion {
       }
       else
       {
-        expr->add_expression_reference();
+        expr->add_nested_expression_reference(did, &mutator);
         for (FieldMaskSet<InstanceView>::const_iterator it =
               updates.begin(); it != updates.end(); it++)
           it->first->add_nested_valid_ref(did, &mutator);
@@ -14972,6 +15005,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::filter_initialized_data(IndexSpaceExpression *expr, 
                   const bool expr_covers, const FieldMask &filter_mask, 
+                  ReferenceMutator &mutator,
                   std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove)
     //--------------------------------------------------------------------------
     {
@@ -14995,7 +15029,7 @@ namespace Legion {
               else
                 finder->second += 1;
             }
-            else if (it->first->remove_expression_reference())
+            else if (it->first->remove_nested_expression_reference(did))
               delete it->first;
           }
           initialized_data.clear();
@@ -15026,7 +15060,7 @@ namespace Legion {
                 else
                   finder->second += 1;
               }
-              else if ((*it)->remove_expression_reference())
+              else if ((*it)->remove_nested_expression_reference(did))
                 delete (*it);
             }
           }
@@ -15078,7 +15112,7 @@ namespace Legion {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
             if (initialized_data.insert(it->first, it->second))
-              it->first->add_expression_reference();
+              it->first->add_nested_expression_reference(did, &mutator);
         }
         if (!to_delete.empty())
         {
@@ -15097,7 +15131,7 @@ namespace Legion {
               else
                 finder->second += 1;
             }
-            else if ((*it)->remove_expression_reference())
+            else if ((*it)->remove_nested_expression_reference(did))
               delete (*it);
           }
         }
@@ -15109,6 +15143,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::filter_restricted_instances(IndexSpaceExpression *expr,
                   const bool expr_covers, const FieldMask &filter_mask,
+                  ReferenceMutator &mutator,
                   std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
                   std::map<LogicalView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
@@ -15134,7 +15169,7 @@ namespace Legion {
               else
                 finder->second += 1;
             }
-            else if (rit->first->remove_expression_reference())
+            else if (rit->first->remove_nested_expression_reference(did))
               delete rit->first;
             for (FieldMaskSet<InstanceView>::const_iterator it =
                   rit->second.begin(); it != rit->second.end(); it++)
@@ -15229,7 +15264,7 @@ namespace Legion {
               else
                 finder->second += 1;
             }
-            else if ((*it)->remove_expression_reference())
+            else if ((*it)->remove_nested_expression_reference(did))
               delete (*it);
           }
           restricted_fields -= filter_mask;
@@ -15384,7 +15419,7 @@ namespace Legion {
               restricted_instances.find(ait->first);
           if (finder != restricted_instances.end())
           {
-            ait->first->add_expression_reference();
+            ait->first->add_nested_expression_reference(did, &mutator);
             restricted_instances[ait->first].swap(ait->second);
           }
           else
@@ -15412,7 +15447,7 @@ namespace Legion {
             else
               finder->second += 1;
           }
-          else if ((*it)->remove_expression_reference())
+          else if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
         // Rebuild the restricted fields
@@ -15431,6 +15466,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::filter_released_instances(IndexSpaceExpression *expr,
                   const bool expr_covers, const FieldMask &filter_mask,
+                  ReferenceMutator &mutator,
                   std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
                   std::map<LogicalView*,unsigned> *view_refs_to_remove)
     //--------------------------------------------------------------------------
@@ -15511,7 +15547,7 @@ namespace Legion {
             else
               finder->second += 1;
           }
-          else if ((*it)->remove_expression_reference())
+          else if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
       }
@@ -15664,7 +15700,7 @@ namespace Legion {
               released_instances.find(ait->first);
           if (finder != released_instances.end())
           {
-            ait->first->add_expression_reference();
+            ait->first->add_nested_expression_reference(did, &mutator);
             released_instances[ait->first].swap(ait->second);
           }
           else
@@ -15692,7 +15728,7 @@ namespace Legion {
             else
               finder->second += 1;
           }
-          else if ((*it)->remove_expression_reference())
+          else if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
       }
@@ -15882,7 +15918,7 @@ namespace Legion {
         // In all cases we're going to remove any reductions we've overwriting
         const FieldMask reduce_filter = reduction_fields & overwrite_mask;
         if (!!reduce_filter)
-          filter_reduction_instances(expr, expr_covers, reduce_filter);
+          filter_reduction_instances(expr, expr_covers, reduce_filter, mutator);
         if (analysis.add_restriction || 
             !restricted_fields || (restricted_fields * overwrite_mask))
         {
@@ -15927,7 +15963,7 @@ namespace Legion {
               reduction_instances[fidx].push_back(
                   std::make_pair(it->first, expr)); 
               it->first->add_nested_valid_ref(did, &mutator);
-              expr->add_expression_reference();
+              expr->add_nested_expression_reference(did, &mutator);
               fidx = it->second.find_next_set(fidx+1);
             }
           }
@@ -15952,7 +15988,7 @@ namespace Legion {
         }
       }
       // Record that there is initialized data for this equivalence set
-      update_initialized_data(expr, expr_covers, overwrite_mask); 
+      update_initialized_data(expr, expr_covers, overwrite_mask, mutator); 
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
@@ -16027,7 +16063,7 @@ namespace Legion {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
             if (part_finder->second.insert(it->first, it->second))
-              it->first->add_expression_reference();
+              it->first->add_nested_expression_reference(did, &mutator);
           // Deletions after adds to keep references around
           if (!to_delete.empty())
           {
@@ -16042,7 +16078,7 @@ namespace Legion {
               if (!!finder->second)
                 continue;
               part_finder->second.erase(*it);
-              if ((*it)->remove_expression_reference())
+              if ((*it)->remove_nested_expression_reference(did))
                 delete (*it);
             }
           }
@@ -16158,7 +16194,7 @@ namespace Legion {
             aligned::iterator finder = restricted_instances.find(it->first);
           if (finder == restricted_instances.end())
           {
-            it->first->add_expression_reference();
+            it->first->add_nested_expression_reference(did, &mutator);
             analysis.inst_view->add_nested_valid_ref(did, &mutator);
             restricted_instances[it->first].insert(analysis.inst_view, 
                                                    it->second);
@@ -16178,7 +16214,7 @@ namespace Legion {
           if (!finder->second.empty())
             continue;
           restricted_instances.erase(finder);
-          if ((*it)->remove_expression_reference())
+          if ((*it)->remove_nested_expression_reference(did))
             delete (*it);
         }
         // Rebuild the restricted fields
@@ -16190,7 +16226,7 @@ namespace Legion {
           restricted_fields |= it->second.get_valid_mask();
         // If the data was restricted then we just removed the only
         // valid copy so we need to filter the initialized data
-        filter_initialized_data(expr, expr_covers, filter_mask);
+        filter_initialized_data(expr, expr_covers, filter_mask, mutator);
       }
       else
       {
@@ -16204,7 +16240,7 @@ namespace Legion {
             const FieldMask no_partial = to_check - partial_valid_fields;
             if (!!no_partial)
             {
-              filter_initialized_data(expr, expr_covers, no_partial);
+              filter_initialized_data(expr, expr_covers, no_partial, mutator);
               to_check -= no_partial;
             }
             if (!!to_check)
@@ -16254,14 +16290,14 @@ namespace Legion {
                 {
                   const bool covers =
                     (it->first->get_volume() == set_expr->get_volume());
-                  filter_initialized_data(it->first, covers, it->second);
+                  filter_initialized_data(it->first,covers,it->second,mutator);
                 }
               }
             }
           }
         }
         else // everything empty so filter the whole set
-          filter_initialized_data(set_expr, true/*covers*/, filter_mask);
+          filter_initialized_data(set_expr,true/*covers*/,filter_mask,mutator);
       }
     }
 
@@ -16303,6 +16339,7 @@ namespace Legion {
                                                     std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
+      WrapperReferenceMutator mutator(applied);
       // No need for the lock here since we should be called from a copy
       // fill aggregator that is being built while already holding the lock
       if (HAS_READ(usage) && !IS_DISCARD(usage))
@@ -16317,7 +16354,7 @@ namespace Legion {
             new TraceViewSet(runtime->forest, did, region_node);
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
-          tracing_preconditions->insert(view, it->first, it->second, &applied);
+          tracing_preconditions->insert(view, it->first, it->second, mutator);
         if (view->is_reduction_view())
         {
           // Invalidate this reduction view since we read it
@@ -16340,7 +16377,7 @@ namespace Legion {
       else
         tracing_postconditions = 
           new TraceViewSet(runtime->forest, did, region_node);
-      tracing_postconditions->insert(view, expr, user_mask, &applied);
+      tracing_postconditions->insert(view, expr, user_mask, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -16353,7 +16390,8 @@ namespace Legion {
       if (tracing_anticonditions == NULL)
         tracing_anticonditions =
           new TraceViewSet(runtime->forest, did, region_node);
-      tracing_anticonditions->insert(view, expr, mask, &applied);
+      WrapperReferenceMutator mutator(applied);
+      tracing_anticonditions->insert(view, expr, mask, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -16388,26 +16426,27 @@ namespace Legion {
       TraceViewSet *antiviews = NULL;
       TraceViewSet *postviews = NULL;
       // Compute the views to send back
+      LocalReferenceMutator mutator;
       if (tracing_preconditions != NULL)
       {
         previews = 
           new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
         tracing_preconditions->find_overlaps(*previews, expr, 
-                                             (expr == set_expr), mask);
+                                             (expr == set_expr), mask, mutator);
       }
       if (tracing_anticonditions != NULL)
       {
         antiviews =
           new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
         tracing_anticonditions->find_overlaps(*antiviews, expr,
-                                              (expr == set_expr), mask);
+                                             (expr == set_expr), mask, mutator);
       }
       if (tracing_postconditions != NULL)
       {
         postviews =
           new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
         tracing_postconditions->find_overlaps(*postviews, expr,
-                                              (expr == set_expr), mask);
+                                             (expr == set_expr), mask, mutator);
       }
       // Return the results
       RtEvent result = ready_event;
@@ -16437,6 +16476,12 @@ namespace Legion {
           rez.serialize(ready_event);
         }
         runtime->send_equivalence_set_capture_response(target_space, rez);
+        if (previews != NULL)
+          delete previews;
+        if (antiviews != NULL)
+          delete antiviews;
+        if (postviews != NULL)
+          delete postviews;
       }
       else
       {
@@ -16452,6 +16497,16 @@ namespace Legion {
         }
         else if (ready_event.exists())
           Runtime::trigger_event(ready_event);
+      }
+      // See if all the mutation effects have been applied
+      // If not then merge them into the result event
+      const RtEvent applied = mutator.get_done_event();
+      if (applied.exists() && !applied.has_triggered())
+      {
+        if (result.exists() && !result.has_triggered())
+          result = Runtime::merge_events(applied, result);
+        else
+          result = applied;
       }
       // Finally remove our references
       if (result.exists() && !result.has_triggered())
@@ -16509,7 +16564,7 @@ namespace Legion {
           for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
                 expr_refs_to_remove.begin(); it != 
                 expr_refs_to_remove.end(); it++)
-            if (it->first->remove_expression_reference(it->second))
+            if (it->first->remove_nested_expression_reference(did, it->second))
               delete it->first;
         }
       }
@@ -16792,9 +16847,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(
+          runtime->weak_find_distributed_collectable(did));
       FieldMask mask;
       derez.deserialize(mask);
       AddressSpaceID origin;
@@ -16804,16 +16858,21 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      std::set<RtEvent> applied_events; 
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->invalidate_trackers(mask, applied_events, origin,
-                               NULL/*mapping*/, context_uid);
-      if (!applied_events.empty())
-        Runtime::trigger_event(done_event,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(done_event);
+      if (set != NULL)
+      {
+        std::set<RtEvent> applied_events; 
+        set->invalidate_trackers(mask, applied_events, origin,
+                                 NULL/*mapping*/, context_uid);
+        if (set->remove_base_resource_ref(RUNTIME_REF))
+          delete set;
+        if (!applied_events.empty())
+        {
+          Runtime::trigger_event(done_event,
+              Runtime::merge_events(applied_events));
+          return;
+        }
+      }
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -17225,17 +17284,78 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
+      LocalReferenceMutator mutator;
       find_overlap_updates(expr, expr_covers, mask, valid_updates,
                            initialized_updates, reduction_updates, 
                            restricted_updates, released_updates,
                            pack_guards ? &read_only_guards : NULL, 
                            pack_guards ? &reduction_fill_guards : NULL, 
                            precondition_updates, anticondition_updates, 
-                           postcondition_updates);
+                           postcondition_updates, mutator);
       pack_updates(rez, target, valid_updates, initialized_updates,
            reduction_updates, restricted_updates, released_updates, 
            &read_only_guards, &reduction_fill_guards, precondition_updates, 
            anticondition_updates, postcondition_updates);
+      if ((precondition_updates != NULL) || (anticondition_updates != NULL) ||
+          (postcondition_updates != NULL))
+      {
+        const RtEvent applied = mutator.get_done_event();
+        if (applied.exists() && !applied.has_triggered())
+        {
+          std::map<IndexSpaceExpression*,unsigned> expr_refs_to_remove;
+          std::map<LogicalView*,unsigned> view_refs_to_remove;
+          if (precondition_updates != NULL)
+          {
+            precondition_updates->invalidate_all_but(NULL, expr, mask,
+                            &expr_refs_to_remove, &view_refs_to_remove);
+            delete precondition_updates;
+          }
+          if (anticondition_updates != NULL)
+          {
+            anticondition_updates->invalidate_all_but(NULL, expr, mask,
+                            &expr_refs_to_remove, &view_refs_to_remove);
+            delete anticondition_updates;
+          }
+          if (postcondition_updates != NULL)
+          {
+            postcondition_updates->invalidate_all_but(NULL, expr, mask,
+                            &expr_refs_to_remove, &view_refs_to_remove);
+            delete postcondition_updates;
+          }
+          if (!applied.has_triggered())
+          {
+            // Defer removing these references until it is safe to do so
+            DeferReleaseRefArgs args(did);
+            args.view_refs_to_remove->swap(view_refs_to_remove);
+            args.expr_refs_to_remove->swap(expr_refs_to_remove);
+            runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_DEFERRED_PRIORITY, applied);
+          }
+          else
+          {
+            // We can remove these references now
+            for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                  view_refs_to_remove.begin(); it != 
+                  view_refs_to_remove.end(); it++)
+              if (it->first->remove_nested_valid_ref(did, NULL, it->second))
+                delete it->first;
+            for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
+                  expr_refs_to_remove.begin(); it != 
+                  expr_refs_to_remove.end(); it++)
+              if (it->first->remove_nested_expression_reference(did,it->second))
+                delete it->first;
+          }
+        }
+        else
+        {
+          if (precondition_updates != NULL)
+            delete precondition_updates;
+          if (anticondition_updates != NULL)
+            delete anticondition_updates;
+          if (postcondition_updates != NULL)
+            delete postcondition_updates;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17642,12 +17762,13 @@ namespace Legion {
         std::map<IndexSpaceExpression*,unsigned> expr_refs_to_remove;
         filter_valid_instances(expr, expr_covers, mask, mutator, 
                                &expr_refs_to_remove, &view_refs_to_remove);
-        filter_reduction_instances(expr, expr_covers, mask, 
+        filter_reduction_instances(expr, expr_covers, mask, mutator,
                                &expr_refs_to_remove, &view_refs_to_remove);
-        filter_initialized_data(expr, expr_covers, mask, &expr_refs_to_remove);
-        filter_restricted_instances(expr, expr_covers, mask,
+        filter_initialized_data(expr, expr_covers, mask, mutator,
+                                &expr_refs_to_remove);
+        filter_restricted_instances(expr, expr_covers, mask, mutator,
                                &expr_refs_to_remove, &view_refs_to_remove);
-        filter_released_instances(expr, expr_covers, mask,
+        filter_released_instances(expr, expr_covers, mask, mutator,
                                &expr_refs_to_remove, &view_refs_to_remove);
         if (tracing_preconditions != NULL)
         {
@@ -17699,17 +17820,17 @@ namespace Legion {
           for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
                 expr_refs_to_remove.begin(); it != 
                 expr_refs_to_remove.end(); it++)
-            if (it->first->remove_expression_reference(it->second))
+            if (it->first->remove_nested_expression_reference(did, it->second))
               delete it->first;
         }
       }
       else
       {
         filter_valid_instances(expr, expr_covers, mask, mutator); 
-        filter_reduction_instances(expr, expr_covers, mask); 
-        filter_initialized_data(expr, expr_covers, mask);
-        filter_restricted_instances(expr, expr_covers, mask);
-        filter_released_instances(expr, expr_covers, mask);
+        filter_reduction_instances(expr, expr_covers, mask, mutator); 
+        filter_initialized_data(expr, expr_covers, mask, mutator);
+        filter_restricted_instances(expr, expr_covers, mask, mutator);
+        filter_released_instances(expr, expr_covers, mask, mutator);
         if (tracing_preconditions != NULL)
         {
           tracing_preconditions->invalidate_all_but(NULL, expr, mask);
@@ -17762,7 +17883,8 @@ namespace Legion {
       for (std::map<IndexSpaceExpression*,unsigned>::const_iterator it =
             dargs->expr_refs_to_remove->begin(); it !=
             dargs->expr_refs_to_remove->end(); it++)
-        if (it->first->remove_expression_reference(it->second))
+        if (it->first->remove_nested_expression_reference(dargs->did, 
+                                                          it->second))
           delete it->first;
       delete dargs->view_refs_to_remove;
       delete dargs->expr_refs_to_remove;
@@ -17830,6 +17952,7 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
       IndexSpaceExpression *overlap = NULL;
+      WrapperReferenceMutator mutator(applied_events);
       if (!set_expr->is_empty())
       {
         overlap = runtime->forest->intersect_index_spaces(set_expr, 
@@ -17842,15 +17965,17 @@ namespace Legion {
         find_overlap_updates(overlap, overlap_covers, mask, valid_updates,
                              initialized_updates, reduction_updates, 
                              restricted_updates, released_updates,
-                             NULL/*guards*/,NULL/*guards*/,precondition_updates,
-                             anticondition_updates, postcondition_updates);
+                             NULL/*guards*/,NULL/*guards*/,
+                             precondition_updates, anticondition_updates,
+                             postcondition_updates, mutator);
       }
       else if (dst->set_expr->is_empty())
         find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
                              initialized_updates, reduction_updates, 
                              restricted_updates, released_updates,
-                             NULL/*guards*/,NULL/*guards*/,precondition_updates,
-                             anticondition_updates, postcondition_updates);
+                             NULL/*guards*/,NULL/*guards*/,
+                             precondition_updates, anticondition_updates,
+                             postcondition_updates, mutator);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
             restricted_updates, released_updates, precondition_updates,
@@ -17966,7 +18091,8 @@ namespace Legion {
               FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
-              TraceViewSet *&postcondition_updates) const
+              TraceViewSet *&postcondition_updates,
+              ReferenceMutator &mutator) const
     //--------------------------------------------------------------------------
     {
       // Get updates from the total valid instances
@@ -18261,7 +18387,7 @@ namespace Legion {
           precondition_updates = 
             new TraceViewSet(runtime->forest, 0/*did*/, region_node);
           tracing_preconditions->find_overlaps(*precondition_updates,
-                                 overlap_expr, overlap_covers, mask);
+                                 overlap_expr, overlap_covers, mask, mutator);
           if (precondition_updates->empty())
           {
             delete precondition_updates;
@@ -18270,7 +18396,7 @@ namespace Legion {
         }
         else
           tracing_preconditions->find_overlaps(*precondition_updates,
-                                  overlap_expr, overlap_covers, mask);
+                                 overlap_expr, overlap_covers, mask, mutator);
       }
       if (tracing_anticonditions != NULL)
       {
@@ -18279,7 +18405,7 @@ namespace Legion {
           anticondition_updates = 
             new TraceViewSet(runtime->forest, 0/*did*/, region_node);
           tracing_anticonditions->find_overlaps(*anticondition_updates,
-                                    overlap_expr, overlap_covers, mask);
+                                  overlap_expr, overlap_covers, mask, mutator);
           if (anticondition_updates->empty())
           {
             delete anticondition_updates;
@@ -18288,7 +18414,7 @@ namespace Legion {
         }
         else
           tracing_anticonditions->find_overlaps(*anticondition_updates,
-                                    overlap_expr, overlap_covers, mask);
+                                  overlap_expr, overlap_covers, mask, mutator);
       }
       if (tracing_postconditions != NULL)
       {
@@ -18297,7 +18423,7 @@ namespace Legion {
           postcondition_updates = 
             new TraceViewSet(runtime->forest, 0/*did*/, region_node);
           tracing_postconditions->find_overlaps(*postcondition_updates,
-                                    overlap_expr, overlap_covers, mask);
+                                  overlap_expr, overlap_covers, mask, mutator);
           if (postcondition_updates->empty())
           {
             delete postcondition_updates;
@@ -18306,7 +18432,7 @@ namespace Legion {
         }
         else
           tracing_postconditions->find_overlaps(*postcondition_updates,
-                                    overlap_expr, overlap_covers, mask);
+                                  overlap_expr, overlap_covers, mask, mutator);
       }
     }
 
@@ -18411,9 +18537,9 @@ namespace Legion {
             initialized_updates.begin(); it != initialized_updates.end(); it++)
       {
         if (it->first->get_volume() == dst_volume)
-          update_initialized_data(set_expr, true/*covers*/, it->second);
+          update_initialized_data(set_expr, true/*covers*/, it->second,mutator);
         else
-          update_initialized_data(it->first, false/*covers*/, it->second);
+          update_initialized_data(it->first,false/*covers*/,it->second,mutator);
       }
       for (std::map<unsigned,std::list<
             std::pair<ReductionView*,IndexSpaceExpression*> > >::iterator

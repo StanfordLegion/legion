@@ -107,10 +107,6 @@ void top_level_task(const Task *task,
   double *z_ptr = NULL;
   double *xy_ptr = NULL;
   double *xyz_ptr = NULL;
-  const Memory local_sysmem = Machine::MemoryQuery(Machine::get_machine())
-      .has_affinity_to(runtime->get_executing_processor(ctx))
-      .only_kind(Memory::SYSTEM_MEM)
-      .first();
   if (soa_flag == 0) 
   { // SOA
     xy_ptr = (double*)malloc(2*sizeof(double)*(num_elements));
@@ -127,8 +123,7 @@ void top_level_task(const Task *task,
       std::vector<FieldID> attach_fields(2);
       attach_fields[0] = FID_X;
       attach_fields[1] = FID_Y;
-      launcher.attach_array_soa(xy_ptr, false/*column major*/,
-                                attach_fields, local_sysmem);
+      launcher.attach_array_soa(xy_ptr, false/*column major*/, attach_fields);
       xy_pr = runtime->attach_external_resource(ctx, launcher);
     }
     { 
@@ -136,8 +131,7 @@ void top_level_task(const Task *task,
       AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
       std::vector<FieldID> attach_fields(1);
       attach_fields[0] = FID_Z;
-      launcher.attach_array_soa(z_ptr, false/*column major*/,
-                                attach_fields, local_sysmem);
+      launcher.attach_array_soa(z_ptr, false/*column major*/, attach_fields);
       z_pr = runtime->attach_external_resource(ctx, launcher);
     }
   } 
@@ -155,14 +149,14 @@ void top_level_task(const Task *task,
     {
       AttachLauncher launcher(EXTERNAL_INSTANCE, input_lr, input_lr);
       launcher.attach_array_aos(xyz_ptr, false/*column major*/,
-                                layout_constraint_fields, local_sysmem);
+                                layout_constraint_fields);
       launcher.privilege_fields.erase(FID_Z);
       xy_pr = runtime->attach_external_resource(ctx, launcher);
     }
     {
       AttachLauncher launcher(EXTERNAL_INSTANCE, output_lr, output_lr);
       launcher.attach_array_aos(xyz_ptr, false/*column major*/,
-                                layout_constraint_fields, local_sysmem);
+                                layout_constraint_fields);
       launcher.privilege_fields.erase(FID_X);
       launcher.privilege_fields.erase(FID_Y);
       z_pr = runtime->attach_external_resource(ctx, launcher);

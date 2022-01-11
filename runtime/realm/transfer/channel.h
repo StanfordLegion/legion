@@ -38,6 +38,7 @@
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
 #include "realm/bgwork.h"
+#include "realm/utils.h"
 
 namespace Realm {
 
@@ -768,32 +769,62 @@ namespace Realm {
 	  GLOBAL_KIND,
 	  LOCAL_RDMA,
 	  REMOTE_RDMA,
+          MEMORY_BITMASK,
 	};
 	SrcDstType src_type, dst_type;
+        struct MemBitmask {
+          NodeID node;
+          static const int BITMASK_SIZE = (1 << ID::MEMORY_INDEX_WIDTH) >> 6;
+          uint64_t mems[BITMASK_SIZE], ib_mems[BITMASK_SIZE];
+        };
 	union {
 	  Memory src_mem;
 	  Memory::Kind src_kind;
+          MemBitmask src_bitmask;
 	};
 	union {
 	  Memory dst_mem;
 	  Memory::Kind dst_kind;
+          MemBitmask dst_bitmask;
 	};
 	XferDesKind xd_kind;
 	unsigned bandwidth; // units = MB/s = B/us
 	unsigned latency;   // units = ns
+        unsigned frag_overhead; // units = ns
+        unsigned char max_src_dim, max_dst_dim;
 	bool redops_allowed; // TODO: list of redops?
 	bool serdez_allowed; // TODO: list of serdez ops?
+
+        // mutators to modify less-common fields
+        SupportedPath& set_max_dim(int src_and_dst_dim);
+        SupportedPath& set_max_dim(int src_dim, int dst_dim);
+        SupportedPath& allow_redops();
+        SupportedPath& allow_serdez();
+
+        // only valid when a SupportedPath is modifiable by the above methods
+        //  (i.e. only on the creator node and only until another path is added)
+        SupportedPath *chain;
+
+        void populate_memory_bitmask(span <const Memory> mems,
+                                     NodeID node,
+                                     MemBitmask& bitmask);
       };
 
       const std::vector<SupportedPath>& get_paths(void) const;
 
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      // returns 0 if the path is not supported, or a strictly-positive
+      //  estimate of the time required (in nanoseconds) to transfer data
+      //  along a supported path
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 
@@ -803,24 +834,33 @@ namespace Realm {
       virtual void wakeup_xd(XferDes *xd) = 0;
 
     protected:
-      void add_path(Memory src_mem, Memory dst_mem,
-		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed,
-		    XferDesKind xd_kind);
-      void add_path(Memory src_mem, Memory::Kind dst_kind, bool dst_global,
-		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed,
-		    XferDesKind xd_kind);
-      void add_path(Memory::Kind src_kind, bool src_global,
-		    Memory::Kind dst_kind, bool dst_global,
-		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed,
-		    XferDesKind xd_kind);
+      // returns the added path for further modification, but reference is
+      //  only valid until the next call to 'add_path'
+      SupportedPath& add_path(span<const Memory> src_mems,
+                              span<const Memory> dst_mems,
+                              unsigned bandwidth, unsigned latency,
+                              unsigned frag_overhead,
+                              XferDesKind xd_kind);
+      SupportedPath& add_path(span<const Memory> src_mems,
+                              Memory::Kind dst_kind, bool dst_global,
+                              unsigned bandwidth, unsigned latency,
+                              unsigned frag_overhead,
+                              XferDesKind xd_kind);
+      SupportedPath& add_path(Memory::Kind src_kind, bool src_global,
+                              span<const Memory> dst_mems,
+                              unsigned bandwidth, unsigned latency,
+                              unsigned frag_overhead,
+                              XferDesKind xd_kind);
+      SupportedPath& add_path(Memory::Kind src_kind, bool src_global,
+                              Memory::Kind dst_kind, bool dst_global,
+                              unsigned bandwidth, unsigned latency,
+                              unsigned frag_overhead,
+                              XferDesKind xd_kind);
       // TODO: allow rdma path to limit by kind?
-      void add_path(bool local_loopback,
-		    unsigned bandwidth, unsigned latency,
-		    bool redops_allowed, bool serdez_allowed,
-		    XferDesKind xd_kind);
+      SupportedPath& add_path(bool local_loopback,
+                              unsigned bandwidth, unsigned latency,
+                              unsigned frag_overhead,
+                              XferDesKind xd_kind);
 
       std::vector<SupportedPath> paths;
     };
@@ -916,13 +956,16 @@ namespace Realm {
        */
       virtual long available();
 
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
       virtual void wakeup_xd(XferDes *xd) { assert(0); }
@@ -980,13 +1023,20 @@ namespace Realm {
 
       ~MemcpyChannel();
 
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      // helper to list all memories that can be reached by load/store instructions
+      //  on the cpu in the current process
+      static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
+
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
@@ -1033,13 +1083,16 @@ namespace Realm {
       static const bool is_ordered = false;
 
       // override because we don't want to claim non-reduction copies
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual XferDes *create_xfer_des(uintptr_t dma_op,
 				       NodeID launch_node,
@@ -1254,7 +1307,7 @@ namespace Realm {
     struct UpdateBytesWriteMessage {
       XferDesID guid;
       int port_idx;
-      size_t span_start, span_size, pre_bytes_total;
+      size_t span_start, span_size;
 
       static void handle_message(NodeID sender,
 				 const UpdateBytesWriteMessage &args,
@@ -1263,15 +1316,13 @@ namespace Realm {
 
       static void send_request(NodeID target, XferDesID guid,
 			       int port_idx,
-			       size_t span_start, size_t span_size,
-			       size_t pre_bytes_total)
+			       size_t span_start, size_t span_size)
       {
 	ActiveMessage<UpdateBytesWriteMessage> amsg(target);
         amsg->guid = guid;
 	amsg->port_idx = port_idx;
 	amsg->span_start = span_start;
 	amsg->span_size = span_size;
-	amsg->pre_bytes_total = pre_bytes_total;
 	amsg.commit();
       }
     };

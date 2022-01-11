@@ -361,7 +361,8 @@ namespace Legion {
                                       const std::set<FieldID> &fields) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
-      virtual void destroy_field_allocator(FieldSpaceNode *node);
+      virtual void destroy_field_allocator(FieldSpaceNode *node, 
+                                           bool from_application = true);
       virtual void get_local_field_set(const FieldSpace handle,
                                        const std::set<unsigned> &indexes,
                                        std::set<FieldID> &to_set) const = 0;
@@ -2261,7 +2262,8 @@ namespace Legion {
     public:
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle,
                                                          bool unordered);
-      virtual void destroy_field_allocator(FieldSpaceNode *node);
+      virtual void destroy_field_allocator(FieldSpaceNode *node,
+                                           bool from_application = true);
     public:
       virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
@@ -3259,6 +3261,9 @@ namespace Legion {
     inline void TaskContext::begin_runtime_call(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
       if (overhead_tracker == NULL)
         return;
       const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -3271,6 +3276,11 @@ namespace Legion {
     inline void TaskContext::end_runtime_call(void)
     //--------------------------------------------------------------------------
     {
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
       if (overhead_tracker == NULL)
         return;
       const long long current = Realm::Clock::current_time_in_nanoseconds();

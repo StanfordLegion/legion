@@ -2137,6 +2137,11 @@ void top_level_task(const void *args, size_t arglen,
 	it != all_memories.end();
 	it++) {
       Memory m = *it;
+
+      // skip memories with no capacity for creating instances
+      if(m.capacity() == 0)
+        continue;
+
       if(m.kind() == Memory::SYSTEM_MEM) {
 	sysmems.push_back(m);
 	std::set<Processor> pset;

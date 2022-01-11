@@ -144,6 +144,11 @@ namespace Realm {
     log_module.debug() << "module " << name << " create_code_translators";
   }
 
+  void Module::pre_detach_cleanup(void)
+  {
+    log_module.debug() << "module " << name << " pre-detach cleanup";
+  }
+
   void Module::cleanup(void)
   {
     log_module.debug() << "module " << name << " cleanup";

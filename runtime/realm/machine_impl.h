@@ -70,6 +70,8 @@ namespace Realm {
     bool add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
     bool add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
 
+    void update_kind_maps();
+
     int node;
 
     std::map<Processor, MachineProcInfo *> procs;
@@ -332,6 +334,7 @@ namespace Realm {
 
       void restrict_to_node(int new_node_id);
       void restrict_to_kind(Memory::Kind new_kind);
+      void restrict_by_capacity(size_t new_min_bytes);
       void add_predicate(MemoryQueryPredicate *pred);
 
       Memory first_match(void) const;
@@ -351,6 +354,7 @@ namespace Realm {
       int restricted_node_id;
       bool is_restricted_kind;
       Memory::Kind restricted_kind;
+      size_t restricted_min_capacity;
       bool   shared_cached_list, valid_cache;
       std::vector<Memory>* cur_cached_list;
       unsigned int invalid_count, cur_index;

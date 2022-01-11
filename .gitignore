@@ -3,6 +3,7 @@
 .#*
 .DS_Store
 *.a
+*.d
 *.so
 *.o
 *.gz

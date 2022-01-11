@@ -459,8 +459,6 @@ namespace Realm {
       // we can immediately turn this into a (possibly-preconditioned) request to
       //  deallocate the instance's storage - the eventual callback from that
       //  will be what actually destroys the instance
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-
       log_inst.info() << "instance destroyed: inst=" << *this << " wait_on=" << wait_on;
 
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
@@ -1427,6 +1425,15 @@ namespace Realm {
     , size_in_bytes(_size_in_bytes)
     , read_only(true)
   {}
+
+  // returns the suggested memory in which this resource should be created
+  Memory ExternalMemoryResource::suggested_memory() const
+  {
+    // TODO: some way to ask for external memory resources on other ranks?
+    CoreModule *mod = get_runtime()->get_module<CoreModule>("core");
+    assert(mod);
+    return mod->ext_sysmem->me;
+  }
 
   ExternalInstanceResource *ExternalMemoryResource::clone(void) const
   {

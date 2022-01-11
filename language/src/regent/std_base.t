@@ -898,11 +898,11 @@ local symbol = {}
 function symbol:__index(field)
   local value = symbol[field]
   if value ~= nil then return value end
-  error("symbol has no field '" .. field .. "' (in lookup)", 2)
+  error("symbol has no field '" .. tostring(field) .. "' (in lookup)", 2)
 end
 
 function symbol:__newindex(field, value)
-  error("symbol has no field '" .. field .. "' (in assignment)", 2)
+  error("symbol has no field '" .. tostring(field) .. "' (in assignment)", 2)
 end
 
 do
@@ -1037,6 +1037,12 @@ function base.variant:is_inline()
   return self.inline
 end
 
+local terra generate_unique_kernel_id(kernel_name : &int8, len : int32) : &int8
+  var buf : uint64
+  c.murmur_hash3_32(kernel_name, len, 0, &buf)
+  return [&int8](buf)
+end
+
 do
   -- We use this counter to guarantee that each CUDA kernel within a module has a unique name
   -- Note that task-local counters prefixed by task names are insufficient because meta-programmed
@@ -1047,7 +1053,8 @@ do
       self.cudakernels = terralib.newlist()
     end
     local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(global_kernel_counter)
-    local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
+    kernel_name = "__kernel_id_" .. kernel_name
+    local kernel_id = generate_unique_kernel_id(kernel_name, string.len(kernel_name))
     self.cudakernels:insert({
       name = kernel_name,
       kernel = kernel,

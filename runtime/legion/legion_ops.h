@@ -4012,7 +4012,9 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+      virtual RtEvent check_for_coregions(void);
     public:
+      LogicalRegion create_external_instance(void);
       virtual PhysicalManager* create_manager(RegionNode *node,
                                    const std::vector<FieldID> &field_set,
                                    const std::vector<size_t> &field_sizes,
@@ -4025,6 +4027,11 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       void log_requirement(void);
+      ApEvent create_realm_instance(IndexSpaceNode *node,
+                                    const PointerConstraint &pointer,
+                                    const std::vector<FieldID> &set,
+                                    const std::vector<size_t> &sizes,
+                                    PhysicalInstance &instance) const;
     public:
       ExternalResource resource;
       RegionRequirement requirement;
@@ -4036,6 +4043,8 @@ namespace Legion {
       LegionFileMode file_mode;
       PhysicalRegion region;
       unsigned parent_req_index;
+      InstanceSet external_instances;
+      ApUserEvent attached_event;
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
       size_t footprint;
@@ -4083,6 +4092,8 @@ namespace Legion {
       virtual void check_point_requirements(
                     const std::vector<IndexSpace> &spaces);
       virtual bool are_all_direct_children(bool local) { return local; }
+      virtual RtEvent find_coregions(PointAttachOp *point, LogicalRegion region,
+          InstanceSet &instances, ApUserEvent &attached_event);
     public:
       void handle_point_commit(void);
     protected:
@@ -4097,6 +4108,8 @@ namespace Legion {
       RegionTreePath                                privilege_path;
       IndexSpaceNode*                               launch_space;
       std::vector<PointAttachOp*>                   points;
+      std::map<LogicalRegion,std::vector<PointAttachOp*> >  coregions;
+      std::map<LogicalRegion,ApUserEvent>           coregions_attached;
       std::set<RtEvent>                             map_applied_conditions;
       unsigned                                      parent_req_index;
       unsigned                                      points_committed;
@@ -4122,6 +4135,8 @@ namespace Legion {
         const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
         const DomainPoint &point, unsigned index);
     public:
+      // Overload to look for coregions between points
+      virtual RtEvent check_for_coregions(void);
       virtual void trigger_ready(void);
       virtual void trigger_commit(void);
     protected:

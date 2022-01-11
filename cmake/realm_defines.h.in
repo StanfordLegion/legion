@@ -31,6 +31,7 @@
 
 #cmakedefine REALM_USE_CUDA
 #cmakedefine REALM_USE_CUDART_HIJACK
+#cmakedefine REALM_CUDA_DYNAMIC_LOAD
 
 #cmakedefine REALM_USE_HIP
 #cmakedefine REALM_USE_HIP_HIJACK
@@ -54,7 +55,6 @@
 #cmakedefine REALM_USE_MPI
 
 #cmakedefine REALM_USE_LLVM
-#cmakedefine REALM_LLVM_VERSION @REALM_LLVM_VERSION@
 #cmakedefine REALM_ALLOW_MISSING_LLVM_LIBS
 
 #cmakedefine REALM_USE_HDF5

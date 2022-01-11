@@ -139,6 +139,12 @@ namespace Realm {
 				  bool force_fortran_order,
 				  size_t max_stride) const = 0;
 
+    virtual void count_fragments(RegionInstance inst,
+                                 const std::vector<int>& dim_order,
+                                 const std::vector<FieldID>& fields,
+                                 const std::vector<size_t>& fld_sizes,
+                                 std::vector<size_t>& fragments) const = 0;
+
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      const std::vector<int>& dim_order,
 					      const std::vector<FieldID>& fields,
@@ -217,6 +223,7 @@ namespace Realm {
     };
     std::vector<XDTemplate> xd_nodes;
     std::vector<IBInfo> ib_edges;
+    std::vector<unsigned> ib_alloc_order;
   };
 
   class TransferDesc {
@@ -348,6 +355,8 @@ namespace Realm {
     void create_xds();
 
     void notify_ib_allocation(unsigned ib_index, off_t ib_offset);
+    void notify_ib_allocations(unsigned count, unsigned first_index,
+                               const off_t *offsets);
     void notify_xd_completion(XferDesID xd_id);
 
     class XDLifetimeTracker : public Operation::AsyncWorkItem {
@@ -381,7 +390,7 @@ namespace Realm {
     std::vector<XferDesID> xd_ids;
     std::vector<XDLifetimeTracker *> xd_trackers;
     std::vector<off_t> ib_offsets;
-    atomic<int> ib_responses_needed;
+    atomic<unsigned> ib_responses_needed;
     int priority;
   };
 

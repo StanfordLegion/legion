@@ -32,6 +32,7 @@ list(APPEND REALM_SRC
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
+  realm/transfer/ib_memory.h               realm/transfer/ib_memory.cc
   realm/deppart/byfield.h                  realm/deppart/byfield.cc
   realm/deppart/deppart_config.h
   realm/deppart/image.h
@@ -438,11 +439,15 @@ if(Legion_USE_CUDA)
     string(REGEX REPLACE "[^\;]*cudart[^\;]*(\;?)" "" CUDA_LIBRARIES "${CUDA_LIBRARIES}")
     set(CUDA_LIBRARIES ${CUDA_LIBRARIES} PARENT_SCOPE)
   else()
-    target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDART_LIBRARY})
+    if(NOT REALM_CUDA_DYNAMIC_LOAD)
+      target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDART_LIBRARY})
+    endif()
   endif()
 
   target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
-  target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+  if(NOT REALM_CUDA_DYNAMIC_LOAD)
+    target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+  endif()
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 endif()
@@ -753,12 +758,8 @@ if(LEGION_CUDA_SRC)
     RELEASE -O2
     RELWITHDEBINFO -g -O2)
   target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
-  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
-
-  # complex reduction ops bring in a public dependency on cuda headers
-  if(Legion_REDOP_COMPLEX)
-    target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
-  endif()
+  target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(LEGION_HIP_SRC)

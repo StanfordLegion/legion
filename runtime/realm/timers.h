@@ -20,24 +20,13 @@
 
 #include "realm/realm_config.h"
 
-#ifdef DETAILED_TIMING
-#include "realm/network.h"
+#include "realm/atomics.h"
+
+#include <cstdint>
+
+#if defined(__i386__) || defined(__x86_64__)
+#define REALM_TIMERS_USE_RDTSC
 #endif
-
-#include <stdio.h>
-#include <map>
-
-// outside of namespace because 50-letter-long enums are annoying
-enum {
-  TIME_NONE,
-  TIME_KERNEL,
-  TIME_COPY,
-  TIME_HIGH_LEVEL,
-  TIME_LOW_LEVEL,
-  TIME_MAPPER,
-  TIME_SYSTEM,
-  TIME_AM,
-};
 
 namespace Realm {
 
@@ -51,7 +40,11 @@ namespace Realm {
   //  seconds - uses a double to store fractional seconds
   //  microseconds - uses a 64-bit integer, no fractional microseconds
   //  nanoseconds - uses a 64-bit integer, no fractional nanoseconds
-  class Clock {
+  //
+  // Also provided is the "native" time, which is ideally super-low-overhead
+  //  to query (e.g. reading a cpu time stampe counter), but isn't necessarily
+  //  in units of nanoseconds, nor is it synchronized between processes
+  class REALM_PUBLIC_API Clock {
   public:
     static double current_time(bool absolute = false);
     static long long current_time_in_microseconds(bool absolute = false);
@@ -63,9 +56,81 @@ namespace Realm {
     // set_zero_time() should only be called by the runtime init code
     static void set_zero_time(void);
 
+    // inlined version when we're using CPU time stamp counter
+    static uint64_t native_time();
+
+    // conversion between native and nanoseconds
+    static uint64_t native_to_nanoseconds_absolute(uint64_t native);
+    static uint64_t nanoseconds_to_native_absolute(uint64_t nanoseconds);
+    static int64_t native_to_nanoseconds_delta(int64_t d_native);
+    static int64_t nanoseconds_to_native_delta(int64_t d_nanoseconds);
+
+    // initialization/calibration of timing
+    static void calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
+                          uint64_t force_cpu_tsc_freq);
+
+    class TimescaleConverter {
+    public:
+      // defaults to identity conversion
+      TimescaleConverter();
+
+      // learns an affine translation between two timescales based on two
+      //  samples from each timescale (ta1 and tb1 should be the "same time",
+      //  and ta2 and tb2 should be a (later) "same time")
+      // fails if the translation cannot be represented (i.e. if the
+      //  time intervals differ by a factor of more than 2^32)
+      bool set(uint64_t ta1, uint64_t tb1, uint64_t ta2, uint64_t tb2);
+
+      // conversion of absolute times ("forward" = A->B, "reverse" = B-A)
+      uint64_t convert_forward_absolute(uint64_t ta);
+      uint64_t convert_reverse_absolute(uint64_t tb);
+
+      // conversion of time deltas (slightly cheaper, but must fit in int64_t)
+      int64_t convert_forward_delta(int64_t da);
+      int64_t convert_reverse_delta(int64_t db);
+
+    protected:
+      uint64_t a_zero, b_zero, slope_a_to_b, slope_b_to_a;
+    };
+
   protected:
-    REALM_INTERNAL_API_EXTERNAL_LINKAGE
-    static long long zero_time;
+#ifdef REALM_TIMERS_USE_RDTSC
+    static uint64_t raw_cpu_tsc();
+#endif
+
+    // slower function-call version of native_time for platform portability
+    static uint64_t native_time_slower();
+
+    static uint64_t zero_time;
+    static TimescaleConverter native_to_nanoseconds;
+#ifdef REALM_TIMERS_USE_RDTSC
+    static bool cpu_tsc_enabled;
+#endif
+  };
+
+  // a central theme for a responsive runtime is to place limits on how long
+  //  is spent doing any one task - this is described using a TimeLimit object
+  class TimeLimit {
+  public:
+    // default constructor generates a time limit infinitely far in the future
+    TimeLimit();
+
+    // these constructors describe a limit in terms of Realm's clock
+    static TimeLimit absolute(long long absolute_time_in_nsec,
+			      atomic<bool> *_interrupt_flag = 0);
+    static TimeLimit relative(long long relative_time_in_nsec,
+			      atomic<bool> *_interrupt_flag = 0);
+
+    // often the desired time limit is "idk, something responsive", so
+    //  have a common way to pick a completely-made-up number
+    static TimeLimit responsive();
+
+    bool is_expired() const;
+    bool will_expire(long long additional_nsec) const;
+
+  protected:
+    uint64_t limit_native;
+    atomic<bool> *interrupt_flag;
   };
 
   class Logger;
@@ -81,92 +146,8 @@ namespace Realm {
     const char *message;
     bool difference;
     Logger *logger;
-    double start_time;
+    uint64_t start_native;
   };
-
-  // DetailedTimer allows for precise timing of what a given thread was doing when (or how long)
-  class DetailedTimer {
-  public:
-    static void init_timers(void);
-#ifdef DETAILED_TIMING
-    static void clear_timers(bool all_nodes = true);
-    static void push_timer(int timer_kind);
-    static void pop_timer(void);
-    static void roll_up_timers(std::map<int, double>& timers, bool local_only);
-    static void report_timers(bool local_only = false);
-#else
-    static void clear_timers(bool all_nodes = true) {}
-    static void push_timer(int timer_kind) {}
-    static void pop_timer(void) {}
-    static void roll_up_timers(std::map<int, double>& timers, bool local_only) {}
-    static void report_timers(bool local_only = false) {}
-#endif
-    class ScopedPush {
-    public:
-      ScopedPush(int timer_kind) { push_timer(timer_kind); }
-      ~ScopedPush(void) { pop_timer(); }
-    };
-
-    static const char* stringify(int level)
-    {
-      switch (level)
-        {
-	case TIME_NONE:
-	  return "NONE";
-	case TIME_KERNEL:
-	  return "KERNEL";
-	case TIME_COPY:
-	  return "COPY";
-	case TIME_HIGH_LEVEL:
-	  return "HIGH-LEVEL";
-	case TIME_LOW_LEVEL:
-	  return "LOW-LEVEL";
-	case TIME_MAPPER:
-	  return "MAPPER";
-	case TIME_SYSTEM:
-	  return "SYSTEM";
-	case TIME_AM:
-	  return "ACTV_MESG";
-	default:
-	  break;
-        }
-      // We only call this at the end of the run so leaking a little memory isn't too bad
-      char *result = new char[16];
-      snprintf(result,16,"%d",level);
-      return result;
-    }
-  };
-
-  // active messages
-
-#ifdef DETAILED_TIMING
-  struct ClearTimersMessage {
-    int dummy;
-
-    static void handle_message(NodeID sender,
-			       const ClearTimersMessage &args,
-			       const void *data,
-			       size_t datalen);
-  };
-
-  struct TimerDataRequestMessage {
-    void *rollup_ptr;
-
-    static void handle_message(NodeID sender,
-			       const TimeDataRequestMessage &args,
-			       const void *data,
-			       size_t datalen);
-  };
-  
-  struct TimerDataResponseMessage {
-    void *rollup_ptr;
-
-    static void handle_message(NodeID sender,
-			       const TimerDataResponseMessage &args,
-			       const void *data,
-			       size_t datalen);
-  };
-#endif
   
 }; // namespace Realm
 

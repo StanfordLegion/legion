@@ -22,52 +22,14 @@
 #include "realm/threads.h"
 #include "realm/mutex.h"
 #include "realm/cmdline.h"
+#include "realm/timers.h"
 
 #include <string>
-
-#if defined(__i386__) || defined(__x86_64__)
-#define REALM_TIMELIMIT_USE_RDTSC
-#endif
 
 namespace Realm {
 
   class BackgroundWorkItem;
   class BackgroundWorkThread;
-
-  // a central theme with background workers is to place limits on how long
-  //  they do any one task - this is described using a TimeLimit object
-  class TimeLimit {
-  public:
-    // default constructor generates a time limit infinitely far in the future
-    TimeLimit();
-
-    // these constructors describe a limit in terms of Realm's clock (or
-    //  RDTSC, if available)
-    static TimeLimit absolute(long long absolute_time_in_nsec,
-			      atomic<bool> *_interrupt_flag = 0);
-    static TimeLimit relative(long long relative_time_in_nsec,
-			      atomic<bool> *_interrupt_flag = 0);
-
-    // often the desired time limit is "idk, something responsive", so
-    //  have a common way to pick a completely-made-up number
-    static TimeLimit responsive();
-
-    bool is_expired() const;
-    bool will_expire(long long additional_nsec) const;
-
-#ifdef REALM_TIMELIMIT_USE_RDTSC
-    static void calibrate_rdtsc();
-#endif
-
-  protected:
-#ifdef REALM_TIMELIMIT_USE_RDTSC
-    static uint64_t rdtsc_per_64k_nanoseconds;
-    uint64_t limit_rdtsc;
-#else
-    long long limit_time;
-#endif
-    atomic<bool> *interrupt_flag;
-  };
 
   class BackgroundWorkManager {
   public:
@@ -126,8 +88,10 @@ namespace Realm {
     void advertise_work(unsigned slot);
 
     Config cfg;
+
+    // mutex protects assignment of work items to slots
+    Mutex mutex;
     atomic<unsigned> num_work_items;
-    atomic<int> active_work_items;
     atomic<BitMask> active_work_item_mask[BITMASK_ARRAY_SIZE];
 
     atomic<int> work_item_usecounts[MAX_WORK_ITEMS];
@@ -135,10 +99,27 @@ namespace Realm {
 
     friend class BackgroundWorkThread;
 
-    Mutex mutex;
-    CondVar condvar;
-    atomic<int> shutdown_flag;
-    atomic<int> sleeping_workers;
+    // to manage sleeping workers, we need to stuff three things into a
+    //  single atomically-updatable state variable:
+    // a) the number of active work items - no worker should sleep if there are
+    //     any active work items, and any increment of the active work items
+    //     should wake up one sleeping worker (unless there are none)
+    //     (NOTE: this counter can temporarily underflow, so needs to be the top
+    //       field in the variable to avoid temporarily corrupting other fields)
+    // b) the number of sleeping workers
+    // c) a bit indicating if a shutdown has been requested (which should wake
+    //     up all remaining workers)
+    static const uint32_t STATE_SHUTDOWN_BIT = 1;
+    static const uint32_t STATE_ACTIVE_ITEMS_MASK = 0xFFFF;
+    static const unsigned STATE_ACTIVE_ITEMS_SHIFT = 16;
+    static const uint32_t STATE_SLEEPING_WORKERS_MASK = 0xFFF;
+    static const unsigned STATE_SLEEPING_WORKERS_SHIFT = 4;
+    atomic<uint32_t> worker_state;
+
+    // sleeping workers go in a doorbell list with a delegating mutex
+    DelegatingMutex db_mutex;
+    DoorbellList db_list;
+
     std::vector<BackgroundWorkThread *> dedicated_workers;
   };
 
@@ -188,7 +169,5 @@ namespace Realm {
   };
 
 };
-
-#include "realm/bgwork.inl"
 
 #endif

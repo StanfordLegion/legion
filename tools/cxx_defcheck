@@ -57,6 +57,12 @@ while i < len(sys.argv):
         i += 2
         continue
 
+    if sys.argv[i].startswith('-M'):
+        # dependency generation only in real command
+        real_cmd.append(sys.argv[i])
+        i += 1
+        continue
+
     if sys.argv[i] == '--defcheck':
         # this doesn't appear in either command line
         # allow support for this flag to be tested with magic header name

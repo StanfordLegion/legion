@@ -330,6 +330,10 @@ namespace Realm {
     span(const std::vector<typename remove_const<T>::type>& v)
       : base(v.data()), length(v.size()) {}
 
+    // from a scalar
+    span(T& v)
+      : base(&v), length(1) {}
+
     T& operator[](size_t idx) const { return base[idx]; }
 
     T *data() const { return base; }

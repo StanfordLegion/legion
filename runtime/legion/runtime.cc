@@ -75,8 +75,13 @@ namespace Legion {
     __thread AutoLock *local_lock_list = NULL;
     __thread UniqueID implicit_provenance = 0;
     __thread unsigned inside_registration_callback = NO_REGISTRATION_CALLBACK;
+    __thread ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 #ifdef DEBUG_LEGION_WAITS
     __thread int meta_task_id = -1;
+#endif
+#ifdef DEBUG_LEGION_CALLERS
+    __thread LgTaskID implicit_task_kind = LG_SCHEDULER_ID;
+    __thread LgTaskID implicit_task_caller = LG_SCHEDULER_ID;
 #endif
 
     const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
@@ -110,7 +115,7 @@ namespace Legion {
       if (future_map.impl != NULL)
       {
         point_set = future_map.impl->future_map_domain;
-        point_set->add_expression_reference();
+        point_set->add_base_expression_reference(RUNTIME_REF);
         dimensionality = point_set->get_num_dims();
       }
       else
@@ -133,7 +138,8 @@ namespace Legion {
     ArgumentMapImpl::~ArgumentMapImpl(void)
     //--------------------------------------------------------------------------
     {
-      if ((point_set != NULL) && point_set->remove_expression_reference())
+      if ((point_set != NULL) && 
+          point_set->remove_base_expression_reference(RUNTIME_REF))
         delete point_set;
     }
 
@@ -384,7 +390,8 @@ namespace Legion {
       // Compute the point set if needed
       if (update_point_set)
       {
-        if ((point_set != NULL) && point_set->remove_expression_reference())
+        if ((point_set != NULL) &&
+            point_set->remove_base_expression_reference(RUNTIME_REF))
           delete point_set;
         if (!arguments.empty())
         {
@@ -414,7 +421,7 @@ namespace Legion {
           }
           IndexSpace point_space = ctx->find_index_launch_space(point_domain);
           point_set = runtime->forest->get_node(point_space);
-          point_set->add_expression_reference();
+          point_set->add_base_expression_reference(RUNTIME_REF);
         }
         else
           point_set = NULL;
@@ -455,10 +462,11 @@ namespace Legion {
         return;
       // Otherwise we need to make them equivalent
       future_map.impl->get_all_futures(arguments);
-      if ((point_set != NULL) && point_set->remove_expression_reference())
+      if ((point_set != NULL) && 
+          point_set->remove_base_expression_reference(RUNTIME_REF))
         delete point_set;
       point_set = future_map.impl->future_map_domain;
-      point_set->add_expression_reference();
+      point_set->add_base_expression_reference(RUNTIME_REF);
       update_point_set = false;
       // Count how many dependent futures we have
 #ifdef DEBUG_LEGION
@@ -478,7 +486,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldAllocatorImpl::FieldAllocatorImpl(FieldSpaceNode *n, TaskContext *ctx,
                                            RtEvent ready)
-      : field_space(n->handle), node(n), context(ctx), ready_event(ready)
+      : field_space(n->handle), node(n), context(ctx), ready_event(ready),
+        free_from_application(true)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -503,7 +512,7 @@ namespace Legion {
     FieldAllocatorImpl::~FieldAllocatorImpl(void)
     //--------------------------------------------------------------------------
     {
-      context->destroy_field_allocator(node);
+      context->destroy_field_allocator(node, free_from_application);
       if (context->remove_reference())
         delete context;
       if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
@@ -1238,7 +1247,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(target.address_space() == runtime->address_space);
+      assert((target.address_space() == runtime->address_space) ||
+              runtime->separate_runtime_instances);
 #endif
       // Check to see if we have it
       {
@@ -2654,7 +2664,7 @@ namespace Legion {
         memcpy(buffer, redop->identity, redop->sizeof_rhs);
         Realm::CopySrcDstField src, dst;
         src.set_fill(buffer, size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
@@ -2688,15 +2698,16 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, source->size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> zero(0);
-        const Rect<1,coord_t> rect(zero, zero);
+        const Point<1,coord_t> lo(0);
+        const Point<1,coord_t> hi(source->size - 1);
+        const Rect<1,coord_t> rect(lo, hi);
         if (use_event.exists() && !use_event.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
               Runtime::merge_events(NULL, source->get_ready(check_source_ready),
@@ -2733,16 +2744,17 @@ namespace Legion {
       {
         // We need to offload this to realm
         Realm::CopySrcDstField src, dst;
-        src.set_field(source->get_instance(), 0/*field id*/, source->size);
-        dst.set_field(get_instance(), 0/*field id*/, size);
+        src.set_field(source->get_instance(), 0/*field id*/, 1);
+        dst.set_field(get_instance(), 0/*field id*/, 1);
         dst.set_redop(redop_id, true/*fold*/);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_copy_request(requests, op);
-        const Point<1,coord_t> zero(0);
-        const Rect<1,coord_t> rect(zero, zero);
+        const Point<1,coord_t> lo(0);
+        const Point<1,coord_t> hi(source->size - 1);
+        const Rect<1,coord_t> rect(lo, hi);
         if (use_event.exists() && !use_event.has_triggered())
           return ApEvent(rect.copy(srcs, dsts, requests,
                   Runtime::merge_events(NULL, source->get_ready(),
@@ -2815,12 +2827,13 @@ namespace Legion {
         assert(external_allocation);
 #endif
         const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, size);
+        const std::vector<size_t> sizes(1, 1);
         const int dim_order[1] = { 0 };
         const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-        const Point<1,coord_t> zero(0);
+        const Point<1,coord_t> lo(0);
+        const Point<1,coord_t> hi(size - 1);
         const Realm::IndexSpace<1,coord_t> rect_space(
-                      Realm::Rect<1,coord_t>(zero, zero));
+                      Realm::Rect<1,coord_t>(lo, hi));
         Realm::InstanceLayoutGeneric *ilg =
           Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
               rect_space, constraints, dim_order);
@@ -6594,6 +6607,7 @@ namespace Legion {
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
       vis_mems.has_affinity_to(proc);
+      vis_mems.has_capacity(1/*at least one byte*/);
       for (Machine::MemoryQuery::iterator it = vis_mems.begin();
             it != vis_mems.end(); it++)
       {
@@ -8527,7 +8541,6 @@ namespace Legion {
     { 
       bool add_min_reference = false;
       bool remove_min_reference = false;
-      IgnoreReferenceMutator mutator;
       if (!is_owner)
       {
         RtUserEvent never_gc_wait;
@@ -8613,7 +8626,7 @@ namespace Legion {
             manager->send_remote_valid_decrement(owner_space, NULL,
                                                  reference_effects);
             if (reference_effects.exists())
-              mutator.record_reference_mutation_effect(reference_effects);
+              local_mutator.record_reference_mutation_effect(reference_effects);
             // Then record it
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -8630,12 +8643,18 @@ namespace Legion {
             info.mapper_priorities[key] = LEGION_GC_NEVER_PRIORITY;
           }
           if (remove_duplicate && 
-              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+              manager->remove_base_valid_ref(NEVER_GC_REF))
             delete manager; 
         }
       }
       else
       {
+        // If this a max priority, try adding the reference beforehand, if
+        // it fails then we know the instance is already deleted so whatever
+        DomainPoint dummy;
+        if ((priority == LEGION_GC_NEVER_PRIORITY) &&
+            !manager->acquire_instance(NEVER_GC_REF, NULL/*mutator*/, dummy))
+          return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
@@ -8725,11 +8744,11 @@ namespace Legion {
 #endif
       if (add_min_reference)
       {
+        LocalReferenceMutator mutator;
         manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
         complete_acquire(manager);
       }
-      if (remove_min_reference && 
-          manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+      if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
         delete manager;
     }
 
@@ -9590,7 +9609,9 @@ namespace Legion {
           complete_acquire(manager);
         }
       }
-      // Remote our reference
+      // Remove our references
+      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        delete manager;
       if (manager->remove_base_resource_ref(RUNTIME_REF))
         delete manager;
     }
@@ -10419,12 +10440,12 @@ namespace Legion {
       }
       // Create the layout description for this instance
       const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-      const std::vector<size_t> sizes(1, size);
+      const std::vector<size_t> sizes(1, 1);
       const int dim_order[1] = { 0 };
       const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
       const Realm::IndexSpace<1,coord_t> rect_space(
           Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                 Realm::Point<1,coord_t>(0)));
+                                 Realm::Point<1,coord_t>(size-1)));
       Realm::InstanceLayoutGeneric *ilg =
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
@@ -11350,6 +11371,10 @@ namespace Legion {
       // messages so we can just set this to zero.
       *((UniqueID*)sending_buffer) = 0;
       sending_index = sizeof(UniqueID);
+#ifdef DEBUG_LEGION_CALLERS
+      *((LgTaskID*)(((char*)sending_buffer)+sending_index)) = LG_SCHEDULER_ID;
+      sending_index += sizeof(LgTaskID);
+#endif
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
       *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
@@ -11412,6 +11437,9 @@ namespace Legion {
       size_t buffer_size = rez.get_used_bytes();
       const char *buffer = (const char*)rez.get_buffer();
       const size_t header_size = 
+#ifdef DEBUG_LEGION_CALLERS
+        sizeof(LgTaskID) +
+#endif
         sizeof(k) + sizeof(implicit_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
       AutoLock c_lock(channel_lock);
@@ -11428,6 +11456,10 @@ namespace Legion {
         sending_index += sizeof(k);
         *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
         sending_index += sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        sending_index += sizeof(implicit_task_kind);
+#endif
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         while (buffer_size > 0)
@@ -11457,6 +11489,10 @@ namespace Legion {
         sending_index += sizeof(k);
         *((UniqueID*)(sending_buffer+sending_index)) = implicit_provenance;
         sending_index += sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+        *((LgTaskID*)(sending_buffer+sending_index)) = implicit_task_kind;
+        sending_index += sizeof(implicit_task_kind);
+#endif
         *((size_t*)(sending_buffer+sending_index)) = buffer_size;
         sending_index += sizeof(buffer_size);
         // Then copy over the buffer
@@ -11505,7 +11541,10 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) + 
+      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) +
+#ifdef DEBUG_LEGION_CALLERS
+        sizeof(LgTaskID) +
+#endif
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
@@ -11870,6 +11909,12 @@ namespace Legion {
         implicit_provenance = *((const UniqueID*)args);
         args += sizeof(implicit_provenance);
         arglen -= sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+        implicit_task_kind = (LgTaskID)(LG_MESSAGE_ID + kind);
+        implicit_task_caller = *((const LgTaskID*)args);
+        args += sizeof(implicit_task_caller);
+        arglen -= sizeof(implicit_task_caller);
+#endif
         size_t message_size = *((const size_t*)args);
         args += sizeof(message_size);
         arglen -= sizeof(message_size);
@@ -11965,11 +12010,6 @@ namespace Legion {
             {
               runtime->handle_index_space_remote_expression_response(derez,
                                                           remote_address_space);
-              break;
-            }
-          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION:
-            {
-              runtime->handle_index_space_remote_expression_invalidation(derez);
               break;
             }
           case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
@@ -12157,7 +12197,8 @@ namespace Legion {
             }
           case INDEX_SPACE_DESTRUCTION_MESSAGE:
             {
-              runtime->handle_index_space_destruction(derez); 
+              runtime->handle_index_space_destruction(derez,
+                                                      remote_address_space);
               break;
             }
           case INDEX_PARTITION_DESTRUCTION_MESSAGE:
@@ -18229,11 +18270,19 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      bool result = forest->is_index_partition_disjoint(p);
+      const bool result = forest->is_index_partition_disjoint(p);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+      else if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
       return result;
     }
 
@@ -18241,18 +18290,35 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_disjoint(p);
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
+      const bool result = forest->is_index_partition_disjoint(p);
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
       bool result = forest->is_index_partition_complete(p);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
+      else if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
       return result;
     }
 
@@ -18260,7 +18326,16 @@ namespace Legion {
     bool Runtime::is_index_partition_complete(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_complete(p);
+#ifdef DEBUG_LEGION
+      assert(implicit_reference_tracker == NULL);
+#endif
+      const bool result = forest->is_index_partition_complete(p);
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -21492,16 +21567,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_remote_expression_invalidation(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION,
-          EXPRESSION_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_space_generate_color_request(AddressSpaceID target,
                                                           Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23650,14 +23715,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_remote_expression_invalidation(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_expression_invalidation(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_index_space_generate_color_request(Deserializer &derez,
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -23914,7 +23971,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_destruction(Deserializer &derez)
+    void Runtime::handle_index_space_destruction(Deserializer &derez,
+                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -23926,7 +23984,7 @@ namespace Legion {
       assert(done.exists());
 #endif
       std::set<RtEvent> applied;
-      forest->destroy_index_space(handle, applied);
+      forest->destroy_index_space(handle, source, applied);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -26170,8 +26228,24 @@ namespace Legion {
           return finder->second;
       }
       if (!found)
+      {
+#ifdef DEBUG_LEGION_CALLERS
+        LG_TASK_DESCRIPTIONS(task_names);
+        LG_MESSAGE_DESCRIPTIONS(message_names);
         log_run.error("Unable to find distributed collectable %llx "
-                    "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+                      "with type %lld in %s from %s", did,
+                      LEGION_DISTRIBUTED_HELP_DECODE(did),
+                      (implicit_task_kind < LG_MESSAGE_ID) ?
+                        task_names[implicit_task_kind] :
+                        message_names[implicit_task_kind-LG_MESSAGE_ID],
+                      (implicit_task_caller < LG_MESSAGE_ID) ?
+                        task_names[implicit_task_caller] :
+                        message_names[implicit_task_caller-LG_MESSAGE_ID]);
+#else
+        log_run.error("Unable to find distributed collectable %llx with "
+                      "type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+#endif
+      }
       // Wait for it to be ready
       ready.wait();
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
@@ -26703,7 +26777,7 @@ namespace Legion {
       std::set<RtEvent> applied;
       for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, applied);
+        forest->destroy_index_space(it->second, address_space, applied);
       for (std::map<ProjectionID,ProjectionFunction*>::const_iterator it =
            projection_functions.begin(); it != projection_functions.end(); it++)
         it->second->prepare_for_shutdown();
@@ -28393,6 +28467,9 @@ namespace Legion {
     Memory Runtime::find_local_memory(Processor proc, Memory::Kind mem_kind)
     //--------------------------------------------------------------------------
     {
+      if ((mem_kind == Memory::SYSTEM_MEM) &&
+          (proc.address_space() == address_space))
+        return runtime_system_memory;
       // Check to see if this is a local processor in which case
       // we should be able to do this much faster
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
@@ -28401,6 +28478,10 @@ namespace Legion {
         return finder->second->find_best_visible_memory(mem_kind);
       // Otherwise look up the result
       Machine::MemoryQuery visible_memories(machine);
+      // Must be of the right kind
+      visible_memories.only_kind(mem_kind);
+      // Must not be empty
+      visible_memories.has_capacity(1/*at least one byte*/);
       // Have to handle the case where this is a processor group
       if (proc.kind() == Processor::PROC_GROUP)
       {
@@ -28412,7 +28493,6 @@ namespace Legion {
       }
       else
         visible_memories.best_affinity_to(proc);
-      visible_memories.only_kind(mem_kind);
       if (visible_memories.count() == 0)
       {
         const char *mem_names[] = {
@@ -28967,6 +29047,16 @@ namespace Legion {
           return "Layout Constraints";
         case COPY_FILL_AGGREGATOR_ALLOC:
           return "Copy Fill Aggregator";
+        case UNION_EXPR_ALLOC:
+          return "Union Index Space Expression";
+        case INTERSECTION_EXPR_ALLOC:
+          return "Intersection Index Space Expression";
+        case DIFFERENCE_EXPR_ALLOC:
+          return "Difference Index Space Expression";
+        case INSTANCE_EXPR_ALLOC:
+          return "Instance Index Space Expression";
+        case REMOTE_EXPR_ALLOC:
+          return "Remote Index Space Expression";
         default:
           assert(false); // should never get here
       }
@@ -31388,6 +31478,7 @@ namespace Legion {
       if (!runtime->local_utils.empty())
         assert(implicit_context == NULL); // this better hold
 #endif
+      assert(implicit_reference_tracker == NULL);
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -31397,9 +31488,17 @@ namespace Legion {
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_caller = *((const LgTaskID*)data);
+      data += sizeof(implicit_task_caller);
+      arglen -= sizeof(implicit_task_caller);
+#endif
       LgTaskID tid = *((const LgTaskID*)data);
 #ifdef DEBUG_LEGION_WAITS
       meta_task_id = tid;
+#endif
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_kind = tid;
 #endif
       data += sizeof(tid);
       arglen -= sizeof(tid);
@@ -32031,6 +32130,11 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
+      }
 #ifdef DEBUG_LEGION
       if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
         runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);
@@ -32108,6 +32212,7 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
 #ifdef DEBUG_LEGION
       assert(userlen == sizeof(Runtime**));
+      assert(implicit_reference_tracker == NULL);
 #endif
       implicit_runtime = runtime;
       // We immediately bump the priority of all meta-tasks once they start
@@ -32117,9 +32222,17 @@ namespace Legion {
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_caller = *((const LgTaskID*)data);
+      data += sizeof(implicit_task_caller);
+      arglen -= sizeof(implicit_task_caller);
+#endif
       LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
+#ifdef DEBUG_LEGION_CALLERS
+      implicit_task_kind = tid;
+#endif
       switch (tid)
       {
         case LG_FUTURE_CALLBACK_TASK_ID:
@@ -32157,6 +32270,11 @@ namespace Legion {
 #endif
         default:
           assert(false); // should never get here
+      }
+      if (implicit_reference_tracker != NULL)
+      {
+        delete implicit_reference_tracker;
+        implicit_reference_tracker = NULL;
       }
 #ifdef DEBUG_LEGION
       runtime->decrement_total_outstanding_tasks(tid, true/*meta*/);

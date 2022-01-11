@@ -19,7 +19,7 @@
 #include "realm/transfer/channel.h"
 
 #include "realm/transfer/lowlevel_dma.h"
-#include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 #include "realm/inst_layout.h"
 
 #ifdef REALM_ON_WINDOWS
@@ -30,7 +30,9 @@ typedef SSIZE_T ssize_t;
 namespace Realm {
 
   extern Logger log_dma;
+  extern Logger log_ib_alloc;
   Logger log_xplan("xplan");
+  Logger log_xpath("xpath");
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -168,6 +170,76 @@ namespace Realm {
 	return is_done;
       }
     }
+  }
+
+  // finds the largest subrectangle of 'domain' that starts with 'start',
+  //  lies entirely within 'restriction', and is consistent with an iteration
+  //  order (over the original 'domain') of 'dim_order'
+  // the subrectangle is returned in 'subrect', the start of the next subrect
+  //  is in 'next_start', and the return value indicates whether the 'domain'
+  //  has been fully covered
+  template <int N, typename T>
+  static bool next_subrect(const Rect<N,T>& domain, const Point<N,T>& start,
+                           const Rect<N,T>& restriction, const int *dim_order,
+                           Rect<N,T>& subrect, Point<N,T>& next_start)
+  {
+    // special case for when we can do the whole domain in one subrect
+    if((start == domain.lo) && restriction.contains(domain)) {
+      subrect = domain;
+      return true;
+    }
+
+#ifdef DEBUG_REALM
+    // starting point better be inside the restriction
+    assert(restriction.contains(start));
+#endif
+    subrect.lo = start;
+
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+
+      // can we go to the end of the domain in this dimension?
+      if(domain.hi[d] <= restriction.hi[d]) {
+        // we can go to the end of the domain in this dimension ...
+        subrect.hi[d] = domain.hi[d];
+        next_start[d] = domain.lo[d];
+
+        if(start[d] == domain.lo[d]) {
+          // ... and since we started at the start, we can continue to next dim
+          continue;
+        } else {
+          // ... but we have to stop since this wasn't a full span
+          if(++di < N) {
+            d = dim_order[di];
+            subrect.hi[d] = start[d];
+            next_start[d] = start[d] + 1;
+
+            while(++di < N) {
+              d = dim_order[di];
+              subrect.hi[d] = start[d];
+              next_start[d] = start[d];
+            }
+
+            return false;  // still more to do
+          }
+        }
+      } else {
+        // we didn't get to the end, so we'll have to pick up where we left off
+        subrect.hi[d] = restriction.hi[d];
+        next_start[d] = restriction.hi[d] + 1;
+
+        while(++di < N) {
+          d = dim_order[di];
+          subrect.hi[d] = start[d];
+          next_start[d] = start[d];
+        }
+
+        return false;  // still more to do
+      }
+    }
+
+    // if we got through all dimensions, we're done with this domain
+    return true;
   }
 
   template <int N, typename T>
@@ -1358,6 +1430,12 @@ namespace Realm {
 				  bool force_fortran_order,
 				  size_t max_stride) const;
 
+    virtual void count_fragments(RegionInstance inst,
+                                 const std::vector<int>& dim_order,
+                                 const std::vector<FieldID>& fields,
+                                 const std::vector<size_t>& fld_sizes,
+                                 std::vector<size_t>& fragments) const;
+
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      const std::vector<int>& dim_order,
 					      const std::vector<FieldID>& fields,
@@ -1573,6 +1651,136 @@ namespace Realm {
 #ifdef DEBUG_REALM
       assert(dim_order.size() == N);
 #endif
+    }
+  }
+
+  template <int N, typename T>
+  static void add_fragments_for_rect(const Rect<N,T>& rect,
+                                     size_t field_size,
+                                     size_t field_count,
+                                     const Point<N,size_t>& strides,
+                                     const std::vector<int>& dim_order,
+                                     std::vector<size_t>& fragments)
+  {
+    int collapsed[N+1];
+    int breaks = 0;
+    collapsed[0] = 1;
+    size_t exp_stride = field_size;
+    for(int di = 0; di < N; di++) {
+      int d = dim_order[di];
+      // skip trivial dimensions
+      if(rect.lo[d] == rect.hi[d]) continue;
+
+      size_t extent = size_t(rect.hi[d]) - size_t(rect.lo[d]) + 1;
+
+      if(exp_stride == strides[d]) {
+        // stride match?  collapse more
+        collapsed[breaks] *= extent;
+        exp_stride *= extent;
+      } else {
+        // stride mismatch - break here
+        breaks++;
+        collapsed[breaks] = extent;
+        exp_stride = strides[d] * extent;
+      }
+    }
+
+    // now work back down from the top dimension and increase fragment
+    //  count for each break
+    size_t frags = field_count;
+    for(int d = N+1; d >= 0; d--) {
+      if(d <= breaks)
+        frags *= collapsed[d];
+      fragments[d] += frags;
+    }
+  }
+
+  template <int N, typename T>
+  void TransferDomainIndexSpace<N,T>::count_fragments(RegionInstance inst,
+                                                      const std::vector<int>& dim_order,
+                                                      const std::vector<FieldID>& fields,
+                                                      const std::vector<size_t>& fld_sizes,
+                                                      std::vector<size_t>& fragments) const
+  {
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+#ifdef DEBUG_REALM
+    assert(inst_impl->metadata.is_valid());
+#endif
+    const InstanceLayout<N,T> *inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst_impl->metadata.layout);
+
+    fragments.assign(N+2, 0);
+
+    for(size_t i = 0; i < fields.size(); i++) {
+      FieldID fid = fields[i];
+      size_t field_size = fld_sizes[i];
+
+      const InstancePieceList<N,T> *ipl;
+      {
+        std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(fid);
+        assert(it != inst_layout->fields.end());
+        ipl = &inst_layout->piece_lists[it->second.list_idx];
+      }
+
+      IndexSpaceIterator<N,T> isi(is);
+
+      // get the piece for the first index
+      const InstanceLayoutPiece<N,T> *layout_piece = ipl->find_piece(isi.rect.lo);
+      assert(layout_piece != 0);
+
+      if(layout_piece->bounds.contains(is)) {
+        // easy case: one piece covers our entire domain and the iteration order
+        //  doesn't impact the fragment count
+        if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
+          const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+          do {
+            add_fragments_for_rect(isi.rect, field_size, 1 /*field count*/,
+                                   affine->strides, dim_order, fragments);
+            isi.step();
+          } while(isi.valid);
+        } else {
+          // not affine - add one fragment for each rectangle
+          size_t num_rects;
+          if(is.dense()) {
+            num_rects = 1;
+          } else {
+            SparsityMapPublicImpl<N,T> *s_impl = is.sparsity.impl();
+            num_rects = s_impl->get_entries().size();
+          }
+
+          for(int i = 0; i < (N + 2); i++)
+            fragments[i] += num_rects;
+        }
+      } else {
+        size_t non_affine_rects = 0;
+        do {
+          Point<N,T> next_start = isi.rect.lo;
+          while(true) {
+            // look up new piece if needed
+            if(!layout_piece->bounds.contains(next_start)) {
+              layout_piece = ipl->find_piece(next_start);
+              assert(layout_piece != 0);
+            }
+
+            Rect<N,T> subrect;
+            bool last = next_subrect(isi.rect, next_start, layout_piece->bounds,
+                                     dim_order.data(), subrect, next_start);
+            if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
+              const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+              add_fragments_for_rect(isi.rect, field_size, 1 /*field count*/,
+                                     affine->strides, dim_order, fragments);
+            } else
+              non_affine_rects++;
+
+            if(last) break;
+          }
+
+          isi.step();
+        } while(isi.valid);
+
+        if(non_affine_rects > 0)
+          for(int i = 0; i < (N + 2); i++)
+            fragments[i] += non_affine_rects;
+      }
     }
   }
 
@@ -2160,6 +2368,234 @@ namespace Realm {
   
   ////////////////////////////////////////////////////////////////////////
   //
+  // transfer path search logic
+  //
+
+  static bool best_channel_for_mem_pair(Memory src_mem, Memory dst_mem,
+                                        CustomSerdezID src_serdez_id,
+                                        CustomSerdezID dst_serdez_id,
+                                        ReductionOpID redop_id,
+                                        size_t total_bytes,
+                                        const std::vector<size_t> *src_frags,
+                                        const std::vector<size_t> *dst_frags,
+                                        uint64_t& best_cost,
+                                        Channel *& best_channel,
+                                        XferDesKind& best_kind)
+  {
+    // consider dma channels available on either source or dest node
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
+
+    best_cost = 0;
+    best_channel = 0;
+    best_kind = XFER_NONE;
+
+    {
+      const Node& n = get_runtime()->nodes[src_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+	  it != n.dma_channels.end();
+	  ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+                                             src_serdez_id, dst_serdez_id,
+                                             redop_id,
+                                             total_bytes, src_frags, dst_frags,
+                                             &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    if(dst_node != src_node) {
+      const Node& n = get_runtime()->nodes[dst_node];
+      for(std::vector<Channel *>::const_iterator it = n.dma_channels.begin();
+	  it != n.dma_channels.end();
+	  ++it) {
+        XferDesKind kind = XFER_NONE;
+        uint64_t cost = (*it)->supports_path(src_mem, dst_mem,
+                                             src_serdez_id, dst_serdez_id,
+                                             redop_id,
+                                             total_bytes, src_frags, dst_frags,
+                                             &kind);
+        if((cost > 0) && ((best_cost == 0) || (cost < best_cost))) {
+          best_cost = cost;
+          best_channel = *it;
+          best_kind = kind;
+        }
+      }
+    }
+
+    return (best_cost != 0);
+  }
+
+  static bool find_fastest_path(Memory src_mem, Memory dst_mem,
+                                CustomSerdezID serdez_id,
+                                ReductionOpID redop_id,
+                                size_t total_bytes,
+                                const std::vector<size_t> *src_frags,
+                                const std::vector<size_t> *dst_frags,
+                                MemPathInfo& info,
+                                bool skip_final_memcpy = false)
+  {
+    std::vector<size_t> empty_vec;
+    log_xpath.info() << "FFP: " << src_mem << "->" << dst_mem
+                     << " serdez=" << serdez_id
+                     << " redop=" << redop_id
+                     << " bytes=" << total_bytes
+                     << " frags=" << PrettyVector<size_t>(*(src_frags ? src_frags : &empty_vec))
+                     << "/" << PrettyVector<size_t>(*(dst_frags ? dst_frags : &empty_vec));
+
+    // baseline - is a direct path possible?
+    uint64_t best_cost = 0;
+    {
+      Channel *channel;
+      XferDesKind kind;
+      if(best_channel_for_mem_pair(src_mem, dst_mem, serdez_id, serdez_id,
+                                   redop_id, total_bytes, src_frags, dst_frags,
+                                   best_cost, channel, kind)) {
+        log_xpath.info() << "direct: " << src_mem << "->" << dst_mem
+                         << " cost=" << best_cost;
+	info.path.assign(1, src_mem);
+	if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+	  info.path.push_back(dst_mem);
+	  info.xd_channels.assign(1, channel);
+        } else
+          info.xd_channels.clear();
+      }
+    }
+
+    // multi-hop search (have to do this even if a direct path exists)
+    // any intermediate memory on the src or dst node is a candidate
+    struct PartialPath {
+      Memory ib_mem;
+      uint64_t cost;
+      std::vector<Memory> path;
+      std::vector<Channel *> channels;
+    };
+    std::vector<PartialPath> partials;
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
+    size_t num_src_ibs, total_ibs;
+    {
+      const Node& n = get_runtime()->nodes[src_node];
+      num_src_ibs = n.ib_memories.size();
+      partials.resize(num_src_ibs);
+      for(size_t i = 0; i < n.ib_memories.size(); i++) {
+        partials[i].ib_mem = n.ib_memories[i]->me;
+        partials[i].cost = 0;
+      }
+    }
+    if(dst_node != src_node) {
+      const Node& n = get_runtime()->nodes[dst_node];
+      total_ibs = num_src_ibs + n.ib_memories.size();
+      partials.resize(total_ibs);
+      for(size_t i = 0; i < n.ib_memories.size(); i++) {
+        partials[num_src_ibs + i].ib_mem = n.ib_memories[i]->me;
+        partials[num_src_ibs + i].cost = 0;
+      }
+    } else
+      total_ibs = num_src_ibs;
+
+    // see which of the ib memories we can get to from the original srcmem
+    std::set<size_t> active_ibs;
+    for(size_t i = 0; i < total_ibs; i++) {
+      uint64_t cost;
+      Channel *channel;
+      XferDesKind kind;
+      if(best_channel_for_mem_pair(src_mem, partials[i].ib_mem,
+                                   serdez_id, 0 /*no dst serdez*/,
+                                   0 /*no redop on not-last hops*/,
+                                   total_bytes, src_frags, 0 /*no dst_frags*/,
+                                   cost, channel, kind)) {
+        log_xpath.info() << "first: " << src_mem << "->" << partials[i].ib_mem
+                         << " cost=" << cost;
+        // ignore anything that's already worse than the direct path
+        if((best_cost == 0) || (cost < best_cost)) {
+          active_ibs.insert(i);
+          partials[i].cost = cost;
+          partials[i].path.resize(2);
+          partials[i].path[0] = src_mem;
+          partials[i].path[1] = partials[i].ib_mem;
+          partials[i].channels.assign(1, channel);
+        }
+      }
+    }
+
+    // look for multi-ib-hop paths (as long as they improve on the shorter
+    //  ones)
+    while(!active_ibs.empty()) {
+      size_t src_idx = *(active_ibs.begin());
+      active_ibs.erase(active_ibs.begin());
+      // an ib on the dst node isn't allowed to go back to the source
+      size_t first_dst_idx = ((src_idx < num_src_ibs) ? 0 : num_src_ibs);
+      for(size_t dst_idx = first_dst_idx; dst_idx < total_ibs; dst_idx++) {
+        // no self-loops either
+        if(dst_idx == src_idx) continue;
+
+        uint64_t cost;
+        Channel *channel;
+        XferDesKind kind;
+        if(best_channel_for_mem_pair(partials[src_idx].ib_mem,
+                                     partials[dst_idx].ib_mem,
+                                     0, 0, 0, // no serdez or redop on interhops
+                                     total_bytes, 0, 0, // no fragmentation also
+                                     cost, channel, kind)) {
+          size_t total_cost = partials[src_idx].cost + cost;
+          log_xpath.info() << "inter: " << partials[src_idx].ib_mem << "->" << partials[dst_idx].ib_mem
+                           << " cost=" << partials[src_idx].cost << "+" << cost << " = " << total_cost << " <? " << partials[dst_idx].cost;
+          // also prune any path that already exceeds the cost of the direct path
+          if(((partials[dst_idx].cost == 0) ||
+              (total_cost < partials[dst_idx].cost)) &&
+             ((best_cost == 0) || (total_cost < best_cost))) {
+            // replace existing path to this dst ibmem
+            partials[dst_idx].cost = total_cost;
+            partials[dst_idx].path = partials[src_idx].path;
+            partials[dst_idx].path.push_back(partials[dst_idx].ib_mem);
+            partials[dst_idx].channels = partials[src_idx].channels;
+            partials[dst_idx].channels.push_back(channel);
+            active_ibs.insert(dst_idx);
+          }
+        }
+      }
+    }
+
+    // finally, see which (reachable) ibs can get to the destination mem
+    //  (and do it better than any previously known path)
+    for(size_t i = 0; i < total_ibs; i++) {
+      if(partials[i].cost == 0) continue;
+
+      uint64_t cost;
+      Channel *channel;
+      XferDesKind kind;
+      if(best_channel_for_mem_pair(partials[i].ib_mem, dst_mem,
+                                   0 /*no src serdez*/, serdez_id, redop_id,
+                                   total_bytes, 0 /*no src_frags*/, dst_frags,
+                                   cost, channel, kind)) {
+        size_t total_cost = partials[i].cost + cost;
+        log_xpath.info() << "last: " << partials[i].ib_mem << "->" << dst_mem
+                         << " cost=" << partials[i].cost << "+" << cost << " = " << total_cost << " <? " << best_cost;
+        if((best_cost == 0) || (total_cost < best_cost)) {
+          best_cost = total_cost;
+          info.path.swap(partials[i].path);
+          info.xd_channels.swap(partials[i].channels);
+
+          if(!skip_final_memcpy || (kind != XFER_MEM_CPY)) {
+            info.path.push_back(dst_mem);
+            info.xd_channels.push_back(channel);
+          }
+        }
+      }
+    }
+
+    return (best_cost != 0);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class IndirectionInfoBase
   //
 
@@ -2275,6 +2711,25 @@ namespace Realm {
     return TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
   }
 
+  // address splitters need to be able to read addresses from sysmem
+  // TODO: query this from channel in order to support heterogeneity?
+  static Memory find_sysmem_ib_memory(NodeID node)
+  {
+    Node& n = get_runtime()->nodes[node];
+    for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
+        it != n.ib_memories.end();
+        ++it)
+      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM))
+        return (*it)->me;
+
+    log_dma.fatal() << "no sysmem ib memory on node " << node;
+    abort();
+    return Memory::NO_MEMORY;
+  }
+
   void IndirectionInfoBase::generate_gather_paths(Memory dst_mem,
                                                   TransferGraph::XDTemplate::IO dst_edge,
                                                   unsigned indirect_idx,
@@ -2327,7 +2782,7 @@ namespace Realm {
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
       // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[0]->node, 0).convert<Memory>();
+      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[0]->node);
       // do we have to do anything to get the addresses into a cpu-readable
       //  memory on that node?
       MemPathInfo addr_path;
@@ -2382,7 +2837,7 @@ namespace Realm {
       //  the data to where a cpu can look at it
       NodeID addr_node = ID(inst).instance_owner_node();
       // HACK!
-      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
+      Memory addr_ib_mem = find_sysmem_ib_memory(addr_node);
       MemPathInfo addr_path;
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
@@ -2428,7 +2883,7 @@ namespace Realm {
       //  data instances live
       for(size_t i = 0; i < spaces_size; i++) {
 	// HACK!
-	Memory src_ib_mem = ID::make_ib_memory(ID(insts[i]).instance_owner_node(), 0).convert<Memory>();
+	Memory src_ib_mem = find_sysmem_ib_memory(ID(insts[i]).instance_owner_node());
 	if(src_ib_mem != addr_ib_mem) {
 	  MemPathInfo path;
 	  bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
@@ -2445,7 +2900,7 @@ namespace Realm {
       // control information has to get to the merge at the end
       // HACK!
       NodeID dst_node = ID(dst_mem).memory_owner_node();
-      Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
+      Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
       if(dst_ib_mem != addr_ib_mem) {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
@@ -2625,7 +3080,7 @@ namespace Realm {
     if((spaces_size == 1) && !oor_possible) {
       size_t pathlen = path_infos[0].xd_channels.size();
       // HACK!
-      Memory local_ib_mem = ID::make_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node, 0).convert<Memory>();
+      Memory local_ib_mem = find_sysmem_ib_memory(path_infos[0].xd_channels[pathlen - 1]->node);
       // do we have to do anything to get the addresses into a cpu-readable
       //  memory on that node?
       MemPathInfo addr_path;
@@ -2682,7 +3137,7 @@ namespace Realm {
       //  the data to where a cpu can look at it
       NodeID addr_node = ID(inst).instance_owner_node();
       // HACK!
-      Memory addr_ib_mem = ID::make_ib_memory(addr_node, 0).convert<Memory>();
+      Memory addr_ib_mem = find_sysmem_ib_memory(addr_node);
       MemPathInfo addr_path;
       bool ok = find_shortest_path(inst.get_location(),
 				   addr_ib_mem,
@@ -2724,28 +3179,9 @@ namespace Realm {
 	ib_edges[ib_base + spaces_size].size = 65536; // TODO
       }
 
-      // next, see what work we need to get the addresses to where the
-      //  last step of each path is running
-      for(size_t i = 0; i < spaces_size; i++) {
-	// HACK!
-	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
-	Memory dst_ib_mem = ID::make_ib_memory(dst_node, 0).convert<Memory>();
-	if(dst_ib_mem != addr_ib_mem) {
-	  MemPathInfo path;
-	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
-				       0 /*no serdez*/,
-                                       0 /*redop_id*/,
-				       path);
-	  assert(ok);
-	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
-						decoded_addr_edges[i],
-						path);
-	}
-      }
-
       // control information has to get to the split at the start
       // HACK!
-      Memory src_ib_mem = ID::make_ib_memory(ID(src_mem).memory_owner_node(), 0).convert<Memory>();
+      Memory src_ib_mem = find_sysmem_ib_memory(ID(src_mem).memory_owner_node());
       if(src_ib_mem != addr_ib_mem) {
 	MemPathInfo path;
 	bool ok = find_shortest_path(addr_ib_mem, src_ib_mem,
@@ -2793,6 +3229,25 @@ namespace Realm {
 	  path_infos[i].path.insert(path_infos[i].path.begin(), src_mem);
 	  //path_infos[i].xd_target_nodes.insert(path_infos[i].xd_target_nodes.begin(),
 	  //				       ID(src_mem).memory_owner_node());
+	}
+      }
+
+      // next, see what work we need to get the addresses to where the
+      //  last step of each path is running
+      for(size_t i = 0; i < spaces_size; i++) {
+	// HACK!
+	NodeID dst_node = path_infos[path_idx[i]].xd_channels[path_infos[path_idx[i]].xd_channels.size() - 1]->node;
+	Memory dst_ib_mem = find_sysmem_ib_memory(dst_node);
+	if(dst_ib_mem != addr_ib_mem) {
+	  MemPathInfo path;
+	  bool ok = find_shortest_path(addr_ib_mem, dst_ib_mem,
+				       0 /*no serdez*/,
+                                       0 /*redop_id*/,
+				       path);
+	  assert(ok);
+	  decoded_addr_edges[i] = add_copy_path(xd_nodes, ib_edges,
+						decoded_addr_edges[i],
+						path);
 	}
       }
 
@@ -3164,6 +3619,24 @@ namespace Realm {
     return ib_size;
   }
 
+  struct IBAllocOrderSorter {
+    IBAllocOrderSorter(const std::vector<TransferGraph::IBInfo>& _edges)
+      : edges(_edges) {}
+
+    bool operator()(unsigned a, unsigned b) const {
+      // first sort by ascending memory ID
+      if(edges[a].memory.id < edges[b].memory.id) return true;
+      if(edges[a].memory.id > edges[b].memory.id) return false;
+      // next by decreasing size
+      if(edges[a].size > edges[b].size) return true;
+      if(edges[a].size < edges[b].size) return false;
+      // finally by index itself for stability
+      return (a < b);
+    }
+
+    const std::vector<TransferGraph::IBInfo>& edges;
+  };
+
   void TransferDesc::perform_analysis()
   {
     // initialize profiling data
@@ -3250,10 +3723,22 @@ namespace Realm {
         Memory src_mem = srcs[i].inst.get_location();
         Memory dst_mem = dsts[i].inst.get_location();
 
+        std::vector<size_t> src_frags, dst_frags;
+        domain->count_fragments(srcs[i].inst, dim_order,
+                                std::vector<FieldID>(1, srcs[i].field_id),
+                                std::vector<size_t>(1, srcs[i].size),
+                                src_frags);
+        domain->count_fragments(dsts[i].inst, dim_order,
+                                std::vector<FieldID>(1, dsts[i].field_id),
+                                std::vector<size_t>(1, dsts[i].size),
+                                dst_frags);
+
         MemPathInfo path_info;
-        bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
-                                     dsts[i].redop_id,
-                                     path_info);
+        bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+                                    dsts[i].redop_id,
+                                    domain_size * combined_field_size,
+                                    &src_frags, &dst_frags,
+                                    path_info);
         if(!ok) {
           log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (redop=" << dsts[i].redop_id << ")";
           assert(0);
@@ -3380,10 +3865,25 @@ namespace Realm {
 	  if(dsts[i].indirect_index == -1) {
 	    Memory dst_mem = dsts[i].inst.get_location();
 
+            std::vector<size_t> src_frags, dst_frags;
+            domain->count_fragments(srcs[i].inst, dim_order,
+                                    std::vector<FieldID>(1, srcs[i].field_id),
+                                    std::vector<size_t>(1, srcs[i].size),
+                                    src_frags);
+            domain->count_fragments(dsts[i].inst, dim_order,
+                                    std::vector<FieldID>(1, dsts[i].field_id),
+                                    std::vector<size_t>(1, dsts[i].size),
+                                    dst_frags);
+            //log_new_dma.print() << "fragments: domain=" << *domain
+            //                    << " src_inst=" << srcs[i].inst << " frags=" << PrettyVector<size_t>(src_frags)
+            //                    << " dst_inst=" << dsts[i].inst << " frags=" << PrettyVector<size_t>(dst_frags);
+
 	    MemPathInfo path_info;
-	    bool ok = find_shortest_path(src_mem, dst_mem, serdez_id,
-                                         0 /*redop_id*/,
-					 path_info);
+            bool ok = find_fastest_path(src_mem, dst_mem, serdez_id,
+                                        0 /*redop_id*/,
+                                        domain_size * combined_field_size,
+                                        &src_frags, &dst_frags,
+                                        path_info);
 	    if(!ok) {
 	      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
 	      assert(0);
@@ -3542,6 +4042,20 @@ namespace Realm {
       }
     }
 
+    // once we've enumerated all the ibs we'll need, we need to pick an order in
+    //  which to allocate them that will avoid deadlock when multiple transfer
+    //  operations are allocating ibs concurrently - sorting by the memory (and
+    //  then having the allocation code do all ibs for the same memory for a single
+    //  transfer op atomically) does the trick
+    if(!graph.ib_edges.empty()) {
+      graph.ib_alloc_order.resize(graph.ib_edges.size());
+      for(size_t i = 0; i < graph.ib_edges.size(); i++)
+        graph.ib_alloc_order[i] = i;
+
+      std::sort(graph.ib_alloc_order.begin(), graph.ib_alloc_order.end(),
+                IBAllocOrderSorter(graph.ib_edges));
+    }
+
     if(log_xplan.want_debug()) {
       log_xplan.debug() << "analysis: plan=" << (void *)this
 			<< " dim_order=" << PrettyVector<int>(dim_order)
@@ -3563,6 +4077,9 @@ namespace Realm {
 	log_xplan.debug() << "analysis: plan=" << (void *)this
 			  << " ibs[" << i << "]: memory=" << graph.ib_edges[i].memory
 			  << " size=" << graph.ib_edges[i].size;
+      if(!graph.ib_edges.empty())
+        log_xplan.debug() << "analysis: plan=" << (void *)this
+			  << " ib_alloc=" << PrettyVector<unsigned>(graph.ib_alloc_order);
     }
 
     // mark that the analysis is complete and see if there are any pending
@@ -3710,36 +4227,93 @@ namespace Realm {
       //  this loop
       ib_responses_needed.store(tg.ib_edges.size() + 1);
 
-      // sort requests by target memory to reduce risk of resource deadlock
-      // TODO: actually merge requests so that there's at most one per memory
-      typedef std::map<Memory, std::vector<unsigned> > PendingIBRequests;
-      PendingIBRequests pending;
-      for(size_t i = 0; i < tg.ib_edges.size(); i++)
-	pending[tg.ib_edges[i].memory].push_back(i);
+      // respect computed ib allocation order
+      // TODO: attempt opportunistic unordered allocation
 
-      for(PendingIBRequests::const_iterator it = pending.begin();
-	  it != pending.end();
-	  ++it) {
-	Memory tgt_mem = it->first;
-	for(std::vector<unsigned>::const_iterator it2 = it->second.begin();
-	    it2 != it->second.end();
-	    ++it2) {
-	  NodeID owner = ID(tgt_mem).memory_owner_node();
-	  if(owner == Network::my_node_id) {
-	    // local request
-	    ib_req_queue.enqueue_request(tgt_mem, Network::my_node_id,
-					 reinterpret_cast<uintptr_t>(this),
-					 *it2, tg.ib_edges[*it2].size);
-	  } else {
-	    // send message to remote owner
-	    ActiveMessage<RemoteIBAllocRequest> amsg(owner);
-	    amsg->memory = tgt_mem;
-	    amsg->size = tg.ib_edges[*it2].size;
-	    amsg->req_op = reinterpret_cast<uintptr_t>(this);
-	    amsg->ib_index = *it2;
-	    amsg.commit();
-	  }
-	}
+      // see who owns the first memory we need to allocate from
+      NodeID first_owner = ID(tg.ib_edges[tg.ib_alloc_order[0]].memory).memory_owner_node();
+      unsigned immed_count = 0;
+      if(first_owner == Network::my_node_id) {
+        // attempt immediate allocation of local IBs
+        std::vector<size_t> sizes;
+        std::vector<off_t> offsets;
+        while(immed_count < tg.ib_edges.size()) {
+          Memory tgt_mem = tg.ib_edges[tg.ib_alloc_order[immed_count]].memory;
+          first_owner = ID(tgt_mem).memory_owner_node();
+          // if we've gotten to IB requests that are non-local, stop
+          if(first_owner != Network::my_node_id)
+            break;
+          sizes.assign(1, tg.ib_edges[tg.ib_alloc_order[immed_count]].size);
+          unsigned same_mem = 1;
+          while(((immed_count + same_mem) < tg.ib_edges.size()) &&
+                (tgt_mem == tg.ib_edges[tg.ib_alloc_order[immed_count + same_mem]].memory)) {
+            sizes.push_back(tg.ib_edges[tg.ib_alloc_order[immed_count + same_mem]].size);
+            same_mem += 1;
+          }
+
+          offsets.assign(same_mem, -1);
+          IBMemory *ib_mem = get_runtime()->get_ib_memory_impl(tgt_mem);
+          if(ib_mem->attempt_immediate_allocation(Network::my_node_id,
+                                                  reinterpret_cast<uintptr_t>(this),
+                                                  same_mem, sizes.data(),
+                                                  offsets.data())) {
+            log_ib_alloc.debug() << "satisfied: op=" << Network::my_node_id
+                                 << "/" << (void *)this
+                                 << " index=" << immed_count << "+" << same_mem
+                                 << " mem=" << tgt_mem;
+
+            notify_ib_allocations(same_mem, immed_count, offsets.data());
+            immed_count += same_mem;
+          } else {
+            // an immediate allocation failed, so it's time to enqueue
+            break;
+          }
+        }
+      }
+
+      unsigned rem_count = tg.ib_edges.size() - immed_count;
+      if(rem_count > 0) {
+        if(first_owner == Network::my_node_id) {
+          // enqueue all remaining requests with the first memory
+          PendingIBRequests *reqs = new PendingIBRequests(Network::my_node_id,
+                                                          reinterpret_cast<uintptr_t>(this),
+                                                          rem_count,
+                                                          immed_count, 0);
+          for(unsigned i = 0; i < rem_count; i++) {
+            reqs->memories.push_back(tg.ib_edges[tg.ib_alloc_order[immed_count + i]].memory);
+            reqs->sizes.push_back(tg.ib_edges[tg.ib_alloc_order[immed_count + i]].size);
+          }
+
+          IBMemory *ib_mem = get_runtime()->get_ib_memory_impl(reqs->memories[0]);
+          ib_mem->enqueue_requests(reqs);
+        } else {
+          // active message time - special case for rem_count == 1
+          if(rem_count == 1) {
+            ActiveMessage<RemoteIBAllocRequestSingle> amsg(first_owner);
+            amsg->memory = tg.ib_edges[tg.ib_alloc_order[immed_count]].memory;
+            amsg->size = tg.ib_edges[tg.ib_alloc_order[immed_count]].size;
+            amsg->req_op = reinterpret_cast<uintptr_t>(this);
+            amsg->req_index = immed_count;
+            amsg->immediate = false;
+            amsg.commit();
+          } else {
+            size_t bytes = (rem_count * (sizeof(Memory) + sizeof(size_t)));
+            ActiveMessage<RemoteIBAllocRequestMultiple> amsg(first_owner, bytes);
+            amsg->requestor = Network::my_node_id;
+            amsg->count = rem_count;
+            amsg->first_index = immed_count;
+            amsg->curr_index = 0;
+            amsg->req_op = reinterpret_cast<uintptr_t>(this);
+            amsg->immediate = false;
+
+            for(unsigned i = 0; i < rem_count; i++)
+              amsg << tg.ib_edges[tg.ib_alloc_order[immed_count + i]].memory;
+            for(unsigned i = 0; i < rem_count; i++)
+              amsg << tg.ib_edges[tg.ib_alloc_order[immed_count + i]].size;
+
+            amsg.commit();
+          }
+        }
       }
 
       // once all requests are made, do the extra decrement and continue if they
@@ -3772,7 +4346,15 @@ namespace Realm {
   void TransferOperation::notify_ib_allocation(unsigned ib_index,
 					       off_t ib_offset)
   {
+    log_ib_alloc.info() << "notify: op=" << (void *)this
+                        << " index=" << ib_index << "+1"
+                        << " ok=" << ((ib_offset >= 0) ? 1 : 0);
+
+    // translate alloc order back to original ib index
+    ib_index = desc.graph.ib_alloc_order[ib_index];
     assert(ib_index < ib_offsets.size());
+    // TODO: handle failed immediate allocation attempts
+    assert(ib_offset >= 0);
 #ifdef DEBUG_REALM
     assert(ib_offsets[ib_index] == -1);
 #endif
@@ -3780,6 +4362,32 @@ namespace Realm {
 
     // if this was the last response needed, we can continue on to creating xds
     if(ib_responses_needed.fetch_sub_acqrel(1) == 1)
+      create_xds();
+  }
+
+  void TransferOperation::notify_ib_allocations(unsigned count,
+                                                unsigned first_index,
+                                                const off_t *offsets)
+  {
+    log_ib_alloc.info() << "notify: op=" << (void *)this
+                        << " index=" << first_index << "+" << count
+                        << " ok=" << ((offsets != 0) ? 1 : 0);
+
+    assert((first_index + count) <= ib_offsets.size());
+    // TODO: handle failed immediate allocation attempts
+    assert(offsets);
+
+    for(unsigned i = 0; i < count; i++) {
+      // translate alloc order back to original ib index
+      unsigned ib_index = desc.graph.ib_alloc_order[first_index + i];
+#ifdef DEBUG_REALM
+      assert(ib_offsets[ib_index] == -1);
+#endif
+      ib_offsets[ib_index] = offsets[i];
+    }
+
+    // if this was the last response needed, we can continue on to creating xds
+    if(ib_responses_needed.fetch_sub_acqrel(count) == count)
       create_xds();
   }
 

@@ -27,6 +27,7 @@
 
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifndef GASNET_PAR
 #define GASNET_PAR
@@ -157,7 +158,6 @@ namespace Realm {
 #ifdef USE_NBI_ACCESSREGION
     gasnet_begin_nbi_accessregion();
 #endif
-    DetailedTimer::push_timer(10);
     for(size_t i = 0; i < batch_size; i++) {
       off_t offset = offsets[i];
       char *dst_c = (char *)(dsts[i]);
@@ -186,20 +186,13 @@ namespace Realm {
 	if(node == 0) blkid++;
       }
     }
-    DetailedTimer::pop_timer();
 
 #ifdef USE_NBI_ACCESSREGION
-    DetailedTimer::push_timer(11);
     gasnet_handle_t handle = gasnet_end_nbi_accessregion();
-    DetailedTimer::pop_timer();
 
-    DetailedTimer::push_timer(12);
     gasnet_wait_syncnb(handle);
-    DetailedTimer::pop_timer();
 #else
-    DetailedTimer::push_timer(13);
     gasnet_wait_syncnbi_gets();
-    DetailedTimer::pop_timer();
 #endif
   }
 
@@ -210,7 +203,6 @@ namespace Realm {
   {
     gasnet_begin_nbi_accessregion();
 
-    DetailedTimer::push_timer(14);
     for(size_t i = 0; i < batch_size; i++) {
       off_t offset = offsets[i];
       const char *src_c = (char *)(srcs[i]);
@@ -240,15 +232,10 @@ namespace Realm {
 	if(node == 0) blkid++;
       }
     }
-    DetailedTimer::pop_timer();
 
-    DetailedTimer::push_timer(15);
     gasnet_handle_t handle = gasnet_end_nbi_accessregion();
-    DetailedTimer::pop_timer();
 
-    DetailedTimer::push_timer(16);
     gasnet_wait_syncnb(handle);
-    DetailedTimer::pop_timer();
   }
 
   // gets info related to rdma access from other nodes
@@ -616,6 +603,8 @@ namespace Realm {
     CHECK_GASNET( gasnet_init(argc, const_cast<char ***>(argv)) );
     Network::my_node_id = gasnet_mynode();
     Network::max_node_id = gasnet_nodes() - 1;
+    Network::all_peers.add_range(0, gasnet_nodes() - 1);
+    Network::all_peers.remove(gasnet_mynode());
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];

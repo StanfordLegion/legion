@@ -215,7 +215,7 @@ Event DistributedData<N,T>::create_instances(const FieldMap& fields, LAMBDA mem_
     if(!p.exists()) {
       p = Machine::ProcessorQuery(Machine::get_machine()).only_kind(Processor::LOC_PROC).same_address_space_as(m).first();
       assert(p.exists());
-      cpu_mem = Machine::MemoryQuery(Machine::get_machine()).only_kind(Memory::SYSTEM_MEM).has_affinity_to(p).first();
+      cpu_mem = Machine::MemoryQuery(Machine::get_machine()).only_kind(Memory::SYSTEM_MEM).has_affinity_to(p).has_capacity(1).first();
       assert(cpu_mem.exists());
     }
 
@@ -721,7 +721,7 @@ bool DistributedData<N,T>::verify(IndexSpace<N,T> is, FieldID fid, Event wait_on
       acc.reset(it->inst, fid);
     } else {
       // need to make a temporary instance in a memory we can access
-      Memory m = Machine::MemoryQuery(Machine::get_machine()).has_affinity_to(Processor::get_executing_processor()).first(); // TODO: best!
+      Memory m = Machine::MemoryQuery(Machine::get_machine()).has_affinity_to(Processor::get_executing_processor()).has_capacity(1).first(); // TODO: best!
       assert(m.exists());
       std::map<FieldID, size_t> tmp_fields;
       tmp_fields[fid] = sizeof(FT);
@@ -1159,13 +1159,13 @@ void top_level_task(const void *args, size_t arglen,
 
   // first try: use fb memories, if available
   Machine::MemoryQuery mq(Machine::get_machine());
-  mq.only_kind(Memory::GPU_FB_MEM);
+  mq.only_kind(Memory::GPU_FB_MEM).has_capacity(1);
   mems.assign(mq.begin(), mq.end());
 
   // second try: system memories
   if(mems.empty()) {
     Machine::MemoryQuery mq(Machine::get_machine());
-    mq.only_kind(Memory::SYSTEM_MEM);
+    mq.only_kind(Memory::SYSTEM_MEM).has_capacity(1);
     mems.assign(mq.begin(), mq.end());
     assert(!mems.empty());
     do_serdez = true;

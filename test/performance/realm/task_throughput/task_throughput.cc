@@ -202,6 +202,9 @@ void task_launcher(const void *args, size_t arglen,
   if(TestConfig::tasks_per_processor < 2)
     TestConfig::tasks_per_processor = 2;
 
+  // keep completion events for all tasks for race-free cleanup
+  std::vector<Event> events;
+
   for(int i = 0; i < TestConfig::tasks_per_processor; i++) {
     int which = ((i == 0) ? FIRST_TASK :
 		 (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :
@@ -224,6 +227,7 @@ void task_launcher(const void *args, size_t arglen,
       Event e = (*it).spawn(task_id, tta, argsize, prs, preconds[*it], which);
       if(TestConfig::chain_tasks)
 	preconds[*it] = e;
+      events.push_back(e);
       total_tasks++;
     }
   }
@@ -248,6 +252,9 @@ void task_launcher(const void *args, size_t arglen,
   
   if(TestConfig::skip_launch_procs)
     la.finish_barrier.arrive();
+
+  // don't actually terminate until all the tasks we spawned are done
+  Event::merge_events(events).wait();
 }
 
 void top_level_task(const void *args, size_t arglen, 
@@ -332,6 +339,8 @@ void top_level_task(const void *args, size_t arglen,
   }    
 
   // spawn launcher tasks in each address space
+  std::vector<Event> launchers_done;
+
   for(std::map<AddressSpace, std::vector<Processor> >::const_iterator it = all_procs.begin();
       it != all_procs.end();
       ++it) {
@@ -340,14 +349,17 @@ void top_level_task(const void *args, size_t arglen,
     for(int i = 0; i < TestConfig::launching_processors; i++) {
       Processor p = lp[i];
       
-      // no need to grab the finish event - we wait indirectly via the barrier
-      p.spawn(TASK_LAUNCHER, args_data, args_size);
+      Event e = p.spawn(TASK_LAUNCHER, args_data, args_size);
+      launchers_done.push_back(e);
     }
   }
   free(args_data);
 
   // all done - wait for everything to finish via the finish_barrier
   launch_args.finish_barrier.wait();
+
+  // for orderly shutdown, make sure the launcher tasks themselves are done
+  Event::merge_events(launchers_done).wait();
 }
 
 int main(int argc, char **argv)

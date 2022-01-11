@@ -1897,9 +1897,9 @@ class Task (object):
 
         global global_task_registration_barrier
         if global_task_registration_barrier is not None:
+            c.legion_runtime_enable_scheduler_lock()
             c.legion_phase_barrier_arrive(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier, 1)
             global_task_registration_barrier = c.legion_phase_barrier_advance(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
-            c.legion_runtime_enable_scheduler_lock()
             c.legion_phase_barrier_wait(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
             # Need to hold this through the end of registration.
             # c.legion_runtime_disable_scheduler_lock()

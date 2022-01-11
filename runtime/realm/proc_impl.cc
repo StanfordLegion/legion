@@ -80,21 +80,10 @@ namespace Realm {
 			   //std::set<RegionInstance> instances_needed,
 			   Event wait_on, int priority) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
       Event e = finish_event->current_event();
-#ifdef EVENT_GRAPH_TRACE
-      Event enclosing = find_enclosing_termination_event();
-      log_event_graph.info("Task Request: %d " IDFMT 
-                            " (" IDFMT ",%d) (" IDFMT ",%d)"
-                            " (" IDFMT ",%d) %d %p %ld",
-                            func_id, id, e.id, e.gen,
-                            wait_on.id, wait_on.gen,
-                            enclosing.id, enclosing.gen,
-                            priority, args, arglen);
-#endif
 
       p->spawn_task(func_id, args, arglen, ProfilingRequestSet(),
 		    wait_on, finish_event, ID(e).event_generation(), priority);
@@ -105,21 +94,10 @@ namespace Realm {
                            const ProfilingRequestSet &reqs,
 			   Event wait_on, int priority) const
     {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
       Event e = finish_event->current_event();
-#ifdef EVENT_GRAPH_TRACE
-      Event enclosing = find_enclosing_termination_event();
-      log_event_graph.info("Task Request: %d " IDFMT 
-                            " (" IDFMT ",%d) (" IDFMT ",%d)"
-                            " (" IDFMT ",%d) %d %p %ld",
-                            func_id, id, e.id, e.gen,
-                            wait_on.id, wait_on.gen,
-                            enclosing.id, enclosing.gen,
-                            priority, args, arglen);
-#endif
 
       p->spawn_task(func_id, args, arglen, reqs,
 		    wait_on, finish_event, ID(e).event_generation(), priority);
@@ -1389,7 +1367,6 @@ namespace Realm {
 						      const void *data,
 						      size_t datalen)
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
 
     log_task.debug() << "received remote spawn request:"

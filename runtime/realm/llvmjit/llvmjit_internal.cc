@@ -28,20 +28,6 @@
 #include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/IRReader.h>
 
-#define LLVM_VERSION (10 * LLVM_VERSION_MAJOR) + LLVM_VERSION_MINOR
-#if REALM_LLVM_VERSION != LLVM_VERSION
-  #error mismatch between REALM_LLVM_VERSION and LLVM header files!
-#endif
-// JIT for 3.5, MCJIT for 3.6 - 5.0
-#if LLVM_VERSION == 35
-  //define USE_OLD_JIT
-#elif LLVM_VERSION >= 36 && LLVM_VERSION <= 50
-  // nothing special needed here - the C API is actually a lot more stable
-  // than the C++ API
-#else
-  #warning unsupported (or at least untested) LLVM version!
-#endif
-
 #ifdef REALM_ALLOW_MISSING_LLVM_LIBS
 // declare all of the LLVM C API calls we use as weak symbols
 #pragma weak LLVMAddModule

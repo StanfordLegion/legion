@@ -69,6 +69,7 @@ constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>
 # Region Tree
 index_space_pat = re.compile(prefix + r'GC Index Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 index_part_pat  = re.compile(prefix + r'GC Index Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+index_expr_pat  = re.compile(prefix + r'GC Index Expr (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 field_space_pat = re.compile(prefix + r'GC Field Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 region_pat      = re.compile(prefix + r'GC Region (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<is>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
 partition_pat   = re.compile(prefix + r'GC Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<ip>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
@@ -537,22 +538,22 @@ class Base(object):
         self.on_stack = True
         if kind == GC_REF_KIND and self.nested_gc_refs:
             for src,refs in iteritems(self.nested_gc_refs):
-                if refs is 0:
+                if refs == 0:
                     continue
                 src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == VALID_REF_KIND and self.nested_valid_refs:
             for src,refs in iteritems(self.nested_valid_refs):
-                if refs is 0:
+                if refs == 0:
                     continue
                 src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == REMOTE_REF_KIND and self.nested_remote_refs:
             for src,refs in iteritems(self.nested_remote_refs):
-                if refs is 0:
+                if refs == 0:
                     continue
                 src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
             for src,refs in iteritems(self.nested_resource_refs):
-                if refs is 0:
+                if refs == 0:
                     continue
                 src.check_for_cycles_by_kind(assert_on_error, stack, kind)
         stack.pop()
@@ -630,6 +631,14 @@ class IndexPartition(Base):
     def __repr__(self):
         return 'Index Partition '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
 
+class IndexExpression(Base):
+    def __init__(self, did, node, handle):
+        super(IndexExpression,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Index Expression '+str(self.did)+' (Node='+str(self.node)+') ExprID '+str(self.handle)
+
 class FieldSpace(Base):
     def __init__(self, did, node, handle):
         super(FieldSpace,self).__init__(did, node)
@@ -680,6 +689,7 @@ class State(object):
         self.equivalence_sets = {}
         self.index_spaces = {}
         self.index_partitions = {}
+        self.index_expressions = {}
         self.field_spaces = {}
         self.regions = {}
         self.partitions = {}
@@ -799,6 +809,12 @@ class State(object):
                                              long_type(m.group('node')),
                                              long_type(m.group('handle')))
                     continue
+                m = index_expr_pat.match(line)
+                if m is not None:
+                    self.log_index_expression(long_type(m.group('did')),
+                                              long_type(m.group('node')),
+                                              long_type(m.group('handle')))
+                    continue
                 m = field_space_pat.match(line)
                 if m is not None:
                     self.log_field_space(long_type(m.group('did')),
@@ -864,6 +880,8 @@ class State(object):
             index_space.update_nested_references(self)
         for index_part in itervalues(self.index_partitions):
             index_part.update_nested_references(self)
+        for index_expr in itervalues(self.index_expressions):
+            index_expr.update_nested_references(self)
         for field_space in itervalues(self.field_spaces):
             field_space.update_nested_references(self)
         for region in itervalues(self.regions):
@@ -942,6 +960,9 @@ class State(object):
 
     def log_index_partition(self, did, node, handle):
         self.get_index_partition(did, node, handle)
+
+    def log_index_expression(self, did, node, handle):
+        self.get_index_expression(did, node, handle)
 
     def log_field_space(self, did, node, handle):
         self.get_field_space(did, node, handle)
@@ -1037,6 +1058,15 @@ class State(object):
                 del self.unknowns[key]
         return self.index_partitions[key]
 
+    def get_index_expression(self, did, node, handle):
+        key = (did,node)
+        if key not in self.index_expressions:
+            self.index_expressions[key] = IndexExpression(did, node, handle)
+            if key in self.unknowns:
+                self.index_expressions[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.index_expressions[key]
+
     def get_field_space(self, did, node, handle):
         key = (did,node)
         if key not in self.field_spaces:
@@ -1082,6 +1112,8 @@ class State(object):
             return self.index_spaces[key]
         if key in self.index_partitions:
             return self.index_partitions[key]
+        if key in self.index_expressions:
+            return self.index_expressions[key]
         if key in self.field_spaces:
             return self.field_spaces[key]
         if key in self.regions:
@@ -1118,6 +1150,9 @@ class State(object):
         for did,index_part in iteritems(self.index_partitions):
             print("Checking for cycles in "+repr(index_part))
             index_part.check_for_cycles(assert_on_error)
+        for did,index_expr in iteritems(self.index_expressions):
+            print("Checking for cycles in "+repr(index_expr))
+            index_expr.check_for_cycles(assert_on_error)
         for did,field_space in iteritems(self.field_spaces):
             print("Checking for cycles in "+repr(field_space))
             field_space.check_for_cycles(assert_on_error)
@@ -1138,6 +1173,7 @@ class State(object):
         leaked_eq_sets = 0
         leaked_index_spaces = 0
         leaked_index_partitions = 0
+        leaked_index_expressions = 0
         leaked_field_spaces = 0
         leaked_regions = 0
         leaked_partitions = 0
@@ -1169,6 +1205,9 @@ class State(object):
         for index_part in itervalues(self.index_partitions):
             if not index_part.check_for_leaks(assert_on_error, verbose):
                 leaked_index_partitions += 1
+        for index_expr in itervalues(self.index_expressions):
+            if not index_expr.check_for_leaks(assert_on_error, verbose):
+                leaked_index_expressions += 1
         for field_space in itervalues(self.field_spaces):
             if not field_space.check_for_leaks(assert_on_error, verbose):
                 leaked_field_spaces += 1
@@ -1224,6 +1263,11 @@ class State(object):
             if assert_on_error: assert False
         else:
             print("  Leaked Index Partitions: "+str(leaked_index_partitions))
+        if leaked_index_expressions > 0:
+            print("  LEAKED INDEX EXPRESSIONS: "+str(leaked_index_expressions))
+            if assert_on_error: assert False
+        else:
+            print("  Leaked Index Expressions: "+str(leaked_index_expressions))
         if leaked_field_spaces > 0:
             print("  LEAKED FIELD SPACES: "+str(leaked_field_spaces))
             if assert_on_error: assert False

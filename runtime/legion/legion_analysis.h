@@ -1320,9 +1320,8 @@ namespace Legion {
       class Update {
       public:
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
-               CopyAcrossHelper *helper)
-          : expr(exp), src_mask(mask), across_helper(helper) { }
-        virtual ~Update(void) { }
+               CopyAcrossHelper *helper);
+        virtual ~Update(void); 
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;
@@ -2606,7 +2605,9 @@ namespace Legion {
                                   const bool expr_cover, FieldMask uninit,
                                   std::set<RtEvent> &applied_events) const;
       void update_initialized_data(IndexSpaceExpression *expr, 
-                            const bool expr_covers, const FieldMask &user_mask);
+                                   const bool expr_covers,
+                                   const FieldMask &user_mask,
+                                   ReferenceMutator &mutator);
       template<typename T>
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
@@ -2633,7 +2634,7 @@ namespace Legion {
                                          FieldMask filter_mask,
                                          ReferenceMutator &mutator);
       void filter_reduction_instances(IndexSpaceExpression *expr,
-           const bool expr_covers, const FieldMask &filter_mask,
+           const bool covers, const FieldMask &mask, ReferenceMutator &mutator,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
@@ -2707,13 +2708,14 @@ namespace Legion {
                 FieldMaskSet<InstanceView> &updates, ReferenceMutator &mutator);
       void filter_initialized_data(IndexSpaceExpression *expr, 
           const bool expr_covers, const FieldMask &filter_mask, 
+          ReferenceMutator &mutator, 
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL);
       void filter_restricted_instances(IndexSpaceExpression *expr, 
-          const bool expr_covers, const FieldMask &filter_mask, 
+          const bool covers, const FieldMask &mask, ReferenceMutator &mutator,
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void filter_released_instances(IndexSpaceExpression *expr, 
-          const bool expr_covers, const FieldMask &filter_mask, 
+          const bool covers, const FieldMask &mask, ReferenceMutator &mutator, 
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     protected:
@@ -2771,7 +2773,8 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
-            TraceViewSet *&postcondition_updates) const;
+            TraceViewSet *&postcondition_updates,
+            ReferenceMutator &mutator) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> >::aligned &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,

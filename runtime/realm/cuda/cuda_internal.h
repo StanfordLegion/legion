@@ -16,13 +16,18 @@
 #ifndef REALM_CUDA_INTERNAL_H
 #define REALM_CUDA_INTERNAL_H
 
+#include "realm/realm_config.h"
+
 #include <cuda.h>
 
 // We don't actually use the cuda runtime, but
 // we need all its declarations so we have all the right types
 #include <cuda_runtime.h>
 
-#include "realm/realm_config.h"
+#if defined(REALM_CUDA_DYNAMIC_LOAD) && (CUDA_VERSION >= 11030)
+#include <cudaTypedefs.h>
+#endif
+
 #include "realm/operation.h"
 #include "realm/threads.h"
 #include "realm/circ_queue.h"
@@ -31,11 +36,12 @@
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
   if(ret != cudaSuccess) { \
-    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, cudaGetErrorString(ret)); \
+    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, CUDA_RUNTIME_FNPTR(cudaGetErrorString)(ret)); \
     assert(0); \
     exit(1); \
   } \
@@ -46,8 +52,8 @@
 #define REPORT_CU_ERROR(cmd, ret) \
   do { \
     const char *name, *str; \
-    cuGetErrorName(ret, &name); \
-    cuGetErrorString(ret, &str); \
+    CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &name);      \
+    CUDA_DRIVER_FNPTR(cuGetErrorString)(ret, &str);                 \
     fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } while(0)
@@ -98,8 +104,11 @@ namespace Realm {
     class GPUStream;
     class GPUFBMemory;
     class GPUZCMemory;
+    class GPUFBIBMemory;
     class GPU;
     class CudaModule;
+
+    extern CudaModule *cuda_module_singleton;
 
     // an interface for receiving completion notification for a GPU operation
     //  (right now, just copies)
@@ -325,7 +334,7 @@ namespace Realm {
     //  with when async work needs doing
     class GPUStream {
     public:
-      GPUStream(GPU *_gpu, GPUWorker *_worker);
+      GPUStream(GPU *_gpu, GPUWorker *_worker, int rel_priority = 0);
       ~GPUStream(void);
 
       GPU *get_gpu(void) const;
@@ -337,6 +346,12 @@ namespace Realm {
       void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
       void wait_on_streams(const std::set<GPUStream*> &other_streams);
+
+      // atomically checks rate limit counters and returns true if 'bytes'
+      //  worth of copies can be submitted or false if not (in which case
+      //  the progress counter on the xd will be updated when it should try
+      //  again)
+      bool ok_to_submit_copy(size_t bytes, XferDes *xd);
 
       // to be called by a worker (that should already have the GPU context
       //   current) - returns true if any work remains
@@ -407,7 +422,7 @@ namespace Realm {
       bool process_streams(bool sleep_on_empty);
 
       Mutex lock;
-      CondVar condvar;
+      Mutex::CondVar condvar;
 
       typedef CircularQueue<GPUStream *, 16> ActiveStreamQueue;
       ActiveStreamQueue active_streams;
@@ -462,7 +477,7 @@ namespace Realm {
       CUcontext context;
       int max_threads;
       Mutex mutex;
-      CondVar condvar;
+      Mutex::CondVar condvar;
       bool shutdown_flag;
       GPUWorkFence::FenceList fences;
       int total_threads, sleeping_threads, syncing_threads;
@@ -480,8 +495,7 @@ namespace Realm {
     class GPU {
     public:
       GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *worker,
-	  CUcontext _context,
-	  int num_streams);
+	  CUcontext _context);
       ~GPU(void);
 
       void push_context(void);
@@ -497,7 +511,7 @@ namespace Realm {
 #endif
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
-      void create_fb_memory(RuntimeImpl *runtime, size_t size);
+      void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
@@ -588,6 +602,7 @@ namespace Realm {
       GPUStream *find_stream(CUstream stream) const;
       GPUStream *get_null_task_stream(void) const;
       GPUStream *get_next_task_stream(bool create = false);
+      GPUStream *get_next_d2d_stream();
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -597,9 +612,10 @@ namespace Realm {
       GPUWorker *worker;
       GPUProcessor *proc;
       GPUFBMemory *fbmem;
+      GPUFBIBMemory *fb_ibmem;
 
       CUcontext context;
-      CUdeviceptr fbmem_base;
+      CUdeviceptr fbmem_base, fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -614,11 +630,27 @@ namespace Realm {
       GPUStream *host_to_device_stream;
       GPUStream *device_to_host_stream;
       GPUStream *device_to_device_stream;
+      std::vector<GPUStream *> device_to_device_streams;
       std::vector<GPUStream *> peer_to_peer_streams; // indexed by target
       std::vector<GPUStream *> task_streams;
-      atomic<unsigned> next_stream;
+      atomic<unsigned> next_task_stream, next_d2d_stream;
 
       GPUEventPool event_pool;
+
+      // this can technically be different in each context (but probably isn't
+      //  in practice)
+      int least_stream_priority, greatest_stream_priority;
+
+      struct CudaIpcMapping {
+        NodeID owner;
+        Memory mem;
+        uintptr_t local_base;
+        uintptr_t address_offset; // add to convert from original to local base
+      };
+      std::vector<CudaIpcMapping> cudaipc_mappings;
+      std::map<NodeID, GPUStream *> cudaipc_streams;
+
+      const CudaIpcMapping *find_ipc_mapping(Memory mem) const;
 
 #ifdef REALM_USE_CUDART_HIJACK
       std::map<const FatBin *, CUmodule> device_modules;
@@ -760,6 +792,16 @@ namespace Realm {
       NetworkSegment local_segment;
     };
 
+    class GPUFBIBMemory : public IBMemory {
+    public:
+      GPUFBIBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size);
+
+    public:
+      GPU *gpu;
+      CUdeviceptr base;
+      NetworkSegment local_segment;
+    };
+
     class GPURequest;
 
     class GPUCompletionEvent : public GPUCompletionNotification {
@@ -805,27 +847,13 @@ namespace Realm {
 		 const std::vector<XferDesPortInfo>& outputs_info,
 		 int _priority);
 
-      ~GPUXferDes()
-      {
-        while (!available_reqs.empty()) {
-          GPURequest* gpu_req = (GPURequest*) available_reqs.front();
-          available_reqs.pop();
-          delete gpu_req;
-        }
-      }
-
       long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
 
       bool progress_xd(GPUChannel *channel, TimeLimit work_until);
 
     private:
-      //GPURequest* gpu_reqs;
-      //char *src_buf_base;
-      //char *dst_buf_base;
-      GPU *dst_gpu, *src_gpu;
+      std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> dst_is_ipc;
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
@@ -935,13 +963,16 @@ namespace Realm {
 
       // override this because we have to be picky about which reduction ops
       //  we support
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
 
       virtual RemoteChannelInfo *construct_remote_info() const;
 
@@ -986,14 +1017,142 @@ namespace Realm {
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
 
-      virtual bool supports_path(Memory src_mem, Memory dst_mem,
-				 CustomSerdezID src_serdez_id,
-				 CustomSerdezID dst_serdez_id,
-				 ReductionOpID redop_id,
-				 XferDesKind *kind_ret = 0,
-				 unsigned *bw_ret = 0,
-				 unsigned *lat_ret = 0);
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
     };
+
+
+    // active messages for establishing cuda ipc mappings
+
+    struct CudaIpcRequest {
+#ifdef REALM_ON_LINUX
+      long hostid;  // POSIX hostid
+#endif
+
+      static void handle_message(NodeID sender, const CudaIpcRequest& args,
+                                 const void *data, size_t datalen);
+    };
+
+    struct CudaIpcResponse {
+      unsigned count;
+
+      static void handle_message(NodeID sender, const CudaIpcResponse& args,
+                                 const void *data, size_t datalen);
+    };
+
+    struct CudaIpcRelease {
+
+      static void handle_message(NodeID sender, const CudaIpcRelease& args,
+                                 const void *data, size_t datalen);
+    };
+
+
+#ifdef REALM_CUDA_DYNAMIC_LOAD
+  // cuda driver and/or runtime entry points
+  #define CUDA_DRIVER_FNPTR(name) (name ## _fnptr)
+  #define CUDA_RUNTIME_FNPTR(name) (name ## _fnptr)
+
+  #define CUDA_DRIVER_APIS(__op__) \
+    __op__(cuCtxEnablePeerAccess); \
+    __op__(cuCtxGetFlags); \
+    __op__(cuCtxGetStreamPriorityRange); \
+    __op__(cuCtxPopCurrent); \
+    __op__(cuCtxPushCurrent); \
+    __op__(cuCtxSynchronize); \
+    __op__(cuDeviceCanAccessPeer); \
+    __op__(cuDeviceGet); \
+    __op__(cuDeviceGetAttribute); \
+    __op__(cuDeviceGetCount); \
+    __op__(cuDeviceGetName); \
+    __op__(cuDevicePrimaryCtxRelease); \
+    __op__(cuDevicePrimaryCtxRetain); \
+    __op__(cuDevicePrimaryCtxSetFlags); \
+    __op__(cuDeviceTotalMem); \
+    __op__(cuEventCreate); \
+    __op__(cuEventDestroy); \
+    __op__(cuEventQuery); \
+    __op__(cuEventRecord); \
+    __op__(cuGetErrorName); \
+    __op__(cuGetErrorString); \
+    __op__(cuInit); \
+    __op__(cuIpcCloseMemHandle); \
+    __op__(cuIpcGetMemHandle); \
+    __op__(cuIpcOpenMemHandle); \
+    __op__(cuLaunchKernel); \
+    __op__(cuMemAllocManaged); \
+    __op__(cuMemAlloc); \
+    __op__(cuMemcpy2DAsync); \
+    __op__(cuMemcpy3DAsync); \
+    __op__(cuMemcpyAsync); \
+    __op__(cuMemcpyDtoDAsync); \
+    __op__(cuMemcpyDtoHAsync); \
+    __op__(cuMemcpyHtoDAsync); \
+    __op__(cuMemFreeHost); \
+    __op__(cuMemFree); \
+    __op__(cuMemGetInfo); \
+    __op__(cuMemHostAlloc); \
+    __op__(cuMemHostGetDevicePointer); \
+    __op__(cuMemHostRegister); \
+    __op__(cuMemHostUnregister); \
+    __op__(cuMemsetD16Async); \
+    __op__(cuMemsetD2D16Async); \
+    __op__(cuMemsetD2D32Async); \
+    __op__(cuMemsetD2D8Async); \
+    __op__(cuMemsetD32Async); \
+    __op__(cuMemsetD8Async); \
+    __op__(cuModuleLoadDataEx); \
+    __op__(cuStreamAddCallback); \
+    __op__(cuStreamCreate); \
+    __op__(cuStreamCreateWithPriority); \
+    __op__(cuStreamDestroy); \
+    __op__(cuStreamSynchronize); \
+    __op__(cuStreamWaitEvent)
+
+  #if CUDA_VERSION >= 11030
+    // cuda 11.3+ gives us handy PFN_... types
+    #define DECL_FNPTR_EXTERN(name) \
+      extern PFN_ ## name name ## _fnptr;
+  #else
+    // before cuda 11.3, we have to rely on typeof/decltype
+    #define DECL_FNPTR_EXTERN(name) \
+      extern decltype(&name) name ## _fnptr;
+  #endif
+    CUDA_DRIVER_APIS(DECL_FNPTR_EXTERN);
+  #undef DECL_FNPTR_EXTERN
+
+  #define CUDA_RUNTIME_APIS_PRE_11_0(__op__) \
+    __op__(cudaGetDevice, cudaError_t, (int *)); \
+    __op__(cudaGetErrorString, const char *, (cudaError_t)); \
+    __op__(cudaSetDevice, cudaError_t, (int)); \
+    __op__(cudaLaunchKernel, cudaError_t, (const void *, dim3, dim3, void **, size_t, cudaStream_t))
+  #if CUDA_VERSION >= 11000
+    #define CUDA_RUNTIME_APIS_11_0(__op__) \
+      __op__(cudaGetFuncBySymbol, cudaError_t, (cudaFunction_t *, const void *));
+  #else
+    #define CUDA_RUNTIME_APIS_11_0(__op__)
+  #endif
+
+  #define CUDA_RUNTIME_APIS(__op__) \
+    CUDA_RUNTIME_APIS_11_0(__op__) \
+    CUDA_RUNTIME_APIS_PRE_11_0(__op__)
+
+  #define DECL_FNPTR_EXTERN(name, retval, params) \
+    extern retval (*name ## _fnptr) params;
+    CUDA_RUNTIME_APIS(DECL_FNPTR_EXTERN);
+  #undef DECL_FNPTR_EXTERN
+
+#else
+  #define CUDA_DRIVER_FNPTR(name) (name)
+  #define CUDA_RUNTIME_FNPTR(name) (name)
+#endif
 
   }; // namespace Cuda
 

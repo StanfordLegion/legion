@@ -23,6 +23,7 @@
 #include "realm/profiling.h"
 #include "realm/utils.h"
 #include "realm/activemsg.h"
+#include "realm/transfer/transfer.h"
 
 namespace Realm {
 
@@ -449,200 +450,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class IBMemory
-  //
-
-    IBMemory::IBMemory(Memory _me, size_t _size,
-		       MemoryKind _kind, Memory::Kind _lowlevel_kind,
-		       void *prealloc_base, NetworkSegment *_segment)
-      : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
-      , base(static_cast<char *>(prealloc_base))
-    {
-      free_blocks[0] = _size;
-    }
-
-    IBMemory::~IBMemory()
-    {
-    }
-
-    // old-style allocation used by IB memories
-    // make bad offsets really obvious (+1 PB)
-    static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << ((sizeof(off_t) == 8) ? 50 : 30);
-
-    off_t IBMemory::alloc_bytes_local(size_t size)
-    {
-      AutoLock<> al(mutex);
-
-      // for zero-length allocations, return a special "offset"
-      if(size == 0) {
-	return this->size + ZERO_SIZE_INSTANCE_OFFSET;
-      }
-
-      const size_t alignment = 256;
-
-      if(alignment > 0) {
-	off_t leftover = size % alignment;
-	if(leftover > 0) {
-	  log_malloc.info("padding allocation from %zd to %zd",
-			  size, (size_t)(size + (alignment - leftover)));
-	  size += (alignment - leftover);
-	}
-      }
-      // HACK: pad the size by a bit to see if we have people falling off
-      //  the end of their allocations
-      size += 0;
-
-      // try to minimize footprint by allocating at the highest address possible
-      if(!free_blocks.empty()) {
-	std::map<off_t, off_t>::iterator it = free_blocks.end();
-	do {
-	  --it;  // predecrement since we started at the end
-
-	  if(it->second == (off_t)size) {
-	    // perfect match
-	    off_t retval = it->first;
-	    free_blocks.erase(it);
-	    log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, (ssize_t)retval);
-#if 0
-	    usage += size;
-	    if(usage > peak_usage) peak_usage = usage;
-	    size_t footprint = this->size - retval;
-	    if(footprint > peak_footprint) peak_footprint = footprint;
-#endif
-	    return retval;
-	  }
-	
-	  if(it->second > (off_t)size) {
-	    // some left over
-	    off_t leftover = it->second - size;
-	    off_t retval = it->first + leftover;
-	    it->second = leftover;
-	    log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, (ssize_t)retval);
-#if 0
-	    usage += size;
-	    if(usage > peak_usage) peak_usage = usage;
-	    size_t footprint = this->size - retval;
-	    if(footprint > peak_footprint) peak_footprint = footprint;
-#endif
-	    return retval;
-	  }
-	} while(it != free_blocks.begin());
-      }
-
-      // no blocks large enough - boo hoo
-      log_malloc.info("alloc FAILED: mem=" IDFMT " size=%zd", me.id, size);
-      return -1;
-    }
-
-    void IBMemory::free_bytes_local(off_t offset, size_t size)
-    {
-      log_malloc.info() << "free block: mem=" << me << " size=" << size << " ofs=" << offset;
-      AutoLock<> al(mutex);
-
-      // frees of zero bytes should have the special offset
-      if(size == 0) {
-	assert((size_t)offset == this->size + ZERO_SIZE_INSTANCE_OFFSET);
-	return;
-      }
-
-      const size_t alignment = 256;
-
-      if(alignment > 0) {
-	off_t leftover = size % alignment;
-	if(leftover > 0) {
-	  log_malloc.info("padding free from %zd to %zd",
-			  size, (size_t)(size + (alignment - leftover)));
-	  size += (alignment - leftover);
-	}
-      }
-
-#if 0
-      usage -= size;
-      // only made things smaller, so can't impact the peak usage
-#endif
-
-      if(free_blocks.size() > 0) {
-	// find the first existing block that comes _after_ us
-	std::map<off_t, off_t>::iterator after = free_blocks.lower_bound(offset);
-	if(after != free_blocks.end()) {
-	  // found one - is it the first one?
-	  if(after == free_blocks.begin()) {
-	    // yes, so no "before"
-	    assert((offset + (off_t)size) <= after->first); // no overlap!
-	    if((offset + (off_t)size) == after->first) {
-	      // merge the ranges by eating the "after"
-	      size += after->second;
-	      free_blocks.erase(after);
-	    }
-	    free_blocks[offset] = size;
-	  } else {
-	    // no, get range that comes before us too
-	    std::map<off_t, off_t>::iterator before = after; before--;
-
-	    // if we're adjacent to the after, merge with it
-	    assert((offset + (off_t)size) <= after->first); // no overlap!
-	    if((offset + (off_t)size) == after->first) {
-	      // merge the ranges by eating the "after"
-	      size += after->second;
-	      free_blocks.erase(after);
-	    }
-
-	    // if we're adjacent with the before, grow it instead of adding
-	    //  a new range
-	    assert((before->first + before->second) <= offset);
-	    if((before->first + before->second) == offset) {
-	      before->second += size;
-	    } else {
-	      free_blocks[offset] = size;
-	    }
-	  }
-	} else {
-	  // nothing's after us, so just see if we can merge with the range
-	  //  that's before us
-
-	  std::map<off_t, off_t>::iterator before = after; before--;
-
-	  // if we're adjacent with the before, grow it instead of adding
-	  //  a new range
-	  assert((before->first + before->second) <= offset);
-	  if((before->first + before->second) == offset) {
-	    before->second += size;
-	  } else {
-	    free_blocks[offset] = size;
-	  }
-	}
-      } else {
-	// easy case - nothing was free, so now just our block is
-	free_blocks[offset] = size;
-      }
-    }
-
-    void *IBMemory::get_direct_ptr(off_t offset, size_t size)
-    {
-      assert(NodeID(ID(me).memory_owner_node()) == Network::my_node_id);
-      assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
-      return (base + offset);
-    }
-
-    // not used by IB memories
-    MemoryImpl::AllocationResult IBMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
-							bool need_alloc_result,
-							bool poisoned,
-							TimeLimit work_until)
-    {
-      abort();
-    }
-
-    void IBMemory::release_storage_immediate(RegionInstanceImpl *inst,
-					     bool poisoned,
-					     TimeLimit work_until)
-    {
-      abort();
-    }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class LocalManagedMemory
   //
 
@@ -710,7 +517,7 @@ namespace Realm {
 	  // automatic success - make the "offset" be the difference between the
 	  //  base address we were given and our own allocation's base
 	  void *mem_base = get_direct_ptr(0, 0); // only our subclasses know this
-	  assert(mem_base != 0);
+	  // assert(mem_base != 0);
 	  // underflow is ok here - it'll work itself out when we add the mem_base
 	  //  back in on accesses
 	  inst_offset = res->base - reinterpret_cast<uintptr_t>(mem_base);
@@ -1390,28 +1197,33 @@ namespace Realm {
       base = (char *)prealloc_base;
       prealloced = true;
     } else {
-      // allocate our own space
-      // enforce alignment on the whole memory range
-      base_orig = static_cast<char *>(malloc(_size + ALIGNMENT - 1));
-      if(!base_orig) {
-	log_malloc.fatal() << "insufficient system memory: "
-			   << size << " bytes needed (from -ll:csize)";
-	abort();
-      }
-      size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
-      if(ofs > 0) {
-	base = base_orig + (ALIGNMENT - ofs);
-      } else {
-	base = base_orig;
-      }
-      prealloced = false;
+      if(_size > 0) {
+        // allocate our own space
+        // enforce alignment on the whole memory range
+        base_orig = static_cast<char *>(malloc(_size + ALIGNMENT - 1));
+        if(!base_orig) {
+          log_malloc.fatal() << "insufficient system memory: "
+                             << size << " bytes needed (from -ll:csize)";
+          abort();
+        }
+        size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
+        if(ofs > 0) {
+          base = base_orig + (ALIGNMENT - ofs);
+        } else {
+          base = base_orig;
+        }
+        prealloced = false;
 
-      // we should not have been given a NetworkSegment by our caller
-      assert(!segment);
-      // advertise our allocation in case the network can register it
-      local_segment.assign(NetworkSegmentInfo::HostMem,
-			   base, _size);
-      segment = &local_segment;
+        // we should not have been given a NetworkSegment by our caller
+        assert(!segment);
+        // advertise our allocation in case the network can register it
+        local_segment.assign(NetworkSegmentInfo::HostMem,
+                             base, _size);
+        segment = &local_segment;
+      } else {
+        base = 0;
+        prealloced = true;
+      }
     }
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
 		     prealloced ? " (prealloced)" : "",

@@ -23,6 +23,7 @@
 
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 
 void enqueue_message(int target, int msgid,
                      const void *args, size_t arg_size,
@@ -150,7 +151,6 @@ namespace Realm {
                                const off_t *offsets, void * const *dsts, 
                                const size_t *sizes)
     {
-        DetailedTimer::push_timer(10);
         for(size_t i = 0; i < batch_size; i++) {
             off_t offset = offsets[i];
             char *dst_c = (char *)(dsts[i]);
@@ -174,11 +174,8 @@ namespace Realm {
                 if(node == 0) blkid++;
             }
         }
-        DetailedTimer::pop_timer();
 
-        DetailedTimer::push_timer(11);
         CHECK_MPI( MPI_Win_flush_all(win) );
-        DetailedTimer::pop_timer();
     }
 
     void MPIMemory::put_batch(size_t batch_size,
@@ -186,7 +183,6 @@ namespace Realm {
                                const void * const *srcs, 
                                const size_t *sizes)
     {
-        DetailedTimer::push_timer(14);
         for(size_t i = 0; i < batch_size; i++) {
             off_t offset = offsets[i];
             const char *src_c = (char *)(srcs[i]);
@@ -210,11 +206,8 @@ namespace Realm {
                 if(node == 0) blkid++;
             }
         }
-        DetailedTimer::pop_timer();
 
-        DetailedTimer::push_timer(15);
         CHECK_MPI( MPI_Win_flush_all(win) );
-        DetailedTimer::pop_timer();
     }
 
     // gets info related to rdma access from other nodes
@@ -636,6 +629,8 @@ namespace Realm {
     Realm::MPI::AM_Init(&mpi_rank, &mpi_size);
     Network::my_node_id = mpi_rank;
     Network::max_node_id = mpi_size - 1;
+    Network::all_peers.add_range(0, mpi_size - 1);
+    Network::all_peers.remove(mpi_rank);
 #ifdef DEBUG_REALM_STARTUP
     { // once we're convinced there isn't skew here, reduce this to rank 0
       char s[80];

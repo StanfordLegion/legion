@@ -155,45 +155,24 @@ namespace Realm {
     InstanceList local_instances;
   };
 
-  // a simple memory used for intermediate buffers in dma system
-  class REALM_INTERNAL_API_EXTERNAL_LINKAGE IBMemory : public MemoryImpl {
+  class PendingIBRequests {
   public:
-    IBMemory(Memory _me, size_t _size,
-	     MemoryKind _kind, Memory::Kind _lowlevel_kind,
-	     void *prealloc_base, NetworkSegment *_segment);
+    PendingIBRequests(NodeID _sender, uintptr_t _req_op,
+                      unsigned _count, unsigned _first_req, unsigned _current_req);
+    PendingIBRequests(NodeID _sender, uintptr_t _req_op,
+                      unsigned _count, unsigned _first_req, unsigned _current_req,
+                      const Memory *_memories, const size_t *_sizes,
+                      const off_t *_offsets);
 
-    virtual ~IBMemory();
-
-    // old-style allocation used by IB memories
-    virtual off_t alloc_bytes_local(size_t size);
-    virtual void free_bytes_local(off_t offset, size_t size);
-
-    virtual void *get_direct_ptr(off_t offset, size_t size);
-    
-    // not used by IB memories
-    virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
-							bool need_alloc_result,
-							bool poisoned,
-							TimeLimit work_until);
-
-    virtual void release_storage_immediate(RegionInstanceImpl *inst,
-					   bool poisoned,
-					   TimeLimit work_until);
-
-    virtual void get_bytes(off_t offset, void *dst, size_t size)
-    {
-      assert(0);
-    }
-    virtual void put_bytes(off_t offset, const void *src, size_t size)
-    {
-      assert(0);
-    }
-
-  protected:
-    Mutex mutex; // protection for resizing vectors
-    std::map<off_t, off_t> free_blocks;
-    char *base;
-    NetworkSegment *segment;
+    PendingIBRequests *next_req;
+    NodeID sender;
+    uintptr_t req_op;
+    unsigned count;
+    unsigned first_req;
+    unsigned current_req;
+    std::vector<Memory> memories;
+    std::vector<size_t> sizes;
+    std::vector<off_t> offsets;
   };
 
   // manages a basic free list of ranges (using range type RT) and allocated

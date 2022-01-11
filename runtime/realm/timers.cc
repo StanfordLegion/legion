@@ -16,345 +16,316 @@
 // clocks, timers for Realm
 
 #include "realm/timers.h"
-#include "realm/activemsg.h"
+#include "realm/logging.h"
 
-#include <string.h>
-#include <list>
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+#include <time.h>
+#endif
 
-#ifdef DETAILED_TIMING
-pthread_key_t thread_timer_key;
+#ifdef REALM_ON_MACOS
+#include <mach/clock.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#endif
+
+#ifdef REALM_ON_WINDOWS
+#include <windows.h>
+#include <sysinfoapi.h>
 #endif
 
 namespace Realm {
 
+  Logger log_timer("timers");
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Clock
+
   // if set_zero_time() is not called, relative time will equal absolute time
-  /*static*/ long long Clock::zero_time = 0;
+  /*static*/ uint64_t Clock::zero_time = 0;
 
-#ifdef DETAILED_TIMERS
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class MultiNodeRollUp
-  //
+#ifdef REALM_TIMERS_USE_RDTSC
+  /*static*/ bool Clock::cpu_tsc_enabled = false;
+#endif
 
-  class MultiNodeRollUp {
-  public:
-    MultiNodeRollUp(std::map<int,double>& _timers);
+  /*static*/ Clock::TimescaleConverter Clock::native_to_nanoseconds;
 
-    void execute(void);
+  /*static*/ uint64_t Clock::native_time_slower()
+  {
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+    // in a posix world that isn't using the cpu tsc, use CLOCK_REALTIME
+    //  (CLOCK_MONOTONIC is better for intervals, but should really use tsc
+    //  if you care that much)
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    uint64_t t = ts.tv_sec;
+    t = (t * 1000000000) + ts.tv_nsec;
+#endif
+#ifdef REALM_ON_MACOS
+    // we're not using tsc intrinsics, but still try to use mach_absolute_time
+    //  rather than the much-slower mach clock port
+    uint64_t t = mach_absolute_time();
+#endif
+#ifdef REALM_ON_WINDOWS
+    // similar to posix, we're not using tsc for some reason, so get the best
+    //  non-tsc thing windows can offer
+    FILETIME ft;
+    GetSystemTimePreciseAsFileTime(&ft);
+    uint64_t t = ft.dwHighDateTime;
+    t = (t << 32) + ft.dwLowDateTime;
+    // windows epoch starts at 1/1/1601, which is overkill and happens to
+    //  overflow int64_t, so shift to Unix epoch (1/1/1970)
+    t -= uint64_t(10000000) * 86400 * (369 * 365 + 89 /* leap days*/);
+    t *= 100;  // FILETIME is in 100ns units
+#endif
+    return t;
+  }
 
-    void handle_data(const void *data, size_t datalen);
+  /*static*/ long long Clock::get_zero_time(void)
+  {
+    return zero_time;
+  }
 
-  protected:
-    Mutex mutex;
-    CondVar condvar;
-    std::map<int,double> *timerp;
-    volatile int count_left;
-  };
+  /*static*/ void Clock::set_zero_time(void)
+  {
+    uint64_t native = native_time();
+    zero_time = native_to_nanoseconds.convert_forward_absolute(native);
+  }
 
-    MultiNodeRollUp::MultiNodeRollUp(std::map<int,double>& _timers)
-      : condvar(mutex), timerp(&_timers)
-    {
-      count_left = 0;
-    }
+  /*static*/ void Clock::calibrate(int use_cpu_tsc /*1=yes, 0=no, -1=dont care*/,
+                                   uint64_t force_cpu_tsc_freq)
+  {
+#ifdef REALM_TIMERS_USE_RDTSC
+    if(use_cpu_tsc != 0) {  // "yes" or "dont care"
+      // we want to get two time samples spread by an interesting amount of
+      //  real time (TARGET_NANOSECONDS), but we don't know the overhead of
+      //  the OS time call so we do iterations with progressively more and
+      //  more TSC reads for a single OS call
+      uint64_t native1 = 0, native2 = 0, nanoseconds1 = 0, nanoseconds2 = 0;
+      unsigned iterations = 0;
+      static const uint64_t TARGET_NANOSECONDS = 10000000; // 10ms
+#ifdef REALM_ON_MACOS
+      clock_serv_t cclock;
+      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+#endif
+      while(true) {
+        // increase the number of tsc reads we do exponentially
+        for(int i = 0; i < (1 << iterations); i++)
+          native2 = std::max(native2, raw_cpu_tsc());
 
-    void MultiNodeRollUp::execute(void)
-    {
-      count_left = max_node_id;
+        // one OS call of the appropriate type
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        nanoseconds2 = ts.tv_sec;
+        nanoseconds2 = (nanoseconds2 * 1000000000) + ts.tv_nsec;
+#endif
+#ifdef REALM_ON_MACOS
+        mach_timespec_t ts;
+        clock_get_time(cclock, &ts);
+        nanoseconds2 = ts.tv_sec;
+        nanoseconds2 = (nanoseconds2 * 1000000000) + ts.tv_nsec;
+#endif
+#ifdef REALM_ON_WINDOWS
+        FILETIME ft;
+        GetSystemTimePreciseAsFileTime(&ft);
+        nanoseconds2 = ft.dwHighDateTime;
+        nanoseconds2 = (nanoseconds2 << 32) + ft.dwLowDateTime;
+        // windows epoch starts at 1/1/1601, which is overkill and happens to
+        //  overflow int64_t, so shift to Unix epoch (1/1/1970)
+        nanoseconds2 -= uint64_t(10000000) * 86400 * (369 * 365 + 89 /* leap days*/);
+        nanoseconds2 *= 100;  // FILETIME is in 100ns units
+#endif
 
-      NodeSet nodes;
-      for(NodeID i = 0; i <= max_node_id; i++)
-        if(i != my_node_id)
-	  nodes.add(i);
-      ActiveMessage<TimerDataRequestMessage> amsg(nodes);
-      amsg->rollup_ptr = (void*)this;
-      amsg.commit();
+        if(iterations == 0) {
+          native1 = native2;
+          nanoseconds1 = nanoseconds2;
+        }
+        ++iterations;
 
-      // take the lock so that we can safely sleep until all the responses
-      //  arrive
-      {
-	AutoLock<> al(mutex);
+        // termination case 1 - a forced cpu tsc freq means we only need
+        //  one sample
+        if(force_cpu_tsc_freq > 0) {
+          // supplied freq is ticks/sec = ticks / 1e9 ns
+          bool ok = native_to_nanoseconds.set(native1,
+                                              nanoseconds1,
+                                              native1 + force_cpu_tsc_freq,
+                                              nanoseconds1 + 1000000000);
+          if(ok) {
+            log_timer.debug() << "fixed-freq calibration: native=" << native1
+                              << " nanoseconds=" << nanoseconds1
+                              << " freq=" << (1e-9 * force_cpu_tsc_freq);
+            cpu_tsc_enabled = true;
+          } else {
+            log_timer.warning() << "fixed-freq calibration failed: native=" << native1
+                                << " nanoseconds=" << nanoseconds1
+                                << " freq=" << (1e-9 * force_cpu_tsc_freq);
+          }
+          break;
+        }
 
-	if(count_left > 0)
-	  condvar.wait();
+        // termination case 2 - at least 4 iterations and enough elapsed time
+        if((iterations > 3) && (nanoseconds2 >= (nanoseconds1 + TARGET_NANOSECONDS))) {
+          // estimate the frequency and rule out things that look silly
+          //  (less than 100 MHz or above 100 GHz)
+          double est_ghz = 1.0 * (native2 - native1) / (nanoseconds2 - nanoseconds1);
+          if((est_ghz >= 0.1) && (est_ghz <= 100.0)) {
+            bool ok = native_to_nanoseconds.set(native1,
+                                                nanoseconds1,
+                                                native2,
+                                                nanoseconds2);
+
+            if(ok) {
+              log_timer.debug() << "tsc calibration: native=" << native1 << "," << native2
+                                << " nanoseconds=" << nanoseconds1 << "," << nanoseconds2
+                                << " freq=" << est_ghz;
+              cpu_tsc_enabled = true;
+            }
+          } else {
+            log_timer.warning() << "tsc calibration failed: native=" << native1 << "," << native2
+                                << " nanoseconds=" << nanoseconds1 << "," << nanoseconds2
+                                << " freq=" << est_ghz;
+          }
+          break;
+        }
+
+        // termination case 3 - too many iterations - assume a tsc read
+        //  should never be faster than 1ns
+        if((uint64_t(1) << iterations) > TARGET_NANOSECONDS) {
+          log_timer.warning() << "tsc calibration too fast: native=" << native1 << "," << native2
+                              << " nanoseconds=" << nanoseconds1 << "," << nanoseconds2
+                              << " iterations=" << iterations;
+          break;
+        }
+
+        // termination case 4 - time elapsed with too few iterations
+        if(nanoseconds2 >= (nanoseconds1 + TARGET_NANOSECONDS)) {
+          log_timer.warning() << "tsc calibration too slow: native=" << native1 << "," << native2
+                              << " nanoseconds=" << nanoseconds1 << "," << nanoseconds2
+                              << " iterations=" << iterations;
+          break;
+        }
       }
-      assert(count_left == 0);
+#ifdef REALM_ON_MACOS
+      mach_port_deallocate(mach_task_self(), cclock);
+#endif
+
+      // if we've got a working tsc, we're done
+      if(cpu_tsc_enabled)
+        return;
     }
-
-    void MultiNodeRollUp::handle_data(const void *data, size_t datalen)
-    {
-      // have to take mutex here since we're updating shared data
-      AutoLock<> a(mutex);
-
-      const double *p = (const double *)data;
-      int count = datalen / (2 * sizeof(double));
-      for(int i = 0; i < count; i++) {
-        int kind; // memcpy preferred over type-punning
-	memcpy(&kind, &p[2*i], sizeof(int));
-        double accum = p[2*i+1];
-
-        std::map<int,double>::iterator it = timerp->find(kind);
-        if(it != timerp->end())
-          it->second += accum;
-        else
-          timerp->insert(std::make_pair(kind,accum));
-      }
-
-      count_left--;
-      if(count_left == 0)
-	condvar.signal();
+#else
+    // fatal error if the user demanded use of the cpu tsc
+    if(use_cpu_tsc > 0) {
+      log_timer.fatal() << "missing support for CPU time stamp counter mode";
+      abort();
     }
 #endif
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class DetailedTimer (and friends)
-  //
-
-    struct TimerStackEntry {
-      int timer_kind;
-      double start_time;
-      double accum_child_time;
-    };
-
-#ifdef DETAILED_TIMING
-    struct PerThreadTimerData {
-    public:
-      PerThreadTimerData(void)
-      {
-        thread = pthread_self();
-      }
-
-      pthread_t thread;
-      std::list<TimerStackEntry> timer_stack;
-      std::map<int, double> timer_accum;
-      Mutex mutex;
-    };
-
-    Mutex timer_data_mutex;
-    std::vector<PerThreadTimerData *> timer_data;
-
-    static void thread_timer_free(void *arg)
-    {
-      assert(arg != NULL);
-      PerThreadTimerData *ptr = (PerThreadTimerData*)arg;
-      delete ptr;
+    // non-tsc mode - default is to use an OS-provided source of nanoseconds,
+    //  requiring no initialization
+#ifdef REALM_ON_MACOS
+    // macos is special though - use mach apis to figure out how
+    //  mach_absolute_time relates to nanoseconds
+    // get a single sample from CALENDAR_CLOCK and the tsc
+    mach_timespec_t ts;
+    clock_serv_t cclock;
+    host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+    clock_get_time(cclock, &ts);
+    uint64_t abstime = mach_absolute_time();
+    mach_port_deallocate(mach_task_self(), cclock);
+    uint64_t caltime = ts.tv_sec;
+    caltime = (caltime * 100000000) + ts.tv_nsec;
+    // now ask mach for the clock ratio and we'll fake the second sample
+    mach_timebase_info_data_t info;
+    kern_return_t ret = mach_timebase_info(&info);
+    if(ret != KERN_SUCCESS) {
+      log_timer.fatal() << "unable to get mach timebase";
+      abort();
     }
-#endif
+    // ns = numer/denom * ticks -> `denom` ns == `numer` ticks
+    bool ok = native_to_nanoseconds.set(abstime,
+                                        caltime,
+                                        abstime + info.numer,
+                                        caltime + info.denom);
+    if(!ok) {
+      log_timer.fatal() << "mach calibration failed: abstime=" << abstime
+                        << " caltime=" << caltime
+                        << " ratio=" << info.numer << "/" << info.denom;
+      abort();
+    }
 
-  /*static*/ void DetailedTimer::init_timers(void)
-  {
-#ifdef DETAILED_TIMING
-    // Create the key for the thread local data
-#ifndef NDEBUG
-    int ret =
-#endif
-      pthread_key_create(&thread_timer_key,thread_timer_free);
-    assert(ret == 0);
+    log_timer.debug() << "mach calibration: abstime=" << abstime
+                      << " caltime=" << caltime
+                      << " ratio=" << info.numer << "/" << info.denom;
 #endif
   }
 
-#ifdef DETAILED_TIMING
-    /*static*/ void DetailedTimer::clear_timers(bool all_nodes /*= true*/)
-    {
-      // take global mutex because we need to walk the list
-      {
-	log_timer.warning("clearing timers");
-	AutoLock<> l1(timer_data_mutex);
-	for(std::vector<PerThreadTimerData *>::iterator it = timer_data.begin();
-	    it != timer_data.end();
-	    it++) {
-	  // take each thread's data's lock too
-	  AutoLock<> l2((*it)->mutex);
-	  (*it)->timer_accum.clear();
-	}
-      }
-
-      // if we've been asked to clear other nodes too, send a message
-      if(all_nodes) {
-	NodeSet nodes;
-	for(NodeID i = 0; i < max_node_id; i++)
-	  if(i != my_node_id)
-	    nodes.add(i);
-	ActiveMessage<ClearTimersMessage> amsg(nodes);
-	amsg->dummy = 0;
-	amsg.commit();
-      }
-    }
-
-    /*static*/ void DetailedTimer::push_timer(int timer_kind)
-    {
-      PerThreadTimerData *thread_timer_data = 
-        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
-      if(!thread_timer_data) {
-        //printf("creating timer data for thread %lx\n", pthread_self());
-        AutoLock<> l1(timer_data_mutex);
-        thread_timer_data = new PerThreadTimerData;
-        CHECK_PTHREAD( pthread_setspecific(thread_timer_key, thread_timer_data) );
-        timer_data.push_back(thread_timer_data);
-      }
-
-      // no lock needed here - only our thread touches the stack
-      TimerStackEntry entry;
-      entry.timer_kind = timer_kind;
-      struct timespec ts;
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-      entry.start_time = (1.0 * ts.tv_sec + 1e-9 * ts.tv_nsec);
-      entry.accum_child_time = 0;
-      PerThreadTimerData *thread_timer_data = 
-        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
-      thread_timer_data->timer_stack.push_back(entry);
-    }
-        
-    /*static*/ void DetailedTimer::pop_timer(void)
-    {
-      PerThreadTimerData *thread_timer_data = 
-        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
-      if(!thread_timer_data) {
-        printf("got pop without initialized thread data!?\n");
-        exit(1);
-      }
-
-      // no conflicts on stack
-      PerThreadTimerData *thread_timer_data = 
-        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
-      TimerStackEntry old_top = thread_timer_data->timer_stack.back();
-      thread_timer_data->timer_stack.pop_back();
-
-      struct timespec ts;
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-      double elapsed = (1.0 * ts.tv_sec + 1e-9 * ts.tv_nsec) - old_top.start_time;
-
-      // all the elapsed time is added to new top as child time
-      if(thread_timer_data->timer_stack.size() > 0)
-        thread_timer_data->timer_stack.back().accum_child_time += elapsed;
-
-      // only the elapsed minus our own child time goes into the timer accumulator
-      elapsed -= old_top.accum_child_time;
-
-      // we do need a lock to touch the accumulator map
-      if(old_top.timer_kind > 0) {
-        AutoLock<> l1(thread_timer_data->mutex);
-
-        std::map<int,double>::iterator it = thread_timer_data->timer_accum.find(old_top.timer_kind);
-        if(it != thread_timer_data->timer_accum.end())
-          it->second += elapsed;
-        else
-          thread_timer_data->timer_accum.insert(std::make_pair<int,double>(old_top.timer_kind, elapsed));
-      }
-    }
-
-    /*static*/ void DetailedTimer::roll_up_timers(std::map<int, double>& timers,
-                                                  bool local_only)
-    {
-      // take global mutex because we need to walk the list
-      {
-	AutoLock<> l1(timer_data_mutex);
-	for(std::vector<PerThreadTimerData *>::iterator it = timer_data.begin();
-	    it != timer_data.end();
-	    it++) {
-	  // take each thread's data's lock too
-	  AutoLock<> l2((*it)->mutex);
-
-	  for(std::map<int,double>::iterator it2 = (*it)->timer_accum.begin();
-	      it2 != (*it)->timer_accum.end();
-	      it2++) {
-	    std::map<int,double>::iterator it3 = timers.find(it2->first);
-	    if(it3 != timers.end())
-	      it3->second += it2->second;
-	    else
-	      timers.insert(*it2);
-	  }
-	}
-      }
-
-      // get data from other nodes if requested
-      if(!local_only) {
-        MultiNodeRollUp mnru(timers);
-        mnru.execute();
-      }
-    }
-
-    /*static*/ void DetailedTimer::report_timers(bool local_only /*= false*/)
-    {
-      std::map<int,double> timers;
-      
-      roll_up_timers(timers, local_only);
-
-      printf("DETAILED TIMING SUMMARY:\n");
-      for(std::map<int,double>::iterator it = timers.begin();
-          it != timers.end();
-          it++) {
-        printf("%12s - %7.3f s\n", stringify(it->first), it->second);
-      }
-      printf("END OF DETAILED TIMING SUMMARY\n");
-    }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ClearTimersMessage
-  //
+  // class Clock::TimescaleConverter
 
-  /*static*/ void ClearTimersMessage::handle_message(NodeID sender,
-						     const ClearTimerMessage &args,
-						     const void *data,
-						     size_t datalen)
+  Clock::TimescaleConverter::TimescaleConverter()
+    : a_zero(0)
+    , b_zero(0)
+    , slope_a_to_b(uint64_t(1) << 32)
+    , slope_b_to_a(uint64_t(1) << 32)
+  {}
+
+  bool Clock::TimescaleConverter::set(uint64_t ta1, uint64_t tb1,
+                                      uint64_t ta2, uint64_t tb2)
   {
-    DetailedTimer::clear_timers(false);
+    // insist that second point is later
+    if((ta2 <= ta1) || (tb2 <= tb1)) return false;
+
+    // limit the supported ratio to 2^16 in either direction
+    uint64_t a_delta = ta2 - ta1;
+    uint64_t b_delta = tb2 - tb1;
+    if(((a_delta >> 16) >= b_delta) || ((b_delta >> 16) >= a_delta))
+      return false;
+
+    // slopes are 32.32 fixed point - i.e. slope_a_to_b = (2^32 * b) / a
+#ifdef REALM_HAS_INT128
+    // easy if we have 128-bit integer math
+    __int128 a_to_b_128 = (__int128(b_delta) << 32) / a_delta;
+    __int128 b_to_a_128 = (__int128(a_delta) << 32) / b_delta;
+#ifdef DEBUG_REALM
+    assert((a_to_b_128 >= 0) && (a_to_b_128 < LLONG_MAX));
+    assert((b_to_a_128 >= 0) && (b_to_a_128 < LLONG_MAX));
+#endif
+    slope_a_to_b = a_to_b_128;
+    slope_b_to_a = b_to_a_128;
+#else
+    // do this by first computing the integer part (ok due to ratio check):
+    //   slope_int = 2^32 * (b/a)
+    // and then correcting with the fractional part (which won't overflow)
+    //   slope = slope_int + ((b - a * slope_int) / a)
+    slope_a_to_b = (b_delta / a_delta) << 32;
+    slope_a_to_b += ((b_delta << 32) - a_delta * slope_a_to_b) / a_delta;
+    slope_b_to_a = (a_delta / b_delta) << 32;
+    slope_b_to_a += ((a_delta << 32) - b_delta * slope_b_to_a) / b_delta;
+#endif
+
+    a_zero = ta1;
+    b_zero = tb1;
+
+#ifdef DEBUG_REALM
+    // sanity-check
+    uint64_t tb3 = convert_forward_absolute(ta2);
+    uint64_t ta3 = convert_reverse_absolute(tb2);
+    int64_t db_plus = convert_forward_delta(a_delta);
+    int64_t db_minus = convert_forward_delta(-a_delta);
+    int64_t da_plus = convert_reverse_delta(b_delta);
+    int64_t da_minus = convert_reverse_delta(-b_delta);
+    assert((ta2 == ta3) && (tb2 == tb3) &&
+           (db_plus == (int64_t)b_delta) && (-db_minus == (int64_t)b_delta) &&
+           (da_plus == (int64_t)a_delta) && (-da_minus == (int64_t)a_delta));
+#endif
+
+    return true;
   }
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class TimerDataRequestMessage
-  //
-
-  /*static*/ void TimerDataRequestMessage::handle_message(NodeID sender,
-							  const TimerDataRequestMessage &args,
-							  const void *data,
-							  size_t datalen)
-  {
-    std::map<int,double> timers;
-    DetailedTimer::roll_up_timers(timers, true);
-
-    double return_data[200];
-    int count = 0;
-    for(std::map<int,double>::iterator it = timers.begin();
-	it != timers.end();
-	it++) {
-      // use memcpy instead of type-punning
-      //*(int *)(&return_data[count]) = it->first;
-      return_data[count] = 0;
-      memcpy(&return_data[count], &(it->first), sizeof(int));
-      return_data[count+1] = it->second;
-      count += 2;
-    }
-    assert(count <= 200);
-
-    ActiveMessage<TimerDataResponseMessage> amsg(sender, count*sizeof(double));
-    amsg->rollup_ptr = args.rollup_ptr;
-    amsg.add_payload(return_data, count*sizeof(double));
-    amsg.commit();
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class TimerDataResponseMessage
-  //
-
-  /*static*/ void TimerDataResponseMessage::handle_message(NodeID sender,
-							   const TimerDataResponseMessage &args,
-							   const void *data,
-							   size_t datalen)
-
-  {
-    ((MultiNodeRollUp *)args.rollup_ptr)->handle_data(data, datalen); 
-  }
-
-  ActiveMessageHandlerReg<ClearTimersMessage> clear_timers_message_handler;
-  ActiveMessageHandlerReg<TimerDataRequestMessage> timers_data_request_message_handler;
-  ActiveMessageHandlerReg<TimerDataResponseMessage> timer_data_response_message_handler;
-
-#endif  
 
 }; // namespace Realm

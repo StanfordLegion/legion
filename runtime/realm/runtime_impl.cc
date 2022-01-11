@@ -20,6 +20,7 @@
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
+#include "realm/transfer/ib_memory.h"
 
 #include "realm/activemsg.h"
 #include "realm/deppart/preimage.h"
@@ -49,6 +50,7 @@
 #endif
 
 #ifdef REALM_ON_WINDOWS
+#include <windows.h>
 #include <processthreadsapi.h>
 #include <synchapi.h>
 
@@ -682,6 +684,7 @@ namespace Realm {
       .add_option_bool("-ll:pin_util", m->pin_util_procs)
       .add_option_int("-ll:cpu_bgwork", m->cpu_bgwork_timeslice)
       .add_option_int("-ll:util_bgwork", m->util_bgwork_timeslice)
+      .add_option_int("-ll:ext_sysmem", m->use_ext_sysmem)
       .parse_command_line(cmdline);
 
     return m;
@@ -693,12 +696,27 @@ namespace Realm {
   {
     Module::create_memories(runtime);
 
+    MemoryImpl *sysmem;
     if(sysmem_size > 0) {
       Memory m = runtime->next_local_memory_id();
-      MemoryImpl *mi = new LocalCPUMemory(m, sysmem_size,
-          -1/*don't care numa domain*/, Memory::SYSTEM_MEM);
-      runtime->add_memory(mi);
-    }
+      sysmem = new LocalCPUMemory(m, sysmem_size,
+                                  -1/*don't care numa domain*/,
+                                  Memory::SYSTEM_MEM);
+      runtime->add_memory(sysmem);
+    } else
+      sysmem = 0;
+
+    // create a memory that will hold external instances (the sysmem above
+    //  might get registered with network and/or gpus, but external instances
+    //  usually won't have those affinities)
+    if(use_ext_sysmem || !sysmem) {
+      Memory m = runtime->next_local_memory_id();
+      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/,
+                                      -1 /*don't care numa domain*/,
+                                      Memory::SYSTEM_MEM);
+      runtime->add_memory(ext_sysmem);
+    } else
+      ext_sysmem = sysmem;
   }
 
   // create any processors provided by the module (default == do nothing)
@@ -809,7 +827,8 @@ namespace Realm {
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
 	num_local_processors(0),
-	module_registrar(this)
+	module_registrar(this),
+        modules_created(false)
     {
       machine = new MachineImpl;
     }
@@ -906,6 +925,30 @@ namespace Realm {
       return code_translators;
     }
 
+    Module *RuntimeImpl::get_module_untyped(const char *name) const
+    {
+      if(!modules_created) {
+        log_runtime.fatal() << "request for '" << name
+                            << "' module before all modules have been created";
+        abort();
+      }
+
+      // TODO: worth building a map here instead?
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+          it != modules.end();
+          ++it)
+        if(!strcmp(name, (*it)->get_name().c_str()))
+          return *it;
+
+      for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
+          it != network_modules.end();
+          ++it)
+        if(!strcmp(name, (*it)->get_name().c_str()))
+          return *it;
+
+      return 0;
+    }
+
     static void add_proc_mem_affinities(MachineImpl *machine,
 					const std::set<Processor>& procs,
 					const std::set<Memory>& mems,
@@ -958,8 +1001,6 @@ namespace Realm {
 
     bool RuntimeImpl::network_init(int *argc, char ***argv)
     {
-      DetailedTimer::init_timers();
-
       // if we're given empty or non-existent argc/argv, start from a
       //  dummy command line with a single string (which is supposed to be
       //  the name of the binary) so that the network module and/or the
@@ -1174,6 +1215,18 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
+      // calibrate timers
+      int use_cpu_tsc = -1; // dont care
+      uint64_t force_cpu_tsq_freq = 0; // no force
+      {
+        CommandLineParser cp;
+        cp.add_option_int("-ll:cputsc", use_cpu_tsc);
+        cp.add_option_int_units("-ll:tscfreq", force_cpu_tsq_freq, 'm', false/*!binary*/);
+        bool ok = cp.parse_command_line(cmdline);
+        assert(ok);
+      }
+      Clock::calibrate(use_cpu_tsc, force_cpu_tsq_freq);
+
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
 
@@ -1186,6 +1239,7 @@ namespace Realm {
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
+      modules_created = true;
 
       PartitioningOpQueue::configure_from_cmdline(cmdline);
 
@@ -1567,11 +1621,6 @@ namespace Realm {
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
 	  it++)
-	(*it)->create_dma_channels(this);
-
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
-	  it++)
 	(*it)->create_code_translators(this);
       
       // start dma system at the very ending of initialization
@@ -1595,6 +1644,11 @@ namespace Realm {
 	printf("HELP!  Could not satisfy all core reservations!\n");
 	exit(1);
       }
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_dma_channels(this);
 
       {
         // iterate over all local processors and add affinities for them
@@ -2265,6 +2319,13 @@ namespace Realm {
 	(*it)->shutdown();
       stop_dma_system();
 
+      // let network-dependent cleanup happen before we detach
+      for(std::vector<Module *>::iterator it = modules.begin();
+          it != modules.end();
+          it++) {
+        (*it)->pre_detach_cleanup();
+      }
+
       // detach from the network
       for(std::vector<NetworkModule *>::const_iterator it = network_modules.begin();
 	  it != network_modules.end();
@@ -2312,12 +2373,6 @@ namespace Realm {
                rt->local_reservation_free_list->next_alloc,
                rt->local_index_space_free_list->next_alloc,
                rt->local_proc_group_free_list->next_alloc);
-      }
-#endif
-#ifdef EVENT_GRAPH_TRACE
-      {
-        //FILE *log_file = Logger::get_log_file();
-        show_event_waiters(/*log_file*/);
       }
 #endif
       cleanup_query_caches();

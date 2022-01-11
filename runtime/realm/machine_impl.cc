@@ -22,6 +22,7 @@
 
 #include "realm/activemsg.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/ib_memory.h"
 
 #ifdef REALM_ON_WINDOWS
 // TODO: clean up query cache code and renable!
@@ -204,8 +205,6 @@ namespace Realm {
 
     ptr = new MachineProcInfo(p);
 
-    Processor::Kind k = p.kind();
-    proc_by_kind[k][p] = ptr;
     return true;
   }
   
@@ -219,8 +218,6 @@ namespace Realm {
 
     ptr = new MachineMemInfo(m);
 
-    Memory::Kind k = m.kind();
-    mem_by_kind[k][m] = ptr;
     return true;
   }
 
@@ -264,6 +261,21 @@ namespace Realm {
     }
 
     return changed;
+  }
+
+  void MachineNodeInfo::update_kind_maps()
+  {
+    proc_by_kind.clear();
+    for(std::map<Processor, MachineProcInfo *>::const_iterator it = procs.begin();
+        it != procs.end();
+        ++it)
+      proc_by_kind[it->first.kind()][it->first] = it->second;
+
+    mem_by_kind.clear();
+    for(std::map<Memory, MachineMemInfo *>::const_iterator it = mems.begin();
+        it != mems.end();
+        ++it)
+      mem_by_kind[it->first.kind()][it->first] = it->second;
   }
 
 
@@ -1380,6 +1392,13 @@ namespace Realm {
     return *this;
   }
 
+  Machine::MemoryQuery& Machine::MemoryQuery::has_capacity(size_t min_bytes)
+  {
+    impl = ((MemoryQueryImpl *)impl)->writeable_reference();
+    ((MemoryQueryImpl *)impl)->restrict_by_capacity(min_bytes);
+    return *this;
+  }
+
   size_t Machine::MemoryQuery::count(void) const
   {
     return ((MemoryQueryImpl *)impl)->count_matches();
@@ -2397,6 +2416,7 @@ namespace Realm {
     , machine((MachineImpl *)_machine.impl)
     , is_restricted_node(false)
     , is_restricted_kind(false)
+    , restricted_min_capacity(0)
     , shared_cached_list(false)
     , valid_cache(false)
     , cur_cached_list(NULL)
@@ -2412,6 +2432,7 @@ namespace Realm {
     , restricted_node_id(copy_from.restricted_node_id)
     , is_restricted_kind(copy_from.is_restricted_kind)
     , restricted_kind(copy_from.restricted_kind)
+    , restricted_min_capacity(copy_from.restricted_min_capacity)
     , shared_cached_list(copy_from.shared_cached_list)
     , valid_cache(copy_from.valid_cache)
     , cur_cached_list(copy_from.cur_cached_list)
@@ -2498,6 +2519,16 @@ namespace Realm {
     valid_cache = false;
   }
 
+  void MemoryQueryImpl::restrict_by_capacity(size_t new_min_bytes)
+  {
+    restricted_min_capacity = std::max(restricted_min_capacity,
+                                       new_min_bytes);
+    if (valid_cache && cur_cached_list) {
+      delete cur_cached_list; cur_cached_list = NULL;
+    }
+    valid_cache = false;
+  }
+
   void MemoryQueryImpl::add_predicate(MemoryQueryPredicate *pred)
   {
     // a writer is always unique, so no need for mutexes
@@ -2517,7 +2548,8 @@ namespace Realm {
     }
     bool found = false;
     // shared cache, not mutated query
-    if (is_restricted_kind && (!is_restricted_node) && (!predicates.size())) {
+    if (is_restricted_kind && (!is_restricted_node) && (!predicates.size()) &&
+        (restricted_min_capacity == 0)) {
       // if the caches are invalid and not in the middle of a query, reset
       if (!global_valid_cache) {
         _mem_cache.clear();
@@ -2693,7 +2725,8 @@ namespace Realm {
         else
           it2 = plist->begin();
         while(it2 != plist->end()) {
-          bool ok = true;
+          bool ok = ((restricted_min_capacity == 0) ||
+                     (it2->first.capacity() >= restricted_min_capacity));
           for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
               ok && (it3 != predicates.end());
               it3++)
@@ -2731,7 +2764,9 @@ namespace Realm {
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
-	bool ok = true;
+        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+          continue;
+        bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
 	    ok && (it2 != predicates.end());
 	    it2++)
@@ -2772,7 +2807,8 @@ namespace Realm {
 
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
 	while(it2 != plist->end()) {
-	  bool ok = true;
+          bool ok = ((restricted_min_capacity == 0) ||
+                     (it2->first.capacity() >= restricted_min_capacity));
 	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
 	      ok && (it3 != predicates.end());
 	      it3++)
@@ -2810,6 +2846,8 @@ namespace Realm {
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
+        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+          continue;
 	bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
 	    ok && (it2 != predicates.end());
@@ -2846,7 +2884,8 @@ namespace Realm {
 	else
 	  it2 = plist->begin();
 	while(it2 != plist->end()) {
-	  bool ok = true;
+          bool ok = ((restricted_min_capacity == 0) ||
+                     (it2->first.capacity() >= restricted_min_capacity));
 	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
 	      ok && (it3 != predicates.end());
 	      it3++)
@@ -2905,6 +2944,8 @@ namespace Realm {
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
+        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+          continue;
 	bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
 	    ok && (it2 != predicates.end());
@@ -2947,7 +2988,8 @@ namespace Realm {
         else  {
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
 	while(it2 != plist->end()) {
-	  bool ok = true;
+          bool ok = ((restricted_min_capacity == 0) ||
+                     (it2->first.capacity() >= restricted_min_capacity));
 	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
 	      ok && (it3 != predicates.end());
 	      it3++)
@@ -2985,6 +3027,8 @@ namespace Realm {
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
+        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+          continue;
 	bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
 	    ok && (it2 != predicates.end());
@@ -3026,7 +3070,8 @@ namespace Realm {
       if(plist) {
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
 	while(it2 != plist->end()) {
-	  bool ok = true;
+          bool ok = ((restricted_min_capacity == 0) ||
+                     (it2->first.capacity() >= restricted_min_capacity));
 	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
 	      ok && (it3 != predicates.end());
 	      it3++)
@@ -3063,7 +3108,6 @@ namespace Realm {
 						      const void *data, size_t datalen)
 
   {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info() << "received fragment from " << sender
                     << ": num_fragments=" << args.num_fragments;
     
@@ -3098,6 +3142,13 @@ namespace Realm {
     }
 
     log_annc.info("node %d has received all of its announcements", Network::my_node_id);
+
+    // 3) go ahead and build the by-kind maps in each node info
+    MachineImpl *impl = get_machine();
+    for(std::map<int, MachineNodeInfo *>::iterator it = impl->nodeinfos.begin();
+        it != impl->nodeinfos.end();
+        ++it)
+      it->second->update_kind_maps();
   }
   
 

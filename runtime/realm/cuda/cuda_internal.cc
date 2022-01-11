@@ -30,398 +30,581 @@ namespace Realm {
   namespace Cuda {
 
     extern Logger log_stream;
+    extern Logger log_gpudma;
 
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPUXferDes
 
-      GPUXferDes::GPUXferDes(uintptr_t _dma_op, Channel *_channel,
-			           NodeID _launch_node, XferDesID _guid,
-				   const std::vector<XferDesPortInfo>& inputs_info,
-				   const std::vector<XferDesPortInfo>& outputs_info,
-				   int _priority)
-	: XferDes(_dma_op, _channel, _launch_node, _guid,
-		  inputs_info, outputs_info,
-		  _priority, 0, 0)
-      {
-	if((inputs_info.size() >= 1) &&
-	   (input_ports[0].mem->kind == MemoryImpl::MKIND_GPUFB)) {
-	  // all input ports should agree on which gpu they target
-	  src_gpu = ((GPUFBMemory*)(input_ports[0].mem))->gpu;
-	  for(size_t i = 1; i < input_ports.size(); i++) {
-	    // exception: control and indirect ports should be readable from cpu
-	    if((int(i) == input_control.control_port_idx) ||
-	       (int(i) == output_control.control_port_idx) ||
-	       input_ports[i].is_indirect_port) {
-	      assert((input_ports[i].mem->kind == MemoryImpl::MKIND_SYSMEM) ||
-		     (input_ports[i].mem->kind == MemoryImpl::MKIND_ZEROCOPY) ||
-		     (input_ports[i].mem->kind == MemoryImpl::MKIND_MANAGED));
-	      continue;
-	    }
-	    assert(input_ports[i].mem == input_ports[0].mem);
-	  }
-	} else
-	  src_gpu = 0;
+    GPUXferDes::GPUXferDes(uintptr_t _dma_op, Channel *_channel,
+                           NodeID _launch_node, XferDesID _guid,
+                           const std::vector<XferDesPortInfo>& inputs_info,
+                           const std::vector<XferDesPortInfo>& outputs_info,
+                           int _priority)
+      : XferDes(_dma_op, _channel, _launch_node, _guid,
+                inputs_info, outputs_info,
+                _priority, 0, 0)
+    {
+      kind = XFER_GPU_IN_FB; // TODO: is this needed at all?
 
-	if((outputs_info.size() >= 1) &&
-	   (output_ports[0].mem->kind == MemoryImpl::MKIND_GPUFB)) {
-	  // all output ports should agree on which gpu they target
-	  dst_gpu = ((GPUFBMemory*)(output_ports[0].mem))->gpu;
-	  for(size_t i = 1; i < output_ports.size(); i++)
-	    assert(output_ports[i].mem == output_ports[0].mem);
-	} else
-	  dst_gpu = 0;
-
-	// if we're doing a multi-hop copy, we'll dial down the request
-	//  sizes to improve pipelining
-	bool multihop_copy = false;
-	for(size_t i = 1; i < input_ports.size(); i++)
-	  if(input_ports[i].peer_guid != XFERDES_NO_GUID)
-	    multihop_copy = true;
-	for(size_t i = 1; i < output_ports.size(); i++)
-	  if(output_ports[i].peer_guid != XFERDES_NO_GUID)
-	    multihop_copy = true;
-
-	if(src_gpu != 0) {
-	  if(dst_gpu != 0) {
-	    if(src_gpu == dst_gpu) {
-	      kind = XFER_GPU_IN_FB;
-	      // ignore max_req_size value passed in - it's probably too small
-	      max_req_size = 1 << 30;
-	    } else {
-	      kind = XFER_GPU_PEER_FB;
-	      // ignore max_req_size value passed in - it's probably too small
-	      max_req_size = 256 << 20;
-	    }
-	  } else {
-	    kind = XFER_GPU_FROM_FB;
-	    if(multihop_copy)
-	      max_req_size = 4 << 20;
-	  }
-	} else {
-	  if(dst_gpu != 0) {
-	    kind = XFER_GPU_TO_FB;
-	    if(multihop_copy)
-	      max_req_size = 4 << 20;
-	  } else {
-	    assert(0);
-	  }
-	}
-
-	const int max_nr = 10; // FIXME
-        for (int i = 0; i < max_nr; i++) {
-          GPURequest* gpu_req = new GPURequest;
-          gpu_req->xd = this;
-	  gpu_req->event.req = gpu_req;
-          available_reqs.push(gpu_req);
+      src_gpus.resize(inputs_info.size(), 0);
+      for(size_t i = 0; i < input_ports.size(); i++)
+	if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
+	  src_gpus[i] = (ID(input_ports[i].mem->me).is_memory() ?
+                           (checked_cast<GPUFBMemory *>(input_ports[i].mem))->gpu :
+                           (checked_cast<GPUFBIBMemory *>(input_ports[i].mem))->gpu);
+      dst_gpus.resize(outputs_info.size(), 0);
+      dst_is_ipc.resize(outputs_info.size(), false);
+      for(size_t i = 0; i < output_ports.size(); i++)
+	if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+	  dst_gpus[i] = (ID(output_ports[i].mem->me).is_memory() ?
+                           (checked_cast<GPUFBMemory *>(output_ports[i].mem))->gpu :
+                           (checked_cast<GPUFBIBMemory *>(output_ports[i].mem))->gpu);
+        } else {
+          // assume a memory owned by another node is ipc
+          if(NodeID(ID(output_ports[i].mem->me).memory_owner_node()) != Network::my_node_id)
+            dst_is_ipc[i] = true;
         }
-      }
+    }
 	
-      long GPUXferDes::get_requests(Request** requests, long nr)
-      {
-        GPURequest** reqs = (GPURequest**) requests;
-	// TODO: add support for 3D CUDA copies (just 1D and 2D for now)
-	unsigned flags = (TransferIterator::LINES_OK |
-			  TransferIterator::PLANES_OK);
-        long new_nr = default_get_requests(requests, nr, flags);
-        for (long i = 0; i < new_nr; i++) {
-          switch (kind) {
-            case XFER_GPU_TO_FB:
-            {
-              //reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
-	      reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
-											 reqs[i]->nbytes);
-	      assert(reqs[i]->src_base != 0);
-              //reqs[i]->dst_gpu_off = /*dst_buf.alloc_offset +*/ reqs[i]->dst_off;
-              break;
+    long GPUXferDes::get_requests(Request** requests, long nr)
+    {
+      // unused
+      assert(0);
+      return 0;
+    }
+
+    bool GPUXferDes::progress_xd(GPUChannel *channel,
+                                 TimeLimit work_until)
+    {
+      bool did_work = false;
+
+      ReadSequenceCache rseqcache(this, 2 << 20);
+      WriteSequenceCache wseqcache(this, 2 << 20);
+
+      while(true) {
+        size_t min_xfer_size = 4 << 20;  // TODO: make controllable
+        size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+        if(max_bytes == 0)
+          break;
+
+        XferPort *in_port = 0, *out_port = 0;
+        size_t in_span_start = 0, out_span_start = 0;
+        GPU *in_gpu = 0, *out_gpu = 0;
+        bool out_is_ipc = false;
+        int out_ipc_index = -1;
+        if(input_control.current_io_port >= 0) {
+          in_port = &input_ports[input_control.current_io_port];
+          in_span_start = in_port->local_bytes_total;
+          in_gpu = src_gpus[input_control.current_io_port];
+        }
+        if(output_control.current_io_port >= 0) {
+          out_port = &output_ports[output_control.current_io_port];
+          out_span_start = out_port->local_bytes_total;
+          out_gpu = dst_gpus[output_control.current_io_port];
+          out_is_ipc = dst_is_ipc[output_control.current_io_port];
+        }
+
+        size_t total_bytes = 0;
+        if(in_port != 0) {
+          if(out_port != 0) {
+            // input and output both exist - transfer what we can
+            log_xd.info() << "cuda memcpy chunk: min=" << min_xfer_size
+                          << " max=" << max_bytes;
+
+            uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+            uintptr_t out_base;
+            const GPU::CudaIpcMapping *out_mapping = 0;
+            if(out_is_ipc) {
+              out_mapping = in_gpu->find_ipc_mapping(out_port->mem->me);
+              assert(out_mapping);
+              out_base = out_mapping->local_base;
+            } else
+              out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+            // pick the correct stream for any memcpy's we generate
+            GPUStream *stream;
+            if(in_gpu) {
+              if(out_gpu == in_gpu)
+                stream = in_gpu->get_next_d2d_stream();
+              else if(out_mapping)
+                stream = in_gpu->cudaipc_streams[out_mapping->owner];
+              else if(!out_gpu)
+                stream = in_gpu->device_to_host_stream;
+              else {
+                stream = in_gpu->peer_to_peer_streams[out_gpu->info->index];
+                assert(stream);
+              }
+            } else {
+              assert(out_gpu);
+              stream = out_gpu->host_to_device_stream;
             }
-            case XFER_GPU_FROM_FB:
-            {
-              //reqs[i]->src_gpu_off = /*src_buf.alloc_offset +*/ reqs[i]->src_off;
-              //reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
-	      reqs[i]->dst_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(reqs[i]->dst_off,
-											  reqs[i]->nbytes);
-	      assert(reqs[i]->dst_base != 0);
-              break;
+
+            AutoGPUContext agc(stream->get_gpu());
+
+            size_t bytes_to_fence = 0;
+
+            while(total_bytes < max_bytes) {
+              AddressListCursor& in_alc = in_port->addrcursor;
+              AddressListCursor& out_alc = out_port->addrcursor;
+
+              uintptr_t in_offset = in_alc.get_offset();
+              uintptr_t out_offset = out_alc.get_offset();
+
+              // the reported dim is reduced for partially consumed address
+              //  ranges - whatever we get can be assumed to be regular
+              int in_dim = in_alc.get_dim();
+              int out_dim = out_alc.get_dim();
+
+              size_t bytes = 0;
+              size_t bytes_left = max_bytes - total_bytes;
+
+              // limit transfer size for host<->device copies
+              if((bytes_left > (4 << 20)) && (!in_gpu || (!out_gpu && (out_ipc_index == -1))))
+                bytes_left = 4 << 20;
+
+              assert(in_dim > 0);
+              assert(out_dim > 0);
+
+              size_t icount = in_alc.remaining(0);
+              size_t ocount = out_alc.remaining(0);
+
+              // contig bytes is always the min of the first dimensions
+              size_t contig_bytes = std::min(std::min(icount, ocount),
+                                             bytes_left);
+
+              // catch simple 1D case first
+              if((contig_bytes == bytes_left) ||
+                 ((contig_bytes == icount) && (in_dim == 1)) ||
+                 ((contig_bytes == ocount) && (out_dim == 1))) {
+                bytes = contig_bytes;
+
+                // check rate limit on stream
+                if(!stream->ok_to_submit_copy(bytes, this))
+                  break;
+
+                // grr...  prototypes of these differ slightly...
+                if(in_gpu) {
+                  if(out_gpu || (out_ipc_index >= 0)) {
+                    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyDtoDAsync)
+                              (static_cast<CUdeviceptr>(out_base + out_offset),
+                               static_cast<CUdeviceptr>(in_base + in_offset),
+                               bytes,
+                               stream->get_stream()) );
+                  } else {
+                    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyDtoHAsync)
+                              (reinterpret_cast<void *>(out_base + out_offset),
+                               static_cast<CUdeviceptr>(in_base + in_offset),
+                               bytes,
+                               stream->get_stream()) );
+                  }
+                } else {
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyHtoDAsync)
+                            (static_cast<CUdeviceptr>(out_base + out_offset),
+                             reinterpret_cast<const void *>(in_base + in_offset),
+                             bytes,
+                             stream->get_stream()) );
+                }
+                log_gpudma.info() << "gpu memcpy: dst="
+                                  << std::hex << (out_base + out_offset)
+                                  << " src=" << (in_base + in_offset) << std::dec
+                                  << " bytes=" << bytes << " stream=" << stream;
+
+                in_alc.advance(0, bytes);
+                out_alc.advance(0, bytes);
+
+                bytes_to_fence += bytes;
+                // TODO: fence on a threshold
+              } else {
+                // grow to a 2D copy
+                int id;
+                int iscale;
+                uintptr_t in_lstride;
+                if(contig_bytes < icount) {
+                  // second input dim comes from splitting first
+                  id = 0;
+                  in_lstride = contig_bytes;
+                  size_t ilines = icount / contig_bytes;
+                  if((ilines * contig_bytes) != icount)
+                    in_dim = 1;  // leftover means we can't go beyond this
+                  icount = ilines;
+                  iscale = contig_bytes;
+                } else {
+                  assert(in_dim > 1);
+                  id = 1;
+                  icount = in_alc.remaining(id);
+                  in_lstride = in_alc.get_stride(id);
+                  iscale = 1;
+                }
+
+                int od;
+                int oscale;
+                uintptr_t out_lstride;
+                if(contig_bytes < ocount) {
+                  // second output dim comes from splitting first
+                  od = 0;
+                  out_lstride = contig_bytes;
+                  size_t olines = ocount / contig_bytes;
+                  if((olines * contig_bytes) != ocount)
+                    out_dim = 1;  // leftover means we can't go beyond this
+                  ocount = olines;
+                  oscale = contig_bytes;
+                } else {
+                  assert(out_dim > 1);
+                  od = 1;
+                  ocount = out_alc.remaining(od);
+                  out_lstride = out_alc.get_stride(od);
+                  oscale = 1;
+                }
+
+                size_t lines = std::min(std::min(icount, ocount),
+                                        bytes_left / contig_bytes);
+
+                // see if we need to stop at 2D
+                if(((contig_bytes * lines) == bytes_left) ||
+                   ((lines == icount) && (id == (in_dim - 1))) ||
+                   ((lines == ocount) && (od == (out_dim - 1)))) {
+                  bytes = contig_bytes * lines;
+
+                  // check rate limit on stream
+                  if(!stream->ok_to_submit_copy(bytes, this))
+                    break;
+
+                  CUDA_MEMCPY2D copy_info;
+                  memset(&copy_info, 0, sizeof(copy_info));
+                  if(in_gpu) {
+                    copy_info.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+                    copy_info.srcDevice = static_cast<CUdeviceptr>(in_base + in_offset);
+                  } else {
+                    copy_info.srcMemoryType = CU_MEMORYTYPE_HOST;
+                    copy_info.srcHost = reinterpret_cast<const void *>(in_base + in_offset);
+                  }
+                  if(out_gpu || (out_ipc_index >= 0)) {
+                    copy_info.dstMemoryType = CU_MEMORYTYPE_DEVICE;
+                    copy_info.dstDevice = static_cast<CUdeviceptr>(out_base + out_offset);
+                  } else {
+                    copy_info.dstMemoryType = CU_MEMORYTYPE_HOST;
+                    copy_info.dstHost = reinterpret_cast<void *>(out_base + out_offset);
+                  }
+                  copy_info.srcPitch = in_lstride;
+                  copy_info.dstPitch = out_lstride;
+                  copy_info.WidthInBytes = contig_bytes;
+                  copy_info.Height = lines;
+
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                            (&copy_info, stream->get_stream()) );
+
+                  log_gpudma.info() << "gpu memcpy 2d: dst="
+                                    << std::hex << (out_base + out_offset) << std::dec
+                                    << "+" << out_lstride << " src="
+                                    << std::hex << (in_base + in_offset) << std::dec
+                                    << "+" << in_lstride
+                                    << " bytes=" << bytes << " lines=" << lines
+                                    << " stream=" << stream;
+
+                  in_alc.advance(id, lines * iscale);
+                  out_alc.advance(od, lines * oscale);
+
+                  bytes_to_fence += bytes;
+                  // TODO: fence on a threshold
+                } else {
+                  uintptr_t in_pstride;
+                  if(lines < icount) {
+                    // third input dim comes from splitting current
+                    in_pstride = in_lstride * lines;
+                    size_t iplanes = icount / lines;
+                    // check for leftovers here if we go beyond 3D!
+                    icount = iplanes;
+                    iscale *= lines;
+                  } else {
+                    id++;
+                    assert(in_dim > id);
+                    icount = in_alc.remaining(id);
+                    in_pstride = in_alc.get_stride(id);
+                    iscale = 1;
+                  }
+
+                  uintptr_t out_pstride;
+                  if(lines < ocount) {
+                    // third output dim comes from splitting current
+                    out_pstride = out_lstride * lines;
+                    size_t oplanes = ocount / lines;
+                    // check for leftovers here if we go beyond 3D!
+                    ocount = oplanes;
+                    oscale *= lines;
+                  } else {
+                    od++;
+                    assert(out_dim > od);
+                    ocount = out_alc.remaining(od);
+                    out_pstride = out_alc.get_stride(od);
+                    oscale = 1;
+                  }
+
+                  size_t planes = std::min(std::min(icount, ocount),
+                                           (bytes_left /
+                                            (contig_bytes * lines)));
+
+                  // a cuMemcpy3DAsync appears to be unrolled on the host in the
+                  //  driver, so we'll do the unrolling into 2D copies ourselves,
+                  //  allowing us to stop early if we hit the rate limit or a
+                  //  timeout
+                  CUDA_MEMCPY2D copy_info;
+                  memset(&copy_info, 0, sizeof(copy_info));
+                  copy_info.srcMemoryType = (in_gpu ? CU_MEMORYTYPE_DEVICE : CU_MEMORYTYPE_HOST);
+                  copy_info.dstMemoryType = ((out_gpu || (out_ipc_index >= 0)) ?
+                                               CU_MEMORYTYPE_DEVICE :
+                                               CU_MEMORYTYPE_HOST);
+                  copy_info.srcPitch = in_lstride;
+                  copy_info.dstPitch = out_lstride;
+                  copy_info.WidthInBytes = contig_bytes;
+                  copy_info.Height = lines;
+
+                  size_t act_planes = 0;
+                  while(act_planes < planes) {
+                    // check rate limit on stream
+                    if(!stream->ok_to_submit_copy(contig_bytes * lines, this))
+                      break;
+
+                    if(in_gpu)
+                      copy_info.srcDevice = static_cast<CUdeviceptr>(in_base + in_offset + (act_planes * in_pstride));
+                    else
+                      copy_info.srcHost = reinterpret_cast<const void *>(in_base + in_offset + (act_planes * in_pstride));
+                    if(out_gpu || (out_ipc_index >= 0))
+                      copy_info.dstDevice = static_cast<CUdeviceptr>(out_base + out_offset + (act_planes * out_pstride));
+                    else
+                      copy_info.dstHost = reinterpret_cast<void *>(out_base + out_offset + (act_planes * out_pstride));
+
+                    CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                              (&copy_info, stream->get_stream()) );
+                    act_planes++;
+
+                    if(work_until.is_expired())
+                      break;
+                  }
+
+                  if(act_planes == 0)
+                    break;
+
+                  log_gpudma.info() << "gpu memcpy 3d: dst="
+                                    << std::hex << (out_base + out_offset) << std::dec
+                                    << "+" << out_lstride
+                                    << "+" << out_pstride << " src="
+                                    << std::hex << (in_base + in_offset) << std::dec
+                                    << "+" << in_lstride
+                                    << "+" << in_pstride
+                                    << " bytes=" << contig_bytes
+                                    << " lines=" << lines
+                                    << " planes=" << act_planes
+                                    << " stream=" << stream;
+
+                  bytes = contig_bytes * lines * act_planes;
+                  in_alc.advance(id, act_planes * iscale);
+                  out_alc.advance(od, act_planes * oscale);
+
+                  bytes_to_fence += bytes;
+                  // TODO: fence on a threshold
+                }
+              }
+
+#ifdef DEBUG_REALM
+              assert(bytes <= bytes_left);
+#endif
+              total_bytes += bytes;
+
+              // stop if it's been too long, but make sure we do at least the
+              //  minimum number of bytes
+              if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
             }
-            case XFER_GPU_IN_FB:
-            {
-              //reqs[i]->src_gpu_off = /*src_buf.alloc_offset*/ + reqs[i]->src_off;
-              //reqs[i]->dst_gpu_off = /*dst_buf.alloc_offset*/ + reqs[i]->dst_off;
-              break;
+
+            if(bytes_to_fence > 0) {
+              add_reference(); // released by transfer completion
+              log_gpudma.info() << "gpu memcpy fence: stream=" << stream
+                                << " xd=" << std::hex << guid << std::dec
+                                << " bytes=" << total_bytes;
+
+              stream->add_notification(new GPUTransferCompletion(this,
+                                                                 input_control.current_io_port,
+                                                                 in_span_start,
+                                                                 total_bytes,
+                                                                 output_control.current_io_port,
+                                                                 out_span_start,
+                                                                 total_bytes));
+              in_span_start += total_bytes;
+              out_span_start += total_bytes;
             }
-            case XFER_GPU_PEER_FB:
-            {
-              //reqs[i]->src_gpu_off = /*src_buf.alloc_offset +*/ reqs[i]->src_off;
-              //reqs[i]->dst_gpu_off = /*dst_buf.alloc_offset +*/ reqs[i]->dst_off;
-              // also need to set dst_gpu for peer xfer
-              reqs[i]->dst_gpu = dst_gpu;
-              break;
-            }
-            default:
-              assert(0);
+          } else {
+            // input but no output, so skip input bytes
+            total_bytes = max_bytes;
+            in_port->addrcursor.skip_bytes(total_bytes);
+
+            rseqcache.add_span(input_control.current_io_port,
+                               in_span_start, total_bytes);
+            in_span_start += total_bytes;
+          }
+        } else {
+          if(out_port != 0) {
+            // output but no input, so skip output bytes
+            total_bytes = max_bytes;
+            out_port->addrcursor.skip_bytes(total_bytes);
+          } else {
+            // skipping both input and output is possible for simultaneous
+            //  gather+scatter
+            total_bytes = max_bytes;
+
+            wseqcache.add_span(output_control.current_io_port,
+                               out_span_start, total_bytes);
+            out_span_start += total_bytes;
+
           }
         }
-        return new_nr;
+
+        if(total_bytes > 0) {
+          did_work = true;
+
+          bool done = record_address_consumption(total_bytes, total_bytes);
+
+          if(done || work_until.is_expired())
+            break;
+        }
       }
 
-      bool GPUXferDes::progress_xd(GPUChannel *channel,
-				   TimeLimit work_until)
-      {
-	Request *rq;
-	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
-	    break;
-	} while(!work_until.is_expired());
+      rseqcache.flush();
+      wseqcache.flush();
 
-	return did_work;
-      }
-
-      void GPUXferDes::notify_request_read_done(Request* req)
-      {
-        default_notify_request_read_done(req);
-      }
-
-      void GPUXferDes::notify_request_write_done(Request* req)
-      {
-        default_notify_request_write_done(req);
-      }
-
-      void GPUXferDes::flush()
-      {
-      }
+      return did_work;
+    }
 
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPUChannel
 
-      GPUChannel::GPUChannel(GPU* _src_gpu, XferDesKind _kind,
-			     BackgroundWorkManager *bgwork)
-	: SingleXDQChannel<GPUChannel,GPUXferDes>(bgwork,
-						  _kind,
-						  stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
-      {
-        src_gpu = _src_gpu;
+    GPUChannel::GPUChannel(GPU* _src_gpu, XferDesKind _kind,
+                           BackgroundWorkManager *bgwork)
+      : SingleXDQChannel<GPUChannel,GPUXferDes>(bgwork,
+                                                _kind,
+                                                stringbuilder() << "cuda channel (gpu=" << _src_gpu->info->index << " kind=" << (int)_kind << ")")
+    {
+      src_gpu = _src_gpu;
 
-        // switch out of ordered mode if multi-threaded dma is requested
-        if(_src_gpu->module->cfg_multithread_dma)
-          xdq.ordered_mode = false;
+      // switch out of ordered mode if multi-threaded dma is requested
+      if(_src_gpu->module->cfg_multithread_dma)
+        xdq.ordered_mode = false;
 
-	Memory fbm = src_gpu->fbmem->me;
+      std::vector<Memory> local_gpu_mems;
+      local_gpu_mems.push_back(src_gpu->fbmem->me);
+      if(src_gpu->fb_ibmem)
+        local_gpu_mems.push_back(src_gpu->fb_ibmem->me);
 
-	switch(_kind) {
-	case XFER_GPU_TO_FB:
-	  {
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
-		it != src_gpu->pinned_sysmems.end();
-		++it)
-	      add_path(*it, fbm, bw, latency, false, false,
-		       XFER_GPU_TO_FB);
+      std::vector<Memory> peer_gpu_mems;
+      peer_gpu_mems.insert(peer_gpu_mems.end(),
+                           src_gpu->peer_fbs.begin(),
+                           src_gpu->peer_fbs.end());
+      for(std::vector<GPU::CudaIpcMapping>::const_iterator it = src_gpu->cudaipc_mappings.begin();
+          it != src_gpu->cudaipc_mappings.end();
+          ++it)
+        peer_gpu_mems.push_back(it->mem);
 
-	    for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
-		it != src_gpu->managed_mems.end();
-		++it)
-	      add_path(*it, fbm, bw, latency, false, false,
-		       XFER_GPU_TO_FB);
+      std::vector<Memory> mapped_cpu_mems;
+      mapped_cpu_mems.insert(mapped_cpu_mems.end(),
+                             src_gpu->pinned_sysmems.begin(),
+                             src_gpu->pinned_sysmems.end());
+      // treat managed memory as usually being on the host as well
+      mapped_cpu_mems.insert(mapped_cpu_mems.end(),
+                             src_gpu->managed_mems.begin(),
+                             src_gpu->managed_mems.end());
 
-	    break;
-	  }
+      switch(_kind) {
+      case XFER_GPU_TO_FB:
+        {
+          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
-	case XFER_GPU_FROM_FB:
-	  {
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
-		it != src_gpu->pinned_sysmems.end();
-		++it)
-	      add_path(fbm, *it, bw, latency, false, false,
-		       XFER_GPU_FROM_FB);
+          add_path(mapped_cpu_mems,
+                   local_gpu_mems,
+                   bw, latency, frag_overhead, XFER_GPU_TO_FB)
+            .set_max_dim(2); // D->H cudamemcpy3d is unrolled into 2d copies
 
-	    for(std::set<Memory>::const_iterator it = src_gpu->managed_mems.begin();
-		it != src_gpu->managed_mems.end();
-		++it)
-	      add_path(fbm, *it, bw, latency, false, false,
-		       XFER_GPU_FROM_FB);
-
-	    break;
-	  }
-
-	case XFER_GPU_IN_FB:
-	  {
-	    // self-path
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    add_path(fbm, fbm, bw, latency, false, false,
-		     XFER_GPU_IN_FB);
-
-	    break;
-	  }
-
-	case XFER_GPU_PEER_FB:
-	  {
-	    // just do paths to peers - they'll do the other side
-	    unsigned bw = 0; // TODO
-	    unsigned latency = 0;
-	    for(std::set<Memory>::const_iterator it = src_gpu->peer_fbs.begin();
-		it != src_gpu->peer_fbs.end();
-		++it)
-	      add_path(fbm, *it, bw, latency, false, false,
-		       XFER_GPU_PEER_FB);
-
-	    break;
-	  }
-
-	default:
-	  assert(0);
-	}
-      }
-
-      GPUChannel::~GPUChannel()
-      {
-      }
-
-      XferDes *GPUChannel::create_xfer_des(uintptr_t dma_op,
-					   NodeID launch_node,
-					   XferDesID guid,
-					   const std::vector<XferDesPortInfo>& inputs_info,
-					   const std::vector<XferDesPortInfo>& outputs_info,
-					   int priority,
-					   XferDesRedopInfo redop_info,
-					   const void *fill_data, size_t fill_size)
-      {
-	assert(redop_info.id == 0);
-	assert(fill_size == 0);
-	return new GPUXferDes(dma_op, this, launch_node, guid,
-			      inputs_info, outputs_info,
-			      priority);
-      }
-
-      long GPUChannel::submit(Request** requests, long nr)
-      {
-        for (long i = 0; i < nr; i++) {
-          GPURequest* req = (GPURequest*) requests[i];
-	  // no serdez support
-	  assert(req->xd->input_ports[req->src_port_idx].serdez_op == 0);
-	  assert(req->xd->output_ports[req->dst_port_idx].serdez_op == 0);
-
-	  // empty transfers don't need to bounce off the GPU
-	  if(req->nbytes == 0) {
-	    req->xd->notify_request_read_done(req);
-	    req->xd->notify_request_write_done(req);
-	    continue;
-	  }
-
-	  switch(req->dim) {
-	    case Request::DIM_1D: {
-	      switch (kind) {
-                case XFER_GPU_TO_FB:
-		  src_gpu->copy_to_fb(req->dst_off, req->src_base,
-				      req->nbytes, &req->event);
-		  break;
-                case XFER_GPU_FROM_FB:
-		  src_gpu->copy_from_fb(req->dst_base, req->src_off,
-					req->nbytes, &req->event);
-		  break;
-                case XFER_GPU_IN_FB:
-		  src_gpu->copy_within_fb(req->dst_off, req->src_off,
-					  req->nbytes, &req->event);
-		  break;
-                case XFER_GPU_PEER_FB:
-		  src_gpu->copy_to_peer(req->dst_gpu, req->dst_off,
-					req->src_off, req->nbytes,
-					&req->event);
-		  break;
-                default:
-		  assert(0);
-	      }
-	      break;
-	    }
-
-	    case Request::DIM_2D: {
-              switch (kind) {
-	        case XFER_GPU_TO_FB:
-		  src_gpu->copy_to_fb_2d(req->dst_off, req->src_base,
-					 req->dst_str, req->src_str,
-					 req->nbytes, req->nlines, &req->event);
-		  break;
-	        case XFER_GPU_FROM_FB:
-		  src_gpu->copy_from_fb_2d(req->dst_base, req->src_off,
-					   req->dst_str, req->src_str,
-					   req->nbytes, req->nlines,
-					   &req->event);
-		  break;
-                case XFER_GPU_IN_FB:
-		  src_gpu->copy_within_fb_2d(req->dst_off, req->src_off,
-					     req->dst_str, req->src_str,
-					     req->nbytes, req->nlines,
-					     &req->event);
-		  break;
-                case XFER_GPU_PEER_FB:
-		  src_gpu->copy_to_peer_2d(req->dst_gpu, req->dst_off,
-					   req->src_off, req->dst_str,
-					   req->src_str, req->nbytes,
-					   req->nlines, &req->event);
-		  break;
-                default:
-		  assert(0);
-	      }
-	      break;
-	    }
-
-	    case Request::DIM_3D: {
-              switch (kind) {
-	        case XFER_GPU_TO_FB:
-		  src_gpu->copy_to_fb_3d(req->dst_off, req->src_base,
-					 req->dst_str, req->src_str,
-					 req->dst_pstr, req->src_pstr,
-					 req->nbytes, req->nlines, req->nplanes,
-					 &req->event);
-		  break;
-	        case XFER_GPU_FROM_FB:
-		  src_gpu->copy_from_fb_3d(req->dst_base, req->src_off,
-					   req->dst_str, req->src_str,
-					   req->dst_pstr, req->src_pstr,
-					   req->nbytes, req->nlines, req->nplanes,
-					   &req->event);
-		  break;
-                case XFER_GPU_IN_FB:
-		  src_gpu->copy_within_fb_3d(req->dst_off, req->src_off,
-					     req->dst_str, req->src_str,
-					     req->dst_pstr, req->src_pstr,
-					     req->nbytes, req->nlines, req->nplanes,
-					     &req->event);
-		  break;
-                case XFER_GPU_PEER_FB:
-		  src_gpu->copy_to_peer_3d(req->dst_gpu,
-					   req->dst_off, req->src_off,
-					   req->dst_str, req->src_str,
-					   req->dst_pstr, req->src_pstr,
-					   req->nbytes, req->nlines, req->nplanes,
-					   &req->event);
-		  break;
-                default:
-		  assert(0);
-	      }
-	      break;
-	    }
-
-	    default:
-	      assert(0);
-	  }
-
-          //pending_copies.push_back(req);
+          break;
         }
-        return nr;
+
+      case XFER_GPU_FROM_FB:
+        {
+          unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+
+          add_path(local_gpu_mems,
+                   mapped_cpu_mems,
+                   bw, latency, frag_overhead, XFER_GPU_FROM_FB)
+            .set_max_dim(2); // H->D cudamemcpy3d is unrolled into 2d copies
+
+          break;
+        }
+
+      case XFER_GPU_IN_FB:
+        {
+          // self-path
+          unsigned bw = 200000;  // HACK - estimate at 200 GB/s
+          unsigned latency = 250;  // HACK - estimate at 250 ns
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+
+          add_path(local_gpu_mems,
+                   local_gpu_mems,
+                   bw, latency, frag_overhead, XFER_GPU_IN_FB)
+            .set_max_dim(3);
+
+          break;
+        }
+
+      case XFER_GPU_PEER_FB:
+        {
+          // just do paths to peers - they'll do the other side
+          unsigned bw = 50000;  // HACK - estimate at 50 GB/s
+          unsigned latency = 1000;  // HACK - estimate at 1 us
+          unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+
+          add_path(local_gpu_mems,
+                   peer_gpu_mems,
+                   bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+            .set_max_dim(3);
+
+          break;
+        }
+
+      default:
+        assert(0);
       }
+    }
+
+    GPUChannel::~GPUChannel()
+    {
+    }
+
+    XferDes *GPUChannel::create_xfer_des(uintptr_t dma_op,
+                                         NodeID launch_node,
+                                         XferDesID guid,
+                                         const std::vector<XferDesPortInfo>& inputs_info,
+                                         const std::vector<XferDesPortInfo>& outputs_info,
+                                         int priority,
+                                         XferDesRedopInfo redop_info,
+                                         const void *fill_data, size_t fill_size)
+    {
+      assert(redop_info.id == 0);
+      assert(fill_size == 0);
+      return new GPUXferDes(dma_op, this, launch_node, guid,
+                            inputs_info, outputs_info,
+                            priority);
+    }
+
+    long GPUChannel::submit(Request** requests, long nr)
+    {
+      // unused
+      assert(0);
+      return 0;
+    }
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -456,6 +639,10 @@ namespace Realm {
 
     void GPUTransferCompletion::request_completed(void)
     {
+      log_gpudma.info() << "gpu memcpy complete: xd=" << std::hex << xd->guid << std::dec
+                        << " read=" << read_port_idx << "/" << read_offset
+                        << " write=" << write_port_idx << "/" << write_offset
+                        << " bytes=" << write_size;
       if(read_port_idx >= 0)
         xd->update_bytes_read(read_port_idx, read_offset, read_size);
       if(write_port_idx >= 0)
@@ -517,7 +704,7 @@ namespace Realm {
     {
       bool did_work = false;
       ReadSequenceCache rseqcache(this, 2 << 20);
-      ReadSequenceCache wseqcache(this, 2 << 20);
+      WriteSequenceCache wseqcache(this, 2 << 20);
 
       while(true) {
         size_t min_xfer_size = 4096;  // TODO: make controllable
@@ -543,7 +730,7 @@ namespace Realm {
           uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
 
           AutoGPUContext agc(channel->gpu);
-          GPUStream *stream = channel->gpu->device_to_device_stream;
+          GPUStream *stream = channel->gpu->get_next_d2d_stream();
 
           while(total_bytes < max_bytes) {
             AddressListCursor& out_alc = out_port->addrcursor;
@@ -562,20 +749,22 @@ namespace Realm {
               memcpy(&fill_u8, fill_data, 1);
               if(out_dim == 1) {
                 size_t bytes = out_alc.remaining(0);
-                CHECK_CU( cuMemsetD8Async(CUdeviceptr(out_base + out_offset),
-                                          fill_u8,
-                                          bytes,
-                                          stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           fill_u8,
+                           bytes,
+                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
                 total_bytes += bytes;
               } else {
                 size_t bytes = out_alc.remaining(0);
                 size_t lines = out_alc.remaining(1);
-                CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(out_base + out_offset),
-                                            out_alc.get_stride(1),
-                                            fill_u8,
-                                            bytes, lines,
-                                            stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           out_alc.get_stride(1),
+                           fill_u8,
+                           bytes, lines,
+                           stream->get_stream()) );
                 out_alc.advance(1, lines);
                 total_bytes += bytes * lines;
               }
@@ -591,10 +780,11 @@ namespace Realm {
 #ifdef DEBUG_REALM
                 assert((bytes & 1) == 0);
 #endif
-                CHECK_CU( cuMemsetD16Async(CUdeviceptr(out_base + out_offset),
-                                           fill_u16,
-                                           bytes >> 1,
-                                           stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD16Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           fill_u16,
+                           bytes >> 1,
+                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
                 total_bytes += bytes;
               } else {
@@ -604,11 +794,12 @@ namespace Realm {
                 assert((bytes & 1) == 0);
                 assert((out_alc.get_stride(1) & 1) == 0);
 #endif
-                CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset),
-                                             out_alc.get_stride(1),
-                                             fill_u16,
-                                             bytes >> 1, lines,
-                                             stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           out_alc.get_stride(1),
+                           fill_u16,
+                           bytes >> 1, lines,
+                           stream->get_stream()) );
                 out_alc.advance(1, lines);
                 total_bytes += bytes * lines;
               }
@@ -624,10 +815,11 @@ namespace Realm {
 #ifdef DEBUG_REALM
                 assert((bytes & 3) == 0);
 #endif
-                CHECK_CU( cuMemsetD32Async(CUdeviceptr(out_base + out_offset),
-                                           fill_u32,
-                                           bytes >> 2,
-                                           stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD32Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           fill_u32,
+                           bytes >> 2,
+                           stream->get_stream()) );
                 out_alc.advance(0, bytes);
                 total_bytes += bytes;
               } else {
@@ -637,11 +829,12 @@ namespace Realm {
                 assert((bytes & 3) == 0);
                 assert((out_alc.get_stride(1) & 3) == 0);
 #endif
-                CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(out_base + out_offset),
-                                             out_alc.get_stride(1),
-                                             fill_u32,
-                                             bytes >> 2, lines,
-                                             stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                          (CUdeviceptr(out_base + out_offset),
+                           out_alc.get_stride(1),
+                           fill_u32,
+                           bytes >> 2, lines,
+                           stream->get_stream()) );
                 out_alc.advance(1, lines);
                 total_bytes += bytes * lines;
               }
@@ -672,11 +865,12 @@ namespace Realm {
                   memcpy(&fill_u32,
                          reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                          4);
-                  CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                               reduced_fill_size,
-                                               fill_u32,
-                                               1 /*"width"*/, fill_elems /*"height"*/,
-                                               stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D32Async)
+                            (CUdeviceptr(out_base + out_offset + partial_bytes),
+                             reduced_fill_size,
+                             fill_u32,
+                             1 /*"width"*/, fill_elems /*"height"*/,
+                             stream->get_stream()) );
                   partial_bytes += 4;
                 }
               }
@@ -687,11 +881,12 @@ namespace Realm {
                   memcpy(&fill_u16,
                          reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                          2);
-                  CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                               reduced_fill_size,
-                                               fill_u16,
-                                               1 /*"width"*/, fill_elems /*"height"*/,
-                                               stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D16Async)
+                            (CUdeviceptr(out_base + out_offset + partial_bytes),
+                             reduced_fill_size,
+                             fill_u16,
+                             1 /*"width"*/, fill_elems /*"height"*/,
+                             stream->get_stream()) );
                   partial_bytes += 2;
                 }
               }
@@ -701,21 +896,23 @@ namespace Realm {
                 memcpy(&fill_u8,
                        reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                        1);
-                CHECK_CU( cuMemsetD2D8Async(CUdeviceptr(out_base + out_offset + partial_bytes),
-                                            reduced_fill_size,
-                                            fill_u8,
-                                            1 /*"width"*/, fill_elems /*"height"*/,
-                                            stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD2D8Async)
+                          (CUdeviceptr(out_base + out_offset + partial_bytes),
+                           reduced_fill_size,
+                           fill_u8,
+                           1 /*"width"*/, fill_elems /*"height"*/,
+                           stream->get_stream()) );
                 partial_bytes += 1;
               }
 
               while(fill_elems < elems) {
                 size_t todo = std::min(fill_elems, elems - fill_elems);
-                CHECK_CU( cuMemcpyAsync(CUdeviceptr(out_base + out_offset +
-                                                    (fill_elems * reduced_fill_size)),
-                                        CUdeviceptr(out_base + out_offset),
-                                        todo * reduced_fill_size,
-                                        stream->get_stream()) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
+                          (CUdeviceptr(out_base + out_offset +
+                                       (fill_elems * reduced_fill_size)),
+                           CUdeviceptr(out_base + out_offset),
+                           todo * reduced_fill_size,
+                           stream->get_stream()) );
                 fill_elems += todo;
               }
 
@@ -747,7 +944,8 @@ namespace Realm {
                   copy2d.dstDevice = CUdeviceptr(out_base + out_offset +
                                                  (lines_done * lstride));
                   copy2d.Height = todo;
-                  CHECK_CU( cuMemcpy2DAsync(&copy2d, stream->get_stream()) );
+                  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                            (&copy2d, stream->get_stream()) );
                   lines_done += todo;
                 }
 
@@ -789,7 +987,8 @@ namespace Realm {
                       copy3d.dstDevice = CUdeviceptr(out_base + out_offset +
                                                      (planes_done * pstride));
                       copy3d.Depth = todo;
-                      CHECK_CU( cuMemcpy3DAsync(&copy3d, stream->get_stream()) );
+                      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy3DAsync)
+                                (&copy3d, stream->get_stream()) );
                       planes_done += todo;
                     }
 
@@ -803,7 +1002,8 @@ namespace Realm {
                     for(size_t p = 1; p < planes; p++) {
                       copy2d.dstDevice = CUdeviceptr(out_base + out_offset +
                                                      (p * pstride));
-                      CHECK_CU( cuMemcpy2DAsync(&copy2d, stream->get_stream()) );
+                      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
+                                (&copy2d, stream->get_stream()) );
                     }
                   }
                 }
@@ -862,11 +1062,12 @@ namespace Realm {
     {
       Memory fbm = gpu->fbmem->me;
 
-      unsigned bw = 0; // TODO
-      unsigned latency = 0;
+      unsigned bw = 300000;  // HACK - estimate at 300 GB/s
+      unsigned latency = 250;  // HACK - estimate at 250 ns
+      unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
-      add_path(Memory::NO_MEMORY, fbm,
-               bw, latency, false, false, XFER_GPU_IN_FB);
+      add_path(Memory::NO_MEMORY, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+        .set_max_dim(2);
 
       xdq.add_to_manager(bgwork);
     }
@@ -927,10 +1128,10 @@ namespace Realm {
   #if CUDA_VERSION >= 11000
       // we can ask the runtime to perform the mapping for us
       int orig_device;
-      CHECK_CUDART( cudaGetDevice(&orig_device) );
-      CHECK_CUDART( cudaSetDevice(gpu->info->index) );
-      CHECK_CUDART( cudaGetFuncBySymbol(&kernel, host_proxy) );
-      CHECK_CUDART( cudaSetDevice(orig_device) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetDevice)(&orig_device) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(gpu->info->index) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetFuncBySymbol)(&kernel, host_proxy) );
+      CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(orig_device) );
   #else
       // no way to ask the runtime to perform the mapping, so we'll have
       //  to actually launch the kernels with the runtime API
@@ -938,7 +1139,7 @@ namespace Realm {
   #endif
 #endif
 
-      stream = gpu->device_to_device_stream;
+      stream = gpu->get_next_d2d_stream();
     }
 
     long GPUreduceXferDes::get_requests(Request** requests, long nr)
@@ -992,12 +1193,22 @@ namespace Realm {
         } else {
           max_elems = std::min(input_control.remaining_count / in_elem_size,
                                output_control.remaining_count / out_elem_size);
-          if(in_port != 0)
+          if(in_port != 0) {
             max_elems = std::min(max_elems,
                                  in_port->addrlist.bytes_pending() / in_elem_size);
-          if(out_port != 0)
+            if(in_port->peer_guid != XFERDES_NO_GUID) {
+              size_t read_bytes_avail = in_port->seq_remote.span_exists(in_port->local_bytes_total,
+                                                                        (max_elems * in_elem_size));
+              max_elems = std::min(max_elems,
+                                   (read_bytes_avail / in_elem_size));
+            }
+          }
+          if(out_port != 0) {
             max_elems = std::min(max_elems,
                                  out_port->addrlist.bytes_pending() / out_elem_size);
+            // no support for reducing into an intermediate buffer
+            assert(out_port->peer_guid == XFERDES_NO_GUID);
+          }
         }
 
         size_t total_elems = 0;
@@ -1076,13 +1287,14 @@ namespace Realm {
                   CU_LAUNCH_PARAM_END
                 };
 
-                CHECK_CU( cuLaunchKernel(kernel,
-                                         blocks_per_grid, 1, 1,
-                                         threads_per_block, 1, 1,
-                                         0 /*sharedmem*/,
-                                         stream->get_stream(),
-                                         0 /*params*/,
-                                         extra) );
+                CHECK_CU( CUDA_DRIVER_FNPTR(cuLaunchKernel)
+                          (kernel,
+                           blocks_per_grid, 1, 1,
+                           threads_per_block, 1, 1,
+                           0 /*sharedmem*/,
+                           stream->get_stream(),
+                           0 /*params*/,
+                           extra) );
 #else
                 int orig_device;
                 void *params[] = {
@@ -1093,15 +1305,16 @@ namespace Realm {
                   &args->count,
                   args+1
                 };
-                CHECK_CUDART( cudaGetDevice(&orig_device) );
-                CHECK_CUDART( cudaSetDevice(channel->gpu->info->index) );
-                CHECK_CUDART( cudaLaunchKernel(kernel_host_proxy,
-                                               dim3(blocks_per_grid, 1, 1),
-                                               dim3(threads_per_block, 1, 1),
-                                               params,
-                                               0 /*sharedMem*/,
-                                               (cudaStream_t)(stream->get_stream())) );
-                CHECK_CUDART( cudaSetDevice(orig_device) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaGetDevice)(&orig_device) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(channel->gpu->info->index) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaLaunchKernel)
+                              (kernel_host_proxy,
+                               dim3(blocks_per_grid, 1, 1),
+                               dim3(threads_per_block, 1, 1),
+                               params,
+                               0 /*sharedMem*/,
+                               (cudaStream_t)(stream->get_stream())) );
+                CHECK_CUDART( CUDA_RUNTIME_FNPTR(cudaSetDevice)(orig_device) );
 #endif
 
                 // insert fence to track completion of reduction kernel
@@ -1184,30 +1397,62 @@ namespace Realm {
                                                             stringbuilder() << "cuda reduce channel (gpu=" << _gpu->info->index << ")")
       , gpu(_gpu)
     {
-      Memory fbm = gpu->fbmem->me;
+      std::vector<Memory> local_gpu_mems;
+      local_gpu_mems.push_back(gpu->fbmem->me);
+      if(gpu->fb_ibmem)
+        local_gpu_mems.push_back(gpu->fb_ibmem->me);
 
-      unsigned bw = 0; // TODO
-      unsigned latency = 0;
+      std::vector<Memory> peer_gpu_mems;
+      peer_gpu_mems.insert(peer_gpu_mems.end(),
+                           gpu->peer_fbs.begin(),
+                           gpu->peer_fbs.end());
+
+      std::vector<Memory> mapped_cpu_mems;
+      mapped_cpu_mems.insert(mapped_cpu_mems.end(),
+                             gpu->pinned_sysmems.begin(),
+                             gpu->pinned_sysmems.end());
+      // treat managed memory as usually being on the host as well
+      mapped_cpu_mems.insert(mapped_cpu_mems.end(),
+                             gpu->managed_mems.begin(),
+                             gpu->managed_mems.end());
 
       // intra-FB reduction
-      add_path(fbm, fbm,
-               bw, latency, true /*redops*/, false, XFER_GPU_IN_FB);
+      {
+        unsigned bw = 100000;  // HACK - estimate at 100 GB/s
+        unsigned latency = 250;  // HACK - estimate at 250 ns
+        unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+
+        add_path(local_gpu_mems,
+                 local_gpu_mems,
+                 bw, latency, frag_overhead, XFER_GPU_IN_FB)
+          .allow_redops();
+      }
 
       // zero-copy to FB (no need for intermediate buffer in FB)
-      for(std::set<Memory>::const_iterator it = gpu->pinned_sysmems.begin();
-          it != gpu->pinned_sysmems.end();
-          ++it)
-        add_path(*it, fbm,
-                 bw, latency, true /*redops*/, false, XFER_GPU_IN_FB);
+      {
+        unsigned bw = 10000;  // HACK - estimate at 10 GB/s
+        unsigned latency = 1000;  // HACK - estimate at 1 us
+        unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+
+        add_path(mapped_cpu_mems,
+                 local_gpu_mems,
+                 bw, latency, frag_overhead, XFER_GPU_TO_FB)
+          .allow_redops();
+      }
 
       // unlike normal cuda p2p copies where we want to push from the source,
       //  reductions are always sent to the destination memory's gpu to keep the
       //  RMW loop as tight as possible
-      for(std::set<Memory>::const_iterator it = gpu->peer_fbs.begin();
-          it != gpu->peer_fbs.end();
-          ++it)
-        add_path(*it, fbm,
-                 bw, latency, true /*redops*/, false, XFER_GPU_IN_FB);
+      {
+        unsigned bw = 50000;  // HACK - estimate at 50 GB/s
+        unsigned latency = 2000;  // HACK - estimate at 1 us
+        unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
+
+        add_path(peer_gpu_mems,
+                 local_gpu_mems,
+                 bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+          .allow_redops();
+      }
 
       xdq.add_to_manager(bgwork);
     }
@@ -1228,23 +1473,27 @@ namespace Realm {
       return true;
     }
 
-    bool GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                         CustomSerdezID src_serdez_id,
-                                         CustomSerdezID dst_serdez_id,
-                                         ReductionOpID redop_id,
-                                         XferDesKind *kind_ret /*= 0*/,
-                                         unsigned *bw_ret /*= 0*/,
-                                         unsigned *lat_ret /*= 0*/)
+    uint64_t GPUreduceChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                             CustomSerdezID src_serdez_id,
+                                             CustomSerdezID dst_serdez_id,
+                                             ReductionOpID redop_id,
+                                             size_t total_bytes,
+                                             const std::vector<size_t> *src_frags,
+                                             const std::vector<size_t> *dst_frags,
+                                             XferDesKind *kind_ret /*= 0*/,
+                                             unsigned *bw_ret /*= 0*/,
+                                             unsigned *lat_ret /*= 0*/)
     {
-      // give all the normal supports_path logic a chance to reject it first
-      if(!Channel::supports_path(src_mem, dst_mem, src_serdez_id, dst_serdez_id,
-                                 redop_id, kind_ret, bw_ret, lat_ret))
-        return false;
+      // first check that we have a reduction op (if not, we want the cudamemcpy
+      //   path to pick this up instead) and that it has cuda kernels available
+      if(!is_gpu_redop(redop_id))
+        return 0;
 
-      // if everything else was ok, check that we have a reduction op (if not,
-      //   we want the cudamemcpy path to pick this up instead) and that it has
-      //   cuda kernels available
-      return is_gpu_redop(redop_id);
+      // then delegate to the normal supports_path logic
+      return Channel::supports_path(src_mem, dst_mem,
+                                    src_serdez_id, dst_serdez_id, redop_id,
+                                    total_bytes, src_frags, dst_frags,
+                                    kind_ret, bw_ret, lat_ret);
     }
 
     RemoteChannelInfo *GPUreduceChannel::construct_remote_info() const
@@ -1340,23 +1589,27 @@ namespace Realm {
       : RemoteChannel(_remote_ptr)
     {}
 
-    bool GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
-                                               CustomSerdezID src_serdez_id,
-                                               CustomSerdezID dst_serdez_id,
-                                               ReductionOpID redop_id,
-                                               XferDesKind *kind_ret /*= 0*/,
-                                               unsigned *bw_ret /*= 0*/,
-                                               unsigned *lat_ret /*= 0*/)
+    uint64_t GPUreduceRemoteChannel::supports_path(Memory src_mem, Memory dst_mem,
+                                                   CustomSerdezID src_serdez_id,
+                                                   CustomSerdezID dst_serdez_id,
+                                                   ReductionOpID redop_id,
+                                                   size_t total_bytes,
+                                                   const std::vector<size_t> *src_frags,
+                                                   const std::vector<size_t> *dst_frags,
+                                                   XferDesKind *kind_ret /*= 0*/,
+                                                   unsigned *bw_ret /*= 0*/,
+                                                   unsigned *lat_ret /*= 0*/)
     {
-      // give all the normal supports_path logic a chance to reject it first
-      if(!Channel::supports_path(src_mem, dst_mem, src_serdez_id, dst_serdez_id,
-                                 redop_id, kind_ret, bw_ret, lat_ret))
-        return false;
+      // check first that we have a reduction op (if not, we want the cudamemcpy
+      //   path to pick this up instead) and that it has cuda kernels available
+      if(!GPUreduceChannel::is_gpu_redop(redop_id))
+        return 0;
 
-      // if everything else was ok, check that we have a reduction op (if not,
-      //   we want the cudamemcpy path to pick this up instead) and that it has
-      //   cuda kernels available
-      return GPUreduceChannel::is_gpu_redop(redop_id);
+      // then delegate to the normal supports_path logic
+      return Channel::supports_path(src_mem, dst_mem,
+                                    src_serdez_id, dst_serdez_id, redop_id,
+                                    total_bytes, src_frags, dst_frags,
+                                    kind_ret, bw_ret, lat_ret);
     }
 
 

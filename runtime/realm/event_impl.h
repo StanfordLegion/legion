@@ -252,7 +252,9 @@ namespace Realm {
 
       // external waiters on this node are notifies via a condition variable
       bool has_external_waiters;
-      CondVar external_waiter_condvar;
+      // use kernel mutex for timedwait functionality
+      KernelMutex external_waiter_mutex;
+      KernelMutex::CondVar external_waiter_condvar;
 
       // remote waiters are kept in a bitmask for the current generation - this is
       //  only maintained on the owner, who never has to worry about more than one
@@ -360,7 +362,9 @@ namespace Realm {
 
       // external waiters on this node are notifies via a condition variable
       bool has_external_waiters;
-      CondVar external_waiter_condvar;
+      // use kernel mutex for timedwait functionality
+      KernelMutex external_waiter_mutex;
+      KernelMutex::CondVar external_waiter_condvar;
 
       // a list of remote waiters and the latest generation they're interested in
       // also the latest generation that each node (that has ever subscribed) has been told about
@@ -416,7 +420,7 @@ namespace Realm {
 	RemotePopRequest(Event *_events, size_t _capacity);
 
 	Mutex mutex;
-	CondVar condvar;
+        Mutex::CondVar condvar;
 	bool completed;
 	size_t count, capacity;
 	Event *events;

@@ -181,6 +181,10 @@ namespace Realm {
       size_t sysmem_size, stack_size;
       bool pin_util_procs;
       long long cpu_bgwork_timeslice, util_bgwork_timeslice;
+      bool use_ext_sysmem;
+
+    public:
+      MemoryImpl *ext_sysmem;
     };
 
     template <typename K, typename V, typename LT = Mutex>
@@ -313,7 +317,7 @@ namespace Realm {
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
       Mutex shutdown_mutex;
-      CondVar shutdown_condvar;
+      Mutex::CondVar shutdown_condvar;
       bool shutdown_request_received;  // has a request for shutdown arrived
       Event shutdown_precondition;
       int shutdown_result_code;
@@ -361,12 +365,25 @@ namespace Realm {
 
       const std::vector<CodeTranslator *>& get_code_translators(void) const;
 
+      template <typename T>
+      T *get_module(const char *name) const
+      {
+        Module *mod = get_module_untyped(name);
+        if(mod)
+          return checked_cast<T *>(mod);
+        else
+          return 0;
+      }
+
     protected:
+      Module *get_module_untyped(const char *name) const;
+
       ID::IDType num_local_memories, num_local_ib_memories, num_local_processors;
       NetworkSegment reg_ib_mem_segment;
       NetworkSegment reg_mem_segment;
 
       ModuleRegistrar module_registrar;
+      bool modules_created;
       std::vector<Module *> modules;
       std::vector<CodeTranslator *> code_translators;
 

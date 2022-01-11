@@ -530,6 +530,9 @@ namespace Legion {
 
     /**
      * \class TraceViewSet
+     * The trace view set stores a temporary collection of instance views
+     * with valid expressions and fields for each instance. Note that we
+     * use private inheritance with LegionHeapify to ensure that 
      */
     class TraceViewSet {
     public:
@@ -551,7 +554,7 @@ namespace Legion {
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
                   const FieldMask &mask,
-                  std::set<RtEvent> *ready_events);
+                  ReferenceMutator &mutator);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
@@ -579,7 +582,8 @@ namespace Legion {
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                             FieldMaskSet<LogicalView> >::aligned &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
-                         const bool expr_covers, const FieldMask &mask) const;
+                         const bool expr_covers, const FieldMask &mask,
+                         ReferenceMutator &mutator) const;
       bool empty(void) const;
     public:
       void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
@@ -1205,11 +1209,7 @@ namespace Legion {
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
                              LogicalView *view, Deserializer &derez,
-                             IndexSpace handle);
-        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
-                             UpdateKind kind, RtUserEvent done, 
-                             LogicalView *view, Deserializer &derez,
-                             IndexSpaceExprID expr_id);
+                             const PendingRemoteExpression &pending);
         DeferTraceUpdateArgs(const DeferTraceUpdateArgs &args,
                              RtUserEvent deferral);
       public:
@@ -1218,8 +1218,7 @@ namespace Legion {
         const RtUserEvent done;
         LogicalView *const view;
         IndexSpaceExpression *const expr;
-        const IndexSpaceExprID remote_expr_id;
-        const IndexSpace handle;
+        const PendingRemoteExpression pending;
         const size_t buffer_size;
         void *const buffer;
         const RtUserEvent deferral_event;

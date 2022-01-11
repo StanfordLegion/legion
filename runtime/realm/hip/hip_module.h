@@ -20,6 +20,7 @@
 #include "realm/realm_config.h"
 #include "realm/module.h"
 #include "realm/network.h"
+#include "realm/atomics.h"
 
 namespace Realm {
   
@@ -65,14 +66,18 @@ namespace Realm {
       // create any code translators provided by the module (default == do nothing)
       virtual void create_code_translators(RuntimeImpl *runtime);
 
+      // if a module has to do cleanup that involves sending messages to other
+      //  nodes, this must be done in the pre-detach cleanup
+      virtual void pre_detach_cleanup(void);
+
       // clean up any common resources created by the module - this will be called
       //  after all memories/processors/etc. have been shut down and destroyed
       virtual void cleanup(void);
 
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
-      size_t cfg_fb_mem_size;
-      unsigned cfg_num_gpus, cfg_gpu_streams;
+      size_t cfg_fb_mem_size, cfg_fb_ib_size;
+      unsigned cfg_num_gpus, cfg_task_streams, cfg_d2d_streams;
       bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
       bool cfg_suppress_hijack_warning;
@@ -82,6 +87,8 @@ namespace Realm {
       int cfg_max_ctxsync_threads;
       bool cfg_multithread_dma;
       size_t cfg_hostreg_limit;
+      int cfg_d2d_stream_priority;
+      bool cfg_use_hip_ipc;
 
       // "global" variables live here too
       GPUWorker *shared_worker;
@@ -91,6 +98,12 @@ namespace Realm {
       void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
       std::vector<void *> registered_host_ptrs;
+
+      Mutex hipipc_mutex;
+      Mutex::CondVar hipipc_condvar;
+      atomic<int> hipipc_responses_needed;
+      atomic<int> hipipc_releases_needed;
+      atomic<int> hipipc_exports_remaining;
     };
 
   }; // namespace Hip

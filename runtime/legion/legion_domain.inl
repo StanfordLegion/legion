@@ -234,6 +234,27 @@ namespace Legion {
       point_data[i] = 0;
   }
 
+  // Specializations for unsigned long long types that might overflow the
+  // maximum allowable representation for signed long long types
+#define DIMFUNC(DIM)                                                           \
+  template<> __CUDA_HD__                                                       \
+  inline DomainPoint::DomainPoint(                                             \
+                  const Point<DIM,unsigned long long> &rhs)                    \
+    : dim(DIM)                                                                 \
+  {                                                                            \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      /* This code assumes that coord_t is a long long */                      \
+      static_assert(std::is_same<coord_t,long long>::value,"coord_t changed"); \
+      assert(rhs[i] <= ((unsigned long long)LLONG_MAX));                       \
+      point_data[i] = rhs[i];                                                  \
+    }                                                                          \
+    for (int i = DIM; i < MAX_POINT_DIM; i++)                                  \
+      point_data[i] = 0;                                                       \
+  }
+  LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+
   //----------------------------------------------------------------------------
   template<unsigned DIM>
   inline DomainPoint::operator LegionRuntime::Arrays::Point<DIM>(void) const
@@ -266,6 +287,37 @@ namespace Legion {
       point_data[i] = rhs.point_data[i];
     return *this;
   }
+
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T> __CUDA_HD__
+  inline DomainPoint& DomainPoint::operator=(const Point<DIM,T> &rhs)
+  //----------------------------------------------------------------------------
+  {
+    dim = DIM;
+    for (int i = 0; i < DIM; i++)
+      point_data[i] = rhs[i];
+    return *this;
+  }
+
+// Specializations for unsigned long long types that might overflow the
+  // maximum allowable representation for signed long long types
+#define DIMFUNC(DIM)                                                           \
+  template<> __CUDA_HD__                                                       \
+  inline DomainPoint& DomainPoint::operator=<DIM,unsigned long long>(          \
+                            const Point<DIM,unsigned long long> &rhs)          \
+  {                                                                            \
+    dim = DIM;                                                                 \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      /* This code assumes that coord_t is a long long */                      \
+      static_assert(std::is_same<coord_t,long long>::value,"coord_t changed"); \
+      assert(rhs[i] <= ((unsigned long long)LLONG_MAX));                       \
+      point_data[i] = rhs[i];                                                  \
+    }                                                                          \
+    return *this;                                                              \
+  }
+  LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
 
   //----------------------------------------------------------------------------
   __CUDA_HD__ inline bool DomainPoint::operator==(const DomainPoint &rhs) const
@@ -709,6 +761,30 @@ namespace Legion {
       rect_data[DIM+i] = other.hi[i];
   }
 
+  // Specializations for unsigned long long types that might overflow the
+  // maximum allowable representation for signed long long types
+#define DIMFUNC(DIM)                                                           \
+  template<> __CUDA_HD__                                                       \
+  inline Domain::Domain(                                                       \
+                  const Rect<DIM,unsigned long long> &rhs)                     \
+    : is_id(0), dim(DIM)                                                       \
+  {                                                                            \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      /* This code assumes that coord_t is a long long */                      \
+      static_assert(std::is_same<coord_t,long long>::value,"coord_t changed"); \
+      assert(rhs.lo[i] <= ((unsigned long long)LLONG_MAX));                    \
+      rect_data[i] = rhs.lo[i];                                                \
+    }                                                                          \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      assert(rhs.hi[i] <= ((unsigned long long)LLONG_MAX));                    \
+      rect_data[DIM+i] = rhs.hi[i];                                            \
+    }                                                                          \
+  }
+  LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Domain::Domain(const DomainT<DIM,T> &other)
@@ -721,6 +797,30 @@ namespace Legion {
       rect_data[DIM+i] = other.bounds.hi[i];
   }
 
+  // Specializations for unsigned long long types that might overflow the
+  // maximum allowable representation for signed long long types
+#define DIMFUNC(DIM)                                                           \
+  template<> __CUDA_HD__                                                       \
+  inline Domain::Domain(                                                       \
+                  const DomainT<DIM,unsigned long long> &rhs)                  \
+    : is_id(rhs.sparsity.id), dim(DIM)                                         \
+  {                                                                            \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      /* This code assumes that coord_t is a long long */                      \
+      static_assert(std::is_same<coord_t,long long>::value,"coord_t changed"); \
+      assert(rhs.bounds.lo[i] <= ((unsigned long long)LLONG_MAX));             \
+      rect_data[i] = rhs.bounds.lo[i];                                         \
+    }                                                                          \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      assert(rhs.bounds.hi[i] <= ((unsigned long long)LLONG_MAX));             \
+      rect_data[DIM+i] = rhs.bounds.hi[i];                                     \
+    }                                                                          \
+  }
+  LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+
   //----------------------------------------------------------------------------
   __CUDA_HD__ inline Domain& Domain::operator=(const Domain &other)
   //----------------------------------------------------------------------------
@@ -731,6 +831,86 @@ namespace Legion {
       rect_data[i] = other.rect_data[i];
     return *this;
   }
+
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T> __CUDA_HD__
+  inline Domain& Domain::operator=(const Rect<DIM,T> &other)
+  //----------------------------------------------------------------------------
+  {
+    is_id = 0;
+    dim = DIM;
+    for (int i = 0; i < DIM; i++)
+      rect_data[i] = other.lo[i];
+    for (int i = 0; i < DIM; i++)
+      rect_data[DIM+i] = other.hi[i];
+    return *this;
+  }
+
+  // Specializations for unsigned long long types that might overflow the
+  // maximum allowable representation for signed long long types
+#define DIMFUNC(DIM)                                                           \
+  template<> __CUDA_HD__                                                       \
+  inline Domain& Domain::operator=<DIM,unsigned long long>(                    \
+                  const Rect<DIM,unsigned long long> &rhs)                     \
+  {                                                                            \
+    is_id = 0;                                                                 \
+    dim = DIM;                                                                 \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      /* This code assumes that coord_t is a long long */                      \
+      static_assert(std::is_same<coord_t,long long>::value,"coord_t changed"); \
+      assert(rhs.lo[i] <= ((unsigned long long)LLONG_MAX));                    \
+      rect_data[i] = rhs.lo[i];                                                \
+    }                                                                          \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      assert(rhs.hi[i] <= ((unsigned long long)LLONG_MAX));                    \
+      rect_data[DIM+i] = rhs.hi[i];                                            \
+    }                                                                          \
+    return *this;                                                              \
+  }
+  LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T> __CUDA_HD__
+  inline Domain& Domain::operator=(const DomainT<DIM,T> &other)
+  //----------------------------------------------------------------------------
+  {
+    dim = DIM;
+    is_id = other.sparsity.id;
+    for (int i = 0; i < DIM; i++)
+      rect_data[i] = other.bounds.lo[i];
+    for (int i = 0; i < DIM; i++)
+      rect_data[DIM+i] = other.bounds.hi[i];
+    return *this;
+  }
+
+  // Specializations for unsigned long long types that might overflow the
+  // maximum allowable representation for signed long long types
+#define DIMFUNC(DIM)                                                           \
+  template<> __CUDA_HD__                                                       \
+  inline Domain& Domain::operator=<DIM,unsigned long long>(                    \
+                  const DomainT<DIM,unsigned long long> &rhs)                  \
+  {                                                                            \
+    dim = DIM;                                                                 \
+    is_id = rhs.sparsity.id;                                                   \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      /* This code assumes that coord_t is a long long */                      \
+      static_assert(std::is_same<coord_t,long long>::value,"coord_t changed"); \
+      assert(rhs.bounds.lo[i] <= ((unsigned long long)LLONG_MAX));             \
+      rect_data[i] = rhs.bounds.lo[i];                                         \
+    }                                                                          \
+    for (int i = 0; i < DIM; i++)                                              \
+    {                                                                          \
+      assert(rhs.bounds.hi[i] <= ((unsigned long long)LLONG_MAX));             \
+      rect_data[DIM+i] = rhs.bounds.hi[i];                                     \
+    }                                                                          \
+    return *this;                                                              \
+  }
+  LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
 
   //----------------------------------------------------------------------------
   __CUDA_HD__ inline bool Domain::operator==(const Domain &rhs) const
