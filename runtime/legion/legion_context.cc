@@ -14051,9 +14051,12 @@ namespace Legion {
       for (std::map<DomainPoint,Domain>::const_iterator it = 
             domains.begin(); it != domains.end(); it++)
       {
+        // Use the direct call to TaskContext::from_value in order to
+        // avoid any further checks for invalid control replication
         if (shard++ == owner_shard->shard_id)
-          shard_futures[it->first] = Future::from_untyped_pointer(
-              runtime->external, &it->second, sizeof(it->second));
+          shard_futures[it->first] = TaskContext::from_value(
+              &it->second, sizeof(it->second), false/*owned*/,
+              Memory::SYSTEM_MEM, NULL/*free function*/);
         if (shard == total_shards)
           shard = 0;
       }
