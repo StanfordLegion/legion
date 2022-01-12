@@ -415,10 +415,8 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     [register]
     [kernels:map(function(kernel)
       return quote
-        var kernel_id : int64 = 0
-        [c.murmur_hash3_32]([kernel.kernel_id], [string.len(kernel.kernel_id)], 0, &kernel_id)
-        [c.regent_register_kernel_id](kernel_id)
-        [HijackAPI.hijackCudaRegisterFunction]([handle], [&opaque](kernel_id), [kernel.name])
+        [c.regent_register_kernel_id]([int64]([kernel.kernel_id]))
+        [HijackAPI.hijackCudaRegisterFunction]([handle], [kernel.kernel_id], [kernel.name])
       end
     end)]
   end
@@ -1352,9 +1350,7 @@ function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_s
       [launch_domain_init]
       ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
       [setupArguments]
-      var kid : int64 = 0
-      [c.murmur_hash3_32]([kernel_id], [string.len(kernel_id)], 0, &kid)
-      ExecutionAPI.cudaLaunch([&int8](kid))
+      ExecutionAPI.cudaLaunch([&int8](kernel_id))
     end
   end
 end
