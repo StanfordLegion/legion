@@ -1054,7 +1054,7 @@ do
     end
     local kernel_name = self.task:get_name():concat("_") .. "_cuda" .. tostring(global_kernel_counter)
     kernel_name = "__kernel_id_" .. kernel_name
-    local kernel_id = generate_unique_kernel_id(kernel_name, string.len(kernel_name))
+    local kernel_id = kernel_name
     self.cudakernels:insert({
       name = kernel_name,
       kernel = kernel,
