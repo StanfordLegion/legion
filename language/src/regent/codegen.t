@@ -8877,10 +8877,10 @@ function codegen.stat_for_list(cx, node)
       end
 
       -- Register the kernel function to JIT
-      local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
+      local kernel_name = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
       local count = terralib.newsymbol(c.size_t, "count")
       local kernel_call =
-        cudahelper.codegen_kernel_call(cuda_cx, kernel_id, count, args, shared_mem_size, false)
+        cudahelper.codegen_kernel_call(cuda_cx, kernel_name, count, args, shared_mem_size, false)
 
       local bounds_setup = terralib.newlist()
       bounds_setup:insert(quote var [count] = 1 end)
