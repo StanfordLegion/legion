@@ -415,8 +415,10 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     [register]
     [kernels:map(function(kernel)
       return quote
-        [c.regent_register_kernel_id]([int64]([kernel.kernel_id]))
-        [HijackAPI.hijackCudaRegisterFunction]([handle], [kernel.kernel_id], [kernel.name])
+        var kernel_id : int64 = 0
+        [c.murmur_hash3_32]([kernel.name], [string.len(kernel.name)], 0, &kernel_id)
+        [c.regent_register_kernel_id](kernel_id)
+        [HijackAPI.hijackCudaRegisterFunction]([handle], [&opaque](kernel_id), [kernel.name])
       end
     end)]
   end
@@ -604,7 +606,6 @@ cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
   local kernel_name =
     INTERNAL_KERNEL_PREFIX .. "__init__" .. tostring(type) ..
     "__" .. tostring(op_name) .. "__"
-  local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
   local terra init(buffer : &type)
     var tid = tid_x() + bid_x() * n_tid_x()
     buffer[tid] = [value]
@@ -613,9 +614,8 @@ cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
   internal_kernels:insert({
     name = kernel_name,
     kernel = init,
-    kernel_id = kernel_id,
   })
-  return kernel_id
+  return kernel_name
 end)
 
 cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
@@ -624,7 +624,6 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
   local kernel_name =
     INTERNAL_KERNEL_PREFIX .. "__red__" .. tostring(type) ..
     "__" .. tostring(op_name) .. "__"
-  local kernel_id = terralib.global(&int8, "__kernel_id_" .. kernel_name)
 
   local tid = terralib.newsymbol(c.size_t, "tid")
   local input = terralib.newsymbol(&type, "input")
@@ -650,9 +649,8 @@ cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op
   internal_kernels:insert({
     name = kernel_name,
     kernel = red,
-    kernel_id = kernel_id,
   })
-  return kernel_id
+  return kernel_name
 end)
 
 function cudahelper.generate_reduction_preamble(cx, reductions)
@@ -671,7 +669,7 @@ function cudahelper.generate_reduction_preamble(cx, reductions)
     local host_buffer =
       terralib.newsymbol(c.legion_deferred_buffer_char_1d_t,
                          "__h_buffer_" .. red_var.displayname)
-    local init_kernel_id = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
+    local init_kernel_name = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
     preamble:insert(quote
       var [device_ptr] = [&red_var.type](nil)
@@ -685,7 +683,7 @@ function cudahelper.generate_reduction_preamble(cx, reductions)
         [device_buffer] = c.legion_deferred_buffer_char_1d_create(bounds, c.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
           [&red_var.type]([&opaque](c.legion_deferred_buffer_char_1d_ptr([device_buffer], bounds.lo)))
-        [cudahelper.codegen_kernel_call(cx, init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
+        [cudahelper.codegen_kernel_call(cx, init_kernel_name, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
       do
         var bounds : c.legion_rect_1d_t
@@ -787,13 +785,13 @@ function cudahelper.generate_reduction_postamble(cx, reductions, device_ptrs_map
   local postamble = quote end
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
-    local red_kernel_id = cudahelper.generate_buffer_reduction_kernel(red_var.type, red_op)
+    local red_kernel_name = cudahelper.generate_buffer_reduction_kernel(red_var.type, red_op)
     local host_ptr = host_ptrs_map[device_ptr]
     local red_args = terralib.newlist({device_ptr, host_ptr})
     local shared_mem_size = terralib.sizeof(red_var.type) * THREAD_BLOCK_SIZE
     postamble = quote
       [postamble];
-      [cudahelper.codegen_kernel_call(cx, red_kernel_id, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
+      [cudahelper.codegen_kernel_call(cx, red_kernel_name, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
     end
   end
 
@@ -1288,7 +1286,7 @@ function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_
   return launch
 end
 
-function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_size, tight)
+function cudahelper.codegen_kernel_call(cx, kernel_name, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -1350,7 +1348,9 @@ function cudahelper.codegen_kernel_call(cx, kernel_id, count, args, shared_mem_s
       [launch_domain_init]
       ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
       [setupArguments]
-      ExecutionAPI.cudaLaunch([&int8](kernel_id))
+      var kid : int64 = 0
+      [c.murmur_hash3_32]([kernel_name], [string.len(kernel_name)], 0, &kid)
+      ExecutionAPI.cudaLaunch([&int8](kid))
     end
   end
 end
