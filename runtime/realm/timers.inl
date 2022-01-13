@@ -24,9 +24,12 @@
 
 #ifdef REALM_TIMERS_USE_RDTSC
   #if defined(__i386__) || defined(__x86_64__)
-    #if defined(REALM_COMPILER_IS_NVCC) && (__CUDACC_VER_MAJOR__ < 10)
+    #if defined(REALM_COMPILER_IS_NVCC)
       // old versions of nvcc have trouble with avx512 intrinsic definitions,
       //  which we cannot avoid in the include below
+      // Update 1/13/2022: the issue has been observed even with CUDA 11.2.
+      //  as the version check doesn't seem to safely filter out all the buggy
+      //  ones, we remove the check.
       #define __rdtsc __builtin_ia32_rdtsc
     #else
       #include <x86intrin.h>
