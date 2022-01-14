@@ -1714,7 +1714,6 @@ namespace Legion {
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EquivalenceSet> >::aligned remote_sets; 
       FieldMaskSet<LogicalView> *recorded_instances;
-    
     };
 
     /**
@@ -2374,6 +2373,8 @@ namespace Legion {
       public:
         void record_remote_request(ReplicationChange *target,
             AddressSpaceID source, const FieldMask &request_mask);
+        void send_remote_responses(EquivalenceSet *set,
+                                   const FieldMask &full_mask) const;
       public:
         CollectiveMapping *const mapping;
         const RtUserEvent ready_event;
@@ -2393,20 +2394,18 @@ namespace Legion {
       public:
         EquivalenceSet *const set;
       };
-#if 0
       struct DeferPendingReplicationArgs : 
         public LgTaskArgs<DeferPendingReplicationArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PENDING_REPLICATION_TASK_ID;
       public:
-        DeferPendingReplicationArgs(EquivalenceSet *s, PendingReplication *p,
+        DeferPendingReplicationArgs(EquivalenceSet *s, ReplicationChange *c,
                                     const FieldMask &m);
       public:
         EquivalenceSet *const set;
-        PendingReplication *const pending;
+        ReplicationChange *const change;
         FieldMask *const mask;
       };
-#endif
       struct DeferApplyStateArgs : public LgTaskArgs<DeferApplyStateArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_APPLY_STATE_TASK_ID;
@@ -2732,14 +2731,13 @@ namespace Legion {
                 const FieldMask &full_mask, const FieldMask &request_mask,
                 ReplicationChange *target, const AddressSpaceID source,
                 bool owner_search);
-#if 0
-      void process_replication_response(PendingReplication *target,
-                const FieldMask &mask, RtEvent precondition,
-                const FieldMask &update_mask, Deserializer &derez);
-      
-      void finalize_pending_replication(PendingReplication *pending,
-         const FieldMask &mask, const bool first, const bool need_lock = false);
-#endif
+      void send_replication_response(AddressSpaceID target,
+          ReplicationChange *remote_change, const FieldMask &full_mask,
+          const FieldMask &request_mask);
+      void process_replication_response(Deserializer &derez,
+                                        AddressSpaceID source);
+      void finalize_replication_response(ReplicationChange *change,
+                                         const FieldMask &full_mask);
       void unpack_replicated_states(Deserializer &derez);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
@@ -2822,7 +2820,8 @@ namespace Legion {
       static void handle_make_owner(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_trackers(Deserializer &derez, Runtime *rt);
       static void handle_replication_request(Deserializer &derez, Runtime *rt);
-      static void handle_replication_response(Deserializer &derez, Runtime *rt);
+      static void handle_replication_response(Deserializer &derez, Runtime *rt,
+                                              AddressSpaceID source);
       static void handle_replication_update(Deserializer &derez, Runtime *rt);
       static void handle_clone_request(Deserializer &derez, Runtime *runtime);
       static void handle_clone_response(Deserializer &derez, Runtime *runtime);

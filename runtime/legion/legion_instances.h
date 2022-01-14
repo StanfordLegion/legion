@@ -119,8 +119,18 @@ namespace Legion {
       CollectiveMapping(Deserializer &derez, size_t size = 0);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
+#ifdef DEBUG_LEGION
+        { assert(idx < size()); return unique_sorted_spaces[idx]; }
+#else
         { return unique_sorted_spaces[idx]; }
+#endif
       inline size_t size(void) const { return unique_sorted_spaces.size(); }
+      inline AddressSpaceID get_origin(void) const 
+#ifdef DEBUG_LEGION
+        { assert(size() > 0); return unique_sorted_spaces.front(); }
+#else
+        { return unique_sorted_spaces.front(); }
+#endif
       bool operator==(const CollectiveMapping &rhs) const;
       bool operator!=(const CollectiveMapping &rhs) const;
     public:

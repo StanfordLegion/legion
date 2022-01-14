@@ -12716,7 +12716,8 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE:
             {
-              runtime->handle_equivalence_set_replication_response(derez);
+              runtime->handle_equivalence_set_replication_response(derez,
+                                                    remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_UPDATE:
@@ -24802,10 +24803,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_replication_response(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_replication_response(derez, this);
+      EquivalenceSet::handle_replication_response(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

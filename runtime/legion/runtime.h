@@ -3544,7 +3544,8 @@ namespace Legion {
                                            AddressSpaceID source);
       void handle_equivalence_set_invalidate_trackers(Deserializer &derez);
       void handle_equivalence_set_replication_request(Deserializer &derez);
-      void handle_equivalence_set_replication_response(Deserializer &derez);
+      void handle_equivalence_set_replication_response(Deserializer &derez,
+                                                       AddressSpaceID source);
       void handle_equivalence_set_replication_update(Deserializer &derez);
       void handle_equivalence_set_migration(Deserializer &derez,
                                             AddressSpaceID source);

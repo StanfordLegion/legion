@@ -11567,8 +11567,26 @@ namespace Legion {
         ReplicationChange *target, AddressSpaceID source, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(add);
+#endif
       RemoteRequest *request = new RemoteRequest(target, source);
       remote_requests.insert(request, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::ReplicationChange::send_remote_responses(
+                          EquivalenceSet *set, const FieldMask &full_mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(add);
+      assert(!remote_requests.empty());
+#endif
+      for (FieldMaskSet<RemoteRequest>::const_iterator it =
+            remote_requests.begin(); it != remote_requests.end(); it++)
+        set->send_replication_response(it->first->source, it->first->target,
+                                       full_mask, it->second);
     }
 
     //--------------------------------------------------------------------------
@@ -11698,7 +11716,7 @@ namespace Legion {
               // Mapping doesn't contain the owner space, so we'll
               // just have the first local collective on the first
               // address space in the mapping do the work
-              if ((local_space == (*mapping)[0]) &&
+              if ((local_space == mapping->get_origin()) &&
                     analysis.collective_first_local)
               {
                 if (!is_logical_owner())
@@ -11773,14 +11791,15 @@ namespace Legion {
               }
             }
             // If we get here then we need to send the state request
-            const AddressSpaceID origin = (*mapping)[0];
+            const AddressSpaceID origin = mapping->get_origin();
             ReplicationChange *change = new ReplicationChange(mapping,
                 mapping->count_children(origin, local_space), true/*add*/);
             applied_events.insert(change->applied_event);
             // Send the message 
-            if ((origin != local_space) || !!unreplicated)
+            const bool owner_search = (origin == local_space);
+            if (!owner_search || !!unreplicated)
             {
-              const AddressSpaceID target = (origin == local_space) ?
+              const AddressSpaceID target = owner_search ?
                 logical_owner_space : mapping->get_parent(origin, local_space);
               Serializer rez;
               {
@@ -11791,19 +11810,25 @@ namespace Legion {
                 rez.serialize(unreplicated);
                 rez.serialize(change);
                 rez.serialize(local_space);
-                rez.serialize<bool>((origin == local_space));
+                rez.serialize<bool>(owner_search);
               }
               runtime->send_equivalence_set_replication_request(target, rez);
-              // Increment the count for the expected arrivals for the response
-              // if we're actually expecting one
+              // See if we're going to need to wait on a response
               if (!!unreplicated)
                 change->remaining_arrivals++;
+            }
+            // See if we're still waiting for a response, if we are then
+            // we should defer the change, otherwise we can finalize it
+            if (change->remaining_arrivals > 0)
+            {
               replication_changes.insert(change, mask);
               analysis.defer_traversal(change->ready_event, this, mask,
                                       deferral_events, applied_events);
               return true;
             }
-            else // owner that is already valid finalize the change
+            else
+              // If we fall through to here then we're not expecting any
+              // kind of response so we can finalize the change
               finalize_replication_change(change, mask);
           }
         }
@@ -11834,6 +11859,7 @@ namespace Legion {
               // state, if it is then we can send the invalidations 
               // asynchronously and have them complete in the background,
               // otherwise we need to wait for an update to be flushed here
+              // because the state in this equivalence set might be invalid
               if (!it->first->contains(local_space))
               {
                 // Make a replication change object for the change that
@@ -11841,7 +11867,6 @@ namespace Legion {
                 // the first space in the previous mapping
                 ReplicationChange *change =
                  new ReplicationChange(it->first, 1/*arrivals*/, false/*add*/);
-                applied_events.insert(change->applied_event);
                 Serializer rez;
                 {
                   RezCheck z(rez);
@@ -11854,8 +11879,9 @@ namespace Legion {
                   rez.serialize<bool>(false); // not owner search
                 }
                 runtime->send_equivalence_set_replication_request(
-                                            (*(it->first))[0], rez);
+                                      it->first->get_origin(), rez);
                 replication_changes.insert(change, overlap);
+                applied_events.insert(change->applied_event);
               }
               else
                 update_replicated_state(it->first, NULL/*not collective*/,
@@ -12037,7 +12063,7 @@ namespace Legion {
               rez.serialize(update_mask);
               rez.serialize(applied);
             }
-            runtime->send_equivalence_set_replication_update(children[idx], rez);
+            runtime->send_equivalence_set_replication_update(children[idx],rez);
             applied_events.insert(applied);
           }
         }
@@ -12064,7 +12090,8 @@ namespace Legion {
                 rez.serialize(update_mask);
                 rez.serialize(applied);
               }
-              runtime->send_equivalence_set_replication_update(children[idx], rez);
+              runtime->send_equivalence_set_replication_update(children[idx],
+                                                               rez);
               applied_events.insert(applied);
             }
           }
@@ -12085,8 +12112,10 @@ namespace Legion {
           }
         }
       }
-      // TODO: Now perform the local invalidation of the replicated state
-
+      // Now perform the local invalidation of the replicated state
+      if ((newstate == NULL) || !newstate->contains(local_space))
+        invalidate_state(set_expr, true/*covers*/,
+                         update_mask, RtEvent::NO_RT_EVENT);
       // When we're done find the replicated state and remove it
       std::vector<CollectiveMapping*> to_delete;
       for (FieldMaskSet<CollectiveMapping>::iterator it = 
@@ -12128,14 +12157,7 @@ namespace Legion {
       assert(change->remaining_arrivals == 0);
 #endif
       if (!change->remote_requests.empty()) 
-      {
-#ifdef DEBUG_LEGION
-        assert(change->add);
-#endif
-        // TODO: Send out any replication responses from our state before 
-        // we go about changing anything
-
-      }
+        change->send_remote_responses(this, change_mask);
       std::set<RtEvent> applied_events;
       if (change->add)
       {
@@ -12256,14 +12278,15 @@ namespace Legion {
           // Any fields that are already replicated are good
           unreplicated = full_mask - replicated_states.get_valid_mask();
         // Create the replication change and record it
-        const AddressSpaceID origin = (*mapping)[0];
+        const AddressSpaceID origin = mapping->get_origin();
         ReplicationChange *change = new ReplicationChange(mapping,
             mapping->count_children(origin, local_space), true/*add*/);
         if (!!request_mask)
           change->record_remote_request(target, source, request_mask);
         if ((origin != local_space) || !!unreplicated)
         {
-          const AddressSpaceID target = (origin == local_space) ?
+          const bool owner_search = (origin == local_space);
+          const AddressSpaceID target = owner_search ?
             logical_owner_space : mapping->get_parent(origin, local_space);
           Serializer rez;
           {
@@ -12274,161 +12297,95 @@ namespace Legion {
             rez.serialize(unreplicated);
             rez.serialize(change);
             rez.serialize(local_space);
-            rez.serialize<bool>((origin == local_space));
+            rez.serialize<bool>(owner_search);
           }
           runtime->send_equivalence_set_replication_request(target, rez);
           // Increment the count for the expected arrivals for the response
           // if we're actually expecting one
           if (!!unreplicated)
+          {
             change->remaining_arrivals++;
-          replication_changes.insert(change, full_mask);
+            replication_changes.insert(change, full_mask);
+            return;
+          }
         }
-        else
-          finalize_replication_change(change, full_mask);
+        // If we make it here then finalize the replication change
+        finalize_replication_change(change, full_mask);
       }
       else
-      {
         // In this case we should just package up the replication state
         // and send it back to whichever node requested it
-
-      }
+        send_replication_response(source, target, full_mask, request_mask);
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_request(const FieldMask &mask,
-                         CollectiveMapping *mapping, PendingReplication *target,
-                         const AddressSpaceID source, const RtEvent done_event)
+    void EquivalenceSet::send_replication_response(AddressSpaceID target,
+                   ReplicationChange *remote_change, const FieldMask &full_mask,
+                   const FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
-      // If we're not the logical owner, keep forwarding this on until
-      // we get to the logical owner
-      if (!is_logical_owner())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(mask);
-          mapping->pack(rez);
-          rez.serialize(target);
-          rez.serialize(source);
-          rez.serialize(done_event);
-        }
-        runtime->send_equivalence_set_replication_request(logical_owner_space,
-                                                          rez);
-        return;
-      }
-      // Before we do anything else, go through and figure out what (if any)
-      // update state we will need to pack to send to the new node
-      // Do this before calling make_replicated_state which is when the
-      // replicated_state data structure can change
-      FieldMask update_mask = mask;
-      if (!(mask * replicated_states.get_valid_mask()))
-      {
-        for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-              replicated_states.begin(); it != replicated_states.end(); it++)
-        {
-          if (update_mask * it->second)
-            continue;
-          if (!it->first->contains(source))
-            continue;
-          update_mask -= it->second;
-          if (!update_mask)
-            break;
-        }
-      }
-      std::set<RtEvent> deferral_events;
-      make_replicated_state(mapping, mask, source, deferral_events);
-      RtEvent ready_event;
-      if (!deferral_events.empty())
-        ready_event = Runtime::merge_events(deferral_events);
-      // Then send the response back to the source
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(mask);
-        rez.serialize(target);
-        rez.serialize(ready_event);
-        rez.serialize(update_mask);
-        if (!!update_mask)
-        {
-          rez.serialize(local_space);
-          pack_state(rez, source, set_expr, true/*covers*/, mask, 
-                      true/*pack guards*/); 
-        }
+        rez.serialize(remote_change);
+        rez.serialize(full_mask);
+        pack_state(rez, target, set_expr, true/*covers*/,
+                   request_mask, false/*pack guards*/);
       }
-      runtime->send_equivalence_set_replication_response(source, rez);
+      runtime->send_equivalence_set_replication_response(target, rez);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_response(
-        PendingReplication *target, const FieldMask &mask, RtEvent precondition,
-        const FieldMask &update_mask, Deserializer &derez)
+    void EquivalenceSet::process_replication_response(Deserializer &derez,
+                                                      AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      ReplicationChange *change;
+      derez.deserialize(change);
+      FieldMask full_mask;
+      derez.deserialize(full_mask);
       std::set<RtEvent> unpacked_events;
-      if (!!update_mask)
-      {
-        AddressSpaceID source;
-        derez.deserialize(source);
-        unpack_state_and_apply(derez, source, false/*forward*/,unpacked_events);
-      }
-      AutoLock eq(eq_lock);
+      unpack_state_and_apply(derez, source, false/*forward*/, unpacked_events);
+      // Defer the completion if there are any unpacked events that haven't
+      // fully triggered yet
       if (!unpacked_events.empty())
-        target->preconditions.insert(unpacked_events.begin(), 
-                                     unpacked_events.end());
-      // Then finalize our replication
-      if (precondition.exists())
-        target->preconditions.insert(precondition);
-      finalize_pending_replication(target, mask, true/*first*/);
+      {
+        const RtEvent unpacked = Runtime::merge_events(unpacked_events);
+        if (unpacked.exists() && !unpacked.has_triggered())
+        {
+          // Defer the removal until we're done unpacking
+          DeferPendingReplicationArgs args(this, change, full_mask);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, unpacked);
+          return;
+        }
+      }
+      // If we get here then we can remove our expected arrival
+      finalize_replication_response(change, full_mask);
+       
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::finalize_replication_response(
+                          ReplicationChange *change, const FieldMask &full_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(change->remaining_arrivals > 0); 
+#endif
+      if ((--change->remaining_arrivals) == 0)
+        finalize_replication_change(change, full_mask);
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferPendingReplicationArgs::DeferPendingReplicationArgs(
-                   EquivalenceSet *s, PendingReplication *p, const FieldMask &m)
+                   EquivalenceSet *s, ReplicationChange *c, const FieldMask &m)
       : LgTaskArgs<DeferPendingReplicationArgs>(implicit_provenance),
-        set(s), pending(p), mask(new FieldMask(m))
+        set(s), change(c), mask(new FieldMask(m))
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::finalize_pending_replication(
-                             PendingReplication *pending, const FieldMask &mask,
-                             const bool first, const bool need_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (need_lock)
-      {
-        AutoLock eq(eq_lock);
-        finalize_pending_replication(pending, mask, first, false/*need lock*/);
-        return;
-      }
-      if (first)
-      {
-        if (!pending->preconditions.empty())
-          Runtime::trigger_event(pending->ready_event,
-              Runtime::merge_events(pending->preconditions));
-        else
-          Runtime::trigger_event(pending->ready_event);
-        if (!pending->ready_event.has_triggered())
-        {
-          // Need to defer adding this until it is ready
-          DeferPendingReplicationArgs args(this, pending, mask);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, pending->ready_event);
-          return;
-        }
-      }
-#ifdef DEBUG
-      assert(mask * replicated_states.get_valid_mask());
-#endif
-      if (replicated_states.insert(pending->mapping, mask))
-        pending->mapping->add_reference();
-      delete pending;
     }
 
     //--------------------------------------------------------------------------
@@ -12437,11 +12394,9 @@ namespace Legion {
     {
       const DeferPendingReplicationArgs *dargs = 
         (const DeferPendingReplicationArgs*)args;
-      dargs->set->finalize_pending_replication(dargs->pending, *(dargs->mask),
-          false/*first*/, true/*need lock*/);
+      dargs->set->finalize_replication_change(dargs->change, *(dargs->mask));
       delete (dargs->mask);
     }
-#endif
 
     //--------------------------------------------------------------------------
     template<typename T>
@@ -16912,10 +16867,9 @@ namespace Legion {
         delete mapping;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_response(
-                                          Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -16924,23 +16878,10 @@ namespace Legion {
       RtEvent ready_event;
       EquivalenceSet *set = 
         runtime->find_or_request_equivalence_set(did, ready_event);
-      FieldMask mask;
-      derez.deserialize(mask);
-      PendingReplication *target;
-      derez.deserialize(target);
-      RtEvent precondition;
-      derez.deserialize(precondition);
-      FieldMask update_mask;
-      derez.deserialize(update_mask);
-
-      if (precondition.exists())
-        target->preconditions.insert(precondition);
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->process_replication_response(target, mask, precondition, 
-                                        update_mask, derez);
+      set->process_replication_response(derez, source);
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_update(
@@ -17888,7 +17829,7 @@ namespace Legion {
           delete it->first;
       delete dargs->view_refs_to_remove;
       delete dargs->expr_refs_to_remove;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_local(EquivalenceSet *dst, FieldMask mask,
