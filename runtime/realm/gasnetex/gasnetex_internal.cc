@@ -1291,8 +1291,9 @@ namespace Realm {
 		 reinterpret_cast<const void *>(pktbuf->baseptr + pktstart),
 		 pktend - pktstart);
 	} else {
-	  assert((hdr_start >= realbuf->baseptr) &&
-		 (hdr_start < (realbuf->baseptr + pktbuf->size)));
+	  assert(!hdr_start ||
+                 ((hdr_start >= realbuf->baseptr) &&
+                  (hdr_start < (realbuf->baseptr + pktbuf->size))));
 	  // already in right place!
 	  uintptr_t pktstart = offset;
 	  uintptr_t pktend = pktbuf->pktbuf_pkt_ends[pktidx];
