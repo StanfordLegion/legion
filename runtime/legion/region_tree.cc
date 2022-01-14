@@ -7273,17 +7273,20 @@ namespace Legion {
         IndexSpaceNode *node = get_node(pending.handle);
         LocalReferenceMutator mutator;
         node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((pending.source == node->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          node->record_remote_owner_valid_reference();
-        else
-          node->send_remote_valid_decrement(pending.source, NULL/*mut*/, added);
+        if (!pending.done_ref_counting)
+        {
+          const RtEvent added = mutator.get_done_event();
+          // Special case here: if the source was the owner and we didn't
+          // just send a message to add our reference then we can buffer up
+          // our reference to be removed when we are no longer valid
+          // Be very careful here! You can only do this if the expression
+          // was sent from the source or you risk reference count cycles!
+          if ((pending.source == node->owner_space) &&
+              (!added.exists() || added.has_triggered()))
+            node->record_remote_owner_valid_reference();
+          else
+            node->send_remote_valid_decrement(pending.source,NULL/*mut*/,added);
+        }
         if (implicit_reference_tracker == NULL)
           implicit_reference_tracker = new ImplicitReferenceTracker;
         implicit_reference_tracker->record_live_expression(node);
@@ -7309,17 +7312,20 @@ namespace Legion {
 #endif
         LocalReferenceMutator mutator;
         result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((pending.source == op->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          result->record_remote_owner_valid_reference();
-        else
-          op->send_remote_valid_decrement(pending.source,NULL/*mutator*/,added);
+        if (!pending.done_ref_counting)
+        {
+          const RtEvent added = mutator.get_done_event();
+          // Special case here: if the source was the owner and we didn't
+          // just send a message to add our reference then we can buffer up
+          // our reference to be removed when we are no longer valid
+          // Be very careful here! You can only do this if the expression
+          // was sent from the source or you risk reference count cycles!
+          if ((pending.source == op->owner_space) &&
+              (!added.exists() || added.has_triggered()))
+            result->record_remote_owner_valid_reference();
+          else
+            op->send_remote_valid_decrement(pending.source, NULL/*mut*/, added);
+        }
         if (implicit_reference_tracker == NULL)
           implicit_reference_tracker = new ImplicitReferenceTracker;
         implicit_reference_tracker->record_live_expression(result);
@@ -7684,6 +7690,9 @@ namespace Legion {
           PendingRemoteExpression &pending, RtEvent &wait_for)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!pending.done_ref_counting);
+#endif
       // Handle the special case where this is a local index space expression 
       bool is_local;
       derez.deserialize(is_local);
@@ -7691,19 +7700,19 @@ namespace Legion {
       {
         IndexSpaceExpression *result;
         derez.deserialize(result);
+#ifdef DEBUG_LEGION
+        IndexSpaceOperation *op = 
+          dynamic_cast<IndexSpaceOperation*>(result);
+        assert(op != NULL);
+#else
+        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+        // Make this valid and then send the removal of the 
+        // remote did expression
+        LocalReferenceMutator mutator;
+        op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
         if (source != forest->runtime->address_space)
         {
-#ifdef DEBUG_LEGION
-          IndexSpaceOperation *op = 
-            dynamic_cast<IndexSpaceOperation*>(result);
-          assert(op != NULL);
-#else
-          IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-          // Make this valid and then send the removal of the 
-          // remote did expression
-          LocalReferenceMutator mutator;
-          op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
           // Always need to send this reference removal back immediately
           // in order to avoid reference counting deadlock
           op->send_remote_valid_decrement(source, NULL/*mutator*/,
@@ -7712,6 +7721,7 @@ namespace Legion {
         if (implicit_reference_tracker == NULL)
           implicit_reference_tracker = new ImplicitReferenceTracker;
         implicit_reference_tracker->record_live_expression(result);
+        pending.done_ref_counting = true;
         return result;
       }
       derez.deserialize(pending.is_index_space);
@@ -7738,6 +7748,7 @@ namespace Legion {
           node->record_remote_owner_valid_reference();
         else
           node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        pending.done_ref_counting = true;
         if (implicit_reference_tracker == NULL)
           implicit_reference_tracker = new ImplicitReferenceTracker;
         implicit_reference_tracker->record_live_expression(node);
@@ -7773,6 +7784,7 @@ namespace Legion {
         result->record_remote_owner_valid_reference();
       else
         op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+      pending.done_ref_counting = true;
       if (implicit_reference_tracker == NULL)
         implicit_reference_tracker = new ImplicitReferenceTracker;
       implicit_reference_tracker->record_live_expression(result);

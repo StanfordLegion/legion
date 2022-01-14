@@ -168,18 +168,17 @@ GPU_ARCH ?= pascal
 CONDUIT ?= ibv #not sure if this is true
 endif
 
-# backwards-compatibility for GASNet builds - any of GASNET_ROOT, GASNET, or
-#  USE_GASNET=1 will set REALM_NETWORKS=gasnet1
-USE_GASNET ?= 0
+# Backwards-compatibility for GASNet builds
+# GASNET_ROOT is a synonym for GASNET
 ifdef GASNET_ROOT
   GASNET ?= $(GASNET_ROOT)
 endif
-ifneq ($(strip $(GASNET)),)
-  ifneq ($(strip $(USE_GASNET)),0)
-    REALM_NETWORKS ?= gasnet1
-  endif
+# USE_GASNET=1 will set REALM_NETWORKS=gasnet1
+USE_GASNET ?= 0
+ifeq ($(strip $(USE_GASNET)),1)
+  REALM_NETWORKS ?= gasnet1
 endif
-# Backwards compatibility, turn on network support if REALM_NETWORKS is not empty
+# Turn on network support if REALM_NETWORKS is not empty
 REALM_NETWORKS ?=
 ifndef USE_NETWORK
   ifeq ($(strip $(REALM_NETWORKS)),)

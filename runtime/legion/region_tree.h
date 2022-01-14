@@ -71,12 +71,13 @@ namespace Legion {
     public:
       PendingRemoteExpression(void)
         : handle(IndexSpace::NO_SPACE), remote_expr_id(0),
-          source(0), is_index_space(false) { }
+          source(0), is_index_space(false), done_ref_counting(false) { }
     public:
       IndexSpace handle;
       IndexSpaceExprID remote_expr_id;
       AddressSpaceID source;
       bool is_index_space;
+      bool done_ref_counting;
     };
 
     /**
