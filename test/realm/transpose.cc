@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "osdep.h"
+#include "philox.h"
 
 using namespace Realm;
 
@@ -41,7 +42,7 @@ void create_permutations(std::vector<LayoutPermutation<N> >& perms,
 			 LayoutPermutation<N>& scratch,
 			 int pos, size_t narrow_size)
 {
-  static const char *dim_names = "XYZW";
+  static const char *dim_names = "XYZWABCDEF";
 
   for(int i = 0; i < N; i++) {
     bool found = false;
@@ -86,8 +87,12 @@ void copy_profiling_task(const void *args, size_t arglen,
 namespace TestConfig {
   size_t buffer_size = 64 << 20; // should be bigger than any cache in system
   size_t narrow_dim = 0;  // should one dimension be a fixed (narrow) size?
-  unsigned dim_mask = 7; // i.e. 1-D, 2-D, 3-D
+  unsigned dim_mask = ~0U; // i.e. all the dimensions
   bool all_mems = false;
+  size_t pad_width = 32;
+  size_t max_perms = 10;
+  unsigned random_seed = 12345; // used to sample permutations if needed
+  bool wait_after = false; // wait after each copy?
 };
 
 template <int N, typename FT>
@@ -99,6 +104,19 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
   LayoutPermutation<N> scratch;
   memset(&scratch, 0, sizeof(scratch));
   create_permutations<N>(perms, scratch, 0, narrow_size);
+
+  if((TestConfig::max_perms > 3) && (perms.size() > TestConfig::max_perms)) {
+    // mostly-randomly sample permutations in the hopes we get interesting
+    //  stuff, but keep the first 3 (i.e. normal fortran order and two that
+    //  are very similar to it)
+    for(size_t i = 3; i < TestConfig::max_perms; i++) {
+      size_t idx = (3 +
+                    (Philox_2x32<>::rand_raw(TestConfig::random_seed, N, i) %
+                     (perms.size() - 3)));
+      perms[i] = perms[idx];
+    }
+    perms.resize(TestConfig::max_perms);
+  }
 
   Rect<N> bounds;
   for(int i = 0; i < N; i++) {
@@ -118,7 +136,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
   Rect<N> bounds_pad;
   for(int i = 0; i < N; i++) {
     bounds_pad.lo[i] = 0;
-    bounds_pad.hi[i] = bounds.hi[i] + (((narrow_size > 0) && (narrow_size < 32)) ? narrow_size : 32);
+    bounds_pad.hi[i] = bounds.hi[i] + (((narrow_size > 0) && (narrow_size < TestConfig::pad_width)) ? narrow_size : TestConfig::pad_width);
   }
   IndexSpace<N> is_pad(bounds_pad);
 
@@ -186,6 +204,8 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       dsts[0].field_id = 0;
       dsts[0].size = field_sizes[0];
       wait_for = is.copy(srcs, dsts, prs, wait_for);
+      if(TestConfig::wait_after)
+        wait_for.wait();
 
       dst_inst.destroy(wait_for);
     }
@@ -266,6 +286,36 @@ void top_level_task(const void *args, size_t arglen,
       if((TestConfig::dim_mask & 4) != 0)
         do_single_dim<3, FT>(*src_it, *dst_it, log2_buffer_size,
                              TestConfig::narrow_dim, p);
+#if REALM_MAX_DIM >= 4
+      if((TestConfig::dim_mask & 8) != 0)
+        do_single_dim<4, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+#endif
+#if REALM_MAX_DIM >= 5
+      if((TestConfig::dim_mask & 16) != 0)
+        do_single_dim<5, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+#endif
+#if REALM_MAX_DIM >= 6
+      if((TestConfig::dim_mask & 32) != 0)
+        do_single_dim<6, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+#endif
+#if REALM_MAX_DIM >= 7
+      if((TestConfig::dim_mask & 64) != 0)
+        do_single_dim<7, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+#endif
+#if REALM_MAX_DIM >= 8
+      if((TestConfig::dim_mask & 128) != 0)
+        do_single_dim<8, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+#endif
+#if REALM_MAX_DIM >= 9
+      if((TestConfig::dim_mask & 256) != 0)
+        do_single_dim<9, FT>(*src_it, *dst_it, log2_buffer_size,
+                             TestConfig::narrow_dim, p);
+#endif
     }
 }
 
@@ -279,7 +329,11 @@ int main(int argc, char **argv)
   cp.add_option_int_units("-b", TestConfig::buffer_size, 'M')
     .add_option_int("-narrow", TestConfig::narrow_dim)
     .add_option_int("-dims", TestConfig::dim_mask)
-    .add_option_int("-all", TestConfig::all_mems);
+    .add_option_int("-all", TestConfig::all_mems)
+    .add_option_int("-pad", TestConfig::pad_width)
+    .add_option_int("-perms", TestConfig::max_perms)
+    .add_option_int("-seed", TestConfig::random_seed)
+    .add_option_int("-wait", TestConfig::wait_after);
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
 
