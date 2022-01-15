@@ -2389,20 +2389,34 @@ namespace Legion {
       struct DeferApplyStateArgs : public LgTaskArgs<DeferApplyStateArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_APPLY_STATE_TASK_ID;
+        typedef LegionMap<IndexSpaceExpression*,
+                  FieldMaskSet<LogicalView> >::aligned ExprLogicalViews; 
+        typedef std::map<unsigned,std::list<std::pair<ReductionView*,
+          IndexSpaceExpression*> > > ExprReductionViews;
+        typedef LegionMap<IndexSpaceExpression*,
+                  FieldMaskSet<InstanceView> >::aligned ExprInstanceViews;
       public:
         DeferApplyStateArgs(EquivalenceSet *set, RtUserEvent done_event, 
-                            const bool foward_to_owner);
+                            const bool foward_to_owner,
+                            std::set<RtEvent> &applied_events,
+                            ExprLogicalViews &valid_updates,
+                            FieldMaskSet<IndexSpaceExpression> &init_updates,
+                            ExprReductionViews &reduction_updates,
+                            ExprInstanceViews &restricted_updates,
+                            ExprInstanceViews &released_updates,
+                            FieldMaskSet<CopyFillGuard> &read_only_updates,
+                            FieldMaskSet<CopyFillGuard> &reduction_fill_updates,
+                            TraceViewSet *precondition_updates,
+                            TraceViewSet *anticondition_updates,
+                            TraceViewSet *postcondition_updates);
+        void release_references(void) const;
       public:
         EquivalenceSet *const set;
-        LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
-          *const valid_updates;
+        ExprLogicalViews *const valid_updates;
         FieldMaskSet<IndexSpaceExpression> *const initialized_updates;
-        std::map<unsigned,std::list<std::pair<ReductionView*,
-          IndexSpaceExpression*> > > *const reduction_updates;
-        LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
-          *const restricted_updates;
-        LegionMap<IndexSpaceExpression*,FieldMaskSet<InstanceView> >::aligned
-          *const released_updates;
+        ExprReductionViews *const reduction_updates;
+        ExprInstanceViews *const restricted_updates;
+        ExprInstanceViews *const released_updates;
         FieldMaskSet<CopyFillGuard> *const read_only_updates;
         FieldMaskSet<CopyFillGuard> *const reduction_fill_updates;
         TraceViewSet *precondition_updates;
