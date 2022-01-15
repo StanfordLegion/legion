@@ -8241,7 +8241,7 @@ class Task(object):
     def set_shard(self, shard, original):
         assert not self.shard
         self.shard = shard
-        self.op.set_context(original, False)
+        self.op.set_context(original)
 
     def add_premapping(self, index):
         if not self.premappings:
