@@ -2767,9 +2767,9 @@ namespace Legion {
                           const bool invalidate_overlap,
                           const bool forward_to_owner);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
-                    IndexSpaceNode *target_node, const FieldMask &mask,
-                    RtUserEvent done_event, const bool invalidate_overlap,
-                    const bool forward_to_owner);
+                    IndexSpaceNode *target_node, FieldMask mask,
+                    std::set<RtEvent> &applied_events,
+                    const bool invalidate_overlap, const bool forward_to_owner);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask, 
             LegionMap<IndexSpaceExpression*,

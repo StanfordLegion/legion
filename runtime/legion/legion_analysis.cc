@@ -12025,7 +12025,7 @@ namespace Legion {
           // the logical owner space, if it doesn't then we need to 
           // send an invalidation to the owner as well
           if (!newstate->contains(logical_owner_space) &&
-              (local_space == ((*newstate)[0])))
+              (local_space == newstate->get_origin()))
           {
             const RtUserEvent applied = Runtime::create_rt_user_event();
             Serializer rez;
@@ -12072,7 +12072,7 @@ namespace Legion {
           // Old state does not contain the logical owner space, so if we're
           // the logical owner space we send it to the origin and then start
           // the tree broadcast from there
-          const AddressSpaceID origin = (*oldstate)[0];
+          const AddressSpaceID origin = oldstate->get_origin();
           if (!is_logical_owner())
           {
             std::vector<AddressSpaceID> children;
@@ -17065,19 +17065,15 @@ namespace Legion {
 #endif
         return;
       }
-      if (target_space != local_space)
-      {
-        const RtUserEvent done_event = Runtime::create_rt_user_event();
-        src->clone_to_remote(did, target_space, region_node->row_source,
-                 mask, done_event, invalidate_overlap, forward_to_owner);
-        applied_events.insert(done_event);
-      }
-      else
+      if (target_space == local_space)
       {
         AutoLock eq(eq_lock); 
         src->clone_to_local(this, mask, applied_events, 
-                            invalidate_overlap, forward_to_owner);  
+                            invalidate_overlap, forward_to_owner);
       }
+      else
+        src->clone_to_remote(did, target_space, region_node->row_source,
+             mask, applied_events, invalidate_overlap, forward_to_owner);
     }
 
     //--------------------------------------------------------------------------
@@ -17943,6 +17939,56 @@ namespace Legion {
             return;
         }
       }
+      else
+      {
+        // Another corner case here: with replicated states we can have 
+        // replicated states that don't contain the logical owner space
+        // so we might need to forward on the request to a remote copy
+        if (!replicated_states.empty() && 
+            !(mask * replicated_states.get_valid_mask()))
+        {
+          FieldMaskSet<CollectiveMapping> to_invalidate;
+          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
+                replicated_states.begin(); it != replicated_states.end(); it++)
+          {
+            if (it->first->contains(local_space))
+              continue;
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            const RtUserEvent done_event = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(dst->did);
+              rez.serialize(local_space);
+              rez.serialize(dst->region_node->row_source->handle);
+              rez.serialize(overlap);
+              rez.serialize(done_event);
+              rez.serialize<bool>(invalidate_overlap);
+              rez.serialize<bool>(forward_to_owner);
+            }
+            runtime->send_equivalence_set_clone_request(it->first->get_origin(),
+                                                        rez);
+            applied_events.insert(done_event);
+            if (invalidate_overlap)
+              to_invalidate.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+          if (invalidate_overlap)
+          {
+            for (FieldMaskSet<CollectiveMapping>::const_iterator it =
+                  to_invalidate.begin(); it != to_invalidate.end(); it++)
+              update_replicated_state(it->first, NULL/*new state*/,
+                  it->second, applied_events, false/*need lock*/);
+          }
+          if (!mask)
+            return;
+        }
+      }
       // If we get here, we're performing the clone locally for these fields
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> >::aligned
         valid_updates;
@@ -18002,7 +18048,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_remote(DistributedID target, 
                      AddressSpaceID target_space, IndexSpaceNode *target_node, 
-                     const FieldMask &mask, RtUserEvent done_event, 
+                     FieldMask mask, std::set<RtEvent> &applied_events, 
                      const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
@@ -18032,6 +18078,7 @@ namespace Legion {
           forward = true;
         if (forward)
         {
+          const RtUserEvent done_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
@@ -18045,7 +18092,58 @@ namespace Legion {
             rez.serialize<bool>(forward_to_owner);
           }
           runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
+          applied_events.insert(done_event);
           return;
+        }
+      }
+      else
+      {
+        // Another corner case here: with replicated states we can have 
+        // replicated states that don't contain the logical owner space
+        // so we might need to forward on the request to a remote copy
+        if (!replicated_states.empty() &&
+            !(mask * replicated_states.get_valid_mask()))
+        {
+          FieldMaskSet<CollectiveMapping> to_invalidate;
+          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
+                replicated_states.begin(); it != replicated_states.end(); it++)
+          {
+            if (it->first->contains(local_space))
+              continue;
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            const RtUserEvent done_event = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(target);
+              rez.serialize(target_space);
+              rez.serialize(target_node->handle);
+              rez.serialize(overlap);
+              rez.serialize(done_event);
+              rez.serialize<bool>(invalidate_overlap);
+              rez.serialize<bool>(forward_to_owner);
+            }
+            runtime->send_equivalence_set_clone_request(it->first->get_origin(),
+                                                        rez);
+            applied_events.insert(done_event);
+            if (invalidate_overlap)
+              to_invalidate.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+          if (invalidate_overlap)
+          {
+            for (FieldMaskSet<CollectiveMapping>::const_iterator it =
+                  to_invalidate.begin(); it != to_invalidate.end(); it++)
+              update_replicated_state(it->first, NULL/*new state*/,
+                  it->second, applied_events, false/*need lock*/);
+          }
+          if (!mask)
+            return;
         }
       }
       IndexSpaceExpression *overlap = 
@@ -18061,6 +18159,7 @@ namespace Legion {
       else if (overlap_volume == target_node->get_volume())
         overlap = target_node;
       // If we make it here, then we've got valid data for the all the fields
+      const RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -18078,6 +18177,7 @@ namespace Legion {
         else
           invalidate_state(set_expr, true/*cover*/, mask, done_event);
       }
+      applied_events.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -18617,7 +18717,7 @@ namespace Legion {
       bool invalidate_overlap, forward_to_owner;
       derez.deserialize<bool>(invalidate_overlap);
       derez.deserialize<bool>(forward_to_owner);
-      
+      std::set<RtEvent> applied_events;   
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       if (target_space == runtime->address_space)
@@ -18625,23 +18725,22 @@ namespace Legion {
         // We've been sent back to the owner node
         EquivalenceSet *dst = 
           runtime->find_or_request_equivalence_set(target, ready);
-        std::set<RtEvent> applied_events;   
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
         dst->clone_from(target_space, set, mask, forward_to_owner,
                         applied_events, invalidate_overlap);
-        if (!applied_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(applied_events));
-        else
-          Runtime::trigger_event(done_event);
       }
       else
       {
         IndexSpaceNode *node = runtime->forest->get_node(handle);
-        set->clone_to_remote(target, target_space, node, mask, done_event, 
+        set->clone_to_remote(target, target_space, node, mask, applied_events,
                              invalidate_overlap, forward_to_owner);
       }
+      if (!applied_events.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
