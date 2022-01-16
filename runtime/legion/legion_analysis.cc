@@ -17617,20 +17617,13 @@ namespace Legion {
         {
           // Defer this until it is ready to be performed
           const RtUserEvent applied_event = Runtime::create_rt_user_event();
-          DeferApplyStateArgs args(this, applied_event, forward_to_owner);
-          args.valid_updates->swap(valid_updates);
-          args.initialized_updates->swap(initialized_updates);
-          args.reduction_updates->swap(reduction_updates);
-          args.restricted_updates->swap(restricted_updates);
-          args.released_updates->swap(released_updates);
-          args.read_only_updates->swap(read_only_updates);
-          args.reduction_fill_updates->swap(reduction_fill_updates);
-          args.precondition_updates = precondition_updates;
-          args.anticondition_updates = anticondition_updates;
-          args.postcondition_updates = postcondition_updates;
+          DeferApplyStateArgs args(this, applied_event, forward_to_owner,
+              applied_events, valid_updates, initialized_updates, 
+              reduction_updates, restricted_updates, released_updates,
+              read_only_updates, reduction_fill_updates, precondition_updates,
+              anticondition_updates, postcondition_updates);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, ready_event);
-          applied_events.insert(applied_event);
           return;
         }
       }
@@ -17644,7 +17637,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferApplyStateArgs::DeferApplyStateArgs(EquivalenceSet *s,
-                                                 RtUserEvent done, bool forward)
+                                       RtUserEvent done, bool forward,
+                                       std::set<RtEvent> &applied_events,
+                                       ExprLogicalViews &valid,
+                                       FieldMaskSet<IndexSpaceExpression> &init,
+                                       ExprReductionViews &reductions,
+                                       ExprInstanceViews &restricted,
+                                       ExprInstanceViews &released,
+                                       FieldMaskSet<CopyFillGuard> &read_only,
+                                       FieldMaskSet<CopyFillGuard> &reduc_fill,
+                                       TraceViewSet *preconditions,
+                                       TraceViewSet *anticonditions,
+                                       TraceViewSet *postconditions)
       : LgTaskArgs<DeferApplyStateArgs>(implicit_provenance), set(s),
         valid_updates(new LegionMap<IndexSpaceExpression*,
             FieldMaskSet<LogicalView> >::aligned()),
@@ -17657,9 +17661,68 @@ namespace Legion {
             FieldMaskSet<InstanceView> >::aligned()), 
         read_only_updates(new FieldMaskSet<CopyFillGuard>()),
         reduction_fill_updates(new FieldMaskSet<CopyFillGuard>()),
+        precondition_updates(preconditions),
+        anticondition_updates(anticonditions),
+        postcondition_updates(postconditions),
         done_event(done), forward_to_owner(forward)
     //--------------------------------------------------------------------------
     {
+      WrapperReferenceMutator mutator(applied_events);
+      for (ExprLogicalViews::const_iterator it =
+            valid.begin(); it != valid.end(); it++)
+        it->first->add_base_expression_reference(META_TASK_REF, &mutator);
+      valid_updates->swap(valid);
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+            init.begin(); it != init.end(); it++)
+        it->first->add_base_expression_reference(META_TASK_REF, &mutator);
+      initialized_updates->swap(init);
+      for (ExprReductionViews::const_iterator rit =
+            reductions.begin(); rit != reductions.end(); rit++)
+        for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+              const_iterator it = rit->second.begin();
+              it != rit->second.end(); it++)
+          it->second->add_base_expression_reference(META_TASK_REF, &mutator);
+      reduction_updates->swap(reductions);
+      for (ExprInstanceViews::const_iterator it =
+            restricted.begin(); it != restricted.end(); it++)
+        it->first->add_base_expression_reference(META_TASK_REF, &mutator);
+      restricted_updates->swap(restricted);
+      for (ExprInstanceViews::const_iterator it =
+            released.begin(); it != released.end(); it++)
+        it->first->add_base_expression_reference(META_TASK_REF, &mutator);
+      released_updates->swap(released);
+      read_only_updates->swap(read_only);
+      reduction_fill_updates->swap(reduc_fill);
+      applied_events.insert(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::DeferApplyStateArgs::release_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (ExprLogicalViews::const_iterator it =
+            valid_updates->begin(); it != valid_updates->end(); it++)
+        if (it->first->remove_base_expression_reference(META_TASK_REF))
+          delete it->first;
+      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+           initialized_updates->begin(); it != initialized_updates->end(); it++)
+        if (it->first->remove_base_expression_reference(META_TASK_REF))
+          delete it->first;
+      for (ExprReductionViews::const_iterator rit =
+            reduction_updates->begin(); rit != reduction_updates->end(); rit++)
+        for (std::list<std::pair<ReductionView*,IndexSpaceExpression*> >::
+              const_iterator it = rit->second.begin(); 
+              it != rit->second.end(); it++)
+          if (it->second->remove_base_expression_reference(META_TASK_REF))
+            delete it->second;
+      for (ExprInstanceViews::const_iterator it =
+            restricted_updates->begin(); it != restricted_updates->end(); it++)
+        if (it->first->remove_base_expression_reference(META_TASK_REF))
+          delete it->first;
+      for (ExprInstanceViews::const_iterator it =
+            released_updates->begin(); it != released_updates->end(); it++)
+        if (it->first->remove_base_expression_reference(META_TASK_REF))
+          delete it->first;
     }
 
     //--------------------------------------------------------------------------
@@ -17680,6 +17743,7 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->done_event);
+      dargs->release_references();
       delete dargs->valid_updates;
       delete dargs->initialized_updates;
       delete dargs->reduction_updates;
