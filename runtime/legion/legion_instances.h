@@ -102,7 +102,7 @@ namespace Legion {
     protected:
       mutable LocalLock layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
-               LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
+               LegionList<std::pair<FieldMask,FieldMask> > > comp_cache;
     }; 
 
     /**
@@ -351,7 +351,7 @@ namespace Legion {
       FieldMask convert_dst_to_src(const FieldMask &dst_mask);
     public:
       std::vector<CopySrcDstField> offsets; 
-      LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;
+      LegionDeque<std::pair<FieldMask,FieldMask> > compressed_cache;
     };
 
     /**

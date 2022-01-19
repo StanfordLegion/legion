@@ -556,7 +556,7 @@ namespace Legion {
       // Regions which are NO_ACCESS or have no privilege fields
       std::vector<bool>                     no_access_regions;
       // The version infos for this operation
-      LegionVector<VersionInfo>::aligned    version_infos;
+      LegionVector<VersionInfo>             version_infos;
     protected:
       std::vector<Processor>                target_processors;
       // Hold the result of the mapping
@@ -1054,7 +1054,7 @@ namespace Legion {
       unsigned committed_points;
       RtUserEvent future_map_ready;
     protected:
-      LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
+      LegionMap<unsigned/*idx*/,VersionInfo> version_infos;
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
     protected:

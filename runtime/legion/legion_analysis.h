@@ -825,15 +825,13 @@ namespace Legion {
       RegionTreeNode *const owner;
     public:
       LegionList<FieldState,
-                 LOGICAL_FIELD_STATE_ALLOC>::track_aligned field_states;
-      LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned 
-                                                            curr_epoch_users;
-      LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
-                                                            prev_epoch_users;
+                 LOGICAL_FIELD_STATE_ALLOC> field_states;
+      LegionList<LogicalUser,CURR_LOGICAL_ALLOC> curr_epoch_users;
+      LegionList<LogicalUser,PREV_LOGICAL_ALLOC> prev_epoch_users;
     public:
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
-      LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
+      LegionMap<ReductionOpID,FieldMask> outstanding_reductions;
     public:
       // Keep track of the current projection epoch for each field
       std::list<ProjectionEpoch*> projection_epochs;
@@ -884,26 +882,26 @@ namespace Legion {
                                        const LogicalTraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
-             LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
-             LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+             LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
+             LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers);
       void update_state(LogicalState &state);
       void register_close_operations(
-              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
+              LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &users);
     protected:
       void register_dependences(CloseOp *close_op, 
                                 const LogicalUser &close_user,
                                 const LogicalUser &current, 
                                 const FieldMask &open_below,
-             LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned &husers,
-             LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &ausers,
-             LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
-             LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+             LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC> &husers,
+             LegionList<LogicalUser,LOGICAL_REC_ALLOC> &ausers,
+             LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
+             LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers);
     public:
       const ContextID ctx;
       const LogicalUser &user;
       RegionTreeNode *const root_node;
       const bool validates;
-      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned closed_users;
+      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC> closed_users;
     protected:
       FieldMask close_mask;
     protected:
@@ -1080,7 +1078,7 @@ namespace Legion {
       public:
         inline bool empty(void) const { return vector.empty(); }
       public:
-        LegionVector<InstanceRef>::aligned vector; 
+        LegionVector<InstanceRef> vector; 
       };
     public:
       InstanceSet(size_t init_size = 0);
@@ -1225,9 +1223,9 @@ namespace Legion {
       }; 
     public:
       typedef LegionMap<InstanceView*,
-               FieldMaskSet<IndexSpaceExpression> >::aligned InstanceFieldExprs;
+               FieldMaskSet<IndexSpaceExpression> > InstanceFieldExprs;
       typedef LegionMap<ApEvent,
-               FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
+               FieldMaskSet<IndexSpaceExpression> > EventFieldExprs;
       class CopyUpdate;
       class FillUpdate;
       class Update {
@@ -1243,7 +1241,7 @@ namespace Legion {
                const bool copy_across,
 #endif
                const std::map<InstanceView*,EventFieldExprs> &src_pre,
-               LegionMap<ApEvent,FieldMask>::aligned &preconditions) const = 0;
+               LegionMap<ApEvent,FieldMask> &preconditions) const = 0;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills) = 0;
@@ -1274,7 +1272,7 @@ namespace Legion {
                    const bool copy_across,
 #endif
                    const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+                   LegionMap<ApEvent,FieldMask> &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills);
@@ -1303,7 +1301,7 @@ namespace Legion {
                    const bool copy_across,
 #endif
                    const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+                   LegionMap<ApEvent,FieldMask> &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills);
@@ -1311,7 +1309,7 @@ namespace Legion {
         FillView *const source;
       };
       typedef LegionMap<ApEvent,
-               FieldMaskSet<Update> >::aligned EventFieldUpdates;
+               FieldMaskSet<Update> > EventFieldUpdates;
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned idx, RtEvent guard_event, bool track_events,
@@ -1365,7 +1363,7 @@ namespace Legion {
     protected:
       void record_view(LogicalView *new_view);
       RtEvent perform_updates(const LegionMap<InstanceView*,
-                            FieldMaskSet<Update> >::aligned &updates,
+                            FieldMaskSet<Update> > &updates,
                            const PhysicalTraceInfo &trace_info,
                            const ApEvent all_precondition, int redop_index,
                            const bool has_src_preconditions,
@@ -1408,9 +1406,9 @@ namespace Legion {
       const bool track_events;
     protected:
       FieldMask update_fields;
-      LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
+      LegionMap<InstanceView*,FieldMaskSet<Update> > sources; 
       std::vector</*vector over reduction epochs*/
-        LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned> reductions;
+        LegionMap<InstanceView*,FieldMaskSet<Update> > > reductions;
       // Figure out the reduction operator is for each epoch of a
       // given destination instance and field
       std::map<std::pair<InstanceView*,unsigned/*dst fidx*/>,
@@ -1439,7 +1437,7 @@ namespace Legion {
         InstanceView *result;
       };
       // Cached calls to the mapper for selecting sources
-      std::map<InstanceView*,LegionVector<SourceQuery>::aligned> mapper_queries;
+      std::map<InstanceView*,LegionVector<SourceQuery> > mapper_queries;
     protected:
       // Help for tracing 
       FieldMaskSet<FillView> *tracing_src_fills;
@@ -1591,7 +1589,7 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> stale_sets;
     protected:
       LegionMap<std::pair<AddressSpaceID,bool>,
-                FieldMaskSet<EquivalenceSet> >::aligned remote_sets;
+                FieldMaskSet<EquivalenceSet> > remote_sets;
       FieldMaskSet<InstanceView> *remote_instances;
       bool restricted;
     private:
@@ -2189,7 +2187,7 @@ namespace Legion {
             FieldMaskSet<LogicalView> *v,
             std::map<unsigned,std::vector<ReductionView*> > *r,
             FieldMaskSet<InstanceView> *t, 
-            LegionMap<VersionID,FieldMask>::aligned *u, RtUserEvent d)
+            LegionMap<VersionID,FieldMask> *u, RtUserEvent d)
           : LgTaskArgs<DeferMergeOrForwardArgs>(implicit_provenance),
             set(s), views(v), reductions(r), restricted(t), 
             versions(u), done(d), initial(init) { }
@@ -2198,7 +2196,7 @@ namespace Legion {
         FieldMaskSet<LogicalView> *const views;
         std::map<unsigned,std::vector<ReductionView*> > *const reductions;
         FieldMaskSet<InstanceView> *const restricted;
-        LegionMap<VersionID,FieldMask>::aligned *const versions;
+        LegionMap<VersionID,FieldMask> *const versions;
         const RtUserEvent done;
         const bool initial;
       };
@@ -2465,7 +2463,7 @@ namespace Legion {
           bool initial_refinement, const FieldMaskSet<LogicalView> &new_views,
           const std::map<unsigned,std::vector<ReductionView*> > &new_reductions,
           const FieldMaskSet<InstanceView> &new_restrictions,
-          const LegionMap<VersionID,FieldMask>::aligned &new_versions);
+          const LegionMap<VersionID,FieldMask> &new_versions);
       void pack_migration(Serializer &rez, RtEvent done_migration);
       void unpack_migration(Deserializer &derez, AddressSpaceID source,
                             RtUserEvent done_event);
@@ -2528,7 +2526,7 @@ namespace Legion {
       FieldMask                                           restricted_fields;
       // This is the current version number of the equivalence set
       // Each field should appear in exactly one mask
-      LegionMap<VersionID,FieldMask>::aligned             version_numbers;
+      LegionMap<VersionID,FieldMask>                      version_numbers;
     protected:
       // Track the current state of this equivalence state
       EqState eq_state;
@@ -2646,7 +2644,7 @@ namespace Legion {
       FieldMaskSet<EquivalenceSet> equivalence_sets;
       FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
       FieldMaskSet<VersionInfo> waiting_infos;
-      LegionMap<RtUserEvent,FieldMask>::aligned equivalence_sets_ready;
+      LegionMap<RtUserEvent,FieldMask> equivalence_sets_ready;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 
@@ -2682,7 +2680,7 @@ namespace Legion {
       const FieldMask* get_aliased_children(unsigned depth) const;
     protected:
       std::vector<LegionColor> path;
-      LegionMap<unsigned/*depth*/,FieldMask>::aligned interfering_children;
+      LegionMap<unsigned/*depth*/,FieldMask> interfering_children;
       unsigned min_depth;
       unsigned max_depth;
     };

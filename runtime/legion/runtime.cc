@@ -11621,10 +11621,10 @@ namespace Legion {
       // Initialize our profiling instance
       if (address_space < num_profiling_nodes)
         initialize_legion_prof(config);
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count = 0;
       // Instantiate all the kinds of allocations
-      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
+      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < UNTRACKED_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
 #ifdef LEGION_GC
@@ -12074,10 +12074,10 @@ namespace Legion {
           redop_table.erase(it);
         }
       }
-      for (LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
-            PROCESSOR_GROUP_ALLOC>::aligned::const_iterator git = 
+      for (LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>,
+            PROCESSOR_GROUP_ALLOC>::const_iterator git = 
             processor_groups.begin(); git != processor_groups.end(); git++)
-        for (LegionDeque<ProcessorGroupInfo>::aligned::const_iterator it = 
+        for (LegionDeque<ProcessorGroupInfo>::const_iterator it = 
               git->second.begin(); it != git->second.end(); it++)
           it->processor_group.destroy();
       for (std::map<Memory,MemoryManager*>::const_iterator it =
@@ -19624,7 +19624,7 @@ namespace Legion {
       log_run.debug("Running scheduler on processor " IDFMT "", proc.id);
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       unsigned long long trace_count = 
         __sync_fetch_and_add(&allocation_tracing_count,1); 
       if ((trace_count % LEGION_TRACE_ALLOCATION_FREQUENCY) == 0)
@@ -19709,11 +19709,11 @@ namespace Legion {
       ProcessorMask local_mask = find_processor_mask(procs);
       uint64_t hash = local_mask.get_hash_key();
       AutoLock g_lock(group_lock);
-      std::map<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned >::iterator 
+      std::map<uint64_t,LegionDeque<ProcessorGroupInfo> >::iterator 
         finder = processor_groups.find(hash);
       if (finder != processor_groups.end())
       {
-        for (LegionDeque<ProcessorGroupInfo>::aligned::const_iterator it = 
+        for (LegionDeque<ProcessorGroupInfo>::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
           if (local_mask == it->processor_mask)
@@ -21813,7 +21813,7 @@ namespace Legion {
       return result;
     }
 
-#ifdef TRACE_ALLOCATION 
+#ifdef LEGION_TRACE_ALLOCATION 
     //--------------------------------------------------------------------------
     void Runtime::trace_allocation(AllocationType type, size_t size, int elems)
     //--------------------------------------------------------------------------
@@ -23381,7 +23381,7 @@ namespace Legion {
       std::map<Processor,Runtime*> processor_mapping;
       if (config.separate_runtime_instances)
       {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
         REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES, 
                       "Memory tracing not supported with "
                       "separate runtime instances.")
@@ -25226,7 +25226,7 @@ namespace Legion {
       }
     }
 
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
     //--------------------------------------------------------------------------
     /*static*/ void LegionAllocation::trace_allocation(
                                        AllocationType a, size_t size, int elems)

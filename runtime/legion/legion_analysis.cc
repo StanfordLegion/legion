@@ -2639,9 +2639,8 @@ namespace Legion {
     {
       if (!curr_epoch_users.empty())
       {
-        for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::
-              const_iterator it = curr_epoch_users.begin(); it != 
-              curr_epoch_users.end(); it++)
+        for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::const_iterator it =
+              curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
         {
           it->op->remove_mapping_reference(it->gen); 
         }
@@ -2649,9 +2648,8 @@ namespace Legion {
       }
       if (!prev_epoch_users.empty())
       {
-        for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned::
-              const_iterator it = prev_epoch_users.begin(); it != 
-              prev_epoch_users.end(); it++)
+        for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::const_iterator it =
+              prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
         {
           it->op->remove_mapping_reference(it->gen); 
         }
@@ -2677,7 +2675,7 @@ namespace Legion {
     void LogicalState::clear_deleted_state(const FieldMask &deleted_mask)
     //--------------------------------------------------------------------------
     {
-      for (LegionList<FieldState>::aligned::iterator it = field_states.begin();
+      for (LegionList<FieldState>::iterator it = field_states.begin();
             it != field_states.end(); /*nothing*/)
       {
         if (it->filter(deleted_mask))
@@ -2689,7 +2687,7 @@ namespace Legion {
       if (!outstanding_reductions.empty())
       {
         std::vector<ReductionOpID> to_delete;
-        for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
+        for (LegionMap<ReductionOpID,FieldMask>::iterator it = 
               outstanding_reductions.begin(); it != 
               outstanding_reductions.end(); it++)
         {
@@ -3411,21 +3409,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LogicalCloser::perform_dependence_analysis(const LogicalUser &current,
                                                     const FieldMask &open_below,
-              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
-              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers)
+                             LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &cusers,
+                             LegionList<LogicalUser,PREV_LOGICAL_ALLOC> &pusers)
     //--------------------------------------------------------------------------
     {
       // We also need to do dependence analysis against all the other operations
       // that this operation recorded dependences on above in the tree so we
       // don't run too early.
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC> &above_users = 
                                               current.op->get_logical_records();
       const LogicalUser merge_close_user(close_op, 0/*idx*/, RegionUsage(
             LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/), close_mask);
       register_dependences(close_op, merge_close_user, current, 
           open_below, closed_users, above_users, cusers, pusers);
       // Now we can remove our references on our local users
-      for (LegionList<LogicalUser>::aligned::const_iterator it = 
+      for (LegionList<LogicalUser>::const_iterator it = 
             closed_users.begin(); it != closed_users.end(); it++)
       {
         it->op->remove_mapping_reference(it->gen);
@@ -3448,7 +3446,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::register_close_operations(
-               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users)
+                              LegionList<LogicalUser,CURR_LOGICAL_ALLOC> &users)
     //--------------------------------------------------------------------------
     {
       // No need to add mapping references, we did that in 
@@ -4008,19 +4006,19 @@ namespace Legion {
       }
       dst_pre.clear();
       // Delete all our copy updates
-      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-            const_iterator mit = sources.begin(); mit != sources.end(); mit++)
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
+            mit = sources.begin(); mit != sources.end(); mit++)
       {
         for (FieldMaskSet<Update>::const_iterator it = 
               mit->second.begin(); it != mit->second.end(); it++)
           delete it->first;
       }
       for (std::vector<LegionMap<InstanceView*,
-                FieldMaskSet<Update> >::aligned>::const_iterator rit = 
+                FieldMaskSet<Update> > >::const_iterator rit = 
             reductions.begin(); rit != reductions.end(); rit++)
       {
-        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-              const_iterator mit = rit->begin(); mit != rit->end(); mit++)
+        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
+              mit = rit->begin(); mit != rit->end(); mit++)
         {
           for (FieldMaskSet<Update>::const_iterator it = 
                 mit->second.begin(); it != mit->second.end(); it++)
@@ -4084,7 +4082,7 @@ namespace Legion {
                      const bool copy_across,
 #endif
                      const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                     LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
+                     LegionMap<ApEvent,FieldMask> &preconditions) const
     //--------------------------------------------------------------------------
     {
       std::map<InstanceView*,EventFieldExprs>::const_iterator finder = 
@@ -4116,8 +4114,8 @@ namespace Legion {
             assert(expr_overlap->get_volume() == expr->get_volume());
 #endif
           // Overlap in both so record it
-          LegionMap<ApEvent,FieldMask>::aligned::iterator
-            event_finder = preconditions.find(eit->first);
+          LegionMap<ApEvent,FieldMask>::iterator event_finder =
+            preconditions.find(eit->first);
           if (event_finder == preconditions.end())
             preconditions[eit->first] = overlap;
           else
@@ -4153,7 +4151,7 @@ namespace Legion {
                      const bool copy_across,
 #endif
                      const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                     LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
+                     LegionMap<ApEvent,FieldMask> &preconditions) const
     //--------------------------------------------------------------------------
     {
       // Do nothing, we have no source preconditions to worry about
@@ -4213,9 +4211,9 @@ namespace Legion {
       else
       {
         // We have multiple views, so let's sort them
-        LegionList<FieldSet<LogicalView*> >::aligned view_sets;
+        LegionList<FieldSet<LogicalView*> > view_sets;
         src_views.compute_field_sets(src_mask, view_sets);
-        for (LegionList<FieldSet<LogicalView*> >::aligned::const_iterator
+        for (LegionList<FieldSet<LogicalView*> >::const_iterator
               vit = view_sets.begin(); vit != view_sets.end(); vit++)
         {
           if (vit->elements.empty())
@@ -4294,11 +4292,11 @@ namespace Legion {
                 bool found = false;
                 const std::set<InstanceView*> instances_set(instances.begin(),
                                                             instances.end());
-                std::map<InstanceView*,LegionVector<SourceQuery>::aligned>::
+                std::map<InstanceView*,LegionVector<SourceQuery>>::
                   const_iterator finder = mapper_queries.find(dst_view);
                 if (finder != mapper_queries.end())
                 {
-                  for (LegionVector<SourceQuery>::aligned::const_iterator qit = 
+                  for (LegionVector<SourceQuery>::const_iterator qit = 
                         finder->second.begin(); qit != 
                         finder->second.end(); qit++)
                   {
@@ -4689,7 +4687,7 @@ namespace Legion {
       // it is going to be very common
       FieldMask first_mask;
       ReductionOpID first_redop = 0;
-      LegionMap<ReductionOpID,FieldMask>::aligned *other_masks = NULL;
+      LegionMap<ReductionOpID,FieldMask> *other_masks = NULL;
       int fidx = copy_mask.find_first_set();
       while (fidx >= 0)
       {
@@ -4704,7 +4702,7 @@ namespace Legion {
           if (first_redop != 0)
           {
             if (other_masks == NULL)
-              other_masks = new LegionMap<ReductionOpID,FieldMask>::aligned();
+              other_masks = new LegionMap<ReductionOpID,FieldMask>();
             (*other_masks)[op].set_bit(fidx);
           }
           else
@@ -4724,9 +4722,8 @@ namespace Legion {
         preconditions_ready.insert(first_ready);
       if (other_masks != NULL)
       {
-        for (LegionMap<ReductionOpID,FieldMask>::aligned::
-              const_iterator it = other_masks->begin(); 
-              it != other_masks->end(); it++)
+        for (LegionMap<ReductionOpID,FieldMask>::const_iterator it =
+              other_masks->begin(); it != other_masks->end(); it++)
         {
           RtEvent pre_ready = view->find_copy_preconditions(
               false/*reading*/, it->first, it->second, copy_expr, op_id, 
@@ -4740,7 +4737,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent CopyFillAggregator::perform_updates(
-         const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
+         const LegionMap<InstanceView*,FieldMaskSet<Update> > &updates,
          const PhysicalTraceInfo &trace_info, const ApEvent all_precondition,
          int redop_index, const bool has_src_preconditions, 
          const bool has_dst_preconditions, const bool needs_preconditions)
@@ -4751,8 +4748,8 @@ namespace Legion {
       {
         // First compute the access expressions for all the copies
         InstanceFieldExprs dst_exprs, src_exprs;
-        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-              const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
+              uit = updates.begin(); uit != updates.end(); uit++)
         {
           FieldMaskSet<IndexSpaceExpression> &dst_expr = dst_exprs[uit->first];
           for (FieldMaskSet<Update>::const_iterator it = 
@@ -4808,12 +4805,10 @@ namespace Legion {
             else
             {
               // Sort into field sets and merge expressions
-              LegionList<FieldSet<IndexSpaceExpression*> >::aligned 
-                sorted_exprs;
+              LegionList<FieldSet<IndexSpaceExpression*> > sorted_exprs;
               dit->second.compute_field_sets(FieldMask(), sorted_exprs);
-              for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                    const_iterator it = sorted_exprs.begin(); 
-                    it != sorted_exprs.end(); it++)
+              for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
+                    it = sorted_exprs.begin(); it != sorted_exprs.end(); it++)
               {
                 const FieldMask &copy_mask = it->set_mask; 
                 IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
@@ -4854,12 +4849,10 @@ namespace Legion {
             else
             {
               // Sort into field sets and merge expressions
-              LegionList<FieldSet<IndexSpaceExpression*> >::aligned 
-                sorted_exprs;
+              LegionList<FieldSet<IndexSpaceExpression*> > sorted_exprs;
               sit->second.compute_field_sets(FieldMask(), sorted_exprs);
-              for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                    const_iterator it = sorted_exprs.begin(); 
-                    it != sorted_exprs.end(); it++)
+              for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
+                    it = sorted_exprs.begin(); it != sorted_exprs.end(); it++)
               {
                 const FieldMask &copy_mask = it->set_mask; 
                 IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
@@ -4886,8 +4879,8 @@ namespace Legion {
       // Iterate over the destinations and compute updates that have the
       // same preconditions on different fields
       std::map<std::set<ApEvent>,ApEvent> merge_cache;
-      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-            const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
+            uit = updates.begin(); uit != updates.end(); uit++)
       {
         EventFieldUpdates update_groups;
         const EventFieldExprs &dst_preconditions = dst_pre[uit->first];
@@ -4899,7 +4892,7 @@ namespace Legion {
           // to make sure that all the fields are in same field space
           // which will be the source field space, so we need to convert
           // some field masks back to that space if necessary
-          LegionMap<ApEvent,FieldMask>::aligned preconditions;
+          LegionMap<ApEvent,FieldMask> preconditions;
           // Compute the destination preconditions first
           if (!dst_preconditions.empty())
           {
@@ -4930,7 +4923,7 @@ namespace Legion {
                           it->first->expr->get_volume());
 #endif
                 // Overlap on both so add it to the set
-                LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+                LegionMap<ApEvent,FieldMask>::iterator finder = 
                   preconditions.find(pit->first);
                 // Make sure to convert back to the source field space
                 // in the case of across copies if necessary
@@ -4969,8 +4962,8 @@ namespace Legion {
                                                        it->first->src_mask);
           else if (preconditions.size() == 1)
           {
-            LegionMap<ApEvent,FieldMask>::aligned::const_iterator
-              first = preconditions.begin();
+            LegionMap<ApEvent,FieldMask>::const_iterator first =
+              preconditions.begin();
             update_groups[first->first].insert(it->first, first->second);
             const FieldMask remainder = it->first->src_mask - first->second;
             if (!!remainder)
@@ -4979,10 +4972,10 @@ namespace Legion {
           else
           {
             // Group event preconditions by fields
-            LegionList<FieldSet<ApEvent> >::aligned grouped_events;
+            LegionList<FieldSet<ApEvent> > grouped_events;
             compute_field_sets<ApEvent>(it->first->src_mask,
                                         preconditions, grouped_events);
-            for (LegionList<FieldSet<ApEvent> >::aligned::const_iterator ait =
+            for (LegionList<FieldSet<ApEvent> >::const_iterator ait =
                   grouped_events.begin(); ait != grouped_events.end(); ait++) 
             {
               ApEvent key;
@@ -5040,9 +5033,9 @@ namespace Legion {
           else
           {
             // Group by fields
-            LegionList<FieldSet<Update*> >::aligned field_groups;
+            LegionList<FieldSet<Update*> > field_groups;
             group.compute_field_sets(FieldMask(), field_groups);
-            for (LegionList<FieldSet<Update*> >::aligned::const_iterator fit =
+            for (LegionList<FieldSet<Update*> >::const_iterator fit =
                   field_groups.begin(); fit != field_groups.end(); fit++)
             {
               std::vector<FillUpdate*> fills;
@@ -5064,14 +5057,14 @@ namespace Legion {
 #else
       // This is the unsafe aggregation routine that just looks at fields
       // and expressions and doesn't consider event preconditions
-      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-            const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
+            uit = updates.begin(); uit != updates.end(); uit++)
       {
         const EventFieldExprs &dst_preconditions = dst_pre[uit->first];
         // Group by fields first
-        LegionList<FieldSet<Update*> >::aligned field_groups;
+        LegionList<FieldSet<Update*> > field_groups;
         uit->second.compute_field_sets(FieldMask(), field_groups);
-        for (LegionList<FieldSet<Update*> >::aligned::const_iterator fit = 
+        for (LegionList<FieldSet<Update*> >::const_iterator fit = 
               field_groups.begin(); fit != field_groups.end(); fit++)
         {
           const FieldMask &dst_mask = fit->set_mask;
@@ -5172,7 +5165,7 @@ namespace Legion {
               copies.begin()->second[0]->across_helper;
             const FieldMask src_mask = (across_helper == NULL) ? dst_mask :
               across_helper->convert_dst_to_src(dst_mask);
-            LegionMap<ApEvent,FieldMask>::aligned src_preconds;
+            LegionMap<ApEvent,FieldMask> src_preconds;
             for (std::map<InstanceView*,std::vector<CopyUpdate*> >::
                   const_iterator cit = copies.begin(); cit != 
                   copies.end(); cit++)
@@ -5187,7 +5180,7 @@ namespace Legion {
                                                     src_pre, src_preconds);
               }
             }
-            for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
+            for (LegionMap<ApEvent,FieldMask>::const_iterator it =
                   src_preconds.begin(); it != src_preconds.end(); it++)
             {
               if (it->second * dst_mask)
@@ -5744,7 +5737,7 @@ namespace Legion {
 #endif
       FieldMaskSet<IndexSpaceExpression> remote_exprs; 
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               rit->second.begin(); it != rit->second.end(); it++)
@@ -5753,11 +5746,10 @@ namespace Legion {
       std::vector<IndexSpaceExpression*> to_remove;
       if (remote_exprs.size() > 1)
       {
-        LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
+        LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
         remote_exprs.compute_field_sets(FieldMask(), field_sets);
-        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-              const_iterator fit = field_sets.begin(); 
-              fit != field_sets.end(); fit++)
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
+              fit = field_sets.begin(); fit != field_sets.end(); fit++)
         {
           IndexSpaceExpression *remote_expr = (fit->elements.size() == 1) ?
             *(fit->elements.begin()) : 
@@ -6217,7 +6209,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> ready_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -6312,7 +6304,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -6462,7 +6454,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> ready_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -6563,7 +6555,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -6774,7 +6766,7 @@ namespace Legion {
       }
       std::set<RtEvent> remote_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -6929,7 +6921,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       FieldMask user_mask;
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
@@ -7131,7 +7123,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> remote_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -7225,7 +7217,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -7375,7 +7367,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
       std::set<RtEvent> remote_events;
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -7489,7 +7481,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -7711,7 +7703,7 @@ namespace Legion {
       assert(src_indexes.size() == dst_indexes.size());
 #endif
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -7825,11 +7817,10 @@ namespace Legion {
         // issuing copies for that particular expression
         if (local_exprs.size() > 1)
         {
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
+          LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
           local_exprs.compute_field_sets(FieldMask(), field_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = field_sets.begin(); 
-                it != field_sets.end(); it++)
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
+                it = field_sets.begin(); it != field_sets.end(); it++)
           {
             IndexSpaceExpression *expr = (it->elements.size() == 1) ? 
               *(it->elements.begin()) :
@@ -7934,7 +7925,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       FieldMask src_mask;
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
@@ -8209,7 +8200,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
       WrapperReferenceMutator mutator(applied_events);
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -8337,7 +8328,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -8512,7 +8503,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
       WrapperReferenceMutator mutator(applied_events);
       for (LegionMap<std::pair<AddressSpaceID,bool>,
-                     FieldMaskSet<EquivalenceSet> >::aligned::const_iterator 
+                     FieldMaskSet<EquivalenceSet> >::const_iterator 
             rit = remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
@@ -8570,7 +8561,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
-      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      LegionVector<FieldMask> eq_masks(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -9480,11 +9471,10 @@ namespace Legion {
             if (intersections.size() > 1)
             {
               // Sort these into field mask sets
-              LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
+              LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
               intersections.compute_field_sets(FieldMask(), field_sets);
-              for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                    iterator it = field_sets.begin(); 
-                    it != field_sets.end(); it++)
+              for (LegionList<FieldSet<IndexSpaceExpression*> >::iterator
+                    it = field_sets.begin(); it != field_sets.end(); it++)
               {
                 IndexSpaceExpression *diff = forest->subtract_index_spaces(expr,
                     forest->union_index_spaces(it->elements));
@@ -9872,7 +9862,7 @@ namespace Legion {
       rez.serialize<size_t>(version_numbers.size());
       if (!version_numbers.empty())
       {
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<VersionID,FieldMask>::const_iterator it = 
               version_numbers.begin(); it != version_numbers.end(); it++)
         {
           const FieldMask overlap = pack_mask & it->second;
@@ -10011,7 +10001,7 @@ namespace Legion {
       }
       size_t num_versions;
       derez.deserialize(num_versions);
-      LegionMap<VersionID,FieldMask>::aligned new_versions;
+      LegionMap<VersionID,FieldMask> new_versions;
       for (unsigned idx = 0; idx < num_versions; idx++)
       {
         VersionID vid;
@@ -10053,8 +10043,8 @@ namespace Legion {
           FieldMaskSet<InstanceView> *restrict_copy = 
             new FieldMaskSet<InstanceView>();
           restrict_copy->swap(new_restrictions);
-          LegionMap<VersionID,FieldMask>::aligned *version_copy = 
-            new LegionMap<VersionID,FieldMask>::aligned();
+          LegionMap<VersionID,FieldMask> *version_copy = 
+            new LegionMap<VersionID,FieldMask>();
           version_copy->swap(new_versions);
           DeferMergeOrForwardArgs args(this, initial_refinement, view_copy, 
               reduc_copy, restrict_copy, version_copy, done_event);
@@ -10074,7 +10064,7 @@ namespace Legion {
           bool initial_refinement, const FieldMaskSet<LogicalView> &new_views,
           const std::map<unsigned,std::vector<ReductionView*> > &new_reductions,
           const FieldMaskSet<InstanceView> &new_restrictions,
-          const LegionMap<VersionID,FieldMask>::aligned &new_versions)
+          const LegionMap<VersionID,FieldMask> &new_versions)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
@@ -10109,10 +10099,10 @@ namespace Legion {
           if (restricted_instances.insert(it->first, it->second))
             it->first->add_nested_valid_ref(did, &mutator);
         }
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<VersionID,FieldMask>::const_iterator it =
               new_versions.begin(); it != new_versions.end(); it++)
         {
-          LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+          LegionMap<VersionID,FieldMask>::iterator finder = 
             version_numbers.find(it->first);
           if (finder == version_numbers.end())
             version_numbers.insert(*it);
@@ -10160,7 +10150,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
         rez.serialize(new_versions.size());
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<VersionID,FieldMask>::const_iterator it =
               new_versions.begin(); it != new_versions.end(); it++)
         {
           rez.serialize(it->first);
@@ -10243,7 +10233,7 @@ namespace Legion {
       rez.serialize<size_t>(version_numbers.size());
       if (!version_numbers.empty())
       {
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<VersionID,FieldMask>::const_iterator it = 
               version_numbers.begin(); it != version_numbers.end(); it++)
         {
           rez.serialize(it->first);
@@ -11288,7 +11278,7 @@ namespace Legion {
         // In order to avoid deadlock we have to make different copy fill
         // aggregators for each of the different fields of prior updates
         FieldMask remainder_mask = user_mask;
-        LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::aligned to_add;
+        LegionVector<std::pair<CopyFillAggregator*,FieldMask> > to_add;
         for (FieldMaskSet<CopyFillGuard>::iterator it = 
               update_guards.begin(); it != update_guards.end(); it++)
         {
@@ -11357,8 +11347,7 @@ namespace Legion {
         if (!to_add.empty())
         {
           for (LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::
-                aligned::const_iterator it = to_add.begin(); 
-                it != to_add.end(); it++)
+                const_iterator it = to_add.begin(); it != to_add.end(); it++)
           {
 #ifdef DEBUG_LEGION
             assert(it->second * refining_fields);
@@ -12996,13 +12985,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<VersionID> to_remove; 
-      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
+      for (LegionMap<VersionID,FieldMask>::iterator it = 
             version_numbers.begin(); it != version_numbers.end(); it++)
       {
         const FieldMask overlap = it->second & advance_mask;
         if (!overlap)
           continue;
-        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+        LegionMap<VersionID,FieldMask>::iterator finder = 
           version_numbers.find(it->first + 1);
         if (finder == version_numbers.end())
           version_numbers[it->first + 1] = overlap;
@@ -13143,9 +13132,9 @@ namespace Legion {
           if (complete_subsets.size() > LEGION_MAX_BVH_FANOUT)
           {
             // Sort these info field mask sets
-            LegionList<FieldSet<EquivalenceSet*> >::aligned field_sets;
+            LegionList<FieldSet<EquivalenceSet*> > field_sets;
             complete_subsets.compute_field_sets(complete_mask, field_sets);
-            for (LegionList<FieldSet<EquivalenceSet*> >::aligned::const_iterator
+            for (LegionList<FieldSet<EquivalenceSet*> >::const_iterator
                   fit = field_sets.begin(); fit != field_sets.end(); fit++)
             {
               if (fit->elements.size() <= LEGION_MAX_BVH_FANOUT)
@@ -13326,14 +13315,13 @@ namespace Legion {
             }
             restricted_fields -= complete_mask;
           }
-          for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
+          for (LegionMap<VersionID,FieldMask>::iterator it =
                version_numbers.begin(); it != version_numbers.end();/*nothing*/)
           {
             it->second -= complete_mask;
             if (!it->second)
             {
-              LegionMap<VersionID,FieldMask>::aligned::iterator
-                to_delete = it++;
+              LegionMap<VersionID,FieldMask>::iterator to_delete = it++;
               version_numbers.erase(to_delete);
             }
             else
@@ -13839,7 +13827,7 @@ namespace Legion {
       if (num_subsets == 0)
         return;
       std::vector<EquivalenceSet*> new_subsets(num_subsets); 
-      LegionVector<FieldMask>::aligned new_masks(num_subsets);
+      LegionVector<FieldMask> new_masks(num_subsets);
       std::set<RtEvent> wait_for;
       for (unsigned idx = 0; idx < num_subsets; idx++)
       {
@@ -14426,7 +14414,7 @@ namespace Legion {
         // be a fairly rare thing to do
         if (!equivalence_sets_ready.empty())
         {
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+          for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
                 equivalence_sets_ready.begin(); it != 
                 equivalence_sets_ready.end(); it++)
           {
@@ -14470,7 +14458,7 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
         if (!equivalence_sets_ready.empty())
         {
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+          for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
                 equivalence_sets_ready.begin(); it != 
                 equivalence_sets_ready.end(); it++)
           {
@@ -14568,7 +14556,7 @@ namespace Legion {
       std::set<RtEvent> done_preconditions;
       {
         AutoLock m_lock(manager_lock);
-        LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder =
+        LegionMap<RtUserEvent,FieldMask>::iterator finder =
           equivalence_sets_ready.find(done_event);
 #ifdef DEBUG_LEGION
         assert(finder != equivalence_sets_ready.end());
@@ -14580,7 +14568,7 @@ namespace Legion {
         if (equivalence_sets_ready.size() > 1)
         {
           FieldMask aliased;
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+          for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
                 equivalence_sets_ready.begin(); it != 
                 equivalence_sets_ready.end(); it++)
           {
@@ -14843,7 +14831,7 @@ namespace Legion {
       assert(min_depth <= depth);
       assert(depth <= max_depth);
 #endif
-      LegionMap<unsigned,FieldMask>::aligned::iterator finder = 
+      LegionMap<unsigned,FieldMask>::iterator finder = 
         interfering_children.find(depth);
       if (finder == interfering_children.end())
         interfering_children[depth] = mask;
@@ -14887,7 +14875,7 @@ namespace Legion {
     {
       if (interfering_children.empty())
         return NULL;
-      LegionMap<unsigned,FieldMask>::aligned::const_iterator finder = 
+      LegionMap<unsigned,FieldMask>::const_iterator finder = 
         interfering_children.find(depth);
       if (finder == interfering_children.end())
         return NULL;

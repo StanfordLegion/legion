@@ -107,9 +107,8 @@ namespace Legion {
     class InstanceView : public LogicalView {
     public:
       typedef LegionMap<ApEvent,
-                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs; 
-      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
-                                                              EventFieldUsers;
+                FieldMaskSet<IndexSpaceExpression> > EventFieldExprs; 
+      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       struct DeferFindCopyPreconditionArgs : 
@@ -299,9 +298,8 @@ namespace Legion {
                      public CollectableView, public Collectable {
     public:
       typedef LegionMap<ApEvent,
-                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs; 
-      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
-                                                              EventFieldUsers;
+                FieldMaskSet<IndexSpaceExpression> > EventFieldExprs; 
+      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(RegionTreeForest *ctx, PhysicalManager *manager,
@@ -338,8 +336,7 @@ namespace Legion {
       void find_tightest_subviews(IndexSpaceExpression *expr,
                                   FieldMask &expr_mask,
                                   LegionMap<std::pair<size_t,
-                                    ExprView*>,FieldMask>::aligned 
-                                    &bounding_views);
+                                    ExprView*>,FieldMask> &bounding_views);
       void add_partial_user(const RegionUsage &usage,
                             UniqueID op_id, unsigned index,
                             FieldMask user_mask,
@@ -542,7 +539,7 @@ namespace Legion {
       static const unsigned user_cache_timeout = 1024;
     public:
       typedef LegionMap<VersionID,FieldMaskSet<IndexSpaceExpression>,
-                      PHYSICAL_VERSION_ALLOC>::track_aligned VersionFieldExprs;  
+                        PHYSICAL_VERSION_ALLOC> VersionFieldExprs;  
     public:
       struct DeferMaterializedViewArgs : 
         public LgTaskArgs<DeferMaterializedViewArgs> {
@@ -701,8 +698,8 @@ namespace Legion {
       // On the owner node we also need to keep track of our set of 
       // which nodes have replicated copies for which field
       union {
-        LegionMap<AddressSpaceID,FieldMask>::aligned *replicated_copies;
-        LegionMap<RtUserEvent,FieldMask>::aligned *replicated_requests;
+        LegionMap<AddressSpaceID,FieldMask> *replicated_copies;
+        LegionMap<RtUserEvent,FieldMask> *replicated_requests;
       } repl_ptr;
       // For remote copies we track which fields have seen requests
       // in the past epoch of user adds so that we can reduce our 
@@ -1058,8 +1055,8 @@ namespace Legion {
       const PredEvent false_guard;
       InnerContext *const owner_context;
     protected:
-      LegionMap<LogicalView*,FieldMask>::aligned true_views;
-      LegionMap<LogicalView*,FieldMask>::aligned false_views;
+      LegionMap<LogicalView*,FieldMask> true_views;
+      LegionMap<LogicalView*,FieldMask> false_views;
     };
 
     //--------------------------------------------------------------------------

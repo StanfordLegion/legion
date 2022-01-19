@@ -1854,8 +1854,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline void compute_field_sets(FieldMask universe_mask,
-                        const typename LegionMap<T,FieldMask>::aligned &inputs,
-                        typename LegionList<FieldSet<T> >::aligned &output_sets)
+                                   const LegionMap<T,FieldMask> &inputs,
+                                   LegionList<FieldSet<T> > &output_sets)
     //--------------------------------------------------------------------------
     {
       // Special cases for empty and size 1 sets
@@ -1867,7 +1867,7 @@ namespace Legion {
       }
       else if (inputs.size() == 1)
       {
-        typename LegionMap<T,FieldMask>::aligned::const_iterator first = 
+        typename LegionMap<T,FieldMask>::const_iterator first = 
           inputs.begin();
         output_sets.push_back(FieldSet<T>(first->second));
         FieldSet<T> &last = output_sets.back();
@@ -1880,7 +1880,7 @@ namespace Legion {
         }
         return;
       }
-      for (typename LegionMap<T,FieldMask>::aligned::const_iterator pit = 
+      for (typename LegionMap<T,FieldMask>::const_iterator pit = 
             inputs.begin(); pit != inputs.end(); pit++)
       {
         bool inserted = false;
@@ -1890,7 +1890,7 @@ namespace Legion {
           universe_mask -= pit->second;
         FieldMask remaining = pit->second;
         // Insert this event into the precondition sets 
-        for (typename LegionList<FieldSet<T> >::aligned::iterator it = 
+        for (typename LegionList<FieldSet<T> >::iterator it = 
               output_sets.begin(); it != output_sets.end(); it++)
         {
           // Easy case, check for equality
@@ -1972,7 +1972,7 @@ namespace Legion {
             std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         iterator(FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask>::aligned::iterator _it,
+            typename LegionMap<T*,FieldMask>::iterator _it,
             bool end = false)
           : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
@@ -2057,7 +2057,7 @@ namespace Legion {
             result->second.clear();
           }
       public:
-        inline void erase(typename LegionMap<T*,FieldMask>::aligned &target)
+        inline void erase(LegionMap<T*,FieldMask> &target)
         {
 #ifdef DEBUG_LEGION
           assert(!single);
@@ -2072,7 +2072,7 @@ namespace Legion {
         friend class const_iterator;
         FieldMaskSet *set;
         std::pair<T*const,FieldMask> *result;
-        typename LegionMap<T*,FieldMask>::aligned::iterator it;
+        typename LegionMap<T*,FieldMask>::iterator it;
         bool single;
       };
     public:
@@ -2083,7 +2083,7 @@ namespace Legion {
             const std::pair<T*const,FieldMask> *_result)
           : set(_set), result(_result), single(true) { }
         const_iterator(const FieldMaskSet *_set,
-            typename LegionMap<T*,FieldMask>::aligned::const_iterator _it,
+            typename LegionMap<T*,FieldMask>::const_iterator _it,
             bool end = false)
           : set(_set), result(end ? NULL : &(*_it)), it(_it), single(false) { }
       public:
@@ -2159,7 +2159,7 @@ namespace Legion {
       private:
         const FieldMaskSet *set;
         const std::pair<T*const,FieldMask> *result;
-        typename LegionMap<T*,FieldMask>::aligned::const_iterator it;
+        typename LegionMap<T*,FieldMask>::const_iterator it;
         bool single;
       };
     public:
@@ -2200,7 +2200,7 @@ namespace Legion {
       inline const_iterator end(void) const;
     public:
       inline void compute_field_sets(FieldMask universe_mask,
-          typename LegionList<FieldSet<T*> >::aligned &output_sets) const;
+                    LegionList<FieldSet<T*> > &output_sets) const;
     protected:
       // Fun with C, keep these two fields first and in this order
       // so that a FieldMaskSet of size 1 looks the same as an entry
@@ -2208,7 +2208,7 @@ namespace Legion {
       // provides goodness for the iterator
       union {
         T *single_entry;
-        typename LegionMap<T*,FieldMask>::aligned *multi_entries;
+        LegionMap<T*,FieldMask> *multi_entries;
       } entries;
       // This can be an overapproximation if we have multiple entries
       FieldMask valid_fields;
@@ -2224,7 +2224,7 @@ namespace Legion {
       if (single)
         entries.single_entry = rhs.entries.single_entry;
       else
-        entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
+        entries.multi_entries = new LegionMap<T*,FieldMask>(
             rhs.entries.multi_entries->begin(),
             rhs.entries.multi_entries->end());
     }
@@ -2241,7 +2241,7 @@ namespace Legion {
         // Different data structures
         if (single)
         {
-          entries.multi_entries = new typename LegionMap<T*,FieldMask>::aligned(
+          entries.multi_entries = new LegionMap<T*,FieldMask>(
               rhs.entries.multi_entries->begin(),
               rhs.entries.multi_entries->end());
         }
@@ -2279,7 +2279,7 @@ namespace Legion {
       if (single)
         return valid_fields;
       valid_fields.clear();
-      for (typename LegionMap<T*,FieldMask>::aligned::const_iterator it = 
+      for (typename LegionMap<T*,FieldMask>::const_iterator it = 
             entries.multi_entries->begin(); it !=
             entries.multi_entries->end(); it++)
         valid_fields |= it->second;
@@ -2324,7 +2324,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask>::aligned::const_iterator finder =
+        typename LegionMap<T*,FieldMask>::const_iterator finder =
           entries.multi_entries->find(entry);
 #ifdef DEBUG_LEGION
         assert(finder != entries.multi_entries->end());
@@ -2354,8 +2354,7 @@ namespace Legion {
         else
         {
           // Go to multi
-          typename LegionMap<T*,FieldMask>::aligned *multi = 
-            new typename LegionMap<T*,FieldMask>::aligned();
+          LegionMap<T*,FieldMask> *multi = new LegionMap<T*,FieldMask>();
           (*multi)[entries.single_entry] = valid_fields;
           (*multi)[entry] = mask;
           entries.multi_entries = multi;
@@ -2368,7 +2367,7 @@ namespace Legion {
  #ifdef DEBUG_LEGION
         assert(entries.multi_entries != NULL);
 #endif   
-        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+        typename LegionMap<T*,FieldMask>::iterator finder = 
           entries.multi_entries->find(entry);
         if (finder == entries.multi_entries->end())
           (*entries.multi_entries)[entry] = mask;
@@ -2410,7 +2409,7 @@ namespace Legion {
         {
           // Manually remove entries
           typename std::vector<T*> to_delete;
-          for (typename LegionMap<T*,FieldMask>::aligned::iterator it = 
+          for (typename LegionMap<T*,FieldMask>::iterator it = 
                 entries.multi_entries->begin(); it !=
                 entries.multi_entries->end(); it++)
           {
@@ -2431,7 +2430,7 @@ namespace Legion {
             }
             else if (entries.multi_entries->size() == 1)
             {
-              typename LegionMap<T*,FieldMask>::aligned::iterator last = 
+              typename LegionMap<T*,FieldMask>::iterator last = 
                 entries.multi_entries->begin();     
               T *temp = last->first; 
               valid_fields = last->second;
@@ -2459,7 +2458,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+        typename LegionMap<T*,FieldMask>::iterator finder = 
           entries.multi_entries->find(to_erase);
 #ifdef DEBUG_LEGION
         assert(finder != entries.multi_entries->end());
@@ -2570,7 +2569,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+        typename LegionMap<T*,FieldMask>::iterator finder = 
           entries.multi_entries->find(e);
         if (finder == entries.multi_entries->end())
           return end();
@@ -2600,7 +2599,7 @@ namespace Legion {
         if (entries.multi_entries->size() == 1)
         {
           // go back to single
-          typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+          typename LegionMap<T*,FieldMask>::iterator finder = 
             entries.multi_entries->begin();
           valid_fields = finder->second;
           T *first = finder->first;
@@ -2662,7 +2661,7 @@ namespace Legion {
       }
       else
       {
-        typename LegionMap<T*,FieldMask>::aligned::const_iterator finder = 
+        typename LegionMap<T*,FieldMask>::const_iterator finder = 
           entries.multi_entries->find(e);
         if (finder == entries.multi_entries->end())
           return end();
@@ -2685,7 +2684,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline void FieldMaskSet<T>::compute_field_sets(FieldMask universe_mask,
-                 typename LegionList<FieldSet<T*> >::aligned &output_sets) const
+                                   LegionList<FieldSet<T*> > &output_sets) const
     //--------------------------------------------------------------------------
     {
       // Handle special cases for single entry and single fields
@@ -2746,7 +2745,7 @@ namespace Legion {
           universe_mask -= pit->second;
         FieldMask remaining = pit->second;
         // Insert this event into the precondition sets 
-        for (typename LegionList<FieldSet<T*> >::aligned::iterator it = 
+        for (typename LegionList<FieldSet<T*> >::iterator it = 
               output_sets.begin(); it != output_sets.end(); it++)
         {
           // Easy case, check for equality

@@ -1253,7 +1253,7 @@ namespace Legion {
             // We need to deduplicate finding or making the new ExprView
             // First check to see if we have it already in one sub-tree
             // If not, we'll pick the one with the smallest bounding volume
-            LegionMap<std::pair<size_t/*volume*/,ExprView*>,FieldMask>::aligned
+            LegionMap<std::pair<size_t/*volume*/,ExprView*>,FieldMask>
               sorted_subviews;
             for (FieldMaskSet<ExprView>::const_iterator it = 
                   dominating_subviews.begin(); it != 
@@ -1264,7 +1264,7 @@ namespace Legion {
               it->first->find_tightest_subviews(subview->view_expr, overlap,
                                                 sorted_subviews);
             }
-            for (LegionMap<std::pair<size_t,ExprView*>,FieldMask>::aligned::
+            for (LegionMap<std::pair<size_t,ExprView*>,FieldMask>::
                   const_iterator it = sorted_subviews.begin(); it !=
                   sorted_subviews.end(); it++)
             {
@@ -1313,7 +1313,7 @@ namespace Legion {
     void ExprView::find_tightest_subviews(IndexSpaceExpression *expr,
                                           FieldMask &expr_mask,
                                           LegionMap<std::pair<size_t,ExprView*>,
-                                            FieldMask>::aligned &bounding_views)
+                                                     FieldMask> &bounding_views)
     //--------------------------------------------------------------------------
     {
       if (!subviews.empty() && !(expr_mask * subviews.get_valid_mask()))
@@ -1964,7 +1964,7 @@ namespace Legion {
             delete it->first;
         current_epoch_users.erase(current_finder);
       }
-      LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
+      LegionMap<ApEvent,EventUsers>::iterator previous_finder = 
         previous_epoch_users.find(term_event);
       if (previous_finder != previous_epoch_users.end())
       {
@@ -2305,7 +2305,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
+      for (LegionMap<ApEvent,EventUsers>::const_iterator pit = 
             previous_epoch_users.begin(); pit != 
             previous_epoch_users.end(); pit++)
       {
@@ -2719,7 +2719,7 @@ namespace Legion {
           assert(!repl_ptr.replicated_requests->empty());
 #endif
           FieldMask buffer_mask;
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+          for (LegionMap<RtUserEvent,FieldMask>::const_iterator
                 it = repl_ptr.replicated_requests->begin();
                 it != repl_ptr.replicated_requests->end(); it++)
           {
@@ -2765,7 +2765,7 @@ namespace Legion {
           const FieldMask repl_mask = replicated_fields & user_mask;
           if (!!repl_mask)
           {
-            for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+            for (LegionMap<AddressSpaceID,FieldMask>::const_iterator
                   it = repl_ptr.replicated_copies->begin(); 
                   it != repl_ptr.replicated_copies->end(); it++)
             {
@@ -2931,7 +2931,7 @@ namespace Legion {
           request_mask = copy_mask - replicated_fields;
           if (!!request_mask && (repl_ptr.replicated_requests != NULL))
           {
-            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtUserEvent,FieldMask>::const_iterator it = 
                   repl_ptr.replicated_requests->begin(); it !=
                   repl_ptr.replicated_requests->end(); it++)
             {
@@ -2953,8 +2953,8 @@ namespace Legion {
             }
             runtime->send_view_replication_request(logical_owner, rez2);
             if (repl_ptr.replicated_requests == NULL)
-              repl_ptr.replicated_requests = 
-                new LegionMap<RtUserEvent,FieldMask>::aligned();
+              repl_ptr.replicated_requests =
+                new LegionMap<RtUserEvent,FieldMask>();
             (*repl_ptr.replicated_requests)[request_event] = request_mask;
             // Make sure this is done before things are considered "applied"
             // in order to prevent dangling requests
@@ -3108,7 +3108,7 @@ namespace Legion {
           assert(!repl_ptr.replicated_requests->empty());
 #endif
           FieldMask buffer_mask;
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+          for (LegionMap<RtUserEvent,FieldMask>::const_iterator
                 it = repl_ptr.replicated_requests->begin();
                 it != repl_ptr.replicated_requests->end(); it++)
           {
@@ -3152,7 +3152,7 @@ namespace Legion {
           const FieldMask repl_mask = replicated_fields & copy_mask;
           if (!!repl_mask)
           {
-            for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+            for (LegionMap<AddressSpaceID,FieldMask>::const_iterator
                   it = repl_ptr.replicated_copies->begin(); 
                   it != repl_ptr.replicated_copies->end(); it++)
             {
@@ -3202,8 +3202,8 @@ namespace Legion {
       AutoLock r_lock(replicated_lock); 
       if (repl_ptr.replicated_copies == NULL)
         repl_ptr.replicated_copies = 
-          new LegionMap<AddressSpaceID,FieldMask>::aligned();
-      LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+          new LegionMap<AddressSpaceID,FieldMask>();
+      LegionMap<AddressSpaceID,FieldMask>::iterator finder = 
         repl_ptr.replicated_copies->find(source);
       if (finder != repl_ptr.replicated_copies->end())
       {
@@ -3265,7 +3265,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(repl_ptr.replicated_requests != NULL);
 #endif
-      LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
+      LegionMap<RtUserEvent,FieldMask>::iterator finder = 
         repl_ptr.replicated_requests->find(done);
 #ifdef DEBUG_LEGION
       assert(finder != repl_ptr.replicated_requests->end());
@@ -3311,7 +3311,7 @@ namespace Legion {
       assert(is_logical_owner());
       assert(repl_ptr.replicated_copies != NULL);
 #endif
-      LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+      LegionMap<AddressSpaceID,FieldMask>::iterator finder = 
         repl_ptr.replicated_copies->find(source);
 #ifdef DEBUG_LEGION
       assert(finder != repl_ptr.replicated_copies->end());
@@ -3335,7 +3335,7 @@ namespace Legion {
       if (repl_ptr.replicated_copies->size() > 1)
       {
         replicated_fields.clear();
-        for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<AddressSpaceID,FieldMask>::const_iterator it =
               repl_ptr.replicated_copies->begin(); it !=
               repl_ptr.replicated_copies->end(); it++)
           replicated_fields |= finder->second;
@@ -3427,7 +3427,7 @@ namespace Legion {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // See if we can find the entry in the cache and it's valid 
         // for all of our fields
-        LegionMap<IndexSpaceExprID,ExprView*>::aligned::const_iterator
+        LegionMap<IndexSpaceExprID,ExprView*>::const_iterator
           finder = expr_cache.find(user_expr->expr_id);
         if (finder != expr_cache.end())
         {
@@ -3549,7 +3549,7 @@ namespace Legion {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // See if we can find the entry in the cache and it's valid 
         // for all of our fields
-        LegionMap<IndexSpaceExprID,ExprView*>::aligned::const_iterator
+        LegionMap<IndexSpaceExprID,ExprView*>::const_iterator
           finder = expr_cache.find(user_expr->expr_id);
         if (finder != expr_cache.end())
         {
@@ -3735,7 +3735,7 @@ namespace Legion {
       // If we have any outstanding requests though keep those
       if (repl_ptr.replicated_requests != NULL)
       {
-        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<RtUserEvent,FieldMask>::const_iterator it = 
               repl_ptr.replicated_requests->begin(); it !=
               repl_ptr.replicated_requests->end(); it++)
         {
@@ -4086,14 +4086,14 @@ namespace Legion {
     PhiView::~PhiView(void)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             true_views.begin(); it != true_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
           delete it->first;
       }
       true_views.clear();
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
@@ -4131,10 +4131,10 @@ namespace Legion {
     void PhiView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
     }
@@ -4143,10 +4143,10 @@ namespace Legion {
     void PhiView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
     }
@@ -4155,7 +4155,7 @@ namespace Legion {
     void PhiView::record_true_view(LogicalView *view, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+      LegionMap<LogicalView*,FieldMask>::iterator finder = 
         true_views.find(view);
       if (finder == true_views.end())
       {
@@ -4170,7 +4170,7 @@ namespace Legion {
     void PhiView::record_false_view(LogicalView *view, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+      LegionMap<LogicalView*,FieldMask>::iterator finder = 
         false_views.find(view);
       if (finder == false_views.end())
       {
@@ -4186,14 +4186,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(true_views.size());
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             true_views.begin(); it != true_views.end(); it++)
       {
         rez.serialize(it->first->did);
         rez.serialize(it->second);
       }
       rez.serialize<size_t>(false_views.size());
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
       {
         rez.serialize(it->first->did);

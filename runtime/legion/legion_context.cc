@@ -5961,9 +5961,8 @@ namespace Legion {
       }
       // Also unmap any of our inline mapped physical regions
       AutoLock i_lock(inline_lock);
-      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
-            tracked::const_iterator it = inline_regions.begin();
-            it != inline_regions.end(); it++)
+      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::const_iterator
+            it = inline_regions.begin(); it != inline_regions.end(); it++)
       {
         if (it->is_mapped())
           it->impl->unmap_region();
@@ -7471,7 +7470,7 @@ namespace Legion {
           needs_trigger = true;
           children_complete_invoked = true;
           for (LegionMap<Operation*,GenerationID,
-                COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
             child_completion_events.insert(it->first->get_completion_event());
         }
@@ -9762,7 +9761,7 @@ namespace Legion {
             need_complete = true;
             children_complete_invoked = true;
             for (LegionMap<Operation*,GenerationID,
-                  COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                  COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)
               child_completion_events.insert(it->first->get_completion_event());
           }

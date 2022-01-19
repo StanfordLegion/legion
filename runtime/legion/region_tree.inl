@@ -294,21 +294,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceExpression::construct_indirections_internal(
-                                     const std::vector<unsigned> &field_indexes,
-                                     const FieldID indirect_field,
-                                     const TypeTag indirect_type,
-                                     const bool is_range, 
-                                     const PhysicalInstance indirect_instance,
-                                     const LegionVector<
-                                            IndirectRecord>::aligned &records,
-                                     std::vector<CopyIndirection*> &indirects,
-                                     std::vector<unsigned> &indirect_indexes,
+                                    const std::vector<unsigned> &field_indexes,
+                                    const FieldID indirect_field,
+                                    const TypeTag indirect_type,
+                                    const bool is_range, 
+                                    const PhysicalInstance indirect_instance,
+                                    const LegionVector<IndirectRecord> &records,
+                                    std::vector<CopyIndirection*> &indirects,
+                                    std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
-                                     unsigned unique_indirections_identifier,
-                                     const ApEvent indirect_inst_event,
+                                    unsigned unique_indirections_identifier,
+                                    const ApEvent indirect_inst_event,
 #endif
-                                     const bool possible_out_of_range,
-                                     const bool possible_aliasing)
+                                    const bool possible_out_of_range,
+                                    const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       // Sort instances into field sets and
@@ -322,13 +321,13 @@ namespace Legion {
               field_indexes.size());
 #endif
       // construct indirections for each field set
-      LegionList<FieldSet<IndirectRecord*> >::aligned field_sets;
+      LegionList<FieldSet<IndirectRecord*> > field_sets;
       record_sets.compute_field_sets(FieldMask(), field_sets);
       // Note that we might be appending to some existing indirections
       const unsigned offset = indirects.size();
       indirects.resize(offset+field_sets.size());
       unsigned index = 0;
-      for (LegionList<FieldSet<IndirectRecord*> >::aligned::const_iterator it =
+      for (LegionList<FieldSet<IndirectRecord*> >::const_iterator it =
             field_sets.begin(); it != field_sets.end(); it++, index++)
       {
         UnstructuredIndirectionHelper<DIM,T> helper(indirect_field, is_range,
@@ -357,7 +356,7 @@ namespace Legion {
         // Search through the set of indirections and find the one that is
         // set for this field
         index = 0;
-        for (LegionList<FieldSet<IndirectRecord*> >::aligned::const_iterator
+        for (LegionList<FieldSet<IndirectRecord*> >::const_iterator
               it = field_sets.begin(); it != field_sets.end(); it++, index++)
         {
           if (!it->set_mask.is_set(fidx))
@@ -392,7 +391,7 @@ namespace Legion {
         size_t num_records;
         derez.deserialize(num_records);
         std::set<IndirectRecord*> records;
-        LegionVector<IndirectRecord>::aligned record_allocs(num_records);
+        LegionVector<IndirectRecord> record_allocs(num_records);
         for (unsigned idx2 = 0; idx2 < num_records; idx2++)
         {
           IndirectRecord &record = record_allocs[idx2];
@@ -1697,21 +1696,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceOperationT<DIM,T>::construct_indirections(
-                                     const std::vector<unsigned> &field_indexes,
-                                     const FieldID indirect_field,
-                                     const TypeTag indirect_type,
-                                     const bool is_range, 
-                                     const PhysicalInstance indirect_instance,
-                                     const LegionVector<
-                                            IndirectRecord>::aligned &records,
-                                     std::vector<CopyIndirection*> &indirects,
-                                     std::vector<unsigned> &indirect_indexes,
+                                    const std::vector<unsigned> &field_indexes,
+                                    const FieldID indirect_field,
+                                    const TypeTag indirect_type,
+                                    const bool is_range, 
+                                    const PhysicalInstance indirect_instance,
+                                    const LegionVector<IndirectRecord> &records,
+                                    std::vector<CopyIndirection*> &indirects,
+                                    std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
-                                     unsigned unique_indirections_identifier,
-                                     const ApEvent indirect_event,
+                                    unsigned unique_indirections_identifier,
+                                    const ApEvent indirect_event,
 #endif
-                                     const bool possible_out_of_range,
-                                     const bool possible_aliasing)
+                                    const bool possible_out_of_range,
+                                    const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
@@ -5426,21 +5424,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::construct_indirections(
-                                     const std::vector<unsigned> &field_indexes,
-                                     const FieldID indirect_field,
-                                     const TypeTag indirect_type,
-                                     const bool is_range,
-                                     const PhysicalInstance indirect_instance,
-                                     const LegionVector<
-                                            IndirectRecord>::aligned &records,
-                                     std::vector<CopyIndirection*> &indirects,
-                                     std::vector<unsigned> &indirect_indexes,
+                                    const std::vector<unsigned> &field_indexes,
+                                    const FieldID indirect_field,
+                                    const TypeTag indirect_type,
+                                    const bool is_range,
+                                    const PhysicalInstance indirect_instance,
+                                    const LegionVector<IndirectRecord> &records,
+                                    std::vector<CopyIndirection*> &indirects,
+                                    std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
-                                     unsigned unique_indirections_identifier,
-                                     const ApEvent indirect_event,
+                                    unsigned unique_indirections_identifier,
+                                    const ApEvent indirect_event,
 #endif
-                                     const bool possible_out_of_range,
-                                     const bool possible_aliasing)
+                                    const bool possible_out_of_range,
+                                    const bool possible_aliasing)
     //--------------------------------------------------------------------------
     {
       construct_indirections_internal<DIM,T>(field_indexes, indirect_field,
