@@ -462,7 +462,7 @@ namespace Legion {
         if (A != UNTRACKED_ALLOC)
           LegionAllocation::trace_free(runtime, A, sizeof(T), size);
 #endif
-        ::operator delete (ptr, std::align_val_t(alignof(T)));
+        free(ptr);
       }
 #else
       inline pointer allocate(size_type cnt,
