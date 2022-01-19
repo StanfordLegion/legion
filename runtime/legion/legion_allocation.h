@@ -447,7 +447,10 @@ namespace Legion {
     public:
 #if __cplusplus > 201402L
       inline T* allocate(std::size_t cnt) { 
-        T *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        pointer result = NULL;
+        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
+        memcpy(&result, &ptr, sizeof(result));
 #ifdef LEGION_TRACE_ALLOCATION
         if (A != UNTRACKED_ALLOC)
           LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
