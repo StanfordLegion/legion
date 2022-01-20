@@ -7509,8 +7509,11 @@ namespace Legion {
     {
       bool is_src1 = idx1 < src_requirements.size();
       bool is_src2 = idx2 < src_requirements.size();
+#ifdef DEBUG_LEGION
       unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
       unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
+      // For now we only issue this warning in debug mode, eventually we'll
+      // turn this on only when users request it when we do our debug refactor
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDEX,
                       "Region requirements %d and %d of index copy %lld in "
                       "parent task %s (UID %lld) are potentially interfering. "
@@ -7523,6 +7526,7 @@ namespace Legion {
                       "for this index task launch then everything is good.",
                       actual_idx1, actual_idx2, unique_op_id, 
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#endif
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
     }
 

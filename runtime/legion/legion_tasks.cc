@@ -8870,7 +8870,10 @@ namespace Legion {
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
-#else
+#endif
+#ifdef DEBUG_LEGION
+      // For now we only issue this warning in debug mode, eventually we'll
+      // turn this on only when users request it when we do our debug refactor
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDEX,
                       "Region requirements %d and %d of index task %s "
                       "(UID %lld) in parent task %s (UID %lld) are potentially "
@@ -8883,8 +8886,6 @@ namespace Legion {
                       "messages for this index task launch then everything "
                       "is good.", idx1, idx2, get_task_name(), get_unique_id(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-#endif
-#ifdef DEBUG_LEGION
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
 #endif
     }
