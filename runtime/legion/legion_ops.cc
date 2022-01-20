@@ -7507,9 +7507,9 @@ namespace Legion {
                                                       unsigned idx2)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
       bool is_src1 = idx1 < src_requirements.size();
       bool is_src2 = idx2 < src_requirements.size();
-#ifdef DEBUG_LEGION
       unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
       unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
       // For now we only issue this warning in debug mode, eventually we'll
