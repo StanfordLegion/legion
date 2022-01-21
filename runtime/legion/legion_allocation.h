@@ -143,7 +143,7 @@ namespace Legion {
       DIFFERENCE_EXPR_ALLOC,
       INSTANCE_EXPR_ALLOC,
       REMOTE_EXPR_ALLOC,
-      LAST_ALLOC, // must be last
+      UNTRACKED_ALLOC, // must be last
     };
 
     //--------------------------------------------------------------------------
@@ -203,7 +203,7 @@ namespace Legion {
       return legion_alloc_aligned<sizeof(T), alignof(T), BYTES>(count);
     }
 
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
     // forward declaration of runtime
     class Runtime;
 
@@ -265,7 +265,7 @@ namespace Legion {
     inline void* legion_malloc(AllocationType a, size_t size)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       LegionAllocation::trace_allocation(a, size);
 #endif
       return malloc(size);
@@ -276,7 +276,7 @@ namespace Legion {
                                 size_t old_size, size_t new_size)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       Runtime *rt = LegionAllocation::find_runtime(); 
       LegionAllocation::trace_free(rt, a, old_size);
       LegionAllocation::trace_allocation(rt, a, new_size);
@@ -288,7 +288,7 @@ namespace Legion {
     inline void legion_free(AllocationType a, void *ptr, size_t size)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       LegionAllocation::trace_free(a, size);
 #endif
       free(ptr);
@@ -317,7 +317,7 @@ namespace Legion {
     /*static*/ inline void* LegionHeapify<T>::operator new(size_t count)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       return legion_alloc_aligned<T,true/*bytes*/>(count);  
@@ -328,7 +328,7 @@ namespace Legion {
     /*static*/ inline void* LegionHeapify<T>::operator new[](size_t count)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       return legion_alloc_aligned<T,true/*bytes*/>(count);
@@ -340,7 +340,7 @@ namespace Legion {
                                                            void *ptr)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       return ptr;
@@ -352,7 +352,7 @@ namespace Legion {
                                                              void *ptr)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       return ptr;
@@ -363,7 +363,7 @@ namespace Legion {
     /*static*/ inline void LegionHeapify<T>::operator delete(void *ptr)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
       free(ptr);
@@ -374,7 +374,7 @@ namespace Legion {
     /*static*/ inline void LegionHeapify<T>::operator delete[](void *ptr)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
       free(ptr);
@@ -386,7 +386,7 @@ namespace Legion {
                                                              void *place)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
       free(ptr);
@@ -398,20 +398,20 @@ namespace Legion {
                                                                void *place)
     //--------------------------------------------------------------------------
     {
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
       free(ptr);
     }
 
     /**
-     * \class AlignedAllocator
-     * A class for doing aligned allocation of memory for
-     * STL data structures containing data types that require
-     * larger alignments than the default malloc provides.
+     * \class LegionAllocator
+     * A custom Legion allocator for tracing memory usage in STL
+     * data structures. When tracing is disabled, it defaults back
+     * to using the standard malloc/free and new/delete operations.
      */
-    template<typename T>
-    class AlignedAllocator {
+    template<typename T, AllocationType A = UNTRACKED_ALLOC>
+    class LegionAllocator {
     public:
       typedef size_t          size_type;
       typedef ptrdiff_t difference_type;
@@ -423,41 +423,70 @@ namespace Legion {
     public:
       template<typename U>
       struct rebind {
-        typedef AlignedAllocator<U> other;
+        typedef LegionAllocator<U, A> other;
       };
     public:
-      inline explicit AlignedAllocator(void) { }
-      inline ~AlignedAllocator(void) { }
-      inline AlignedAllocator(const AlignedAllocator<T> &rhs) { }
+      inline explicit LegionAllocator(void) 
+#ifdef LEGION_TRACE_ALLOCATION
+        : runtime(LegionAllocation::find_runtime()) 
+#endif
+      { }
+      inline ~LegionAllocator(void) { }
+      inline LegionAllocator(const LegionAllocator<T, A> &rhs)
+#ifdef LEGION_TRACE_ALLOCATION
+        : runtime(rhs.runtime) 
+#endif
+      { }
       template<typename U>
-      inline AlignedAllocator(const AlignedAllocator<U> &rhs) { }
+      inline LegionAllocator(const LegionAllocator<U, A> &rhs) 
+#ifdef LEGION_TRACE_ALLOCATION
+        : runtime(rhs.runtime) 
+#endif  
+      { }
     public:
       inline pointer address(reference r) { return &r; }
       inline const_pointer address(const_reference r) { return &r; }
     public:
-#if __cplusplus > 201703L
-      inline pointer allocate(std::size_t cnt)
-      {
+#if __cplusplus > 201402L
+      inline T* allocate(std::size_t cnt) { 
         void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         pointer result = NULL;
-        static_assert(sizeof(ptr) == sizeof(result), "Fuck c++");
+        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
         memcpy(&result, &ptr, sizeof(result));
+#ifdef LEGION_TRACE_ALLOCATION
+        if (A != UNTRACKED_ALLOC)
+          LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
+#endif
         return result;
+      }
+      inline void deallocate(T *ptr, std::size_t size) { 
+#ifdef LEGION_TRACE_ALLOCATION
+        if (A != UNTRACKED_ALLOC)
+          LegionAllocation::trace_free(runtime, A, sizeof(T), size);
+#endif
+        free(ptr);
       }
 #else
       inline pointer allocate(size_type cnt,
-                              typename std::allocator<void>::const_pointer = 0)
-      {
+                      typename std::allocator<void>::const_pointer = 0) {
+#ifdef LEGION_TRACE_ALLOCATION
+        if (A != UNTRACKED_ALLOC)
+          LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
+#endif
         void *ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
         pointer result = NULL;
-        static_assert(sizeof(ptr) == sizeof(result), "Fuck c++");
+        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
         memcpy(&result, &ptr, sizeof(result));
         return result;
       }
-#endif
       inline void deallocate(pointer p, size_type size) {
+#ifdef LEGION_TRACE_ALLOCATION
+        if (A != UNTRACKED_ALLOC)
+          LegionAllocation::trace_free(runtime, A, sizeof(T), size);
+#endif
         free(p);
       }
+#endif // After/Before C++17
     public:
       inline size_type max_size(void) const {
         return std::numeric_limits<size_type>::max() / sizeof(T);
@@ -485,159 +514,32 @@ namespace Legion {
       inline void destroy(U* p) { p->~U(); }
 #endif
     public:
-      inline bool operator==(AlignedAllocator const&) const { return true; }
-      inline bool operator!=(AlignedAllocator const& a) const
-                                           { return !operator==(a); }
-    };
-
-    /**
-     * \class LegionAllocator
-     * A custom Legion allocator for tracing memory usage in STL
-     * data structures. When tracing is disabled, it defaults back
-     * to using the standard malloc/free and new/delete operations.
-     */
-    template<typename T, AllocationType A, bool ALIGNED>
-    class LegionAllocator {
-    public:
-      typedef size_t          size_type;
-      typedef ptrdiff_t difference_type;
-      typedef T*                pointer;
-      typedef const T*    const_pointer;
-      typedef T&              reference;
-      typedef const T&  const_reference;
-      typedef T              value_type;
-    public:
-      template<typename U>
-      struct rebind {
-        typedef LegionAllocator<U, A, ALIGNED> other;
-      };
-    public:
-      inline explicit LegionAllocator(void) 
-#ifdef TRACE_ALLOCATION
-        : runtime(LegionAllocation::find_runtime()) 
-#endif
-      { }
-      inline ~LegionAllocator(void) { }
-      inline LegionAllocator(const LegionAllocator<T, A, ALIGNED> &rhs)
-#ifdef TRACE_ALLOCATION
-        : runtime(rhs.runtime) 
-#endif
-      { }
-      template<typename U>
-      inline LegionAllocator(const LegionAllocator<U, A, ALIGNED> &rhs) 
-#ifdef TRACE_ALLOCATION
-        : runtime(rhs.runtime) 
-#endif  
-      { }
-    public:
-      inline pointer address(reference r) { return &r; }
-      inline const_pointer address(const_reference r) { return &r; }
-    public:
-#if __cplusplus > 201402L
-      inline T* allocate(std::size_t cnt) { 
-        // This was failing to compile before because the compiler
-        // couldn't find the align_val_t type in the std namespace
-        // Hopefully this gets fixed soon
-        T *result = static_cast<T*>(::operator new (cnt*sizeof(T),
-                                    std::align_val_t(alignof(T))));
-#ifdef TRACE_ALLOCATION
-        LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
-#endif
-        return result;
-      }
-      inline void deallocate(T *ptr, std::size_t size) { 
-#ifdef TRACE_ALLOCATION
-        LegionAllocation::trace_free(runtime, A, sizeof(T), size);
-#endif
-        ::operator delete (ptr, std::align_val_t(alignof(T)));
-      }
-#else
-      inline pointer allocate(size_type cnt,
-                      typename std::allocator<void>::const_pointer = 0) {
-#ifdef TRACE_ALLOCATION
-        LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
-#endif
-        void *ptr;
-        if (ALIGNED)
-          ptr = legion_alloc_aligned<T, false/*bytes*/>(cnt);
-        else
-          ptr = malloc(cnt * sizeof(T));
-        pointer result = NULL;
-        static_assert(sizeof(result) == sizeof(ptr), "Fuck c++");
-        memcpy(&result, &ptr, sizeof(result));
-        return result;
-      }
-      inline void deallocate(pointer p, size_type size) {
-#ifdef TRACE_ALLOCATION
-        LegionAllocation::trace_free(runtime, A, sizeof(T), size);
-#endif
-        free(p);
-      }
-#endif // After/Before C++17
-    public:
-      inline size_type max_size(void) const {
-        return std::numeric_limits<size_type>::max() / sizeof(T);
-      }
-    public:
-      template<class U, class... Args>
-      inline void construct(U *p, Args&&... args) 
-        { ::new((void*)p) U(std::forward<Args>(args)...); }
-      template<class U>
-      inline void destroy(U *p) { p->~U(); }
-    public:
       inline bool operator==(LegionAllocator const&) const { return true; }
       inline bool operator!=(LegionAllocator const& a) const
                                            { return !operator==(a); }
     public:
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
       Runtime *runtime;
 #endif
     };
 
-    template<typename T, AllocationType A = LAST_ALLOC,
+    template<typename T, AllocationType A = UNTRACKED_ALLOC,
              typename COMPARATOR = std::less<T> >
-    struct LegionSet {
-      typedef std::set<T, COMPARATOR, 
-                       LegionAllocator<T, A, false/*aligned*/> > tracked;
-      typedef std::set<T, COMPARATOR, AlignedAllocator<T> > aligned;
-      typedef std::set<T, COMPARATOR, 
-                       LegionAllocator<T, A, true/*aligned*/> > track_aligned;
-    };
+    using LegionSet = std::set<T, COMPARATOR, LegionAllocator<T,A> >;
 
-    template<typename T, AllocationType A = LAST_ALLOC>
-    struct LegionList {
-      typedef std::list<T, LegionAllocator<T, A, false/*aligned*/> > tracked;
-      typedef std::list<T, AlignedAllocator<T> > aligned;
-      typedef std::list<T, 
-                        LegionAllocator<T, A, true/*aligned*/> > track_aligned;
-    };
+    template<typename T, AllocationType A = UNTRACKED_ALLOC>
+    using LegionList = std::list<T, LegionAllocator<T, A> >;
 
-    template<typename T, AllocationType A = LAST_ALLOC>
-    struct LegionDeque {
-      typedef std::deque<T, LegionAllocator<T, A, false/*aligned*/> > tracked;
-      typedef std::deque<T, AlignedAllocator<T> > aligned;
-      typedef std::deque<T, 
-                         LegionAllocator<T, A, true/*aligned*/> > track_aligned;
-    };
+    template<typename T, AllocationType A = UNTRACKED_ALLOC>
+    using LegionDeque = std::deque<T, LegionAllocator<T, A> >;
 
-    template<typename T, AllocationType A = LAST_ALLOC>
-    struct LegionVector {
-      typedef std::vector<T, LegionAllocator<T, A, false/*aligned*/> > tracked;
-      typedef std::vector<T, AlignedAllocator<T> > aligned;
-      typedef std::vector<T, 
-                         LegionAllocator<T, A, true/*aligned*/> > track_aligned;
-    };
+    template<typename T, AllocationType A = UNTRACKED_ALLOC>
+    using LegionVector = std::vector<T, LegionAllocator<T, A> >;
 
-    template<typename T1, typename T2, 
-             AllocationType A = LAST_ALLOC, typename COMPARATOR = std::less<T1> >
-    struct LegionMap {
-      typedef std::map<T1, T2, COMPARATOR,
-        LegionAllocator<std::pair<const T1, T2>, A, false/*aligned*/> > tracked;
-      typedef std::map<T1, T2, COMPARATOR,
-                           AlignedAllocator<std::pair<const T1, T2> > > aligned;
-      typedef std::map<T1, T2, COMPARATOR, LegionAllocator<
-                   std::pair<const T1, T2>, A, true/*aligned*/> > track_aligned;
-    };
+    template<typename T1, typename T2, AllocationType A = UNTRACKED_ALLOC,
+             typename COMPARATOR = std::less<T1> >
+    using LegionMap = std::map<T1, T2, COMPARATOR,
+            LegionAllocator<std::pair<const T1,T2>, A> >;
   }; // namespace Internal
 }; // namespace Legion
 

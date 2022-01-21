@@ -598,7 +598,7 @@ namespace Legion {
       ApEvent gather_across(const RegionRequirement &src_req,
                             const RegionRequirement &idx_req,
                             const RegionRequirement &dst_req,
-                          const LegionVector<IndirectRecord>::aligned &records,
+                            const LegionVector<IndirectRecord> &records,
                             const InstanceSet &src_targets,
                             const InstanceSet &idx_targets,
                             const InstanceSet &dst_targets,
@@ -619,7 +619,7 @@ namespace Legion {
                              const InstanceSet &src_targets,
                              const InstanceSet &idx_targets,
                              const InstanceSet &dst_targets,
-                          const LegionVector<IndirectRecord>::aligned &records,
+                             const LegionVector<IndirectRecord> &records,
                              CopyOp *op, unsigned src_index,
                              unsigned idx_index, unsigned dst_index,
                              const bool scatter_is_range,
@@ -638,9 +638,9 @@ namespace Legion {
                               const RegionRequirement &dst_idx_req,
                               const InstanceSet &src_targets,
                               const InstanceSet &dst_targets,
-                      const LegionVector<IndirectRecord>::aligned &src_records,
+                              const LegionVector<IndirectRecord> &src_records,
                               const InstanceSet &src_idx_target,
-                      const LegionVector<IndirectRecord>::aligned &dst_records,
+                              const LegionVector<IndirectRecord> &dst_records,
                               const InstanceSet &dst_idx_target, CopyOp *op,
                               unsigned src_index, unsigned dst_index,
                               unsigned src_idx_index, unsigned dst_idx_index,
@@ -1272,8 +1272,7 @@ namespace Legion {
                            const FieldID indirect_field,
                            const TypeTag indirect_type, const bool is_range,
                            const PhysicalInstance indirect_instance,
-                           const LegionVector<
-                                  IndirectRecord>::aligned &records,
+                           const LegionVector<IndirectRecord> &records,
                            std::vector<CopyIndirection*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
@@ -1375,8 +1374,7 @@ namespace Legion {
                                const FieldID indirect_field,
                                const TypeTag indirect_type, const bool is_range,
                                const PhysicalInstance indirect_instance,
-                               const LegionVector<
-                                      IndirectRecord>::aligned &records,
+                               const LegionVector<IndirectRecord> &records,
                                std::vector<CopyIndirection*> &indirections,
                                std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
@@ -1654,8 +1652,7 @@ namespace Legion {
                            const FieldID indirect_field,
                            const TypeTag indirect_type, const bool is_range,
                            const PhysicalInstance indirect_instance,
-                           const LegionVector<
-                                  IndirectRecord>::aligned &records,
+                           const LegionVector<IndirectRecord> &records,
                            std::vector<CopyIndirection*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
@@ -2012,7 +2009,7 @@ namespace Legion {
     protected:
       std::map<IndexTreeNode*,bool> dominators;
     protected:
-      LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
+      LegionMap<SemanticTag,SemanticInfo> semantic_info;
     protected:
       std::map<std::pair<LegionColor,LegionColor>,RtEvent> pending_tests;
     protected:
@@ -2712,8 +2709,7 @@ namespace Legion {
                            const FieldID indirect_field,
                            const TypeTag indirect_type, const bool is_range,
                            const PhysicalInstance indirect_instance,
-                           const LegionVector<
-                                  IndirectRecord>::aligned &records,
+                           const LegionVector<IndirectRecord> &records,
                            std::vector<CopyIndirection*> &indirections,
                            std::vector<unsigned> &indirect_indexes,
 #ifdef LEGION_SPY
@@ -3846,10 +3842,10 @@ namespace Legion {
       // Index them by their hash of their field mask to help
       // differentiate them.
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
-                          LAYOUT_DESCRIPTION_ALLOC>::tracked> layouts;
+                          LAYOUT_DESCRIPTION_ALLOC> > layouts;
     private:
-      LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
-      LegionMap<std::pair<FieldID,SemanticTag>,SemanticInfo>::aligned 
+      LegionMap<SemanticTag,SemanticInfo> semantic_info;
+      LegionMap<std::pair<FieldID,SemanticTag>,SemanticInfo>
                                                     semantic_field_info;
     private:
       // Track which node is the owner for allocation privileges
@@ -3967,7 +3963,7 @@ namespace Legion {
                                     FieldMask &reduction_flush_fields,
                                     bool record_close_operations,
                                     RegionTreeNode *next_child,
-                                    LegionDeque<FieldState>::aligned &states);
+                                    LegionDeque<FieldState> &states);
       // Note that 'allow_next_child' and 
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
@@ -3984,7 +3980,7 @@ namespace Legion {
                                     FieldMask &output_mask); 
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
-                                  LegionDeque<FieldState>::aligned &new_states);
+                                  LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_disjoint_complete_accesses(LogicalState &state,
@@ -4098,17 +4094,17 @@ namespace Legion {
       // Logical helper operations
       template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
       static FieldMask perform_dependence_checks(const LogicalUser &user, 
-          typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
+          LegionList<LogicalUser, ALLOC> &users, 
           const FieldMask &check_mask, const FieldMask &open_below,
           bool validates_regions, Operation *to_skip = NULL, 
           GenerationID skip_gen = 0);
       template<AllocationType ALLOC>
       static void perform_closing_checks(LogicalCloser &closer,
-          typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
+          LegionList<LogicalUser, ALLOC> &users, 
           const FieldMask &check_mask);
       template<AllocationType ALLOC>
       static void perform_nodep_checks(const LogicalUser &user,
-          const typename LegionList<LogicalUser, ALLOC>::track_aligned &users);
+          const LegionList<LogicalUser, ALLOC> &users);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
         { return column_source; }
@@ -4130,7 +4126,7 @@ namespace Legion {
     protected:
       mutable LocalLock node_lock;
     protected:
-      LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
+      LegionMap<SemanticTag,SemanticInfo> semantic_info;
     };
 
     /**

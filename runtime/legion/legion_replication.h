@@ -624,12 +624,12 @@ namespace Legion {
     public:
       IndirectRecordExchange& operator=(const IndirectRecordExchange &rhs);
     public:
-      void exchange_records(LegionVector<IndirectRecord>::aligned &records);
+      void exchange_records(LegionVector<IndirectRecord> &records);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     protected:
-      LegionMap<IndirectKey,FieldMask>::aligned records;
+      LegionMap<IndirectKey,FieldMask> records;
     };
     
     /**
@@ -931,8 +931,8 @@ namespace Legion {
       const ShardID shard_id;
       const bool check_mappings;
     protected:
-      std::map<DistributedID,LegionMap<ShardID,FieldMask>::aligned> mappings;
-      LegionMap<DistributedID,FieldMask>::aligned global_views;
+      std::map<DistributedID,LegionMap<ShardID,FieldMask> > mappings;
+      LegionMap<DistributedID,FieldMask> global_views;
     };
 
     /**
@@ -1479,7 +1479,7 @@ namespace Legion {
       std::map<LogicalRegion,RegionNode*> replicated_regions;
       // Version information objects for each of our local regions
       // that we are own after sharding non-replicated partitions
-      LegionMap<RegionNode*,VersionInfo>::aligned sharded_region_version_infos;
+      LegionMap<RegionNode*,VersionInfo> sharded_region_version_infos;
       // Regions for which we need to propagate refinements for
       // non-replicated partition refinements
       std::map<PartitionNode*,std::vector<RegionNode*> > sharded_regions;
@@ -1624,7 +1624,7 @@ namespace Legion {
           const ApEvent local_post, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
-          LegionVector<IndirectRecord>::aligned &records, const bool sources);
+          LegionVector<IndirectRecord> &records, const bool sources);
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   std::vector<ApBarrier> &indirection_bars,

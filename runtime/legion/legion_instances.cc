@@ -80,7 +80,7 @@ namespace Legion {
     {
       FieldMask compressed; 
       bool found_in_cache = false;
-      for (LegionDeque<std::pair<FieldMask,FieldMask> >::aligned::const_iterator
+      for (LegionDeque<std::pair<FieldMask,FieldMask> >::const_iterator
             it = compressed_cache.begin(); it != compressed_cache.end(); it++)
       {
         if (it->first == src_mask)
@@ -330,13 +330,12 @@ namespace Legion {
       {
         AutoLock o_lock(layout_lock,1,false/*exclusive*/);
         std::map<LEGION_FIELD_MASK_FIELD_TYPE,
-                 LegionList<std::pair<FieldMask,FieldMask> >::aligned>::
-                   const_iterator finder = comp_cache.find(hash_key);
+                 LegionList<std::pair<FieldMask,FieldMask> > >::const_iterator
+                   finder = comp_cache.find(hash_key);
         if (finder != comp_cache.end())
         {
-          for (LegionList<std::pair<FieldMask,FieldMask> >::aligned::
-                const_iterator it = finder->second.begin(); 
-                it != finder->second.end(); it++)
+          for (LegionList<std::pair<FieldMask,FieldMask> >::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
           {
             if (it->first == copy_mask)
             {

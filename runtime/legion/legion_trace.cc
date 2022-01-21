@@ -117,11 +117,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unsigned index = operations.size() - 1;
-      std::map<unsigned,LegionVector<AliasChildren>::aligned>::const_iterator
+      std::map<unsigned,LegionVector<AliasChildren> >::const_iterator
         finder = aliased_children.find(index);
       if (finder == aliased_children.end())
         return;
-      for (LegionVector<AliasChildren>::aligned::const_iterator it = 
+      for (LegionVector<AliasChildren>::const_iterator it = 
             finder->second.begin(); it != finder->second.end(); it++)
       {
 #ifdef DEBUG_LEGION
@@ -330,7 +330,7 @@ namespace Legion {
       if (!op->is_internal_op())
       {
         frontiers.insert(key);
-        const LegionVector<DependenceRecord>::aligned &deps = 
+        const LegionVector<DependenceRecord> &deps = 
           translate_dependence_records(op, index); 
         operations.push_back(key);
 #ifdef LEGION_SPY
@@ -342,7 +342,7 @@ namespace Legion {
         op->add_mapping_reference(gen);  
         // Then compute all the dependences on this operation from
         // our previous recording of the trace
-        for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+        for (LegionVector<DependenceRecord>::const_iterator it = 
               deps.begin(); it != deps.end(); it++)
         {
 #ifdef DEBUG_LEGION
@@ -393,7 +393,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(index > 0);
 #endif
-        const LegionVector<DependenceRecord>::aligned &deps = 
+        const LegionVector<DependenceRecord> &deps = 
           translate_dependence_records(operations[index-1].first, index-1);
         // Special case for internal operations
         // Internal operations need to register transitive dependences
@@ -406,7 +406,7 @@ namespace Legion {
         assert(internal_op == dynamic_cast<InternalOp*>(op));
 #endif
         int internal_index = internal_op->get_internal_index();
-        for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+        for (LegionVector<DependenceRecord>::const_iterator it = 
               deps.begin(); it != deps.end(); it++)
         {
           // We only record dependences for this internal operation on
@@ -521,7 +521,7 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    const LegionVector<LegionTrace::DependenceRecord>::aligned& 
+    const LegionVector<LegionTrace::DependenceRecord>& 
         StaticTrace::translate_dependence_records(Operation *op, unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -535,7 +535,7 @@ namespace Legion {
       {
         const std::vector<StaticDependence> &static_deps = 
           static_dependences[op_idx];
-        LegionVector<DependenceRecord>::aligned &translation = 
+        LegionVector<DependenceRecord> &translation = 
           translated_deps[op_idx];
         for (std::vector<StaticDependence>::const_iterator it = 
               static_deps.begin(); it != static_deps.end(); it++)
@@ -682,7 +682,7 @@ namespace Legion {
           operations.push_back(key);
           op_map[key] = index;
           // Add a new vector for storing dependences onto the back
-          dependences.push_back(LegionVector<DependenceRecord>::aligned());
+          dependences.push_back(LegionVector<DependenceRecord>());
           // Record meta-data about the trace for verifying that
           // it is being replayed correctly
           op_info.push_back(OperationInfo(op));
@@ -691,8 +691,7 @@ namespace Legion {
         {
           std::pair<InternalOp*,GenerationID> 
             local_key(static_cast<InternalOp*>(op),gen);
-          internal_dependences[local_key] = 
-            LegionVector<DependenceRecord>::aligned();
+          internal_dependences[local_key] = LegionVector<DependenceRecord>();
         }
       }
       else
@@ -728,8 +727,7 @@ namespace Legion {
                           ctx->get_unique_id(), info.count,
                           op->get_region_count())
           // If we make it here, everything is good
-          const LegionVector<DependenceRecord>::aligned &deps = 
-                                                          dependences[index];
+          const LegionVector<DependenceRecord> &deps = dependences[index];
           operations.push_back(key);
 #ifdef LEGION_SPY
           current_uids[key] = op->get_unique_op_id();
@@ -740,7 +738,7 @@ namespace Legion {
           op->add_mapping_reference(gen);  
           // Then compute all the dependences on this operation from
           // our previous recording of the trace
-          for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+          for (LegionVector<DependenceRecord>::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
             // Skip any no-dependences since they are still no-deps here
@@ -794,8 +792,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(index > 0);
 #endif
-          const LegionVector<DependenceRecord>::aligned &deps = 
-                                                        dependences[index-1];
+          const LegionVector<DependenceRecord> &deps = dependences[index-1];
           // Special case for internal operations
           // Internal operations need to register transitive dependences
           // on all the other operations with which it interferes.
@@ -807,7 +804,7 @@ namespace Legion {
           assert(internal_op == dynamic_cast<InternalOp*>(op));
 #endif
           int internal_index = internal_op->get_internal_index();
-          for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+          for (LegionVector<DependenceRecord>::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
             // We only record dependences for this internal operation on
@@ -906,13 +903,13 @@ namespace Legion {
         std::pair<InternalOp*,GenerationID> 
           local_key(static_cast<InternalOp*>(target),tar_gen);
         std::map<std::pair<InternalOp*,GenerationID>,
-                LegionVector<DependenceRecord>::aligned>::const_iterator
+                LegionVector<DependenceRecord>>::const_iterator
           internal_finder = internal_dependences.find(local_key);
         if (internal_finder != internal_dependences.end())
         {
-          const LegionVector<DependenceRecord>::aligned &internal_deps = 
+          const LegionVector<DependenceRecord> &internal_deps = 
                                                         internal_finder->second;
-          for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+          for (LegionVector<DependenceRecord>::const_iterator it = 
                 internal_deps.begin(); it != internal_deps.end(); it++)
             insert_dependence(DependenceRecord(it->operation_idx)); 
         }
@@ -977,7 +974,7 @@ namespace Legion {
         std::pair<InternalOp*,GenerationID> 
           local_key(static_cast<InternalOp*>(target), tar_gen);
         std::map<std::pair<InternalOp*,GenerationID>,
-                 LegionVector<DependenceRecord>::aligned>::const_iterator
+                 LegionVector<DependenceRecord>>::const_iterator
           internal_finder = internal_dependences.find(local_key);
         if (internal_finder != internal_dependences.end())
         {
@@ -986,7 +983,7 @@ namespace Legion {
           {
             // Iterate over the internal operation dependences and 
             // translate them to our dependences
-            for (LegionVector<DependenceRecord>::aligned::const_iterator
+            for (LegionVector<DependenceRecord>::const_iterator
                   it = internal_finder->second.begin(); 
                   it != internal_finder->second.end(); it++)
             {
@@ -1008,7 +1005,7 @@ namespace Legion {
             assert(internal_dependences.find(src_key) != 
                    internal_dependences.end());
 #endif
-            for (LegionVector<DependenceRecord>::aligned::const_iterator
+            for (LegionVector<DependenceRecord>::const_iterator
                   it = internal_finder->second.begin(); 
                   it != internal_finder->second.end(); it++)
             {
@@ -1069,8 +1066,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < operations.size(); ++idx)
       {
         const UniqueID uid = get_current_uid_by_index(idx);
-        const LegionVector<DependenceRecord>::aligned &deps = dependences[idx];
-        for (LegionVector<DependenceRecord>::aligned::const_iterator it =
+        const LegionVector<DependenceRecord> &deps = dependences[idx];
+        for (LegionVector<DependenceRecord>::const_iterator it =
              deps.begin(); it != deps.end(); it++)
         {
           if ((it->prev_idx == -1) || (it->next_idx == -1))
@@ -1103,7 +1100,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!dependences.empty());
 #endif
-      LegionVector<DependenceRecord>::aligned &deps = dependences.back();
+      LegionVector<DependenceRecord> &deps = dependences.back();
       // Try to merge it with an existing dependence
       for (unsigned idx = 0; idx < deps.size(); idx++)
         if (deps[idx].merge(record))
@@ -1118,7 +1115,7 @@ namespace Legion {
                                  const DependenceRecord &record)
     //--------------------------------------------------------------------------
     {
-      LegionVector<DependenceRecord>::aligned &deps = internal_dependences[key];
+      LegionVector<DependenceRecord> &deps = internal_dependences[key];
       // Try to merge it with an existing dependence
       for (unsigned idx = 0; idx < deps.size(); idx++)
         if (deps[idx].merge(record))
@@ -2846,10 +2843,10 @@ namespace Legion {
         if (vit->second.get_valid_mask() * finder->second.get_valid_mask())
           continue;
         LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                  FieldMask>::aligned overlaps;
+                  FieldMask> overlaps;
         unique_join_on_field_mask_sets(vit->second, finder->second, overlaps);
         for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                       FieldMask>::aligned::const_iterator it = 
+                       FieldMask>::const_iterator it = 
               overlaps.begin(); it != overlaps.end(); it++)
         {
           IndexSpaceExpression *overlap = 
@@ -2883,7 +2880,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                             FieldMaskSet<LogicalView> >::aligned &target) const
+                                      FieldMaskSet<LogicalView> > &target) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2903,15 +2900,15 @@ namespace Legion {
       // have multiple overwrites for the same fields and index expressions
       FieldMaskSet<IndexSpaceExpression> expr_fields;
       LegionMap<IndexSpaceExpression*,
-                FieldMaskSet<LogicalView> >::aligned intermediate;
+                FieldMaskSet<LogicalView> > intermediate;
       intermediate.swap(target);
       for (LegionMap<IndexSpaceExpression*,
-            FieldMaskSet<LogicalView> >::aligned::const_iterator it =
+            FieldMaskSet<LogicalView> >::const_iterator it =
             intermediate.begin(); it != intermediate.end(); it++)
         expr_fields.insert(it->first, it->second.get_valid_mask());
-      LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_exprs;
+      LegionList<FieldSet<IndexSpaceExpression*> > field_exprs;
       expr_fields.compute_field_sets(FieldMask(), field_exprs);
-      for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::const_iterator
+      for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
             eit = field_exprs.begin(); eit != field_exprs.end(); eit++)
       {
         if (eit->elements.size() == 1)
@@ -3256,7 +3253,7 @@ namespace Legion {
       assert(current_sets.empty());
 #endif
       for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
+                     FieldMaskSet<LogicalView> >::const_iterator eit =
             preconditions.begin(); eit != preconditions.end(); eit++)
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -3267,7 +3264,7 @@ namespace Legion {
           delete eit->first;
       }
       for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
+                     FieldMaskSet<LogicalView> >::const_iterator eit =
             anticonditions.begin(); eit != anticonditions.end(); eit++)
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -3278,7 +3275,7 @@ namespace Legion {
           delete eit->first;
       }
       for (LegionMap<IndexSpaceExpression*,
-                     FieldMaskSet<LogicalView> >::aligned::const_iterator eit =
+                     FieldMaskSet<LogicalView> >::const_iterator eit =
             postconditions.begin(); eit != postconditions.end(); eit++)
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -3432,7 +3429,7 @@ namespace Legion {
       {
         precondition_views->transpose_uniquely(preconditions);
         for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+                       FieldMaskSet<LogicalView> >::const_iterator 
               eit = preconditions.begin(); eit != preconditions.end(); eit++)
         {
           eit->first->add_base_expression_reference(TRACE_REF, &mutator);
@@ -3445,7 +3442,7 @@ namespace Legion {
       {
         anticondition_views->transpose_uniquely(anticonditions);
         for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+                       FieldMaskSet<LogicalView> >::const_iterator 
               eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
         {
           eit->first->add_base_expression_reference(TRACE_REF, &mutator);
@@ -3458,7 +3455,7 @@ namespace Legion {
       {
         postcondition_views->transpose_uniquely(postconditions);
         for (LegionMap<IndexSpaceExpression*,
-                       FieldMaskSet<LogicalView> >::aligned::const_iterator 
+                       FieldMaskSet<LogicalView> >::const_iterator 
               eit = postconditions.begin(); eit != postconditions.end(); eit++)
         {
           eit->first->add_base_expression_reference(TRACE_REF, &mutator);
@@ -4042,7 +4039,7 @@ namespace Legion {
         return Replayable(false, "virtual mapping");
 
       // Next we need to compute the equivalence sets for all these regions
-      LegionVector<VersionInfo>::aligned version_infos(trace_regions.size());
+      LegionVector<VersionInfo> version_infos(trace_regions.size());
       unsigned index = 0;
       std::set<RtEvent> ready_events;
       const ContextID ctx = context->get_context().get_id();
@@ -4060,7 +4057,7 @@ namespace Legion {
       }
       // Compute the sets of regions and fields associated with each set
       index = 0;
-      LegionMap<EquivalenceSet*,FieldMaskSet<RegionNode> >::aligned set_regions;
+      LegionMap<EquivalenceSet*,FieldMaskSet<RegionNode> > set_regions;
       for (FieldMaskSet<RegionNode>::const_iterator rit =
             trace_regions.begin(); rit != trace_regions.end(); rit++, index++)
       {
@@ -4077,14 +4074,14 @@ namespace Legion {
       // their fields will be the one to own the preconditions
       RegionTreeForest *forest = trace->runtime->forest;
       for (LegionMap<EquivalenceSet*,
-                     FieldMaskSet<RegionNode> >::aligned::const_iterator eit =
+                     FieldMaskSet<RegionNode> >::const_iterator eit =
             set_regions.begin(); eit != set_regions.end(); eit++)
       {
         // Sort the region nodes into field groups so we can get a field 
         // expression for each one of these
-        LegionList<FieldSet<RegionNode*> >::aligned region_fields;
+        LegionList<FieldSet<RegionNode*> > region_fields;
         eit->second.compute_field_sets(FieldMask(), region_fields);
-        for (LegionList<FieldSet<RegionNode*> >::aligned::iterator it =
+        for (LegionList<FieldSet<RegionNode*> >::iterator it =
               region_fields.begin(); it != region_fields.end(); it++)
         {
           // The expression for this condition is the intersection of

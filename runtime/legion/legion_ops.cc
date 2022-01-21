@@ -5570,7 +5570,7 @@ namespace Legion {
       // Trigger our local completion event contingent upon 
       // the copy/reduce across being done
       ApEvent copy_post, copy_pre;
-      LegionVector<IndirectRecord>::aligned src_records, dst_records;
+      LegionVector<IndirectRecord> src_records, dst_records;
       ApUserEvent indirect_done, indirect_pre;
       if (gather_targets != NULL)
       {
@@ -5799,7 +5799,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = runtime->forest->get_node(space);
@@ -7535,7 +7535,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
@@ -7955,7 +7955,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
@@ -10496,7 +10496,7 @@ namespace Legion {
       if (!projections.empty())
       {
         for (LegionMap<RegionTreeNode*,FieldMaskSet<RefProjectionSummary> >::
-              aligned::const_iterator pit = projections.begin(); pit !=
+              const_iterator pit = projections.begin(); pit !=
               projections.end(); pit++)
         {
           for (FieldMaskSet<RefProjectionSummary>::const_iterator it =

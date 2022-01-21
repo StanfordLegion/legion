@@ -146,7 +146,7 @@ namespace Legion {
       // We also need a data structure to record when there are
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
-      std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
+      std::map<unsigned,LegionVector<AliasChildren> > aliased_children;
       std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
@@ -209,11 +209,11 @@ namespace Legion {
                           UniqueID prev_fence_uid, UniqueID curr_fence_uid);
 #endif
     protected:
-      const LegionVector<DependenceRecord>::aligned&
+      const LegionVector<DependenceRecord>&
                   translate_dependence_records(Operation *op, unsigned index);
     protected:
       std::deque<std::vector<StaticDependence> > static_dependences;
-      std::deque<LegionVector<DependenceRecord>::aligned> translated_deps;
+      std::deque<LegionVector<DependenceRecord> > translated_deps;
       std::set<RegionTreeID> application_trees;
     };
 
@@ -289,12 +289,12 @@ namespace Legion {
       // trace that we would have interfered with had the internal operations
       // not been necessary.
       std::map<std::pair<InternalOp*,GenerationID>,
-               LegionVector<DependenceRecord>::aligned> internal_dependences;
+               LegionVector<DependenceRecord> > internal_dependences;
     protected: 
       // This is the generalized form of the dependences
       // For each operation, we remember a list of operations that
       // it dependens on and whether it is a validates the region
-      std::deque<LegionVector<DependenceRecord>::aligned> dependences;
+      std::deque<LegionVector<DependenceRecord> > dependences;
       // Metadata for checking the validity of a trace when it is replayed
       std::vector<OperationInfo> op_info;
     protected:
@@ -580,7 +580,7 @@ namespace Legion {
                        FailedPrecondition *condition = NULL) const;
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
-                            FieldMaskSet<LogicalView> >::aligned &target) const;
+                              FieldMaskSet<LogicalView> > &target) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
                          const bool expr_covers, const FieldMask &mask,
                          ReferenceMutator &mutator) const;
@@ -594,7 +594,7 @@ namespace Legion {
       void dump(void) const;
     protected:
       typedef LegionMap<LogicalView*,
-                        FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
+                        FieldMaskSet<IndexSpaceExpression> > ViewExprs;
     protected:
       RegionTreeForest *const forest;
       RegionNode *const region;
@@ -708,7 +708,7 @@ namespace Legion {
       TraceViewSet *postcondition_views; 
       // Transpose of conditions for testing
       typedef LegionMap<IndexSpaceExpression*,
-                        FieldMaskSet<LogicalView> >::aligned ExprViews;
+                        FieldMaskSet<LogicalView> > ExprViews;
       ExprViews preconditions;
       ExprViews anticonditions;
       ExprViews postconditions;
@@ -785,12 +785,12 @@ namespace Legion {
         std::vector<size_t>     future_size_bounds;
         std::deque<InstanceSet> physical_instances;
       };
-      typedef LegionMap<TraceLocalID,CachedMapping>::aligned CachedMappings;
+      typedef LegionMap<TraceLocalID,CachedMapping>             CachedMappings;
     protected:
       typedef LegionMap<InstanceView*,
-                        FieldMaskSet<IndexSpaceExpression> >::aligned ViewExprs;
+                        FieldMaskSet<IndexSpaceExpression> >         ViewExprs;
       typedef LegionMap<InstanceView*,
-                        FieldMaskSet<ViewUser> >::aligned             ViewUsers;
+                        FieldMaskSet<ViewUser> >                     ViewUsers;
     public:
       PhysicalTemplate(PhysicalTrace *trace, ApEvent fence_event,
                        TaskTreeCoordinates &&cordinates);

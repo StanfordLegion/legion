@@ -1625,7 +1625,7 @@ namespace Legion {
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
       typedef LegionMap<PhysicalManager*,InstanceInfo,
-                        MEMORY_INSTANCES_ALLOC>::tracked TreeInstances;
+                        MEMORY_INSTANCES_ALLOC> TreeInstances;
       std::map<RegionTreeID,TreeInstances> current_instances;
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
@@ -3963,7 +3963,7 @@ namespace Legion {
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:
       unsigned generate_random_integer(void);
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
     public:
       void trace_allocation(AllocationType type, size_t size, int elems);
       void trace_free(AllocationType type, size_t size, int elems);
@@ -4195,8 +4195,8 @@ namespace Legion {
       std::map<ShardingID,ShardingFunctor*> sharding_functors;
     protected:
       mutable LocalLock group_lock;
-      LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
-                PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
+      LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>,
+                PROCESSOR_GROUP_ALLOC> processor_groups;
     protected:
       mutable LocalLock processor_mapping_lock;
       std::map<Processor,unsigned> processor_mapping;
@@ -4204,11 +4204,11 @@ namespace Legion {
       mutable LocalLock distributed_id_lock;
       DistributedID unique_distributed_id;
       LegionDeque<DistributedID,
-          RUNTIME_DISTRIBUTED_ALLOC>::tracked available_distributed_ids;
+          RUNTIME_DISTRIBUTED_ALLOC> available_distributed_ids;
     protected:
       mutable LocalLock distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
-                RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
+                RUNTIME_DIST_COLLECT_ALLOC> dist_collectables;
       std::map<DistributedID,
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
@@ -4220,7 +4220,7 @@ namespace Legion {
       mutable LocalLock context_lock;
       std::map<UniqueID,InnerContext*> local_contexts;
       LegionMap<UniqueID,RemoteContext*,
-                RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
+                RUNTIME_REMOTE_ALLOC> remote_contexts;
       std::map<UniqueID,
         std::pair<RtUserEvent,RemoteContext*> > pending_remote_contexts;
       unsigned total_contexts;
@@ -4234,7 +4234,7 @@ namespace Legion {
       // For generating random numbers
       mutable LocalLock random_lock;
       unsigned short random_state[3];
-#ifdef TRACE_ALLOCATION
+#ifdef LEGION_TRACE_ALLOCATION
     protected:
       struct AllocationTracker {
       public:

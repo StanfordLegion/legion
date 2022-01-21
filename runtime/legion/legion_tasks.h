@@ -306,7 +306,7 @@ namespace Legion {
     protected:
       std::vector<unsigned>                     parent_req_indexes;
       // The version infos for this task
-      LegionVector<VersionInfo>::aligned        version_infos;
+      LegionVector<VersionInfo>                 version_infos;
     protected:
       bool complete_received;
       bool commit_received;
