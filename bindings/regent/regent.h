@@ -18,6 +18,12 @@
 
 #include "legion.h"
 
+#ifdef REALM_USE_CUDART_HIJACK
+#define REGENT_USE_HIJACK 1
+#else
+#define REGENT_USE_HIJACK 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
