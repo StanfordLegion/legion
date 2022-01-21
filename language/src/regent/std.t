@@ -4666,6 +4666,15 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
+  -- If the hijack is turned off, we need extra dependencies to link
+  -- the generated CUDA code correctly
+  if std.config["cuda"] and cudahelper.check_cuda_available() and base.c.REGENT_USE_HIJACK == 0 then
+    flags:insertall({
+      "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
+      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
+      "-lpthread", "-lrt"
+    })
+  end
 
   profile('compile', nil, function()
     if #objfiles > 0 and filetype == 'object' then

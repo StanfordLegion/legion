@@ -22,6 +22,8 @@ extern void** __cudaRegisterFatBinary(const void *);
 extern void __cudaRegisterFunction(void**, const void*, char *, const char *,
     int, uint3 *, uint3 *, dim3 *, dim3 *, int *);
 
+extern void __cudaRegisterFatBinaryEnd(void **);
+
 void**
 hijackCudaRegisterFatBinary(const void* fat_bin)
 {
@@ -33,7 +35,12 @@ hijackCudaRegisterFunction(void** handle, const void* host_fun,
                            char* device_fun)
 {
   return __cudaRegisterFunction(handle, host_fun, device_fun,
-      0, 0, 0, 0, 0, 0, 0);
+      device_fun, -1, 0, 0, 0, 0, 0);
+}
+
+void hijackCudaRegisterFatBinaryEnd(void** handle)
+{
+  __cudaRegisterFatBinaryEnd(handle);
 }
 
 }
