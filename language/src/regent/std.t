@@ -4668,7 +4668,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   end
   -- If the hijack is turned off, we need extra dependencies to link
   -- the generated CUDA code correctly
-  if std.config["cuda"] and base.c.REGENT_USE_HIJACK == 0 then
+  if std.config["cuda"] and cudahelper.check_cuda_available() and base.c.REGENT_USE_HIJACK == 0 then
     flags:insertall({
       "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
       "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
