@@ -25,6 +25,8 @@ void** hijackCudaRegisterFatBinary(const void*);
 
 void hijackCudaRegisterFunction(void**, const void*, char*);
 
+void hijackCudaRegisterFatBinaryEnd(void**);
+
 #ifdef __cplusplus
 }
 #endif
