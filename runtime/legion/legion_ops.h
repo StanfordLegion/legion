@@ -578,7 +578,7 @@ namespace Legion {
       // Some extra support for tracking dependences that we've 
       // registered as part of our logical traversal
       void record_logical_dependence(const LogicalUser &user);
-      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
+      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>&
           get_logical_records(void) { return logical_records; }
       void clear_logical_records(void);
     public:
@@ -700,7 +700,7 @@ namespace Legion {
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC> logical_records;
       // Dependence trackers for detecting when it is safe to map and commit
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
@@ -1257,7 +1257,7 @@ namespace Legion {
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space, 
           const DomainPoint &key,
-          LegionVector<IndirectRecord>::aligned &records, const bool sources);
+          LegionVector<IndirectRecord> &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -1327,8 +1327,8 @@ namespace Legion {
       std::vector<RegionTreePath>           dst_privilege_paths;
       std::vector<unsigned>                 src_parent_indexes;
       std::vector<unsigned>                 dst_parent_indexes;
-      LegionVector<VersionInfo>::aligned    src_versions;
-      LegionVector<VersionInfo>::aligned    dst_versions;
+      LegionVector<VersionInfo>             src_versions;
+      LegionVector<VersionInfo>             dst_versions;
     public: // These are only used for indirect copies
       std::vector<RegionTreePath>           gather_privilege_paths;
       std::vector<RegionTreePath>           scatter_privilege_paths;
@@ -1336,8 +1336,8 @@ namespace Legion {
       std::vector<unsigned>                 scatter_parent_indexes;
       std::vector<bool>                     gather_is_range;
       std::vector<bool>                     scatter_is_range;
-      LegionVector<VersionInfo>::aligned    gather_versions;
-      LegionVector<VersionInfo>::aligned    scatter_versions;
+      LegionVector<VersionInfo>             gather_versions;
+      LegionVector<VersionInfo>             scatter_versions;
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
@@ -1396,7 +1396,7 @@ namespace Legion {
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
-          LegionVector<IndirectRecord>::aligned &records, const bool sources); 
+          LegionVector<IndirectRecord> &records, const bool sources); 
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
@@ -1414,8 +1414,8 @@ namespace Legion {
       IndexSpaceNode*                                    launch_space;
     protected:
       std::vector<PointCopyOp*>                          points;
-      std::vector<LegionVector<IndirectRecord>::aligned> src_records;
-      std::vector<LegionVector<IndirectRecord>::aligned> dst_records;
+      std::vector<LegionVector<IndirectRecord> >         src_records;
+      std::vector<LegionVector<IndirectRecord> >         dst_records;
       std::vector<std::vector<ApEvent> >                 exchange_pre_events;
       std::vector<std::vector<ApEvent> >                 exchange_post_events;
       std::vector<ApUserEvent>                           pre_merged;
@@ -1464,7 +1464,7 @@ namespace Legion {
           const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           const DomainPoint &key,
-          LegionVector<IndirectRecord>::aligned &records, const bool sources);
+          LegionVector<IndirectRecord> &records, const bool sources);
     public:
       // For collective instances
       virtual CollectiveManager* find_or_create_collective_instance(
@@ -1708,7 +1708,7 @@ namespace Legion {
       std::vector<unsigned> deletion_req_indexes;
       std::vector<bool> returnable_privileges;
       std::vector<RegionRequirement> deletion_requirements;
-      LegionVector<VersionInfo>::aligned version_infos;
+      LegionVector<VersionInfo> version_infos;
       std::set<RtEvent> map_applied_conditions;
       std::map<Operation*,GenerationID> dependences;
       bool has_preconditions;

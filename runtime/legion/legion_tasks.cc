@@ -1825,7 +1825,7 @@ namespace Legion {
         if (indexes.size() <= 1)
           continue;
         // Get the field masks for each of the requirements
-        LegionVector<FieldMask>::aligned field_masks(indexes.size());
+        LegionVector<FieldMask> field_masks(indexes.size());
         std::vector<IndexTreeNode*> index_nodes(indexes.size());
         {
           FieldSpaceNode *field_space_node = 

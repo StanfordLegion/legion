@@ -1373,8 +1373,7 @@ namespace Legion {
       // unordered detach operations can touch it without synchronizing
       // with the executing task
       mutable LocalLock inline_lock;
-      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
-                                                inline_regions;
+      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC> inline_regions;
     protected:
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
@@ -1383,11 +1382,11 @@ namespace Legion {
       size_t total_summary_count;
       size_t outstanding_children_count;
       LegionMap<Operation*,GenerationID,
-                EXECUTING_CHILD_ALLOC>::tracked executing_children;
+                EXECUTING_CHILD_ALLOC> executing_children;
       LegionMap<Operation*,GenerationID,
-                EXECUTED_CHILD_ALLOC>::tracked executed_children;
+                EXECUTED_CHILD_ALLOC> executed_children;
       LegionMap<Operation*,GenerationID,
-                COMPLETE_CHILD_ALLOC>::tracked complete_children; 
+                COMPLETE_CHILD_ALLOC> complete_children; 
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted
       // into the stream of operations from the task
@@ -1419,7 +1418,7 @@ namespace Legion {
       CompletionQueue                                 post_task_comp_queue;
     protected:
       // Traces for this task's execution
-      LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
+      LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC> traces;
       LegionTrace *current_trace;
       LegionTrace *previous_trace;
       bool valid_wait_event;
@@ -1503,8 +1502,8 @@ namespace Legion {
         std::vector<AttachProjectionFunctor*> > attach_functions;
     protected:
       // Resources that can build up over a task's lifetime
-      LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
-      LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
+      LegionDeque<Reservation,TASK_RESERVATION_ALLOC> context_locks;
+      LegionDeque<ApBarrier,TASK_BARRIER_ALLOC> context_barriers;
     };
 
     /**
