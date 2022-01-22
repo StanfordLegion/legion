@@ -727,6 +727,9 @@ namespace Legion {
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
     public:
+      inline bool field_mask_set_less(const PhysicalUser *rhs) const
+        { return std::less<const PhysicalUser*>{}(this, rhs); }
+    public:
       void pack_user(Serializer &rez, const AddressSpaceID target) const;
       static PhysicalUser* unpack_user(Deserializer &derez, 
               RegionTreeForest *forest, const AddressSpaceID source);
@@ -791,6 +794,9 @@ namespace Legion {
       ~RefProjectionSummary(void);
     public:
       RefProjectionSummary& operator=(const RefProjectionSummary &rhs);
+    public:
+      inline bool field_mask_set_less(const RefProjectionSummary *rhs) const
+        { return std::less<const RefProjectionSummary*>{}(this, rhs); }
     public:
       void project_refinement(RegionTreeNode *node, 
                               std::vector<RegionNode*> &regions) const;
@@ -1242,6 +1248,9 @@ namespace Legion {
     public:
       CopyFillGuard& operator=(const CopyFillGuard &rhs);
     public:
+      inline bool field_mask_set_less(const CopyFillGuard *rhs) const
+        { return std::less<const CopyFillGuard*>{}(this, rhs); }
+    public:
       void pack_guard(Serializer &rez);
       static CopyFillGuard* unpack_guard(Deserializer &derez, Runtime *rt,
                                          EquivalenceSet *set);
@@ -1320,6 +1329,9 @@ namespace Legion {
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
                CopyAcrossHelper *helper);
         virtual ~Update(void); 
+      public:
+        inline bool field_mask_set_less(const Update *rhs) const
+          { return std::less<const Update*>{}(this, rhs); }
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;
@@ -2273,6 +2285,9 @@ namespace Legion {
      */
     class EqSetTracker {
     public:
+      inline bool field_mask_set_less(const EqSetTracker *rhs) const
+        { return std::less<const EqSetTracker*>{}(this, rhs); }
+    public:
       virtual ~EqSetTracker(void) { }
     public:
       virtual void add_tracker_reference(unsigned cnt = 1) = 0;
@@ -2352,6 +2367,9 @@ namespace Legion {
       public:
         PendingReplication(CollectiveMapping *mapping, unsigned notifications);
         ~PendingReplication(void);
+      public:
+        inline bool field_mask_set_less(const PendingReplication *rhs) const
+          { return std::less<const PendingReplication*>{}(this, rhs); }
       public:
         CollectiveMapping *const mapping;
         const RtUserEvent ready_event;
@@ -2443,6 +2461,8 @@ namespace Legion {
     public:
       EquivalenceSet& operator=(const EquivalenceSet &rhs);
     public:
+      inline bool field_mask_set_less(const EquivalenceSet *rhs) const
+        { return (did < rhs->did); }
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
@@ -2816,11 +2836,24 @@ namespace Legion {
       RegionNode *const region_node;
       IndexSpaceNode *const set_expr;
     protected:
-      // This is the physical state of the equivalence set
       mutable LocalLock                                 eq_lock;
+      // This is the physical state of the equivalence set
+      // Note that we need these data structures to be deterministically 
+      // ordered for cases where we replicate the equivalence set so that
+      // analyses will traverse it and update themselves in the same way
+      // All the FieldMaskSet data structures are ordered via the use of
+      // the field_mask_set_less method on types. We still need explicit
+      // comparators though for some of the other data structures though
+      // but we can rely on the same method.
+      template<typename T>
+      struct Comparator {
+        inline bool operator()(const T *lhs, const T *rhs) const
+          { return lhs->field_mask_set_less(rhs); }
+      };
       FieldMaskSet<LogicalView>                         total_valid_instances;
-      LegionMap<LogicalView*,
-        FieldMaskSet<IndexSpaceExpression> >            partial_valid_instances;
+      typedef LegionMap<LogicalView*, FieldMaskSet<IndexSpaceExpression>,
+              UNTRACKED_ALLOC, Comparator<LogicalView> > ViewExprMaskSets;
+      ViewExprMaskSets                                  partial_valid_instances;
       FieldMask                                         partial_valid_fields;
       // Expressions and fields that have valid data
       FieldMaskSet<IndexSpaceExpression>                initialized_data;
@@ -2830,13 +2863,13 @@ namespace Legion {
       FieldMask                                         reduction_fields;
       // The list of expressions with the single instance for each
       // field that represents the restriction of that expression
-      LegionMap<IndexSpaceExpression*,
-        FieldMaskSet<InstanceView> >                    restricted_instances;
+      typedef LegionMap<IndexSpaceExpression*, FieldMaskSet<InstanceView>,
+          UNTRACKED_ALLOC, Comparator<IndexSpaceExpression> > ExprViewMaskSets;
+      ExprViewMaskSets                                  restricted_instances;
       // Summary of any field that has a restriction
       FieldMask                                         restricted_fields;
       // List of instances that were restricted, but have been acquired
-      LegionMap<IndexSpaceExpression*,
-        FieldMaskSet<InstanceView> >                    released_instances;
+      ExprViewMaskSets                                  released_instances;
     protected:
       // Tracing state for this equivalence set
       TraceViewSet                                      *tracing_preconditions;
@@ -2910,6 +2943,9 @@ namespace Legion {
       ~PendingEquivalenceSet(void);
     public:
       PendingEquivalenceSet& operator=(const PendingEquivalenceSet &rhs);
+    public:
+      inline bool field_mask_set_less(const PendingEquivalenceSet *rhs) const
+        { return std::less<const PendingEquivalenceSet*>{}(this, rhs); }
     public:
       void record_previous(EquivalenceSet *set, const FieldMask &mask,
                            std::set<RtEvent> &applied_events);

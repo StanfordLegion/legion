@@ -2421,6 +2421,8 @@ namespace Legion {
       CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
       CollectiveMapping(Deserializer &derez);
     public:
+      inline bool field_mask_set_less(const CollectiveMapping *rhs) const
+        { return std::less<const CollectiveMapping*>{}(this, rhs); }
       inline AddressSpaceID operator[](unsigned idx) const
         { return unique_sorted_spaces[idx]; }
       inline size_t size(void) const { return unique_sorted_spaces.size(); }

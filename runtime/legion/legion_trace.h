@@ -764,6 +764,8 @@ namespace Legion {
                  IndexSpaceExpression *e, int s)
           : usage(r), user(u), expr(e), shard(s)
         {}
+        inline bool field_mask_set_less(const ViewUser *other) const
+          { return std::less<const ViewUser*>{}(this, other); }
         const RegionUsage usage;
         const unsigned user;
         IndexSpaceExpression *const expr;

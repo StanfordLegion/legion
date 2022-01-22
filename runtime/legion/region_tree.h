@@ -53,6 +53,9 @@ namespace Legion {
                      const DomainPoint &key, IndexSpace handle, 
                      const Domain &d);
     public:
+      inline bool field_mask_set_less(const IndirectRecord *rhs) const
+        { return std::less<const IndirectRecord*>{}(this, rhs); }
+    public:
       FieldMask fields;
       PhysicalInstance inst;
 #ifdef LEGION_SPY
@@ -1205,6 +1208,9 @@ namespace Legion {
       IndexSpaceExpression(TypeTag tag, Runtime *runtime, LocalLock &lock); 
       IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id, LocalLock &lock);
       virtual ~IndexSpaceExpression(void);
+    public:
+      inline bool field_mask_set_less(const IndexSpaceExpression *rhs) const
+        { return (expr_id < rhs->expr_id); }
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
@@ -3890,6 +3896,8 @@ namespace Legion {
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
+      inline bool field_mask_set_less(const RegionTreeNode *rhs) const
+        { return (did < rhs->did); } 
       inline LogicalState& get_logical_state(ContextID ctx)
       {
         return *(logical_states.lookup_entry(ctx, this, ctx));
