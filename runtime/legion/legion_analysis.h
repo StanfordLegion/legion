@@ -1516,7 +1516,7 @@ namespace Legion {
       inline const FieldMask& get_update_fields(void) const 
         { return update_fields; }
     public:
-      static void handle_aggregation(const void *args);
+      static void handle_aggregation(const void *args); 
     public:
       RegionTreeForest *const forest;
       const AddressSpaceID local_space;
@@ -1549,14 +1549,27 @@ namespace Legion {
       struct SourceQuery {
       public:
         SourceQuery(void) { }
-        SourceQuery(const std::set<InstanceView*> &srcs,
-                    const FieldMask &src_mask,
-                    InstanceView *res)
-          : sources(srcs), query_mask(src_mask), result(res) { }
+        SourceQuery(std::vector<InstanceView*> &&srcs,
+                    std::vector<unsigned> &&rank,
+                    const FieldMask &src_mask)
+          : sources(srcs), ranking(rank), query_mask(src_mask) { }
       public:
-        std::set<InstanceView*> sources;
+        inline bool matches(const FieldMask &mask,
+                            const std::vector<InstanceView*> &srcs) const
+          {
+            if (mask != query_mask)
+              return false;
+            if (srcs.size() != sources.size())
+              return false;
+            for (unsigned idx = 0; idx < sources.size(); idx++)
+              if (srcs[idx] != sources[idx])
+                return false;
+            return true;
+          }
+      public:
+        std::vector<InstanceView*> sources;
+        std::vector<unsigned> ranking;
         FieldMask query_mask;
-        InstanceView *result;
       };
       // Cached calls to the mapper for selecting sources
       std::map<InstanceView*,LegionVector<SourceQuery> > mapper_queries;

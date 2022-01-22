@@ -4771,6 +4771,19 @@ namespace Legion {
       }
     }
 
+    // Small helper methods here for doing sorting in the functions below
+    static inline bool inst_view_less(const InstanceView *v1,
+                                      const InstanceView *v2)
+    { 
+      return (v1->did < v2->did); 
+    }
+
+    static inline bool deferred_view_less(const DeferredView *v1,
+                                          const DeferredView *v2)
+    {
+      return (v1->did < v2->did);
+    }
+
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_updates(InstanceView *dst_view, 
                                     const FieldMaskSet<LogicalView> &src_views,
@@ -4909,8 +4922,9 @@ namespace Legion {
                 // ask the mapper which one to use
                 // First though check to see if we've already asked it
                 bool found = false;
-                const std::set<InstanceView*> instances_set(instances.begin(),
-                                                            instances.end());
+                // Sort the sources so that they appear determinstically
+                // to the mapper for replicated cases
+                std::sort(instances.begin(), instances.end(), inst_view_less);
                 std::map<InstanceView*,LegionVector<SourceQuery>>::
                   const_iterator finder = mapper_queries.find(dst_view);
                 if (finder != mapper_queries.end())
@@ -4919,12 +4933,12 @@ namespace Legion {
                         finder->second.begin(); qit != 
                         finder->second.end(); qit++)
                   {
-                    if ((qit->query_mask == vit->set_mask) &&
-                        (qit->sources == instances_set))
+                    if (qit->matches(vit->set_mask, instances))
                     {
                       found = true;
-                      record_view(qit->result);
-                      CopyUpdate *update = new CopyUpdate(qit->result, 
+                      InstanceView *result = instances[qit->ranking.front()];
+                      record_view(result);
+                      CopyUpdate *update = new CopyUpdate(result,
                                     qit->query_mask, expr, redop, helper);
                       if (helper == NULL)
                         updates.insert(update, qit->query_mask);
@@ -4932,7 +4946,7 @@ namespace Legion {
                         updates.insert(update, 
                             helper->convert_src_to_dst(qit->query_mask));
                       if (tracing_eq != NULL)
-                        update_tracing_valid_views(tracing_eq, qit->result,
+                        update_tracing_valid_views(tracing_eq, result,
                           dst_view, qit->query_mask, expr, redop, applied);
                       break;
                     }
@@ -4954,14 +4968,31 @@ namespace Legion {
                   std::vector<unsigned> ranking;
                   // Always use the source index for selecting sources
                   op->select_sources(src_index, dst, sources, ranking);
+                  // Check to make sure that the ranking has sound output
+                  unsigned count = 0;
+                  std::vector<bool> unique_indexes(instances.size(), false);
+                  for (std::vector<unsigned>::iterator it =
+                        ranking.begin(); it != ranking.end(); /*nothing*/)
+                  {
+                    if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
+                    {
+                      unique_indexes[*it] = true;
+                      count++;
+                      it++;
+                    }
+                    else // remove duplicates and out of bound entries
+                      it = ranking.erase(it);
+                  }
+                  if (count < unique_indexes.size())
+                  {
+                    for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
+                      if (!unique_indexes[idx])
+                        ranking.push_back(idx);
+                  }
                   // We know that which ever one was chosen first is
                   // the one that satisfies all our fields since all
                   // these instances are valid for all fields
-                  InstanceView *result;
-                  if (!ranking.empty() && (ranking.front() < instances.size()))
-                    result = instances[ranking.front()];
-                  else
-                    result = instances.front();
+                  InstanceView *result = instances[ranking.front()];
                   // Record the update
                   record_view(result);
                   CopyUpdate *update = new CopyUpdate(result, vit->set_mask,
@@ -4976,7 +5007,8 @@ namespace Legion {
                                        vit->set_mask, expr, redop, applied);
                   // Save the result for the future
                   mapper_queries[dst_view].push_back(
-                      SourceQuery(instances_set, vit->set_mask, result));
+                      SourceQuery(std::move(instances), 
+                        std::move(ranking), vit->set_mask));
                 }
               }
             }
@@ -5093,44 +5125,68 @@ namespace Legion {
         std::vector<unsigned> ranking;
         if (instances.size() > 1)
         {
-          // Can't use the cache query version here since we're not just
-          // picking the first valid instance
-          InstanceRef dst(dst_view->get_manager(), remainders.get_valid_mask());
-          InstanceSet sources(instances.size());
-          unsigned src_idx = 0;
-          for (std::vector<InstanceView*>::const_iterator it = 
-                instances.begin(); it != instances.end(); it++)
+          // Sort the instances so that they are in order in case we've
+          // replicated this analysis 
+          std::sort(instances.begin(), instances.end(), inst_view_less);
+          // Check to see if we can find it, if not then we'll need to
+          // ask the mapper to compute it
+          bool found = false;
+          std::map<InstanceView*,LegionVector<SourceQuery>>::
+            const_iterator finder = mapper_queries.find(dst_view);
+          if (finder != mapper_queries.end())
           {
-            LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
-              const_iterator finder = src_views.find(*it);
-#ifdef DEBUG_LEGION
-            assert(finder != src_views.end());
-#endif
-            sources[src_idx++] = InstanceRef((*it)->get_manager(),
-                finder->second.get_valid_mask() & remainders.get_valid_mask());
-          }
-          // Always use the source index for selecting sources
-          op->select_sources(src_index, dst, sources, ranking);
-          // Check to make sure that the ranking has sound output
-          unsigned count = 0;
-          std::vector<bool> unique_indexes(instances.size(), false);
-          for (std::vector<unsigned>::iterator it =
-                ranking.begin(); it != ranking.end(); /*nothing*/)
-          {
-            if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
+            for (LegionVector<SourceQuery>::const_iterator qit = 
+                  finder->second.begin(); qit != 
+                  finder->second.end(); qit++)
             {
-              unique_indexes[*it] = true;
-              count++;
-              it++;
+              if (qit->matches(src_mask, instances))
+              {
+                found = true;
+                ranking = qit->ranking;
+                break;
+              }
             }
-            else // remove duplicates and out of bound entries
-              it = ranking.erase(it);
           }
-          if (count < unique_indexes.size())
+          if (!found)
           {
-            for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
-              if (!unique_indexes[idx])
-                ranking.push_back(idx);
+            InstanceRef dst(dst_view->get_manager(), 
+                            remainders.get_valid_mask());
+            InstanceSet sources(instances.size());
+            unsigned src_idx = 0;
+            for (std::vector<InstanceView*>::const_iterator it = 
+                  instances.begin(); it != instances.end(); it++)
+            {
+              LegionMap<LogicalView*,FieldMaskSet<IndexSpaceExpression> >::
+                const_iterator finder = src_views.find(*it);
+#ifdef DEBUG_LEGION
+              assert(finder != src_views.end());
+#endif
+              sources[src_idx++] = InstanceRef((*it)->get_manager(),
+                 finder->second.get_valid_mask() & remainders.get_valid_mask());
+            }
+            // Always use the source index for selecting sources
+            op->select_sources(src_index, dst, sources, ranking);
+            // Check to make sure that the ranking has sound output
+            unsigned count = 0;
+            std::vector<bool> unique_indexes(instances.size(), false);
+            for (std::vector<unsigned>::iterator it =
+                  ranking.begin(); it != ranking.end(); /*nothing*/)
+            {
+              if (((*it) < unique_indexes.size()) && !unique_indexes[*it])
+              {
+                unique_indexes[*it] = true;
+                count++;
+                it++;
+              }
+              else // remove duplicates and out of bound entries
+                it = ranking.erase(it);
+            }
+            if (count < unique_indexes.size())
+            {
+              for (unsigned idx = 0; idx < unique_indexes.size(); idx++)
+                if (!unique_indexes[idx])
+                  ranking.push_back(idx);
+            }
           }
         }
         else
@@ -5196,6 +5252,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(redop == 0);
 #endif
+        // Sort deferred views for determinism as well
+        std::sort(deferred.begin(), deferred.end(), deferred_view_less);
         for (unsigned idx = 0; idx < deferred.size(); idx++)
         {
           DeferredView *def = deferred[idx];
