@@ -1549,8 +1549,8 @@ namespace Legion {
       struct SourceQuery {
       public:
         SourceQuery(void) { }
-        SourceQuery(const std::set<InstanceView*> srcs,
-                    const FieldMask src_mask,
+        SourceQuery(const std::set<InstanceView*> &srcs,
+                    const FieldMask &src_mask,
                     InstanceView *res)
           : sources(srcs), query_mask(src_mask), result(res) { }
       public:
@@ -2462,7 +2462,7 @@ namespace Legion {
       EquivalenceSet& operator=(const EquivalenceSet &rhs);
     public:
       inline bool field_mask_set_less(const EquivalenceSet *rhs) const
-        { return (did < rhs->did); }
+        { return std::less<const EquivalenceSet*>{}(this, rhs); }
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
