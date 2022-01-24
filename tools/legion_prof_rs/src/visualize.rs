@@ -650,6 +650,9 @@ impl fmt::Display for FSpacePretty<'_> {
                 }
                 if fields.peek().is_some() {
                     write!(f, ",")?;
+                    if i % 5 == 0 {
+                        write!(f, "$")?;
+                    }
                 }
             }
             write!(f, "]")?;
