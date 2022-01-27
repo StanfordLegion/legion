@@ -1701,8 +1701,7 @@ namespace Legion {
 #endif
       runtime->unregister_distributed_collectable(did);
       if (!remote_instances.empty())
-        runtime->recycle_distributed_id(did, 
-                     send_unregister_messages(REFERENCE_VIRTUAL_CHANNEL));
+        runtime->recycle_distributed_id(did, send_unregister_messages());
       else
         runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
     }
@@ -1715,24 +1714,21 @@ namespace Legion {
       Serializer rez;
       rez.serialize(did);
       rez.serialize(done_event); 
-      runtime->send_did_remote_unregister(target, rez, vc);
+      runtime->send_did_remote_unregister(target, rez);
       done_events.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
     DistributedCollectable::DeferRemoteUnregisterArgs::
-      DeferRemoteUnregisterArgs(DistributedID id, VirtualChannelKind c, 
-                                const NodeSet &n)
+      DeferRemoteUnregisterArgs(DistributedID id, const NodeSet &n)
       : LgTaskArgs<DeferRemoteUnregisterArgs>(implicit_provenance),
-        done(Runtime::create_rt_user_event()), did(id), vc(c),
-        nodes(new NodeSet(n))
+        done(Runtime::create_rt_user_event()), did(id), nodes(new NodeSet(n))
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_unregister_messages(
-                                                    VirtualChannelKind vc) const
+    RtEvent DistributedCollectable::send_unregister_messages(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1745,13 +1741,13 @@ namespace Legion {
       // this particular event precondition
       if (reentrant_event.exists() && !reentrant_event.has_triggered())
       {
-        DeferRemoteUnregisterArgs args(did, vc, remote_instances);
+        DeferRemoteUnregisterArgs args(did, remote_instances);
         runtime->issue_runtime_meta_task(args,
             LG_LATENCY_MESSAGE_PRIORITY, reentrant_event);
         return args.done;
       }
       std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, did, vc, done_events); 
+      UnregisterFunctor functor(runtime, did, done_events); 
       // No need for the lock since we're being destroyed
       remote_instances.map(functor);
       return Runtime::merge_events(done_events);
@@ -2159,7 +2155,7 @@ namespace Legion {
       const DeferRemoteUnregisterArgs *dargs = 
         (const DeferRemoteUnregisterArgs*)args;
       std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, dargs->did, dargs->vc, done_events);
+      UnregisterFunctor functor(runtime, dargs->did, done_events);
       dargs->nodes->map(functor);
       if (!done_events.empty())
         Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));

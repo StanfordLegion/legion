@@ -272,14 +272,13 @@ namespace Legion {
       class UnregisterFunctor {
       public:
         UnregisterFunctor(Runtime *rt, const DistributedID d,
-                          VirtualChannelKind v, std::set<RtEvent> &done)
-          : runtime(rt), did(d), vc(v), done_events(done) { }
+                          std::set<RtEvent> &done)
+          : runtime(rt), did(d), done_events(done) { }
       public:
         void apply(AddressSpaceID target);
       protected:
         Runtime *const runtime;
         const DistributedID did;
-        const VirtualChannelKind vc;
         std::set<RtEvent> &done_events;
       };
       struct DeferRemoteReferenceUpdateArgs : 
@@ -305,12 +304,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_REMOTE_UNREGISTER_TASK_ID;
       public:
-        DeferRemoteUnregisterArgs(DistributedID id, VirtualChannelKind c,
-                                  const NodeSet &nodes);
+        DeferRemoteUnregisterArgs(DistributedID id, const NodeSet &nodes);
       public:
         const RtUserEvent done;
         const DistributedID did;
-        const VirtualChannelKind vc;
         NodeSet *const nodes;
       };
     public:
@@ -415,7 +412,7 @@ namespace Legion {
       void register_with_runtime(ReferenceMutator *mutator);
     protected:
       void unregister_with_runtime(void) const;
-      RtEvent send_unregister_messages(VirtualChannelKind vc) const;
+      RtEvent send_unregister_messages(void) const;
     public:
       // This for remote nodes only
       void unregister_collectable(void);

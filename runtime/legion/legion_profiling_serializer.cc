@@ -63,6 +63,8 @@ namespace Legion {
       ss << "MetaDesc {" 
          << "id:" << META_DESC_ID                   << delim
          << "kind:unsigned:"     << sizeof(unsigned) << delim
+         << "message:bool:"      << sizeof(bool) << delim
+         << "ordered_vc:bool:"   << sizeof(bool) << delim
          << "name:string:" << "-1"
          << "}" << std::endl;
 
@@ -455,6 +457,8 @@ namespace Legion {
       int ID = META_DESC_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(meta_desc.kind), sizeof(meta_desc.kind));
+      lp_fwrite(f, (char*)&(meta_desc.message), sizeof(meta_desc.message));
+      lp_fwrite(f, (char*)&(meta_desc.ordered_vc),sizeof(meta_desc.ordered_vc));
       lp_fwrite(f, meta_desc.name, strlen(meta_desc.name) + 1);
     }
 
@@ -1511,7 +1515,8 @@ namespace Legion {
                                       const LegionProfDesc::MetaDesc &meta_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Meta Desc %u %s", meta_desc.kind, meta_desc.name);
+      log_prof.print("Prof Meta Desc %u %d %d %s", meta_desc.kind,
+       meta_desc.message ? 1 : 0, meta_desc.ordered_vc ? 1 : 0, meta_desc.name);
     }
 
     //--------------------------------------------------------------------------
