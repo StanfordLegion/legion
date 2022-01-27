@@ -2650,22 +2650,21 @@ namespace Legion {
      * A template helper class for tracking collections of 
      * objects associated with different sets of fields
      */
-    template<typename T, AllocationType A = UNTRACKED_ALLOC>
+    template<typename T, AllocationType A = UNTRACKED_ALLOC,
+             bool DETERMINISTIC = false>
     class FieldMaskSet : 
       public LegionHeapify<FieldMaskSet<T> > {
-    public:
-      // We want iterating over the elements in FieldMaskSet data
-      // structures to be deterministic in most cases so we force
-      // all the types that we use to instantiate this class to have
-      // 'field_mask_set_less' method that returns whether one key
-      // pointer is strictly less than another key pointer. This 
-      // implementation can still be non-deterministic if we want,
-      // but we'll at least have to opt into it explicitly.
-      struct Comparator {
+    private:
+      // Call the deterministic pointer less method for
+      // any types that have asked for deterministic sets
+      template<typename U>
+      struct DeterministicComparator {
       public:
-        inline bool operator()(const T *one, const T *two) const
-          { return one->field_mask_set_less(two); }
+        inline bool operator()(const U *one, const U *two) const
+          { return one->deterministic_pointer_less(two); }
       };
+      using Comparator = typename std::conditional<DETERMINISTIC,
+            DeterministicComparator<T>, std::less<const T*> >::type;
     public:
       // forward declaration
       class const_iterator;
@@ -2871,14 +2870,14 @@ namespace Legion {
       FieldMaskSet(void)
         : single(true) { entries.single_entry = NULL; }
       inline FieldMaskSet(T *init, const FieldMask &m, bool no_null = true);
-      inline FieldMaskSet(const FieldMaskSet<T,A> &rhs);
-      inline FieldMaskSet(FieldMaskSet<T,A> &&rhs);
+      inline FieldMaskSet(const FieldMaskSet<T,A,DETERMINISTIC> &rhs);
+      inline FieldMaskSet(FieldMaskSet<T,A,DETERMINISTIC> &&rhs);
       // If copy is set to false then this is a move constructor
-      inline FieldMaskSet(FieldMaskSet<T,A> &rhs, bool copy);
+      inline FieldMaskSet(FieldMaskSet<T,A,DETERMINISTIC> &rhs, bool copy);
       ~FieldMaskSet(void) { clear(); }
     public:
-      inline FieldMaskSet& operator=(const FieldMaskSet<T,A> &rhs);
-      inline FieldMaskSet& operator=(FieldMaskSet<T,A> &&rhs);
+      inline FieldMaskSet& operator=(const FieldMaskSet<T,A,DETERMINISTIC> &rh);
+      inline FieldMaskSet& operator=(FieldMaskSet<T,A,DETERMINISTIC> &&rhs);
     public:
       inline bool empty(void) const 
         { return single && (entries.single_entry == NULL); }
@@ -2912,7 +2911,7 @@ namespace Legion {
       inline void compute_field_sets(FieldMask universe_mask,
                     LegionList<FieldSet<T*> > &output_sets) const;
     protected:
-      template<typename T2, AllocationType A2>
+      template<typename T2, AllocationType A2, bool D2>
       friend class FieldMaskSet; 
 
       // Fun with C, keep these two fields first and in this order
@@ -2929,9 +2928,9 @@ namespace Legion {
     };
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>::FieldMaskSet(T *init, const FieldMask &mask, 
-                                           bool no_null)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(T *init, const FieldMask &mask, 
+                                             bool no_null)
       : single(true)
     //--------------------------------------------------------------------------
     {
@@ -2943,8 +2942,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>::FieldMaskSet(const FieldMaskSet<T,A> &rhs)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(const FieldMaskSet<T,A,D> &rhs)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
@@ -2957,8 +2956,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>::FieldMaskSet(FieldMaskSet<T,A> &&rhs)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(FieldMaskSet<T,A,D> &&rhs)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
@@ -2972,8 +2971,8 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>::FieldMaskSet(FieldMaskSet<T,A> &rhs, bool copy)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>::FieldMaskSet(FieldMaskSet<T,A,D> &rhs,bool copy)
       : valid_fields(rhs.valid_fields), single(rhs.single)
     //--------------------------------------------------------------------------
     {
@@ -2999,9 +2998,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>& FieldMaskSet<T,A>::operator=(
-                                                   const FieldMaskSet<T,A> &rhs)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>& FieldMaskSet<T,A,D>::operator=(
+                                                 const FieldMaskSet<T,A,D> &rhs)
     //--------------------------------------------------------------------------
     {
       // Check our current state
@@ -3040,9 +3039,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline FieldMaskSet<T,A>& FieldMaskSet<T,A>::operator=(
-                                                        FieldMaskSet<T,A> &&rhs)
+    template<typename T, AllocationType A, bool D>
+    inline FieldMaskSet<T,A,D>& FieldMaskSet<T,A,D>::operator=(
+                                                      FieldMaskSet<T,A,D> &&rhs)
     //--------------------------------------------------------------------------
     {
       // Check our current state
@@ -3082,8 +3081,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline const FieldMask& FieldMaskSet<T,A>::tighten_valid_mask(void)
+    template<typename T, AllocationType A, bool D>
+    inline const FieldMask& FieldMaskSet<T,A,D>::tighten_valid_mask(void)
     //--------------------------------------------------------------------------
     {
       // If we're single then there is nothing to do as we're already tight
@@ -3098,8 +3097,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::relax_valid_mask(const FieldMask &m)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::relax_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
       if (single && (entries.single_entry != NULL))
@@ -3116,24 +3115,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::filter_valid_mask(const FieldMask &m)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::filter_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
       valid_fields -= m;
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::restrict_valid_mask(const FieldMask &m)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::restrict_valid_mask(const FieldMask &m)
     //--------------------------------------------------------------------------
     {
       valid_fields &= m;
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline const FieldMask& FieldMaskSet<T,A>::operator[](T *entry) const
+    template<typename T, AllocationType A, bool D>
+    inline const FieldMask& FieldMaskSet<T,A,D>::operator[](T *entry) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3155,8 +3154,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline bool FieldMaskSet<T,A>::insert(T *entry, const FieldMask &mask)
+    template<typename T, AllocationType A, bool D>
+    inline bool FieldMaskSet<T,A,D>::insert(T *entry, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       bool result = true;
@@ -3204,8 +3203,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::filter(const FieldMask &filter, bool tighten)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::filter(const FieldMask &filter,
+                                            bool tighten)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3277,8 +3277,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::erase(T *to_erase)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::erase(T *to_erase)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3311,8 +3311,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::clear(void)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::clear(void)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3330,8 +3330,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline size_t FieldMaskSet<T,A>::size(void) const
+    template<typename T, AllocationType A, bool D>
+    inline size_t FieldMaskSet<T,A,D>::size(void) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3346,8 +3346,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::swap(FieldMaskSet &other)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::swap(FieldMaskSet &other)
     //--------------------------------------------------------------------------
     {
       // Just use single, doesn't matter for swap
@@ -3365,8 +3365,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::iterator FieldMaskSet<T,A>::begin(void)
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::iterator 
+                                                FieldMaskSet<T,A,D>::begin(void)
     //--------------------------------------------------------------------------
     {
       // Scariness!
@@ -3386,8 +3387,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::iterator FieldMaskSet<T,A>::find(T *e)
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::iterator
+                                                 FieldMaskSet<T,A,D>::find(T *e)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3411,8 +3413,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::erase(iterator &it)
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::erase(iterator &it)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3444,8 +3446,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::iterator FieldMaskSet<T,A>::end(void)
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::iterator FieldMaskSet<T,A,D>::end(void)
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3455,9 +3457,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::const_iterator 
-                                            FieldMaskSet<T,A>::begin(void) const
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::const_iterator 
+                                          FieldMaskSet<T,A,D>::begin(void) const
     //--------------------------------------------------------------------------
     {
       // Scariness!
@@ -3477,9 +3479,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::const_iterator 
-                                             FieldMaskSet<T,A>::find(T *e) const
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::const_iterator 
+                                           FieldMaskSet<T,A,D>::find(T *e) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3503,9 +3505,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline typename FieldMaskSet<T,A>::const_iterator 
-                                              FieldMaskSet<T,A>::end(void) const
+    template<typename T, AllocationType A, bool D>
+    inline typename FieldMaskSet<T,A,D>::const_iterator 
+                                            FieldMaskSet<T,A,D>::end(void) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -3515,8 +3517,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, AllocationType A>
-    inline void FieldMaskSet<T,A>::compute_field_sets(FieldMask universe_mask,
+    template<typename T, AllocationType A, bool D>
+    inline void FieldMaskSet<T,A,D>::compute_field_sets(FieldMask universe_mask,
                                    LegionList<FieldSet<T*> > &output_sets) const
     //--------------------------------------------------------------------------
     {

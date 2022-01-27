@@ -2077,9 +2077,6 @@ namespace Legion {
     public:
       RefinementOp& operator=(const RefinementOp &rhs);
     public:
-      inline bool field_mask_set_less(const RefinementOp *rhs) const
-        { return std::less<const RefinementOp*>{}(this, rhs); }
-    public:
       void initialize(Operation *creator, unsigned idx, 
                       const LogicalTraceInfo &trace_info,
                       RegionNode *to_refine, const FieldMask &mask);

@@ -55,7 +55,7 @@ namespace Legion {
                   AddressSpaceID owner_proc, bool register_now);
       virtual ~LogicalView(void);
     public:
-      inline bool field_mask_set_less(const LogicalView *rhs) const
+      inline bool deterministic_pointer_less(const LogicalView *rhs) const
         { return (did < rhs->did); }
     public:
       inline bool is_instance_view(void) const;
@@ -316,8 +316,8 @@ namespace Legion {
     public:
       ExprView& operator=(const ExprView &rhs);
     public:
-      inline bool field_mask_set_less(const ExprView *rhs) const
-        { return view_expr->field_mask_set_less(rhs->view_expr); }
+      inline bool deterministic_pointer_less(const ExprView *rhs) const
+        { return view_expr->deterministic_pointer_less(rhs->view_expr); }
     public:
       virtual void add_collectable_reference(ReferenceMutator *mutator);
       virtual bool remove_collectable_reference(ReferenceMutator *mutator);

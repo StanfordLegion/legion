@@ -4771,19 +4771,6 @@ namespace Legion {
       }
     }
 
-    // Small helper methods here for doing sorting in the functions below
-    static inline bool inst_view_less(const InstanceView *v1,
-                                      const InstanceView *v2)
-    { 
-      return (v1->did < v2->did); 
-    }
-
-    static inline bool deferred_view_less(const DeferredView *v1,
-                                          const DeferredView *v2)
-    {
-      return (v1->did < v2->did);
-    }
-
     //--------------------------------------------------------------------------
     void CopyFillAggregator::record_updates(InstanceView *dst_view, 
                                     const FieldMaskSet<LogicalView> &src_views,
@@ -4922,9 +4909,6 @@ namespace Legion {
                 // ask the mapper which one to use
                 // First though check to see if we've already asked it
                 bool found = false;
-                // Sort the sources so that they appear determinstically
-                // to the mapper for replicated cases
-                std::sort(instances.begin(), instances.end(), inst_view_less);
                 std::map<InstanceView*,LegionVector<SourceQuery>>::
                   const_iterator finder = mapper_queries.find(dst_view);
                 if (finder != mapper_queries.end())
@@ -5125,9 +5109,6 @@ namespace Legion {
         std::vector<unsigned> ranking;
         if (instances.size() > 1)
         {
-          // Sort the instances so that they are in order in case we've
-          // replicated this analysis 
-          std::sort(instances.begin(), instances.end(), inst_view_less);
           // Check to see if we can find it, if not then we'll need to
           // ask the mapper to compute it
           bool found = false;
@@ -5252,8 +5233,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(redop == 0);
 #endif
-        // Sort deferred views for determinism as well
-        std::sort(deferred.begin(), deferred.end(), deferred_view_less);
         for (unsigned idx = 0; idx < deferred.size(); idx++)
         {
           DeferredView *def = deferred[idx];
