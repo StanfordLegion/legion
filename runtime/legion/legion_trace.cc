@@ -6903,7 +6903,7 @@ namespace Legion {
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
-        total_replays(0), refreshed_barriers(0), 
+        total_replays(0), refreshed_barriers(0), next_deferral_precondition(0), 
         recording_barrier(repl_ctx->get_next_trace_recording_barrier()),
         recurrent_replays(0), updated_frontiers(0)
     //--------------------------------------------------------------------------
