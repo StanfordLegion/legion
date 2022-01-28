@@ -413,7 +413,7 @@ function specialize.completeness_kind(cx, node)
 end
 
 function specialize.effect_expr(cx, node)
-  local span = ast.trivial_span()
+  local span = node.span
 
   local function make_field(field_path, i)
     if i > #field_path then

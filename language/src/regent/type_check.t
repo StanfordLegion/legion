@@ -145,15 +145,27 @@ function type_check.region_bare(cx, node)
   return region
 end
 
+local region_field = {}
+
+function region_field:__tostring()
+  local region = self.region
+  local fields = self.fields
+  if #fields == 1 then
+    return terralib.newlist({tostring(region), unpack(fields[1])}):concat(".")
+  else
+    local result = tostring(region) .. ".{" .. fields:map(function(field) return field:concat(".") end):concat(", ") .. "}"
+  end
+end
+
 function type_check.region_root(cx, node)
   local region = type_check.region_bare(cx, node)
   local region_type = region:gettype()
   local value_type = region_type:fspace()
-  return {
+  return setmetatable({
     region = region,
     fields = type_check.region_fields(
       cx, node.fields, region, data.newtuple(), value_type),
-  }
+  }, region_field)
 end
 
 function type_check.expr_region_root(cx, node)
@@ -269,7 +281,11 @@ local function check_coherence_conflict(node, region, field, coherence, result)
   end
 end
 
-function type_check.coherence(cx, node, result)
+local function coherence_string(coherence, region_field)
+  return tostring(coherence) .. "(" .. tostring(region_field) .. ")"
+end
+
+function type_check.coherence(cx, node, param_type_set, result)
   local coherence_modes = type_check.coherence_kinds(cx, node.coherence_modes)
   local region_fields = type_check.regions(cx, node.regions)
 
@@ -278,6 +294,10 @@ function type_check.coherence(cx, node, result)
       local region = region_field.region
       local region_type = region:gettype()
       assert(std.type_supports_privileges(region_type))
+      if not param_type_set[region_type] then
+        report.error(node, "requested " .. coherence_string(coherence, region_field) ..
+          " but " .. tostring(region) .. " is not a parameter")
+      end
 
       local fields = region_field.fields
       for _, field in ipairs(fields) do
@@ -288,10 +308,10 @@ function type_check.coherence(cx, node, result)
   end
 end
 
-function type_check.coherence_modes(cx, node)
+function type_check.coherence_modes(cx, node, param_type_set)
   local result = data.new_recursive_map(1)
   for _, coherence in ipairs(node) do
-    type_check.coherence(cx, coherence, result)
+    type_check.coherence(cx, coherence, param_type_set, result)
   end
   return result
 end
@@ -4658,6 +4678,11 @@ function type_check.top_task_param(cx, node, task, mapping, is_defined)
   }
 end
 
+local function privilege_string(privilege)
+  return tostring(privilege.privilege) .. "(" ..
+    terralib.newlist({tostring(privilege.region), unpack(privilege.field_path)}):concat(".") .. ")"
+end
+
 function type_check.top_task(cx, node)
   local return_type = node.return_type
   local is_cuda = node.annotations.cuda:is(ast.annotation.Demand)
@@ -4674,10 +4699,11 @@ function type_check.top_task(cx, node)
   prototype:set_param_symbols(
     params:map(function(param) return param.symbol end))
 
-  local task_type = terralib.types.functype(
-    params:map(function(param) return param.param_type end), return_type, false)
+  local param_types = params:map(function(param) return param.param_type end)
+  local task_type = terralib.types.functype(param_types, return_type, false)
   prototype:set_type(task_type)
 
+  local param_type_set = data.set(param_types)
   local privileges = type_check.privileges(cx, node.privileges)
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
@@ -4686,6 +4712,10 @@ function type_check.top_task(cx, node)
       local region_type = region:gettype()
       local field_path = privilege.field_path
       assert(std.type_supports_privileges(region_type))
+      if not param_type_set[region_type] then
+        report.error(node, "requested " .. privilege_string(privilege) ..
+          " but " .. tostring(region) .. " is not a parameter")
+      end
       if std.is_reduce(privilege_type) then
         local _, field_types =
           std.flatten_struct_fields(std.get_field_path(region_type:fspace(), field_path))
@@ -4697,10 +4727,8 @@ function type_check.top_task(cx, node)
           then
             std.update_reduction_op(privilege_type.op, field_type)
           else
-            report.error(node, "invalid field type for " ..
-              tostring(privilege.privilege) .. "(" ..
-              terralib.newlist({privilege.region:hasname(), unpack(privilege.region)}):concat(".") ..
-              "): " .. tostring(field_type))
+            report.error(node, "invalid field type for " .. privilege_string(privilege) ..
+              ": " .. tostring(field_type))
           end
         end)
       end
@@ -4710,7 +4738,7 @@ function type_check.top_task(cx, node)
   end
   prototype:set_privileges(privileges)
 
-  local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes)
+  local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes, param_type_set)
   prototype:set_coherence_modes(coherence_modes)
 
   local flags = type_check.flags(cx, node.flags)
