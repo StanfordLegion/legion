@@ -1244,14 +1244,16 @@ class StatObject(object):
                 print()
 
 class Variant(StatObject):
-    __slots__ = ['variant_id', 'name', 'op', 'task_kind', 'color']
-    def __init__(self, variant_id, name):
+    __slots__ = ['variant_id', 'name', 'op', 'task_kind', 'color', 'message', 'ordered_vc']
+    def __init__(self, variant_id, name, message = False, ordered_vc= False):
         StatObject.__init__(self)
         self.variant_id = variant_id
         self.name = name
         self.op = dict()
         self.task_kind = None
         self.color = None
+        self.message = message
+        self.ordered_vc = ordered_vc
 
     def __hash__(self):
         return hash(str(self))
@@ -2788,9 +2790,9 @@ class State(object):
         op = self.find_op(op_id)
         op.owner = parent
 
-    def log_meta_desc(self, kind, name):
+    def log_meta_desc(self, kind, message, ordered_vc, name):
         if kind not in self.meta_variants:
-            self.meta_variants[kind] = Variant(kind, name)
+            self.meta_variants[kind] = Variant(kind, name, message, ordered_vc)
         else:
             self.meta_variants[kind].name = name
 
@@ -3131,6 +3133,54 @@ class State(object):
         for channel in itervalues(self.channels):
             channel.init_time_range(self.last_time)
             channel.sort_time_range()
+
+    def check_message_latencies(self, threshold, warn_percentage):
+        if threshold < 0:
+            raise ValueError('Illegal threshold value, must be positive')
+        if warn_percentage < 0.0 or 100.0 < warn_percentage:
+            raise ValueError('Illegal warn percentage, must be a percentage')
+        # Iterate over all the variants looking for message variants
+        # on un-ordered virtual channels because we know that they are
+        # launched without an event precondition. Given Realm's current
+        # implementation, all of the latency between the create and ready
+        # time will then actually be time spent in the network because
+        # Realm will not check the event precondition until the active
+        # message for the task launch arrives on the remote node. This
+        # gives us a way to see how long message latencies are. We'll report
+        # a warning to users if enough messages are over the threshold.
+        total_messages = 0
+        bad_messages = 0
+        longest_latency = 0
+        for variant in itervalues(self.meta_variants):
+            if not variant.message:
+                continue
+            if variant.ordered_vc:
+                continue
+            total_messages += len(variant.op)
+            for op in itervalues(variant.op):
+                latency = op.ready - op.create
+                if threshold <= latency:
+                    bad_messages += 1
+                if longest_latency < latency:
+                    longest_latency = latency
+        if total_messages == 0:
+            return
+        percentage = 100.0 * bad_messages / total_messages
+        if warn_percentage <= percentage:
+            for _ in range(5):
+                print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            print("WARNING: A significant number of long latency messages "
+                    "were detected during this run meaning that the network "
+                    "was likely congested and could be causing a significant "
+                    "performance degredation. We detected %d messages that took "
+                    "longer than %.2fus to run, representing %.2f%% of %d total "
+                    "messages. The longest latency message required %.2fus to "
+                    "execute. Please report this case to the Legion developers "
+                    "along with an accompanying Legion Prof profile so we can "
+                    "better understand why the network is so congested." % 
+                    (bad_messages,threshold,percentage, total_messages,longest_latency))
+            for _ in range(5):
+                print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
     def print_processor_stats(self, verbose):
         print('****************************************************')
@@ -3992,6 +4042,14 @@ def main():
     parser.add_argument(
         dest='filenames', nargs='+',
         help='input Legion Prof log filenames')
+    parser.add_argument(
+        '--message-threshold', dest='message_threshold', action='store',
+        type=float, default=1000,
+        help='threshold for warning about message latencies in microseconds')
+    parser.add_argument(
+        '--message-percentage', dest='message_percentage', action='store',
+        type=float, default=5.0,
+        help='perentage of messages that must be over the threshold to trigger a warning')
     args = parser.parse_args()
 
     file_names = args.filenames
@@ -4007,6 +4065,7 @@ def main():
     verbose = args.verbose
     start_trim = args.start_trim
     stop_trim = args.stop_trim
+    
 
     state = State()
     has_matches = False
@@ -4059,6 +4118,9 @@ def main():
 
     # Once we are done loading everything, do the sorting
     state.sort_time_ranges()
+
+    # Check the message latencies
+    state.check_message_latencies(args.message_threshold, args.message_percentage)
 
     if print_stats:
         state.print_stats(verbose)

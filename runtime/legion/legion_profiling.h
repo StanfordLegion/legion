@@ -76,6 +76,8 @@ namespace Legion {
       struct MetaDesc {
       public:
         unsigned kind;
+        bool message;
+        bool ordered_vc;
         const char *name;
       };
       struct OpDesc {

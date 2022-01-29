@@ -1732,7 +1732,7 @@ namespace Legion {
       Serializer rez;
       rez.serialize(did);
       rez.serialize(done_event); 
-      runtime->send_did_remote_unregister(target, rez, vc);
+      runtime->send_did_remote_unregister(target, rez);
       done_events.insert(done_event);
     }
 
@@ -1769,8 +1769,7 @@ namespace Legion {
         send_unregister_mapping(done_events);
       if (!remote_instances.empty())
       {
-        UnregisterFunctor functor(runtime, did, 
-            REFERENCE_VIRTUAL_CHANNEL, done_events); 
+        UnregisterFunctor functor(runtime, did, done_events); 
         // No need for the lock since we're being destroyed
         remote_instances.map(functor);
       }
@@ -1794,7 +1793,7 @@ namespace Legion {
         Serializer rez;
         rez.serialize(did);
         rez.serialize(done_event); 
-        runtime->send_did_remote_unregister(*it, rez,REFERENCE_VIRTUAL_CHANNEL);
+        runtime->send_did_remote_unregister(*it, rez);
         done_events.insert(done_event);
       }
     }
@@ -2208,8 +2207,7 @@ namespace Legion {
       const DeferRemoteUnregisterArgs *dargs = 
         (const DeferRemoteUnregisterArgs*)args;
       std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, dargs->did, 
-                                REFERENCE_VIRTUAL_CHANNEL, done_events);
+      UnregisterFunctor functor(runtime, dargs->did, done_events);
       dargs->nodes->map(functor);
       if (!done_events.empty())
         Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
