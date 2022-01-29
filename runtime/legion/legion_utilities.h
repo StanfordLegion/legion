@@ -778,14 +778,8 @@ namespace Legion {
     inline void Serializer::serialize<bool>(const bool &element)
     //--------------------------------------------------------------------------
     {
-      static_assert(sizeof(bool) <= 4, "huge bool");
-      while ((index + 4) > total_bytes)
-        resize();
-      memcpy(buffer+index, (const void*)&element, sizeof(bool));
-      index += 4;
-#ifdef DEBUG_LEGION
-      context_bytes += 4;
-#endif
+      const uint32_t flag = element ? 1 : 0;
+      serialize<uint32_t>(flag);
     }
 
     //--------------------------------------------------------------------------
@@ -1004,16 +998,9 @@ namespace Legion {
     inline void Deserializer::deserialize<bool>(bool &element)
     //--------------------------------------------------------------------------
     {
-      static_assert(sizeof(bool) <= 4, "huge bool");
-#ifdef DEBUG_LEGION
-      // Check to make sure we don't read past the end
-      assert((index+4) <= total_bytes);
-#endif
-      memcpy(&element, buffer+index, sizeof(bool));
-      index += 4;
-#ifdef DEBUG_LEGION
-      context_bytes += 4;
-#endif
+      uint32_t flag;
+      deserialize<uint32_t>(flag);
+      element = (flag != 0);
     }
 
     //--------------------------------------------------------------------------
