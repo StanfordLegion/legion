@@ -657,6 +657,7 @@ namespace Legion {
       // The default and work virtual channels are unordered
       DEFAULT_VIRTUAL_CHANNEL = 0, // latency priority
       THROUGHPUT_VIRTUAL_CHANNEL = 1, // throughput priority
+      LAST_UNORDERED_VIRTUAL_CHANNEL = THROUGHPUT_VIRTUAL_CHANNEL,
       // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1, 
       TASK_VIRTUAL_CHANNEL = 2,

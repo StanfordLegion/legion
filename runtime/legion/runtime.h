@@ -1184,13 +1184,15 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      void send_message(Serializer &rez, MessageKind kind, 
-                        VirtualChannelKind channel, bool flush, 
+      template<MessageKind M>
+      inline void send_message(Serializer &rez, bool flush, 
                         bool response = false, bool shutdown = false,
                         RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
+      // Maintain a static-mapping between message kinds and virtual channels
+      static inline VirtualChannelKind find_message_vc(MessageKind kind);
     private:
       VirtualChannel *const channels;
     public:
@@ -2292,8 +2294,7 @@ namespace Legion {
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
-      void send_did_remote_unregister(AddressSpaceID target, Serializer &rez,
-                                      VirtualChannelKind vc);
+      void send_did_remote_unregister(AddressSpaceID target, Serializer &rez);
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_atomic_reservation_request(AddressSpaceID target, 
@@ -2816,7 +2817,7 @@ namespace Legion {
       EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
                                                       RtEvent &ready);
     protected:
-      template<typename T, MessageKind MK, VirtualChannelKind VC>
+      template<typename T, MessageKind MK>
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
@@ -4157,6 +4158,367 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       r.release(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline VirtualChannelKind MessageManager::find_message_vc(
+                                                               MessageKind kind)
+    //--------------------------------------------------------------------------
+    {
+      switch (kind)
+      {
+        case TASK_MESSAGE:
+          return TASK_VIRTUAL_CHANNEL;
+        case STEAL_MESSAGE:
+          return MAPPER_VIRTUAL_CHANNEL;
+        case ADVERTISEMENT_MESSAGE:
+          return MAPPER_VIRTUAL_CHANNEL;
+        case SEND_REGISTRATION_CALLBACK:
+          break;
+        case SEND_REMOTE_TASK_REPLAY:
+          break;
+        case SEND_REMOTE_TASK_PROFILING_RESPONSE:
+          break;
+        case SEND_SHARED_OWNERSHIP:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_INDEX_SPACE_REQUEST:
+          break;
+        case SEND_INDEX_SPACE_RETURN:
+          break;
+        case SEND_INDEX_SPACE_SET:
+          break;
+        case SEND_INDEX_SPACE_CHILD_REQUEST:
+          break;
+        case SEND_INDEX_SPACE_CHILD_RESPONSE:
+          break;
+        case SEND_INDEX_SPACE_COLORS_REQUEST:
+          break;
+        case SEND_INDEX_SPACE_COLORS_RESPONSE:
+          break;
+        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
+          break;
+        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
+          return EXPRESSION_VIRTUAL_CHANNEL;
+        case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
+          break;
+        case SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE:
+          break;
+        case SEND_INDEX_SPACE_RELEASE_COLOR:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_INDEX_PARTITION_NOTIFICATION:
+          break;
+        case SEND_INDEX_PARTITION_REQUEST:
+          break;
+        case SEND_INDEX_PARTITION_RETURN:
+          break;
+        case SEND_INDEX_PARTITION_CHILD_REQUEST:
+          break;
+        case SEND_INDEX_PARTITION_CHILD_RESPONSE:
+          break;
+        case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
+          break;
+        case SEND_FIELD_SPACE_NODE:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_REQUEST:
+          break;
+        case SEND_FIELD_SPACE_RETURN:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_ALLOCATOR_REQUEST:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_ALLOCATOR_RESPONSE:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_ALLOCATOR_INVALIDATION:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_ALLOCATOR_FLUSH:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_ALLOCATOR_FREE:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_INFOS_REQUEST:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_INFOS_RESPONSE:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_ALLOC_REQUEST:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SIZE_UPDATE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_FREE:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_FREE_INDEXES:
+          return FIELD_SPACE_VIRTUAL_CHANNEL;
+        case SEND_FIELD_SPACE_LAYOUT_INVALIDATION:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_LOCAL_FIELD_ALLOC_REQUEST:
+          break;
+        case SEND_LOCAL_FIELD_ALLOC_RESPONSE:
+          break;
+        case SEND_LOCAL_FIELD_FREE:
+          break;
+        case SEND_LOCAL_FIELD_UPDATE:
+          break;
+        case SEND_TOP_LEVEL_REGION_REQUEST:
+          break;
+        case SEND_TOP_LEVEL_REGION_RETURN:
+          break;
+        case INDEX_SPACE_DESTRUCTION_MESSAGE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case INDEX_PARTITION_DESTRUCTION_MESSAGE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case FIELD_SPACE_DESTRUCTION_MESSAGE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case LOGICAL_REGION_DESTRUCTION_MESSAGE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case INDIVIDUAL_REMOTE_COMPLETE:
+          return TASK_VIRTUAL_CHANNEL;
+        case INDIVIDUAL_REMOTE_COMMIT:
+          return TASK_VIRTUAL_CHANNEL;
+        case SLICE_REMOTE_MAPPED:
+          return TASK_VIRTUAL_CHANNEL;
+        case SLICE_REMOTE_COMPLETE:
+          return TASK_VIRTUAL_CHANNEL;
+        case SLICE_REMOTE_COMMIT:
+          return TASK_VIRTUAL_CHANNEL;
+        case SLICE_FIND_INTRA_DEP:
+          break;
+        case SLICE_RECORD_INTRA_DEP:
+          break;
+        case SLICE_COLLECTIVE_REQUEST:
+          break;
+        case SLICE_COLLECTIVE_RESPONSE:
+          break;
+        case DISTRIBUTED_REMOTE_REGISTRATION:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_VALID_UPDATE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_GC_UPDATE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_CREATE_ADD:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_CREATE_REMOVE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_UNREGISTER:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_ATOMIC_RESERVATION_REQUEST:
+          break;
+        case SEND_ATOMIC_RESERVATION_RESPONSE:
+          break;
+        case SEND_BACK_LOGICAL_STATE:
+          return TASK_VIRTUAL_CHANNEL;
+        case SEND_MATERIALIZED_VIEW:
+          break;
+        case SEND_FILL_VIEW:
+          break;
+        case SEND_PHI_VIEW:
+          break;
+        case SEND_REDUCTION_VIEW:
+          break;
+        case SEND_INSTANCE_MANAGER:
+          break;
+        case SEND_COLLECTIVE_MANAGER:
+          break;
+        case SEND_COLLECTIVE_MESSAGE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_CREATE_SHADOW_REQUEST:
+          break;
+        case SEND_CREATE_SHADOW_RESPONSE:
+          break;
+        case SEND_CREATE_TOP_VIEW_REQUEST:
+          break;
+        case SEND_CREATE_TOP_VIEW_RESPONSE:
+          break;
+        case SEND_VIEW_REQUEST:
+          break;
+        case SEND_VIEW_REGISTER_USER:
+          return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_VIEW_FIND_COPY_PRE_REQUEST:
+          return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_VIEW_FIND_COPY_PRE_RESPONSE:
+          break;
+        case SEND_VIEW_ADD_COPY_USER:
+          return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_VIEW_REPLICATION_REQUEST:
+          return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_VIEW_REPLICATION_RESPONSE:
+          return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_VIEW_REPLICATION_REMOVAL:
+          return UPDATE_VIRTUAL_CHANNEL;
+        case SEND_MANAGER_REQUEST:
+          break;
+        case SEND_FUTURE_RESULT:
+          break;
+        case SEND_FUTURE_SUBSCRIPTION:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_FUTURE_NOTIFICATION:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_FUTURE_BROADCAST:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_FUTURE_MAP_REQUEST:
+          break;
+        case SEND_FUTURE_MAP_RESPONSE:
+          break;
+        case SEND_MAPPER_MESSAGE:
+          return MAPPER_VIRTUAL_CHANNEL;
+        case SEND_MAPPER_BROADCAST:
+          return MAPPER_VIRTUAL_CHANNEL;
+        case SEND_TASK_IMPL_SEMANTIC_REQ:
+          break;
+        case SEND_INDEX_SPACE_SEMANTIC_REQ:
+          break;
+        case SEND_INDEX_PARTITION_SEMANTIC_REQ:
+          break;
+        case SEND_FIELD_SPACE_SEMANTIC_REQ:
+          break;
+        case SEND_FIELD_SEMANTIC_REQ:
+          break;
+        case SEND_LOGICAL_REGION_SEMANTIC_REQ:
+          break;
+        case SEND_LOGICAL_PARTITION_SEMANTIC_REQ:
+          break;
+        case SEND_TASK_IMPL_SEMANTIC_INFO:
+          break;
+        case SEND_INDEX_SPACE_SEMANTIC_INFO:
+          break;
+        case SEND_INDEX_PARTITION_SEMANTIC_INFO:
+          break;
+        case SEND_FIELD_SPACE_SEMANTIC_INFO:
+          break;
+        case SEND_FIELD_SEMANTIC_INFO:
+          break;
+        case SEND_LOGICAL_REGION_SEMANTIC_INFO:
+          break;
+        case SEND_LOGICAL_PARTITION_SEMANTIC_INFO:
+          break;
+        case SEND_REMOTE_CONTEXT_REQUEST:
+          return CONTEXT_VIRTUAL_CHANNEL;
+        case SEND_REMOTE_CONTEXT_RESPONSE:
+          return CONTEXT_VIRTUAL_CHANNEL;
+        case SEND_REMOTE_CONTEXT_RELEASE:
+          return CONTEXT_VIRTUAL_CHANNEL;
+        case SEND_REMOTE_CONTEXT_FREE:
+          return CONTEXT_VIRTUAL_CHANNEL;
+        case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
+          return CONTEXT_VIRTUAL_CHANNEL;
+        case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
+          return CONTEXT_VIRTUAL_CHANNEL;
+        case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
+          break;
+        case SEND_EQUIVALENCE_SET_REQUEST:
+          break;
+        case SEND_EQUIVALENCE_SET_RESPONSE:
+          break;
+        case SEND_EQUIVALENCE_SET_SUBSET_REQUEST:
+          break;
+        case SEND_EQUIVALENCE_SET_SUBSET_RESPONSE:
+          return SUBSET_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_SUBSET_UPDATE:
+          return SUBSET_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE:
+          break;
+        case SEND_EQUIVALENCE_SET_MIGRATION:
+          return MIGRATION_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_OWNER_UPDATE:
+          return MIGRATION_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT:
+          return MIGRATION_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES:
+          break;
+        case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID:
+          break;
+        case SEND_EQUIVALENCE_SET_REMOTE_UPDATES:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_RELEASES:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_FILTERS:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
+          break;
+        case SEND_EQUIVALENCE_SET_STALE_UPDATE:
+          break;
+        case SEND_INSTANCE_REQUEST:
+          break;
+        case SEND_INSTANCE_RESPONSE:
+          break;
+        case SEND_EXTERNAL_CREATE_REQUEST:
+          break;
+        case SEND_EXTERNAL_CREATE_RESPONSE:
+          break;
+        case SEND_EXTERNAL_ATTACH:
+          break;
+        case SEND_EXTERNAL_DETACH:
+          break;
+        case SEND_GC_PRIORITY_UPDATE:
+          break;
+        case SEND_NEVER_GC_RESPONSE:
+          break;
+        case SEND_ACQUIRE_REQUEST:
+          break;
+        case SEND_ACQUIRE_RESPONSE:
+          break;
+        case SEND_VARIANT_BROADCAST:
+          break;
+        case SEND_CONSTRAINT_REQUEST:
+          return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
+        case SEND_CONSTRAINT_RESPONSE:
+          return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
+        case SEND_CONSTRAINT_RELEASE:
+          return LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL;
+        case SEND_TOP_LEVEL_TASK_REQUEST:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_TOP_LEVEL_TASK_COMPLETE:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_MPI_RANK_EXCHANGE:
+          break;
+        case SEND_LIBRARY_MAPPER_REQUEST:
+          break;
+        case SEND_LIBRARY_MAPPER_RESPONSE:
+          break;
+        case SEND_LIBRARY_TRACE_REQUEST:
+          break;
+        case SEND_LIBRARY_TRACE_RESPONSE:
+          break;
+        case SEND_LIBRARY_PROJECTION_REQUEST:
+          break;
+        case SEND_LIBRARY_PROJECTION_RESPONSE:
+          break;
+        case SEND_LIBRARY_TASK_REQUEST:
+          break;
+        case SEND_LIBRARY_TASK_RESPONSE:
+          break;
+        case SEND_LIBRARY_REDOP_REQUEST:
+          break;
+        case SEND_LIBRARY_REDOP_RESPONSE:
+          break;
+        case SEND_LIBRARY_SERDEZ_REQUEST:
+          break;
+        case SEND_LIBRARY_SERDEZ_RESPONSE:
+          break;
+        case SEND_REMOTE_OP_REPORT_UNINIT:
+          break;
+        case SEND_REMOTE_OP_PROFILING_COUNT_UPDATE:
+          break;
+        case SEND_REMOTE_TRACE_UPDATE:
+          return TRACING_VIRTUAL_CHANNEL;
+        case SEND_REMOTE_TRACE_RESPONSE:
+          break;
+        case SEND_REMOTE_TRACE_EQ_REQUEST:
+          break;
+        case SEND_REMOTE_TRACE_EQ_RESPONSE:
+          break;
+        case SEND_SHUTDOWN_NOTIFICATION:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case SEND_SHUTDOWN_RESPONSE:
+          return THROUGHPUT_VIRTUAL_CHANNEL;
+        case LAST_SEND_KIND:
+          assert(false);
+      }
+      return DEFAULT_VIRTUAL_CHANNEL;
     }
 
   }; // namespace Internal 
