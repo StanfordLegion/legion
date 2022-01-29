@@ -58,6 +58,49 @@ namespace Realm {
   typedef UnfairMutex Mutex;
 #endif
 
+  // a mutual exclusion checker does not guarantee mutual exclusion, but
+  //  instead tests dynamically whether mutual exclusion has been achieved
+  //  through other means
+  // unlike real mutexes where "lock" has memory acquire semantics and
+  //  "unlock" has memory release semantics, the checker tries to impose
+  //  as little memory ordering as possible
+  // finally, although the MutexChecker is compatible with the templated
+  //  AutoLock, it's encouraged to use 'MutexChecker::CheckedScope' for
+  //  the better diagnostic info
+  class REALM_INTERNAL_API_EXTERNAL_LINKAGE MutexChecker : public noncopyable {
+  public:
+    MutexChecker(const char *_name, void *_object = 0, int _limit = 1);
+    ~MutexChecker();
+
+    // no associated CondVar
+
+    class CheckedScope {
+    public:
+      CheckedScope(MutexChecker& _checker, const char *_name, void *_object = 0);
+      ~CheckedScope();
+
+    protected:
+      friend class MutexChecker;
+
+      MutexChecker& checker;
+      const char *name;
+      void *object;
+    };
+
+    void lock(CheckedScope *cs = 0);
+    bool trylock(CheckedScope *cs = 0);
+    void unlock(CheckedScope *cs = 0);
+
+  protected:
+    void lock_fail(int actval, CheckedScope *cs);
+    void unlock_fail(int actval, CheckedScope *cs);
+
+    const char *name;
+    void *object;
+    int limit;
+    atomic<int> cur_count;
+  };
+
   // a doorbell is used to notify a thread that whatever condition it has been
   //  waiting for has been satisfied - all operations are lock-free in user space,
   //  but wait and notify may cross into kernel space if the doorbell owner goes
@@ -153,6 +196,10 @@ namespace Realm {
     //  a) the first Doorbell in the waiting stack, or
     //  b) 2*extra_notifies - 1, if notifies are waiting for matching doorbells
     atomic<uintptr_t> head_or_count;
+
+#ifdef DEBUG_REALM
+    MutexChecker mutex_check;
+#endif
   };
 
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE UnfairMutex : public noncopyable {

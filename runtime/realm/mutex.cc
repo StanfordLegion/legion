@@ -82,6 +82,7 @@ struct RWLockImpl {
 
 #include "realm/mutex.h"
 #include "realm/timers.h"
+#include "realm/faults.h"
 
 #include <assert.h>
 #include <new>
@@ -100,7 +101,75 @@ struct RWLockImpl {
 #include <xmmintrin.h>
 #endif
 
+#ifdef REALM_ON_WINDOWS
+static void sleep(long seconds) { Sleep(seconds * 1000); }
+#endif
+
 namespace Realm {
+
+  Logger log_mutex("mutex");
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MutexChecker
+  //
+
+  namespace {
+    // only have one of the lock_fail or unlock_fail threads call abort so
+    //  that we don't mess up attempts to dump stack traces (which can take
+    //  quite a while)
+    atomic<int> abort_count(0);
+  };
+
+  void MutexChecker::lock_fail(int actval, CheckedScope *cs)
+  {
+    {
+      LoggerMessage msg = log_mutex.fatal();
+      msg << "over limit on entry into MutexChecker("
+          << (name ? name : "") << "," << object << ") limit="
+          << limit << " actval=" << actval;
+      if(cs)
+        msg << " on scope(" << (cs->name ? cs->name : "") << "," << cs->object << ")";
+      Backtrace bt;
+      bt.capture_backtrace();
+      bt.lookup_symbols();
+      msg << " at " << bt;
+    }
+    // wait a couple seconds so that threads in the guarded section hopefully
+    //  try to leave and declare who they are too
+    sleep(2);
+    while(abort_count.fetch_add(1) > 0) {
+      // if we're in this loop we'll never actually leave
+      sleep(60);
+    }
+    abort();
+  }
+
+  void MutexChecker::unlock_fail(int actval, CheckedScope *cs)
+  {
+    {
+      LoggerMessage msg = log_mutex.fatal();
+      msg << "over limit on exit of MutexChecker("
+          << (name ? name : "") << "," << object << ") limit="
+          << limit << " actval=" << actval;
+      if(cs)
+        msg << " on scope(" << (cs->name ? cs->name : "") << "," << cs->object << ")";
+      Backtrace bt;
+      bt.capture_backtrace();
+      bt.lookup_symbols();
+      msg << " at " << bt;
+    }
+    // wait a couple seconds so that threads in the guarded section hopefully
+    //  try to leave and declare who they are too
+    sleep(2);
+    while(abort_count.fetch_add(1) > 0) {
+      // if we're in this loop we'll never actually leave
+      sleep(60);
+    }
+    abort();
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -325,6 +394,9 @@ namespace Realm {
 
   DoorbellList::DoorbellList()
     : head_or_count(0)
+#ifdef DEBUG_REALM
+    , mutex_check("DoorbellList", this)
+#endif
   {}
 
   DoorbellList::~DoorbellList()
@@ -336,6 +408,10 @@ namespace Realm {
 
   Doorbell *DoorbellList::extract_oldest(bool prefer_spinning, bool allow_extra)
   {
+#ifdef DEBUG_REALM
+    MutexChecker::CheckedScope cs(mutex_check, "extract_oldest");
+#endif
+
     uintptr_t hoc = head_or_count.load_acquire();
     while((hoc == 0) || ((hoc & 1) != 0)) {
       // list appears to be empty
@@ -423,6 +499,10 @@ namespace Realm {
 
   Doorbell *DoorbellList::extract_newest(bool prefer_spinning, bool allow_extra)
   {
+#ifdef DEBUG_REALM
+    MutexChecker::CheckedScope cs(mutex_check, "extract_newest");
+#endif
+
     uintptr_t hoc = head_or_count.load_acquire();
     while((hoc == 0) || ((hoc & 1) != 0)) {
       // list appears to be empty
