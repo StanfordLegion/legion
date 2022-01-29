@@ -411,6 +411,13 @@ namespace Realm {
 
     void enqueue_put_header(PendingPutHeader *put);
 
+    // adds the xpair to the injector ready list or the poller critical
+    //  pair list as appropriate, eventually resulting in a call to
+    //  push_packets - MUST NOT be called until the push_packets
+    //  that resulted from the previous enqueue is done-ish (i.e. not going
+    //  to push anything else)
+    void request_push(bool force_critical);
+
     void push_packets(bool immediate_mode, TimeLimit work_until);
 
     long long time_since_failure() const;
@@ -456,6 +463,9 @@ namespace Realm {
     gex_EP_Index_t tgt_ep_index;
     atomic<size_t> packets_reserved, packets_sent;
     Mutex mutex;
+    // we don't hold the mutex while pushing packets, but we need definitely
+    //  don't want multiple threads trying to push for the same src/dst pair
+    MutexChecker push_mutex_check;
     atomic<OutbufMetadata *> first_pbuf;  // read without mutex
     OutbufMetadata *cur_pbuf;
     atomic<unsigned> imm_fail_count;
