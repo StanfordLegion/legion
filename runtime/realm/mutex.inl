@@ -134,6 +134,9 @@ namespace Realm {
 
   inline bool DoorbellList::add_doorbell(Doorbell *db)
   {
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    db->starvation_count = 0;
+#endif
     uintptr_t oldval = head_or_count.load();
     while(true) {
       if((oldval & 1) == 0) {

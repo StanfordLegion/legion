@@ -25,6 +25,12 @@
 
 #include <stdint.h>
 
+// if enabled, we count how many times a doorbell is passed over and
+//  print warnings if it seems like a lot
+#ifdef DEBUG_REALM
+  #define REALM_ENABLE_STARVATION_CHECKS
+#endif
+
 namespace Realm {
 
   // Realm mutexes come in a few different flavors:
@@ -158,6 +164,13 @@ namespace Realm {
 
     // useful for debugging
     uintptr_t owner_tid;
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    // lower bound on number of times this doorbell has been passed over
+    int starvation_count;
+
+    static atomic<int> starvation_limit;
+    void increase_starvation_count(int to_add, void *db_list);
+#endif
 
     friend class DoorbellList;
     Doorbell *next_doorbell;

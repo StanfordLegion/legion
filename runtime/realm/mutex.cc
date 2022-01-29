@@ -217,6 +217,9 @@ namespace Realm {
     , sleep_timeout(DOORBELL_SLEEP_DEFAULT)
     , next_sleep_time(-1)
     , owner_tid(0)
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    , starvation_count(0)
+#endif
     , next_doorbell(nullptr)
   {
 #ifdef REALM_USE_PTHREADS
@@ -386,6 +389,29 @@ namespace Realm {
     notify_slow();
   }
 
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+  /*static*/ atomic<int> Doorbell::starvation_limit(1000);
+
+  void Doorbell::increase_starvation_count(int to_add, void *db_list)
+  {
+    starvation_count += to_add;
+    int cur_limit = starvation_limit.load();
+    if(starvation_count > cur_limit) {
+      // only print a warning if we can double the limit
+      if(starvation_limit.compare_exchange_relaxed(cur_limit, 2*cur_limit)) {
+        Backtrace bt;
+        bt.capture_backtrace();
+        bt.lookup_symbols();
+        log_mutex.warning() << "doorbell starvation limit reached: list="
+                            << db_list << " db=" << this << " owner="
+                            << std::hex << owner_tid << std::dec
+                            << " count=" << starvation_count
+                            << " at " << bt;
+      }
+    }
+  }
+#endif
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -465,6 +491,13 @@ namespace Realm {
       if(spinning) {
         chosen = spinning;
         chosen_prev = spinning_prev;
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+        // if we chose something that wasn't oldest, update the starvation
+        //  count for the oldest
+        if(chosen->next_doorbell)
+          chosen->next_doorbell->increase_starvation_count(1 + chosen->starvation_count,
+                                                           this);
+#endif
       } else {
         chosen = cur;
         chosen_prev = prev;
@@ -536,6 +569,10 @@ namespace Realm {
           //  messing with the atomic head pointer
           prev->next_doorbell = cur->next_doorbell;
           cur->next_doorbell = nullptr;
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+          // we passed over the head of the list (and everything older)
+          head->increase_starvation_count(1, this);
+#endif
           return cur;
         }
         prev = cur;
@@ -556,6 +593,11 @@ namespace Realm {
       }
       cur->next_doorbell = head->next_doorbell;
     }
+#ifdef REALM_ENABLE_STARVATION_CHECKS
+    if(head->next_doorbell)
+      head->next_doorbell->increase_starvation_count(1 + head->starvation_count,
+                                                     this);
+#endif
     head->next_doorbell = nullptr;
     return head;
   }
