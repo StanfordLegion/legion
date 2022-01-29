@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University
+/* Copyright 2022 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,12 @@
 #define __REGENT_H__
 
 #include "legion.h"
+
+#ifdef REALM_USE_CUDART_HIJACK
+#define REGENT_USE_HIJACK 1
+#else
+#define REGENT_USE_HIJACK 0
+#endif
 
 #ifdef __cplusplus
 extern "C" {

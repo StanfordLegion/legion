@@ -1,5 +1,5 @@
-/* Copyright 2021 Stanford University
- * Copyright 2021 Los Alamos National Laboratory
+/* Copyright 2022 Stanford University
+ * Copyright 2022 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -276,10 +276,8 @@ namespace Realm {
     // by subtracting 1 from bases, strides, and lengths, we get LSBs set
     //  based on the common alignment of every parameter in the copy
     unsigned alignment = ((dst_base - 1) & (bytes - 1));
-//define DEBUG_MEMCPYS
 #ifdef DEBUG_MEMCPYS
-    log_xd.print() << std::hex << "memcpy_1d: dst=" << dst_base
-                   << " src=" << src_base
+    log_xd.print() << std::hex << "memset_1d: dst=" << dst_base
                    << std::dec << " bytes=" << bytes
                    << " align=" << (alignment & 31);
 #endif
@@ -320,10 +318,8 @@ namespace Realm {
     unsigned alignment = ((dst_base - 1) & (dst_lstride - 1) &
 			  (bytes - 1));
 #ifdef DEBUG_MEMCPYS
-    log_xd.print() << std::hex << "memcpy_2d: dst=" << dst_base
+    log_xd.print() << std::hex << "memset_2d: dst=" << dst_base
                    << "+" << dst_lstride
-                   << " src=" << src_base
-                   << "+" << src_lstride
                    << std::dec << " bytes=" << bytes
                    << " lines=" << lines
                    << " align=" << (alignment & 31);
@@ -373,10 +369,8 @@ namespace Realm {
 			  (dst_pstride - 1) &
 			  (bytes - 1));
 #ifdef DEBUG_MEMCPYS
-    log_xd.print() << std::hex << "memcpy_3d: dst=" << dst_base
+    log_xd.print() << std::hex << "memset_3d: dst=" << dst_base
                    << "+" << dst_lstride << "+" << dst_pstride
-                   << " src=" << src_base
-                   << "+" << src_lstride << "+" << src_pstride
                    << std::dec << " bytes=" << bytes
                    << " lines=" << lines
                    << " planes=" << planes

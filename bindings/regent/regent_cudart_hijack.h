@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ extern "C" {
 void** hijackCudaRegisterFatBinary(const void*);
 
 void hijackCudaRegisterFunction(void**, const void*, char*);
+
+void hijackCudaRegisterFatBinaryEnd(void**);
 
 #ifdef __cplusplus
 }

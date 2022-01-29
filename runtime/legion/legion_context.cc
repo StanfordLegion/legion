@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2907,8 +2907,8 @@ namespace Legion {
       }
       while (!pending_equivalence_sets.empty())
       {
-        LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::aligned::
-          iterator next = pending_equivalence_sets.begin();
+        LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::iterator
+          next = pending_equivalence_sets.begin();
         for (FieldMaskSet<PendingEquivalenceSet>::const_iterator it =
               next->second.begin(); it != next->second.end(); it++)
           if (it->first->finalize())
@@ -3792,8 +3792,8 @@ namespace Legion {
     {
       std::set<RtEvent> applied_events;
       AutoLock p_lock(pending_set_lock);
-      LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::aligned
-        ::iterator finder = pending_equivalence_sets.find(region);
+      LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::iterator
+        finder = pending_equivalence_sets.find(region);
       if (finder == pending_equivalence_sets.end())
       {
 #ifdef DEBUG_LEGION
@@ -3861,8 +3861,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(pending_set_lock);
-      LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::aligned
-        ::iterator finder = pending_equivalence_sets.find(region);
+      LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::iterator
+        finder = pending_equivalence_sets.find(region);
       if ((finder == pending_equivalence_sets.end()) ||
           (finder->second.get_valid_mask() * mask))
         return;
@@ -6642,9 +6642,8 @@ namespace Legion {
       }
       // Also unmap any of our inline mapped physical regions
       AutoLock i_lock(inline_lock);
-      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
-            tracked::const_iterator it = inline_regions.begin();
-            it != inline_regions.end(); it++)
+      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::const_iterator
+            it = inline_regions.begin(); it != inline_regions.end(); it++)
       {
         if (it->is_mapped())
           it->impl->unmap_region();
@@ -8140,7 +8139,7 @@ namespace Legion {
           needs_trigger = true;
           children_complete_invoked = true;
           for (LegionMap<Operation*,GenerationID,
-                COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
             child_completion_events.insert(it->first->get_completion_event());
         }
@@ -9662,7 +9661,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
-                      const LegionVector<VersionInfo>::aligned &version_infos,
+                      const LegionVector<VersionInfo> &version_infos,
                       const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
                       std::set<RtEvent> &applied_events,
@@ -10668,7 +10667,7 @@ namespace Legion {
             need_complete = true;
             children_complete_invoked = true;
             for (LegionMap<Operation*,GenerationID,
-                  COMPLETE_CHILD_ALLOC>::tracked::const_iterator it =
+                  COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)
               child_completion_events.insert(it->first->get_completion_event());
           }
@@ -23300,7 +23299,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
-                       const LegionVector<VersionInfo>::aligned &version_infos,
+                       const LegionVector<VersionInfo> &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
                        std::set<RtEvent> &applied_events,

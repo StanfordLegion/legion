@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -306,7 +306,7 @@ namespace Legion {
     protected:
       std::vector<unsigned>                     parent_req_indexes;
       // The version infos for this task
-      LegionVector<VersionInfo>::aligned        version_infos;
+      LegionVector<VersionInfo>                 version_infos;
     protected:
       bool complete_received;
       bool commit_received;

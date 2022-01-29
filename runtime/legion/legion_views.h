@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,6 +54,9 @@ namespace Legion {
       LogicalView(RegionTreeForest *ctx, DistributedID did,
                   AddressSpaceID owner_proc, bool register_now);
       virtual ~LogicalView(void);
+    public:
+      inline bool deterministic_pointer_less(const LogicalView *rhs) const
+        { return (did < rhs->did); }
     public:
       inline bool is_instance_view(void) const;
       inline bool is_deferred_view(void) const;
@@ -111,9 +114,8 @@ namespace Legion {
      */
     class InstanceView : public LogicalView {
     public:
-      typedef LegionMap<ApEvent,FieldMask>::aligned EventFieldMap;
-      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
-                                                              EventFieldUsers;
+      typedef LegionMap<ApEvent,FieldMask> EventFieldMap;
+      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       struct DeferFindCopyPreconditionArgs : 
@@ -303,9 +305,8 @@ namespace Legion {
     class ExprView : public LegionHeapify<ExprView>, 
                      public CollectableView, public Collectable {
     public:
-      typedef LegionMap<ApEvent,FieldMask>::aligned EventFieldMap;
-      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
-                                                              EventFieldUsers;
+      typedef LegionMap<ApEvent,FieldMask> EventFieldMap;
+      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(RegionTreeForest *ctx, PhysicalManager *manager,
@@ -314,6 +315,9 @@ namespace Legion {
       virtual ~ExprView(void);
     public:
       ExprView& operator=(const ExprView &rhs);
+    public:
+      inline bool deterministic_pointer_less(const ExprView *rhs) const
+        { return view_expr->deterministic_pointer_less(rhs->view_expr); }
     public:
       virtual void add_collectable_reference(ReferenceMutator *mutator);
       virtual bool remove_collectable_reference(ReferenceMutator *mutator);
@@ -342,8 +346,7 @@ namespace Legion {
       void find_tightest_subviews(IndexSpaceExpression *expr,
                                   FieldMask &expr_mask,
                                   LegionMap<std::pair<size_t,
-                                    ExprView*>,FieldMask>::aligned 
-                                    &bounding_views);
+                                    ExprView*>,FieldMask> &bounding_views);
       void add_partial_user(const RegionUsage &usage,
                             UniqueID op_id, unsigned index,
                             FieldMask user_mask,
@@ -548,7 +551,7 @@ namespace Legion {
       static const unsigned user_cache_timeout = 1024;
     public:
       typedef LegionMap<VersionID,FieldMaskSet<IndexSpaceExpression>,
-                      PHYSICAL_VERSION_ALLOC>::track_aligned VersionFieldExprs;  
+                        PHYSICAL_VERSION_ALLOC> VersionFieldExprs;  
     public:
       struct DeferMaterializedViewArgs : 
         public LgTaskArgs<DeferMaterializedViewArgs> {
@@ -708,8 +711,8 @@ namespace Legion {
       // On the owner node we also need to keep track of our set of 
       // which nodes have replicated copies for which field
       union {
-        LegionMap<AddressSpaceID,FieldMask>::aligned *replicated_copies;
-        LegionMap<RtUserEvent,FieldMask>::aligned *replicated_requests;
+        LegionMap<AddressSpaceID,FieldMask> *replicated_copies;
+        LegionMap<RtUserEvent,FieldMask> *replicated_requests;
       } repl_ptr;
       // For remote copies we track which fields have seen requests
       // in the past epoch of user adds so that we can reduce our 
@@ -1070,8 +1073,8 @@ namespace Legion {
       const PredEvent false_guard;
       InnerContext *const owner_context;
     protected:
-      LegionMap<LogicalView*,FieldMask>::aligned true_views;
-      LegionMap<LogicalView*,FieldMask>::aligned false_views;
+      LegionMap<LogicalView*,FieldMask> true_views;
+      LegionMap<LogicalView*,FieldMask> false_views;
     };
 
     /**
@@ -1120,7 +1123,7 @@ namespace Legion {
                            std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
-      void initialize(LegionMap<DistributedID,FieldMask>::aligned &views,
+      void initialize(LegionMap<DistributedID,FieldMask> &views,
                       const InstanceSet &local_instances,
                       std::set<RtEvent> &applied_events);
       void unpack_view(Deserializer &derez);
@@ -1129,7 +1132,7 @@ namespace Legion {
                       Deserializer &derez, AddressSpaceID source);
     protected:
       std::set<PhysicalManager*> local_instances;
-      LegionMap<DistributedID,FieldMask>::aligned global_views;
+      LegionMap<DistributedID,FieldMask> global_views;
 #ifdef DEBUG_LEGION
       bool valid;
 #endif

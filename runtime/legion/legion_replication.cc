@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2647,7 +2647,7 @@ namespace Legion {
         // Check to see if any fields are projected, if so then we only
         // need to compute equivalence sets for the projected regions
         LegionMap<RegionTreeNode*,
-          FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator 
+          FieldMaskSet<RefProjectionSummary> >::const_iterator 
             finder = projections.find(it->first);
         if (finder != projections.end())
         {
@@ -2851,7 +2851,7 @@ namespace Legion {
           for (std::vector<RegionNode*>::const_iterator rit =
                 children.begin(); rit != children.end(); rit++)
           {
-            LegionMap<RegionNode*,VersionInfo>::aligned::iterator finder =
+            LegionMap<RegionNode*,VersionInfo>::iterator finder =
               sharded_region_version_infos.find(*rit);
 #ifdef DEBUG_LEGION
             assert(finder != sharded_region_version_infos.end());
@@ -2917,7 +2917,7 @@ namespace Legion {
           FieldMask mask = make_from[it->second];
           // Prune out any projection fields for this node
           LegionMap<RegionTreeNode*,
-            FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator
+            FieldMaskSet<RefProjectionSummary> >::const_iterator
               finder = projections.find(it->second);
           if (finder != projections.end())
             mask -= finder->second.get_valid_mask();
@@ -2981,7 +2981,7 @@ namespace Legion {
           FieldMask mask = make_from[it->second];
           // Prune out any projection fields for this node
           LegionMap<RegionTreeNode*,
-            FieldMaskSet<RefProjectionSummary> >::aligned::const_iterator
+            FieldMaskSet<RefProjectionSummary> >::const_iterator
               finder = projections.find(it->second);
           if (finder != projections.end())
             mask -= finder->second.get_valid_mask();
@@ -3881,7 +3881,7 @@ namespace Legion {
         if (!src_indirect_requirements.empty() &&
             collective_src_indirect_points)
         {
-          LegionVector<IndirectRecord>::aligned empty_records;
+          LegionVector<IndirectRecord> empty_records;
           for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
             IndirectRecordExchange collective(repl_ctx, src_collectives[idx]);
@@ -3892,7 +3892,7 @@ namespace Legion {
         if (!dst_indirect_requirements.empty() && 
             collective_dst_indirect_points)
         {
-          LegionVector<IndirectRecord>::aligned empty_records;
+          LegionVector<IndirectRecord> empty_records;
           for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
             IndirectRecordExchange collective(repl_ctx, dst_collectives[idx]);
@@ -4027,7 +4027,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &instances,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
@@ -14265,13 +14265,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndirectRecordExchange::exchange_records(
-                           LegionVector<IndirectRecord>::aligned &local_records)
+                                    LegionVector<IndirectRecord> &local_records)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(records.empty());
 #endif
-      for (LegionVector<IndirectRecord>::aligned::const_iterator it = 
+      for (LegionVector<IndirectRecord>::const_iterator it = 
             local_records.begin(); it != local_records.end(); it++)
       {
         const IndirectKey key(it->inst, it->domain);
@@ -14280,7 +14280,7 @@ namespace Legion {
       perform_collective_sync();
       local_records.resize(records.size());
       unsigned index = 0;
-      for (LegionMap<IndirectKey,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<IndirectKey,FieldMask>::const_iterator it = 
             records.begin(); it != records.end(); it++, index++)
       {
         IndirectRecord &record = local_records[index];
@@ -14296,7 +14296,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(records.size());
-      for (LegionMap<IndirectKey,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<IndirectKey,FieldMask>::const_iterator it = 
             records.begin(); it != records.end(); it++)
       {
         rez.serialize(it->first.inst);
@@ -14317,7 +14317,7 @@ namespace Legion {
         IndirectKey key;
         derez.deserialize(key.inst);
         derez.deserialize(key.domain);
-        LegionMap<IndirectKey,FieldMask>::aligned::iterator finder = 
+        LegionMap<IndirectKey,FieldMask>::iterator finder = 
           records.find(key);
         if (finder != records.end())
         {
@@ -15675,7 +15675,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(chosen_instances.size());
-      for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<DistributedID,FieldMask>::const_iterator it =
             chosen_instances.begin(); it != chosen_instances.end(); it++)
       {
         rez.serialize(it->first);
@@ -15717,8 +15717,8 @@ namespace Legion {
         for (FieldMaskSet<CollectiveManager>::const_iterator it =
               instances.begin(); it != instances.end(); it++)
         {
-          LegionMap<DistributedID,FieldMask>::aligned::const_iterator
-            finder = chosen_instances.find(it->first->did);
+          LegionMap<DistributedID,FieldMask>::const_iterator finder =
+            chosen_instances.find(it->first->did);
           if (finder == chosen_instances.end())
             return false;
           if (finder->second != it->second)
@@ -15772,13 +15772,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mappings.size());
-      for (std::map<DistributedID,LegionMap<ShardID,FieldMask>::aligned>::
-            const_iterator mit = mappings.begin(); 
-            mit != mappings.end(); mit++)
+      for (std::map<DistributedID,LegionMap<ShardID,FieldMask>>::const_iterator
+            mit = mappings.begin(); mit != mappings.end(); mit++)
       {
         rez.serialize(mit->first);
         rez.serialize<size_t>(mit->second.size());
-        for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<ShardID,FieldMask>::const_iterator it = 
               mit->second.begin(); it != mit->second.end(); it++)
         {
           rez.serialize(it->first);
@@ -15786,7 +15785,7 @@ namespace Legion {
         }
       }
       rez.serialize<size_t>(global_views.size());
-      for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<DistributedID,FieldMask>::const_iterator it = 
             global_views.begin(); it != global_views.end(); it++)
       {
         rez.serialize(it->first);
@@ -15807,12 +15806,12 @@ namespace Legion {
         derez.deserialize(did);
         size_t num_shards;
         derez.deserialize(num_shards);
-        LegionMap<ShardID,FieldMask>::aligned &inst_map = mappings[did];
+        LegionMap<ShardID,FieldMask> &inst_map = mappings[did];
         for (unsigned idx2 = 0; idx2 < num_shards; idx2++)
         {
           ShardID sid;
           derez.deserialize(sid);
-          LegionMap<ShardID,FieldMask>::aligned::iterator finder = 
+          LegionMap<ShardID,FieldMask>::iterator finder = 
             inst_map.find(sid);
           if (finder != inst_map.end())
           {
@@ -15830,7 +15829,7 @@ namespace Legion {
       {
         DistributedID did;
         derez.deserialize(did);
-        LegionMap<DistributedID,FieldMask>::aligned::iterator finder = 
+        LegionMap<DistributedID,FieldMask>::iterator finder = 
           global_views.find(did);
         if (finder != global_views.end())
         {
@@ -15859,8 +15858,8 @@ namespace Legion {
           if (check_mappings)
           {
             const DistributedID did = mapping.get_manager()->did;
-            LegionMap<ShardID,FieldMask>::aligned &inst_map = mappings[did];
-            LegionMap<ShardID,FieldMask>::aligned::iterator finder = 
+            LegionMap<ShardID,FieldMask> &inst_map = mappings[did];
+            LegionMap<ShardID,FieldMask>::iterator finder = 
               inst_map.find(shard_id);
             if (finder == inst_map.end())
               inst_map[shard_id] = mask;
@@ -15868,7 +15867,7 @@ namespace Legion {
               finder->second |= mask;
           }
           const DistributedID view_did = local_views[idx]->did;
-          LegionMap<DistributedID,FieldMask>::aligned::iterator finder = 
+          LegionMap<DistributedID,FieldMask>::iterator finder = 
             global_views.find(view_did);
           if (finder == global_views.end())
             global_views[view_did] = mask;
@@ -15901,13 +15900,13 @@ namespace Legion {
           const DistributedID did = mapping.get_manager()->did;
           const FieldMask &mask = mapping.get_valid_fields();
           const std::map<DistributedID,
-                LegionMap<ShardID,FieldMask>::aligned>::const_iterator
+                LegionMap<ShardID,FieldMask> >::const_iterator
             finder = mappings.find(did);
 #ifdef DEBUG_LEGION
           // We should have at least our own
           assert(finder != mappings.end());
 #endif
-          for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
+          for (LegionMap<ShardID,FieldMask>::const_iterator it = 
                 finder->second.begin(); it != finder->second.end(); it++)
           {
             // We can skip ourself

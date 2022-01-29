@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1291,8 +1291,9 @@ namespace Realm {
 		 reinterpret_cast<const void *>(pktbuf->baseptr + pktstart),
 		 pktend - pktstart);
 	} else {
-	  assert((hdr_start >= realbuf->baseptr) &&
-		 (hdr_start < (realbuf->baseptr + pktbuf->size)));
+	  assert(!hdr_start ||
+                 ((hdr_start >= realbuf->baseptr) &&
+                  (hdr_start < (realbuf->baseptr + pktbuf->size))));
 	  // already in right place!
 	  uintptr_t pktstart = offset;
 	  uintptr_t pktend = pktbuf->pktbuf_pkt_ends[pktidx];
@@ -1711,7 +1712,7 @@ namespace Realm {
 	      // no more completion replies, but do pushing if there are
 	      //  ready packets
 	      ncomps = 0;
-	      do_push = has_ready_packets || !put_head.load();
+	      do_push = has_ready_packets || put_head.load();
 	    }
 	  }
 	} else {
@@ -1779,7 +1780,8 @@ namespace Realm {
       // if we sent anything, we need to remove it from the list, which
       //  requires the lock
       if(cur_put != orig_put) {
-        bool now_empty;
+        bool now_empty = false;
+        bool just_replies = false;
         {
           AutoLock<> al(mutex);
 
@@ -1787,22 +1789,27 @@ namespace Realm {
             // didn't consume all, so we just need to update the head (tail is
             //  still valid)
             put_head.store_release(cur_put);
-            now_empty = false;
           } else {
             if(put_tailp == &prev_put->next_put) {
               // tail is the end of our list, so we're now empty
               put_head.store(nullptr);
               put_tailp = &put_head;
 
-              now_empty = (!has_ready_packets && (comp_reply_count.load() == 0));
+              // if we have ready packets, we'll continue on, but if not, we're
+              //  either empty or we just have replies, in which case we need
+              //  to requeue (but not continue on to trying to send packets)
+              if(!has_ready_packets) {
+                if(comp_reply_count.load() == 0)
+                  now_empty = true;
+                else
+                  just_replies = true;
+              }
             } else {
               // list has grown, but head is whatever was hooked onto the end
               //  of the last put we did
               PendingPutHeader *new_head = prev_put->next_put.load();
               assert(new_head);
               put_head.store(new_head);
-
-              now_empty = false;
             }
           }
         }
@@ -1813,6 +1820,14 @@ namespace Realm {
           PendingPutHeader *next_del = del_put->next_put.load();
           internal->put_alloc.free_obj(del_put);
           del_put = next_del;
+        }
+
+        if(just_replies) {
+          if(internal->module->cfg_crit_timeout >= 0)
+            internal->injector.add_ready_xpair(this);
+          else
+            internal->poller.add_critical_xpair(this);
+          return;
         }
 
         // if removing the entries made us empty, somebody else is going to
@@ -1829,11 +1844,10 @@ namespace Realm {
       }
     }
 
-    // get the head of our pbuf list - if it's empty, that means we have no
-    //  work
+    // get the head of our pbuf list - if it's empty, something's wrong because
+    //  we shouldn't have gotten here
     OutbufMetadata *head = first_pbuf.load_acquire();
-    if(!head)
-      return;
+    assert(head);
 
     while(true) {
       assert(head->state == OutbufMetadata::STATE_PKTBUF);

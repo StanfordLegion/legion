@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2021 Stanford University
+# Copyright 2022 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -270,6 +270,14 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         clang_source_dir = os.path.join(llvm_dir, 'clang-11.1.0.src')
         download(llvm_tarball, '%s/llvmorg-11.1.0/llvm-11.1.0.src.tar.xz' % mirror, 'ce8508e318a01a63d4e8b3090ab2ded3c598a50258cc49e2625b9120d4c03ea5', insecure=insecure)
         download(clang_tarball, '%s/llvmorg-11.1.0/clang-11.1.0.src.tar.xz' % mirror, '0a8288f065d1f57cb6d96da4d2965cbea32edc572aa972e466e954d17148558b', insecure=insecure)
+    elif llvm_version == '130':
+        mirror = 'https://github.com/llvm/llvm-project/releases/download'
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-13.0.0.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-13.0.0.src')
+        clang_tarball = os.path.join(llvm_dir, 'clang-13.0.0.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'clang-13.0.0.src')
+        download(llvm_tarball, '%s/llvmorg-13.0.0/llvm-13.0.0.src.tar.xz' % mirror, '408d11708643ea826f519ff79761fcdfc12d641a2510229eec459e72f8163020', insecure=insecure)
+        download(clang_tarball, '%s/llvmorg-13.0.0/clang-13.0.0.src.tar.xz' % mirror, '5d611cbb06cfb6626be46eb2f23d003b2b80f40182898daa54b1c4e8b5b9e17e', insecure=insecure)
     else:
         assert False
 
@@ -373,7 +381,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
 
     if llvm_version in ('35', '38'):
         llvm_use_cmake = False
-    elif llvm_version in ('39', '60', '90', '110'):
+    elif llvm_version in ('39', '60', '90', '110', '130'):
         llvm_use_cmake = True
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
@@ -528,7 +536,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60', '90', '110'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60', '90', '110', '130'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(

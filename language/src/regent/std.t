@@ -1,4 +1,4 @@
--- Copyright 2021 Stanford University, NVIDIA Corporation
+-- Copyright 2022 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -4665,6 +4665,15 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   flags:insertall({"-L" .. lib_dir, "-lregent"})
   if use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
+  end
+  -- If the hijack is turned off, we need extra dependencies to link
+  -- the generated CUDA code correctly
+  if std.config["cuda"] and cudahelper.check_cuda_available() and base.c.REGENT_USE_HIJACK == 0 then
+    flags:insertall({
+      "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
+      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
+      "-lpthread", "-lrt"
+    })
   end
 
   profile('compile', nil, function()

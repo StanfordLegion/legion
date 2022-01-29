@@ -1,4 +1,4 @@
--- Copyright 2021 Stanford University, NVIDIA Corporation
+-- Copyright 2022 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -413,7 +413,7 @@ function specialize.completeness_kind(cx, node)
 end
 
 function specialize.effect_expr(cx, node)
-  local span = ast.trivial_span()
+  local span = node.span
 
   local function make_field(field_path, i)
     if i > #field_path then

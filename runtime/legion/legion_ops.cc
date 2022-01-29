@@ -1,4 +1,4 @@
-/* Copyright 2021 Stanford University, NVIDIA Corporation
+/* Copyright 2022 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -6898,7 +6898,7 @@ namespace Legion {
       // Trigger our local completion event contingent upon 
       // the copy/reduce across being done
       ApEvent copy_post, copy_pre;
-      LegionVector<IndirectRecord>::aligned src_records, dst_records;
+      LegionVector<IndirectRecord> src_records, dst_records;
       ApUserEvent indirect_done, indirect_pre;
       if (gather_targets != NULL)
       {
@@ -7127,7 +7127,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = runtime->forest->get_node(space);
@@ -8854,10 +8854,13 @@ namespace Legion {
                                                       unsigned idx2)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
       bool is_src1 = idx1 < src_requirements.size();
       bool is_src2 = idx2 < src_requirements.size();
       unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
       unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
+      // For now we only issue this warning in debug mode, eventually we'll
+      // turn this on only when users request it when we do our debug refactor
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDEX,
                       "Region requirements %d and %d of index copy %lld in "
                       "parent task %s (UID %lld) are potentially interfering. "
@@ -8870,6 +8873,7 @@ namespace Legion {
                       "for this index task launch then everything is good.",
                       actual_idx1, actual_idx2, unique_op_id, 
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#endif
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
     }
 
@@ -8878,7 +8882,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
@@ -9298,7 +9302,7 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         const PhysicalTraceInfo &trace_info, const InstanceSet &insts,
         const IndexSpace space, const DomainPoint &key,
-        LegionVector<IndirectRecord>::aligned &records, const bool sources)
+        LegionVector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
@@ -11881,7 +11885,7 @@ namespace Legion {
       if (!projections.empty())
       {
         for (LegionMap<RegionTreeNode*,FieldMaskSet<RefProjectionSummary> >::
-              aligned::const_iterator pit = projections.begin(); pit !=
+              const_iterator pit = projections.begin(); pit !=
               projections.end(); pit++)
         {
           for (FieldMaskSet<RefProjectionSummary>::const_iterator it =

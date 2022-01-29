@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2021 Stanford University, NVIDIA Corporation
+# Copyright 2022 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1950,10 +1950,14 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                         align_str = ":align=" + str(al.align_desc)
                     else:
                         align_str = ""
+                    if (pos1 - 1) % 5 == 0:
+                        break_str = "$"
+                    else:
+                        break_str = ""
                     if count == 0:
                         output_str = output_str + '$Fields: [' + str(f) + align_str
                     else:
-                        output_str = output_str + ',' + str(f) + align_str
+                        output_str = output_str + ',' + break_str + str(f) + align_str
                     count = count + 1
                 if (count > 0):
                     output_str = output_str + ']'

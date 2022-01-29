@@ -1,4 +1,4 @@
--- Copyright 2021 Stanford University, Los Alamos National Laboratory
+-- Copyright 2022 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ local HijackAPI = terralib.includec("regent_cudart_hijack.h")
 
 struct fat_bin_t {
   magic : int,
-  versions : int,
+  seq : int,
   data : &opaque,
   filename : &opaque,
 }
@@ -147,16 +147,6 @@ do
   end
 end
 
--- Declare the API calls that are deprecated in CUDA SDK 10
--- TODO: We must move on to the new execution control API as these old functions
---       can be dropped in the future.
-local ExecutionAPI = {
-  cudaConfigureCall =
-    ef("cudaConfigureCall", {RuntimeAPI.dim3, RuntimeAPI.dim3, uint64, RuntimeAPI.cudaStream_t} -> uint32);
-  cudaSetupArgument = ef("cudaSetupArgument", {&opaque, uint64, uint64} -> uint32);
-  cudaLaunch = ef("cudaLaunch", {&opaque} -> uint32);
-}
-
 do
   local ffi = require('ffi')
   local cudaruntimelinked = false
@@ -239,9 +229,10 @@ local terra register_ptx(ptxc : rawstring) : &&opaque
   -- TODO: this line is leaking memory
   fat_bin = [&fat_bin_t](c.malloc(fat_size))
   base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
-  fat_bin.magic = 1234
-  fat_bin.versions = 5678
+  fat_bin.magic = 0x466243b1
+  fat_bin.seq = 1
   fat_bin.data = ptxc
+  fat_bin.filename = nil
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
@@ -252,9 +243,10 @@ local terra register_cubin(cubin : rawstring) : &&opaque
   -- TODO: this line is leaking memory
   fat_bin = [&fat_bin_t](c.malloc(fat_size))
   base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_cubin")
-  fat_bin.magic = 1234
-  fat_bin.versions = 5678
+  fat_bin.magic = 0x466243b1
+  fat_bin.seq = 1
   fat_bin.data = cubin
+  fat_bin.filename = nil
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
@@ -421,6 +413,11 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
         [HijackAPI.hijackCudaRegisterFunction]([handle], [&opaque](kernel_id), [kernel.name])
       end
     end)]
+  end
+
+  register = quote
+    [register]
+    [HijackAPI.hijackCudaRegisterFatBinaryEnd]([handle])
   end
 
   return register
@@ -1286,17 +1283,59 @@ function cudahelper.generate_parallel_prefix_op(cx, variant, total, lhs_wr, lhs_
   return launch
 end
 
+local function count_primitive_fields(ty)
+  if ty:isprimitive() or ty:ispointer() then return 1
+  elseif ty:isarray() then return count_primitive_fields(ty.type) * ty.N
+  else
+    assert(ty:isstruct())
+    local num_fields = 0
+    ty.entries:map(function(entry)
+      local field_ty = entry[2] or entry.type
+      num_fields = num_fields + count_primitive_fields(field_ty)
+    end)
+    return num_fields
+  end
+end
+
+local function count_arguments(args)
+  local num_args = 0
+  for i = 1, #args do
+    num_args = num_args + count_primitive_fields(args[i].type)
+  end
+  return num_args
+end
+
+local function generate_arg_setup(output, arr, arg, ty, idx)
+  if ty:isprimitive() or ty:ispointer() then
+    output:insert(quote [arr][ [idx] ] = &[arg] end)
+    return idx + 1
+  elseif ty:isarray() then
+    for k = 1, ty.N do
+      idx = generate_arg_setup(output, arr, `([arg][ [k - 1] ]), ty.type, idx)
+    end
+    return idx
+  else
+    assert(ty:isstruct())
+    ty.entries:map(function(entry)
+      local field_name = entry[1] or entry.field
+      local field_ty = entry[2] or entry.type
+      idx = generate_arg_setup(output, arr, `([arg].[field_name]), field_ty, idx)
+    end)
+    return idx
+  end
+end
+
 function cudahelper.codegen_kernel_call(cx, kernel_name, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
-  local offset = 0
+  local arglen = count_arguments(args)
+  local arg_arr = terralib.newsymbol((&opaque)[arglen], "__args")
+  setupArguments:insert(quote var [arg_arr]; end)
+  local idx = 0
   for i = 1, #args do
-    local arg =  args[i]
-    local size = terralib.sizeof(arg.type)
-    setupArguments:insert(quote
-      ExecutionAPI.cudaSetupArgument(&[arg], size, offset)
-    end)
-    offset = offset + size
+    local arg = args[i]
+    -- Need to flatten the arguments into individual primitive values
+    idx = generate_arg_setup(setupArguments, arg_arr, arg, arg.type, idx)
   end
 
   local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
@@ -1346,11 +1385,12 @@ function cudahelper.codegen_kernel_call(cx, kernel_name, count, args, shared_mem
     if [count] > 0 then
       var [grid], [block]
       [launch_domain_init]
-      ExecutionAPI.cudaConfigureCall([grid], [block], shared_mem_size, nil)
       [setupArguments]
       var kid : int64 = 0
       [c.murmur_hash3_32]([kernel_name], [string.len(kernel_name)], 0, &kid)
-      ExecutionAPI.cudaLaunch([&int8](kid))
+      var result = [RuntimeAPI.cudaLaunchKernel](
+        [&int8](kid), [grid], [block], [arg_arr], [shared_mem_size], nil)
+      base.assert(result == 0, "kernel launch failed")
     end
   end
 end

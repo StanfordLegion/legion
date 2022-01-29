@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2021 Stanford University, NVIDIA Corporation
+# Copyright 2022 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -556,6 +556,20 @@ class Shape(object):
         for rect in self.rects:
             result.rects.add(rect)
         return result
+
+    def dominates(self, other):
+        if len(self.rects) == 1 and len(self.points) == 0:
+            our_rect = next(iter(self.rects)) 
+            for point in other.points:
+                if not our_rect.contains_point(point):
+                    return False
+            for rect in other.rects:
+                if not our_rect.dominates(rect):
+                    return False
+            return True
+        else:
+            diff = other - self
+            return diff.empty()
 
     # Set intersection
     def __and__(self, other):
@@ -4054,7 +4068,7 @@ class LogicalState(object):
             else:
                 self.projection_mode = OPEN_READ_WRITE
             self.projection_epoch.append((req.projection_function, 
-                                          op.get_index_launch_rect()))
+                                          op.get_index_launch_shape()))
         return next_open
 
     # Maybe not the most intuitive name for a method but it aligns with the runtime
@@ -4254,32 +4268,32 @@ class LogicalState(object):
                 shallow_disjoint = req.projection_function.depth == 0 or req.is_read_only()
                 # Quick pass if we are disjoint shallow and have a
                 # read-only user, then there is nothing we need to do
-                same_func_and_rect = True
-                current_rect = op.get_index_launch_rect()
-                for func,rect in self.projection_epoch:
+                same_func_and_shape = True
+                current_shape = op.get_index_launch_shape()
+                for func,shape in self.projection_epoch:
                     # We can stay in shallow disjoint mode if the
                     # next user is going to be reading only
                     if shallow_disjoint and func.depth != 0:
                         shallow_disjoint = False
-                        if not same_func_and_rect:
+                        if not same_func_and_shape:
                             break
-                    if same_func_and_rect:
+                    if same_func_and_shape:
                         if func is not req.projection_function:
-                            same_func_and_rect = False
+                            same_func_and_shape = False
                             if not shallow_disjoint:
                                 break
-                        elif rect.dim != current_rect.dim:
+                        elif shape.get_dim() != current_shape.get_dim():
                             # Different dimensions can't be compared
-                            same_func_and_rect = False
+                            same_func_and_shape = False
                             if not shallow_disjoint:
                                 break
-                        elif not rect.dominates(current_rect):
-                            same_func_and_rect = False
+                        elif not shape.dominates(current_shape):
+                            same_func_and_shape = False
                             if not shallow_disjoint:
                                 break
                 # If we can't do either of these then we have to close
                 # Also have to close if this is a reduction and not shallow disjoint
-                if not shallow_disjoint and (not same_func_and_rect or req.is_reduce()):
+                if not shallow_disjoint and (not same_func_and_shape or req.is_reduce()):
                     closed = True
                     if not self.perform_close_operation(empty_children_to_close, False, 
                                         False, op, req, already_closed, previous_deps, 
@@ -5719,7 +5733,7 @@ class Operation(object):
                  'context_index', 'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'internal_ops', 'inlined',
                  'summary_op', 'task', 'task_id', 'predicate', 'predicate_result',
-                 'futures', 'owner_shard', 'index_owner', 'points', 'launch_rect', 
+                 'futures', 'owner_shard', 'index_owner', 'points', 'launch_shape', 
                  'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node', 
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
@@ -5770,7 +5784,7 @@ class Operation(object):
         self.collective_copies = None
         # Only valid for index operations 
         self.points = None
-        self.launch_rect = None
+        self.launch_shape = None
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
@@ -5812,7 +5826,7 @@ class Operation(object):
                 point.set_name(name)
 
     def is_index_op(self):
-        return self.launch_rect is not None
+        return self.launch_shape is not None
 
     def __str__(self):
         if self.name is None:
@@ -5886,9 +5900,10 @@ class Operation(object):
         else:
             assert self.kind == POST_CLOSE_OP_KIND
 
-    def set_launch_rect(self, rect):
-        assert not self.launch_rect
-        self.launch_rect = rect
+    def add_launch_rect(self, rect):
+        if self.launch_shape is None:
+            self.launch_shape = Shape()
+        self.launch_shape.add_rect(rect)
 
     def set_predicate(self, pred):
         self.predicate = pred
@@ -5905,9 +5920,9 @@ class Operation(object):
         # for the operation have been performed
         self.fully_logged = True
 
-    def get_index_launch_rect(self):
-        assert self.launch_rect
-        return self.launch_rect
+    def get_index_launch_shape(self):
+        assert self.launch_shape
+        return self.launch_shape
 
     def add_internal_operation(self, internal):
         if self.internal_ops is None:
@@ -6859,7 +6874,7 @@ class Operation(object):
                 for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                     if not point.perform_op_logical_verification(logical_op, previous_deps):
                         return False
-        elif self.launch_rect is None: 
+        elif self.launch_shape is None: 
             # This is a single operation if it doesn't have a launch rectangle
             assert len(self.reqs) >= len(logical_op.reqs)
             for idx in xrange(0,len(logical_op.reqs)):
@@ -11328,7 +11343,7 @@ def parse_legion_spy_line(line, state):
         for index in xrange(dim):
             lo.vals[index] = int(values[2*index])
             hi.vals[index] = int(values[2*index+1])
-        op.set_launch_rect(Rect(lo, hi)) 
+        op.add_launch_rect(Rect(lo, hi)) 
         return True
     m = mapping_dep_pat.match(line)
     if m is not None:

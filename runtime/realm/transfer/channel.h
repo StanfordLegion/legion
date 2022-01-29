@@ -1,5 +1,5 @@
-/* Copyright 2021 Stanford University
- * Copyright 2021 Los Alamos National Laboratory
+/* Copyright 2022 Stanford University
+ * Copyright 2022 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -227,7 +227,10 @@ namespace Realm {
     protected:
       AddressList *addrlist;
       bool partial;
-      static const int MAX_DIM = 8;
+      // we need to be one larger than any index space realm supports, since
+      //  we use the contiguous bytes within a field as a "dimension" in some
+      //  cases
+      static const int MAX_DIM = REALM_MAX_DIM + 1;
       int partial_dim;
       size_t pos[MAX_DIM];
     };
