@@ -81,7 +81,7 @@ pub struct Point(pub Vec<u64>);
 pub enum Record {
     MapperCallDesc { kind: MapperCallKindID, name: String },
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
-    MetaDesc { kind: VariantID, name: String },
+    MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
     ProcDesc { proc_id: ProcID, kind: ProcKind },
     MaxDimDesc { max_dim: MaxDim },
@@ -349,8 +349,10 @@ fn parse_runtime_call_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
 }
 fn parse_meta_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, kind) = parse_variant_id(input)?;
+    let (input, message) = parse_bool(input)?;
+    let (input, ordered_vc) = parse_bool(input)?;
     let (input, name) = parse_string(input)?;
-    Ok((input, Record::MetaDesc { kind, name }))
+    Ok((input, Record::MetaDesc { kind, message, ordered_vc, name }))
 }
 fn parse_op_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, kind) = le_u32(input)?;

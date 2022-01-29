@@ -2121,7 +2121,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*kind)
                 .or_insert_with(|| RuntimeCallKind::new(*kind, name));
         }
-        Record::MetaDesc { kind, name } => {
+        Record::MetaDesc { kind, message, ordered_vc, name } => {
             state
                 .meta_variants
                 .entry(*kind)

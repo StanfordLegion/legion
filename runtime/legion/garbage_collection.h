@@ -280,14 +280,13 @@ namespace Legion {
       class UnregisterFunctor {
       public:
         UnregisterFunctor(Runtime *rt, const DistributedID d,
-                          VirtualChannelKind v, std::set<RtEvent> &done)
-          : runtime(rt), did(d), vc(v), done_events(done) { }
+                          std::set<RtEvent> &done)
+          : runtime(rt), did(d), done_events(done) { }
       public:
         void apply(AddressSpaceID target);
       protected:
         Runtime *const runtime;
         const DistributedID did;
-        const VirtualChannelKind vc;
         std::set<RtEvent> &done_events;
       };
       struct DeferRemoteReferenceUpdateArgs : 
