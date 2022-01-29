@@ -3333,58 +3333,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::overwrite_sharded(Operation *op, 
-                                          const unsigned index,
-                                          const RegionRequirement &req,
-                                          ShardedView *view, 
-                                          VersionInfo &version_info,
-                                          const PhysicalTraceInfo &trace_info,
-                                          CollectiveMapping *collective_mapping,
-                                          const ApEvent precondition,
-                                          std::set<RtEvent> &map_applied_events,
-                                          const bool add_restriction,
-                                          const bool collective_first_local)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
-        return ApEvent::NO_AP_EVENT;
-      RegionNode *region_node = get_node(req.region);
-      FieldMask overwrite_mask = 
-        region_node->column_source->get_field_mask(req.privilege_fields);
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();     
-      OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          req, region_node->row_source, view, overwrite_mask, trace_info, 
-          collective_mapping, precondition, RtEvent::NO_RT_EVENT,
-          PredEvent::NO_PRED_EVENT, true/*track effects*/, add_restriction,
-          collective_first_local);
-      analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
-      if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, map_applied_events);
-      RtEvent output_ready;
-      if (traversal_done.exists() || analysis->has_output_updates())
-        output_ready = 
-          analysis->perform_updates(traversal_done, map_applied_events);
-      const ApEvent result = analysis->perform_output(
-         Runtime::merge_events(remote_ready, output_ready), map_applied_events);
-      if (analysis->remove_reference())
-        delete analysis;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::create_external_instance(
                              AttachOp *attach_op, const RegionRequirement &req,
                              const std::vector<FieldID> &field_set)

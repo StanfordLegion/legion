@@ -44,7 +44,7 @@ namespace Legion {
       REDUCTION_VIEW_DC = 0x5,
       FILL_VIEW_DC = 0x6,
       PHI_VIEW_DC = 0x7,
-      SHARDED_VIEW_DC = 0x8,
+      // SHARDED_VIEW_DC = 0x8,
       FUTURE_DC = 0x9,
       FUTURE_MAP_DC = 0xA,
       INDEX_EXPR_NODE_DC = 0xB,

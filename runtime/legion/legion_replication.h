@@ -927,36 +927,6 @@ namespace Legion {
     };
 
     /**
-     * \class ShardedMappingExchange
-     * A class for exchanging the names of instances and mapping dependence
-     * events for sharded mapping operations.
-     */
-    class ShardedMappingExchange : public AllGatherCollective<false> {
-    public:
-      ShardedMappingExchange(CollectiveIndexLocation loc, ReplicateContext *ctx,
-                             ShardID shard_id, bool check_mappings);
-      ShardedMappingExchange(const ShardedMappingExchange &rhs);
-      virtual ~ShardedMappingExchange(void);
-    public:
-      ShardedMappingExchange& operator=(const ShardedMappingExchange &rhs);
-    public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
-      virtual void unpack_collective_stage(Deserializer &derez, int stage);
-    public:
-      void initiate_exchange(const InstanceSet &mappings,
-                             const std::vector<InstanceView*> &views);
-      void complete_exchange(Operation *op, ShardedView *sharded_view,
-                             const InstanceSet &mappings,
-                             std::set<RtEvent> &map_applied_events);
-    public:
-      const ShardID shard_id;
-      const bool check_mappings;
-    protected:
-      std::map<DistributedID,LegionMap<ShardID,FieldMask> > mappings;
-      LegionMap<DistributedID,FieldMask> global_views;
-    };
-
-    /**
      * \class TemplateIndexExchange
      * A class for exchanging proposed templates for trace replay
      */

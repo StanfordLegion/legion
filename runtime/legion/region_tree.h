@@ -668,15 +668,6 @@ namespace Legion {
                           std::set<RtEvent> &map_applied_events,
                           CollectiveMapping *collective_mapping,
                           const bool collective_first_local);
-      ApEvent overwrite_sharded(Operation *op, const unsigned index,
-                                const RegionRequirement &req,
-                                ShardedView *view, VersionInfo &version_info,
-                                const PhysicalTraceInfo &trace_info,
-                                CollectiveMapping *collective_mapping,
-                                const ApEvent precondition,
-                                std::set<RtEvent> &map_applied_events,
-                                const bool add_restriction,
-                                const bool collective_first_local);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);

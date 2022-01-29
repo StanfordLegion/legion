@@ -12331,11 +12331,6 @@ namespace Legion {
               runtime->handle_send_phi_view(derez, remote_address_space);
               break;
             }
-          case SEND_SHARDED_VIEW:
-            {
-              runtime->handle_send_sharded_view(derez, remote_address_space);
-              break;
-            }
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
@@ -22173,14 +22168,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_sharded_view(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_SHARDED_VIEW,
-                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/); 
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24212,14 +24199,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhiView::handle_send_phi_view(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_sharded_view(Deserializer &derez,
-                                           AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ShardedView::handle_send_sharded_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -26383,9 +26362,6 @@ namespace Legion {
       else if (LogicalView::is_phi_did(did))
         dc = find_or_request_distributed_collectable<
           PhiView, SEND_VIEW_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did, ready);
-      else if (LogicalView::is_sharded_did(did))
-        dc = find_or_request_distributed_collectable<
-          ShardedView, SEND_VIEW_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(did, ready);
       else
         assert(false);
       // Have to static cast since the memory might not have been initialized

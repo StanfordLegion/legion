@@ -64,7 +64,6 @@ namespace Legion {
       inline bool is_reduction_view(void) const;
       inline bool is_fill_view(void) const;
       inline bool is_phi_view(void) const;
-      inline bool is_sharded_view(void) const;
     public:
       inline InstanceView* as_instance_view(void) const;
       inline DeferredView* as_deferred_view(void) const;
@@ -72,7 +71,6 @@ namespace Legion {
       inline ReductionView* as_reduction_view(void) const;
       inline FillView* as_fill_view(void) const;
       inline PhiView *as_phi_view(void) const;
-      inline ShardedView* as_sharded_view(void) const;
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -91,12 +89,10 @@ namespace Legion {
       static inline DistributedID encode_reduction_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
       static inline DistributedID encode_phi_did(DistributedID did);
-      static inline DistributedID encode_sharded_did(DistributedID did);
       static inline bool is_materialized_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
       static inline bool is_phi_did(DistributedID did);
-      static inline bool is_sharded_did(DistributedID did);
     public:
       RegionTreeForest *const context;
     protected:
@@ -1077,67 +1073,6 @@ namespace Legion {
       LegionMap<LogicalView*,FieldMask> false_views;
     };
 
-    /**
-     * \class ShardedView
-     * A shared view is a representation of many instances all of which
-     * have the same data at the same version. This comes up mainly in
-     * control replication cases such as for inline mappings and attach 
-     * operations where we make many local copies of the same data for
-     * the same logical region. It's better to store one of these in
-     * an equivalence set instead of a bunch of seperate invidividual views.
-     */
-    class ShardedView : public DeferredView {
-    public:
-      class RemoteDecrementFunctor {
-      public:
-        RemoteDecrementFunctor(ShardedView *v, 
-            AddressSpaceID own, ReferenceMutator *m)
-          : view(v), owner(own), mutator(m) { }
-      public:
-        void apply(AddressSpaceID space) const;
-      public:
-        ShardedView *const view;
-        const AddressSpaceID owner;
-        ReferenceMutator *const mutator;
-      };
-    public:
-      ShardedView(RegionTreeForest *forest, DistributedID did,
-                  AddressSpaceID owner_space, bool register_now);
-      ShardedView(const ShardedView &rhs);
-      virtual ~ShardedView(void);
-    public:
-      ShardedView& operator=(const ShardedView &rhs);
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-    public:
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-    public:
-      virtual void send_view(AddressSpaceID target); 
-    public:
-      virtual void flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view, const FieldMask &src_mask,
-                           IndexSpaceExpression *expr,
-                           EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
-                           CopyAcrossHelper *helper);
-    public:
-      void initialize(LegionMap<DistributedID,FieldMask> &views,
-                      const InstanceSet &local_instances,
-                      std::set<RtEvent> &applied_events);
-      void unpack_view(Deserializer &derez);
-    public:
-      static void handle_send_sharded_view(Runtime *runtime,
-                      Deserializer &derez, AddressSpaceID source);
-    protected:
-      std::set<PhysicalManager*> local_instances;
-      LegionMap<DistributedID,FieldMask> global_views;
-#ifdef DEBUG_LEGION
-      bool valid;
-#endif
-    };
-
     //--------------------------------------------------------------------------
     /*static*/ inline DistributedID LogicalView::encode_materialized_did(
                                                               DistributedID did)
@@ -1183,17 +1118,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline DistributedID LogicalView::encode_sharded_did(
-                                                              DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(DIST_TYPE_LAST_DC < (1U << 7));
-#endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, SHARDED_VIEW_DC);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
@@ -1225,14 +1149,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline bool LogicalView::is_sharded_did(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
-                                                SHARDED_VIEW_DC);
-    }
-
-    //--------------------------------------------------------------------------
     inline bool LogicalView::is_instance_view(void) const
     //--------------------------------------------------------------------------
     {
@@ -1243,7 +1159,7 @@ namespace Legion {
     inline bool LogicalView::is_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_fill_did(did) || is_phi_did(did) || is_sharded_did(did));
+      return (is_fill_did(did) || is_phi_did(did));
     }
 
     //--------------------------------------------------------------------------
@@ -1272,13 +1188,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return is_phi_did(did);
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool LogicalView::is_sharded_view(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_sharded_did(did);
     }
 
     //--------------------------------------------------------------------------
@@ -1339,16 +1248,6 @@ namespace Legion {
       assert(is_phi_view());
 #endif
       return static_cast<PhiView*>(const_cast<LogicalView*>(this));
-    }
-
-    //--------------------------------------------------------------------------
-    inline ShardedView* LogicalView::as_sharded_view(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_sharded_view());
-#endif
-      return static_cast<ShardedView*>(const_cast<LogicalView*>(this));
     }
 
     //--------------------------------------------------------------------------

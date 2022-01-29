@@ -796,7 +796,6 @@ namespace Legion {
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
-      SEND_SHARDED_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_MANAGER_UPDATE,
@@ -1016,7 +1015,6 @@ namespace Legion {
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
         "Send Phi View",                                              \
-        "Send Sharded View",                                          \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Manager Update",                                        \
@@ -1818,7 +1816,6 @@ namespace Legion {
     class MaterializedView;
     class FillView;
     class PhiView;
-    class ShardedView;
     class MappingRef;
     class InstanceRef;
     class InstanceSet;
