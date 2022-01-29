@@ -560,8 +560,6 @@ namespace Legion {
       template<typename T>
       inline void hash(const T &value);
       inline void hash(const void *values, size_t size);
-      inline void hash(const ExecutionConstraintSet &set);
-      inline void hash(const TaskLayoutConstraintSet &set);
       inline void finalize(uint64_t result[2]);
     protected:
       inline uint64_t rotl64(uint64_t x, uint8_t r);
