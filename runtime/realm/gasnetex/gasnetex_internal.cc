@@ -2400,12 +2400,14 @@ namespace Realm {
                 // successful injection
                 pkt_sent = true;
 
+                GASNetEXEvent *leaf = 0;
                 // local completion (if needed)
                 if(meta->put->local_comp) {
                   GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
                   ev->set_event(lc_event);
                   ev->set_local_comp(meta->put->local_comp);
                   internal->poller.add_pending_event(ev);
+                  leaf = ev;  // must be connected to root event below
                 }
 
                 // remote completion (always needed)
@@ -2413,6 +2415,8 @@ namespace Realm {
                   GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
                   ev->set_event(rc_event);
                   ev->set_put(meta->put);
+                  if(leaf)
+                    ev->set_leaf(leaf);
                   internal->poller.add_pending_event(ev);
                 }
 
@@ -2589,6 +2593,7 @@ namespace Realm {
     , databuf(nullptr)
     , rget(nullptr)
     , put(nullptr)
+    , leaf(nullptr)
   {}
 
   gex_Event_t GASNetEXEvent::get_event() const
@@ -2632,6 +2637,12 @@ namespace Realm {
     return *this;
   }
 
+  GASNetEXEvent& GASNetEXEvent::set_leaf(GASNetEXEvent *_leaf)
+  {
+    leaf = _leaf;
+    return *this;
+  }
+
   void GASNetEXEvent::trigger(GASNetEXInternal *internal)
   {
     event = GEX_EVENT_INVALID;
@@ -2646,6 +2657,8 @@ namespace Realm {
       rget->rgetter->reverse_get_complete(rget);
     if(put)
       put->xpair->enqueue_put_header(put);
+    if(leaf)
+      leaf->event = GEX_EVENT_NO_OP;
   }
 
 
@@ -2788,7 +2801,13 @@ namespace Realm {
       // go through events in order, either trigger or move to 'still_pending'
       while(!to_check.empty()) {
 	GASNetEXEvent *ev = to_check.pop_front();
-	int ret = gex_Event_Test(ev->get_event());
+        // if the GASNet event is GEX_EVENT_NO_OP, that means we were a leaf
+        //  event and the root event has already been successfully tested,
+        //  so we automatically succeed (it would be illegal to check again)
+        gex_Event_t gev = ev->get_event();
+        int ret = ((gev == GEX_EVENT_NO_OP) ?
+                     GASNET_OK :
+                     gex_Event_Test(gev));
 	switch(ret) {
 	case GASNET_OK:
 	  {
@@ -4580,12 +4599,14 @@ namespace Realm {
         if(rc_event != GEX_EVENT_NO_OP) {
 	  xpair->record_immediate_packet();
 
+          GASNetEXEvent *leaf = 0;
           // local completion (if needed)
           if(msg->put->local_comp) {
             GASNetEXEvent *ev = event_alloc.alloc_obj();
             ev->set_event(lc_event);
             ev->set_local_comp(msg->put->local_comp);
             poller.add_pending_event(ev);
+            leaf = ev;  // must be connected to root event below
           }
 
           // remote completion (always needed)
@@ -4593,6 +4614,8 @@ namespace Realm {
             GASNetEXEvent *ev = event_alloc.alloc_obj();
             ev->set_event(rc_event);
             ev->set_put(msg->put);
+            if(leaf)
+              ev->set_leaf(leaf);
             poller.add_pending_event(ev);
           }
         } else {

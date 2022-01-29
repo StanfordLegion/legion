@@ -511,6 +511,7 @@ namespace Realm {
     GASNetEXEvent& set_databuf(OutbufMetadata *_databuf);
     GASNetEXEvent& set_rget(PendingReverseGet *_rget);
     GASNetEXEvent& set_put(PendingPutHeader *_put);
+    GASNetEXEvent& set_leaf(GASNetEXEvent *_leaf);
 
     void trigger(GASNetEXInternal *internal);
 
@@ -525,6 +526,7 @@ namespace Realm {
     OutbufMetadata *databuf;
     PendingReverseGet *rget;
     PendingPutHeader *put;
+    GASNetEXEvent *leaf;
   };
 
   // an injector tries to send packets, but is not allowed to stall -
