@@ -11935,15 +11935,7 @@ namespace Legion {
     {
       if (map.impl == NULL)
         return;
-#ifdef DEBUG_LEGION
-      ReplFutureMapImpl *impl = 
-        dynamic_cast<ReplFutureMapImpl*>(map.impl);
-      assert(impl != NULL);
-#else
-      ReplFutureMapImpl *impl = 
-        static_cast<ReplFutureMapImpl*>(map.impl);
-#endif
-      hasher.hash(impl->op_ctx_index);
+      hasher.hash(map.impl->op_ctx_index);
     }
 
     //--------------------------------------------------------------------------
