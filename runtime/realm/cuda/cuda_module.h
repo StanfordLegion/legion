@@ -27,6 +27,10 @@ namespace Realm {
     // CUDA device memory - extra is a uintptr_t'd pointer to the GPU
     //  object
     static const MemoryType CudaDeviceMem = 2;
+
+    // CUDA managed memory - extra is a uintptr_t'd pointer to _one of_
+    //  the GPU objects
+    static const MemoryType CudaManagedMem = 4;
   };
 
   namespace Cuda {

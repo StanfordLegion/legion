@@ -2369,8 +2369,13 @@ namespace Realm {
       : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
-      // advertise ourselves as a host memory
-      local_segment.assign(NetworkSegmentInfo::HostMem, cpu_base, size);
+      // advertise ourselves as a host or managed memory, as appropriate
+      NetworkSegmentInfo::MemoryType mtype;
+      if(_kind == MemoryImpl::MKIND_MANAGED)
+        mtype = NetworkSegmentInfo::CudaManagedMem;
+      else
+        mtype = NetworkSegmentInfo::HostMem;
+      local_segment.assign(mtype, cpu_base, size);
       segment = &local_segment;
     }
 
