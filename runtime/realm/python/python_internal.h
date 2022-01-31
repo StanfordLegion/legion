@@ -158,7 +158,7 @@ namespace Realm {
     
     virtual void remove_from_group(ProcessorGroupImpl *group);
     
-    virtual void register_task(Processor::TaskFuncID func_id,
+    virtual bool register_task(Processor::TaskFuncID func_id,
                                CodeDescriptor& codedesc,
                                const ByteArrayRef& user_data);
 

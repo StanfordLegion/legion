@@ -316,9 +316,9 @@ namespace Realm {
     uint64_t tb3 = convert_forward_absolute(ta2);
     uint64_t ta3 = convert_reverse_absolute(tb2);
     int64_t db_plus = convert_forward_delta(a_delta);
-    int64_t db_minus = convert_forward_delta(-a_delta);
+    int64_t db_minus = convert_forward_delta(-((int64_t)a_delta));
     int64_t da_plus = convert_reverse_delta(b_delta);
-    int64_t da_minus = convert_reverse_delta(-b_delta);
+    int64_t da_minus = convert_reverse_delta(-((int64_t)b_delta));
     assert((ta2 == ta3) && (tb2 == tb3) &&
            (db_plus == (int64_t)b_delta) && (-db_minus == (int64_t)b_delta) &&
            (da_plus == (int64_t)a_delta) && (-da_minus == (int64_t)a_delta));

@@ -730,6 +730,13 @@ namespace Realm {
     queue->remove_subscription(&wcu_task_queues);
   }
 
+  void ThreadedTaskScheduler::add_task_context(const TaskContextManager *_manager)
+  {
+    AutoLock<> al(lock);
+
+    context_managers.push_back(_manager);
+  }
+
   void ThreadedTaskScheduler::configure_bgworker(BackgroundWorkManager *manager,
 						 long long max_timeslice,
 						 int numa_domain)
@@ -1069,11 +1076,31 @@ namespace Realm {
 	  // release the lock while we run the task
 	  lock.unlock();
 
+	  // if we have any context managers, create the necessary contexts
+	  std::vector<void *> contexts(context_managers.size(), 0);
+	  if(!context_managers.empty()) {
+	    for(size_t i = 0; i < context_managers.size(); i++)
+	      contexts[i] = context_managers[i]->create_context(task);
+	    // add a reference to the task to prevent it from being deleted
+	    //  before we destroy our contexts
+	    // NOTE: this does NOT prevent the task from finishing - a context
+	    //  should add an AsyncWorkItem to the task if that is needed
+	    task->add_reference();
+	  }
+
 #ifndef NDEBUG
 	  bool ok =
 #endif
 	    execute_task(task);
 	  assert(ok);  // no fault recovery yet
+
+	  if(!context_managers.empty()) {
+	    // destroy contexts in reverse order
+	    for(size_t i = context_managers.size(); i > 0; i--)
+	      context_managers[i-1]->destroy_context(task, contexts[i-1]);
+	    // and only then remove the extra reference we were holding
+	    task->remove_reference();
+	  }
 
 	  lock.lock();
 
