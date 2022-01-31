@@ -3169,13 +3169,13 @@ namespace Legion {
       public:
         void find_remote_interfering(const std::set<AddressSpaceID> &targets,
                           IndexPartition handle, IndexSpaceExpression *expr);
-        void process_remote_interfering_response(Deserializer &derez);
+        RtUserEvent process_remote_interfering_response(Deserializer &derez);
       protected:
         mutable LocalLock tracker_lock;
         std::set<LegionColor> &colors;
         Runtime *const runtime;
         RtUserEvent done_event;
-        unsigned remaining;
+        std::atomic<unsigned> remaining;
       };
     public:
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
