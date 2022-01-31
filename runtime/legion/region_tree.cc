@@ -12306,7 +12306,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartNode::RemoteKDTracker::RemoteKDTracker(std::set<LegionColor> &c, 
                                                     Runtime *rt)
-      : colors(c), runtime(rt), remaining(0)
+      : colors(c), runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT),
+        remaining(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -12318,20 +12319,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(remaining == 0);
+      assert(remaining.load() == 0);
       assert(!targets.empty());
 #endif
-      remaining = targets.size();
+      remaining.store(targets.size());
       for (std::set<AddressSpaceID>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
       {
         if ((*it) == runtime->address_space)
         {
-          AutoLock t_lock(tracker_lock);
 #ifdef DEBUG_LEGION
-          assert(remaining > 0);
+          assert(remaining.load() > 0);
 #endif
-          if (--remaining == 0)
+          if (remaining.fetch_sub(1) == 1)
             return;
           continue;
         }
@@ -12347,7 +12347,7 @@ namespace Legion {
       RtEvent wait_on;
       {
         AutoLock t_lock(tracker_lock);
-        if (remaining == 0)
+        if (remaining.load() == 0)
           return;
         done_event = Runtime::create_rt_user_event();
         wait_on = done_event;
@@ -12357,7 +12357,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::RemoteKDTracker::process_remote_interfering_response(
+    RtUserEvent 
+      IndexPartNode::RemoteKDTracker::process_remote_interfering_response(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -12371,10 +12372,12 @@ namespace Legion {
         colors.insert(color);
       }
 #ifdef DEBUG_LEGION
-      assert(remaining > 0);
+      assert(remaining.load() > 0);
 #endif
-      if ((--remaining == 0) && done_event.exists())
-        Runtime::trigger_event(done_event);
+      if ((remaining.fetch_sub(1) == 1) && done_event.exists())
+        return done_event;
+      else
+        return RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -12440,7 +12443,10 @@ namespace Legion {
       DerezCheck z(derez);
       RemoteKDTracker *tracker;
       derez.deserialize(tracker);
-      tracker->process_remote_interfering_response(derez);
+      const RtUserEvent to_trigger = 
+        tracker->process_remote_interfering_response(derez);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

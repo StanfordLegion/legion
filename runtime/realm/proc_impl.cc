@@ -203,7 +203,8 @@ namespace Realm {
 	    it != local_procs.end();
 	    it++) {
 	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	  p->register_task(func_id, tro->codedesc, tro->userdata);
+	  bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
+	  assert(ok); // TODO: poison completion instead
 	}
       }
 
@@ -279,7 +280,8 @@ namespace Realm {
 	    it != local_procs.end();
 	    it++) {
 	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	  p->register_task(func_id, tro->codedesc, tro->userdata);
+	  bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
+	  assert(ok); // TODO: poison completion instead
 	}
       }
 
@@ -493,12 +495,13 @@ namespace Realm {
       assert(0);
     }
 
-    void ProcessorImpl::register_task(Processor::TaskFuncID func_id,
+    bool ProcessorImpl::register_task(Processor::TaskFuncID func_id,
 				      CodeDescriptor& codedesc,
 				      const ByteArrayRef& user_data)
     {
       // should never be called
       assert(0);
+      return false;
     }
 
     // helper function for spawn implementations
@@ -845,14 +848,16 @@ namespace Realm {
 	  it != local_procs.end();
 	  it++) {
 	ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	p->register_task(args.func_id, codedesc, userdata);
+	bool ok = p->register_task(args.func_id, codedesc, userdata);
+	assert(ok); // TODO: poison completion instead
       }
     } else {
       for(std::vector<Processor>::const_iterator it = procs.begin();
 	  it != procs.end();
 	  it++) {
 	ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	p->register_task(args.func_id, codedesc, userdata);
+	bool ok = p->register_task(args.func_id, codedesc, userdata);
+	assert(ok); // TODO: poison completion instead
       }
     }
 
@@ -1053,7 +1058,7 @@ namespace Realm {
     enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
 
-  void LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
+  bool LocalTaskProcessor::register_task(Processor::TaskFuncID func_id,
 					 CodeDescriptor& codedesc,
 					 const ByteArrayRef& user_data)
   {
@@ -1088,7 +1093,7 @@ namespace Realm {
       // first, make sure we haven't seen this task id before
       if(task_table.count(func_id) > 0) {
         log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
-        assert(0);
+        return false;
       }
 
       TaskTableEntry &tte = task_table[func_id];
@@ -1097,6 +1102,8 @@ namespace Realm {
     }
 
     log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
+
+    return true;
   }
 
   void LocalTaskProcessor::execute_task(Processor::TaskFuncID func_id,

@@ -1688,7 +1688,7 @@ namespace Realm {
     // now work back down from the top dimension and increase fragment
     //  count for each break
     size_t frags = field_count;
-    for(int d = N+1; d >= 0; d--) {
+    for(int d = N; d >= 0; d--) {
       if(d <= breaks)
         frags *= collapsed[d];
       fragments[d] += frags;

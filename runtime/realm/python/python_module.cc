@@ -912,7 +912,7 @@ namespace Realm {
     sched->remove_task_queue(&group->task_queue);
   }
 
-  void LocalPythonProcessor::register_task(Processor::TaskFuncID func_id,
+  bool LocalPythonProcessor::register_task(Processor::TaskFuncID func_id,
                                            CodeDescriptor& codedesc,
                                            const ByteArrayRef& user_data)
   {
@@ -922,6 +922,8 @@ namespace Realm {
     treg->codedesc = new CodeDescriptor(codedesc);
     treg->user_data = user_data;
     sched->add_internal_task(treg);
+    // TODO: failure wouldn't be detected until later...
+    return true;
   }
 
   void LocalPythonProcessor::execute_task(Processor::TaskFuncID func_id,
