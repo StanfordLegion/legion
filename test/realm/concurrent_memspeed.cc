@@ -1,4 +1,3 @@
-#include "realm.h
 #include "realm.h"
 #include "realm/cmdline.h"
 #include "realm/id.h"
@@ -13,6 +12,15 @@
 #include <time.h>
 
 #include "osdep.h"
+
+/**
+ * The test evaluates variaous performance aspects of concurrent copy operations
+ * in Realm such as time and bandwidth. The supported uses cases:
+ * 1. GPU_FB (Node) -> GPU_FB (N-1 nodes) (sinle direction)
+ * 2. GPU_FB( Node) <-> GPU_FB(N-1 nodes) (directional)
+ * Copied buffers can be up to 3 dimensions.
+ * It only supports GPU memory at the moment.
+ */
 
 using namespace Realm;
 
@@ -50,6 +58,9 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
   const CopyProfResult *result =
       static_cast<const CopyProfResult *>(resp.user_data());
   ProfilingMeasurements::OperationTimeline timeline;
+  // As all operations are running concurrently we estimate the total
+  // copy time as the difference between the end of the last transfer and
+  // beginning of the first transfer on the same node.
   if (resp.get_measurement(timeline)) {
     *(result->copy_start_time) =
         (*(result->copy_start_time) == -1)
@@ -185,8 +196,8 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
           .wait();
       assert(dst_instances.back().exists());
 
+      // Now do a number of repetitions on the same buffer.
       for (int k = 0; k < TestConfig::copy_reps; k++) {
-
         std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
         for (int i = 0; i < TestConfig::copy_fields; i++)
           srcs[i].set_field(src_instances.back(), FID_BASE + i, sizeof(void *));
@@ -231,20 +242,31 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
 
   Event::merge_events(done_events).wait();
 
+  int experiment_count = 0;
+  long long mean_copy_duration = 0;
+  double mean_bandwith = 0.0;
   log_app.info() << "Memspeed Results";
   for (size_t i = 0; i < memspeed_experiments.size(); ++i) {
     long long copy_duration = (memspeed_experiments[i].copy_end_time -
                                memspeed_experiments[i].copy_start_time);
     if (copy_duration == 0)
       continue;
-    log_app.print() << "Node=" << memories[i]
+
+    double bandwidth =
+        static_cast<double>(memspeed_experiments[i].copied_bytes) /
+        copy_duration;
+    log_app.print() << "Memory=" << memories[i]
                     << " copy_duration=" << copy_duration
                     << " total_copies=" << memspeed_experiments[i].total_copies
                     << " copied_bytes=" << memspeed_experiments[i].copied_bytes
-                    << " bandwidth="
-                    << (double)memspeed_experiments[i].copied_bytes /
-                           copy_duration;
+                    << " bandwidth=" << bandwidth;
+    mean_copy_duration += copy_duration;
+    mean_bandwith += bandwidth;
+    experiment_count++;
   }
+  log_app.print() << "Mean copy_duration="
+                  << mean_copy_duration / experiment_count << " mean bandwidth="
+                  << static_cast<double>(mean_bandwith) / experiment_count;
 
   for (auto &instance : dst_instances) {
     instance.destroy();
@@ -269,6 +291,11 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
     if (m.kind() == Memory::GPU_FB_MEM) {
       memories.push_back(m);
     }
+  }
+
+  if (memories.empty()) {
+    log_app.info() << "No memories have been found.";
+    return;
   }
 
   if (TestConfig::dimensions == 1)
@@ -330,4 +357,3 @@ int main(int argc, char **argv) {
 
   return 0;
 }
-
