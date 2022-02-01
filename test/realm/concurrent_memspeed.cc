@@ -20,7 +20,6 @@ Logger log_app("app");
 // Task IDs, some IDs are reserved so start at first available number
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
-  MEMSPEED_TASK,
   COPYPROF_TASK,
 };
 
@@ -115,6 +114,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
     field_sizes[FID_BASE + i] = sizeof(void *);
   }
 
+  // TODO(artempriakhin): Add more sanity checks for dimensions.
   Rect<N> boundaries =
       create_boundaries<N>(TestConfig::dimensions, {{0, TestConfig::x_size},
                                                     {0, TestConfig::y_size},
@@ -153,7 +153,6 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
         .wait();
     assert(src_instances.back().exists());
 
-    // clear the instance first - this should also take care of faulting it in
     {
       void *fill_value = 0;
       std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
@@ -180,6 +179,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
           .wait();
       assert(dst_instances.back().exists());
 
+      // TODO(artempriakhin): Support various buffer sizes.
       for (int k = 0; k < TestConfig::copy_reps; k++) {
 
         std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
@@ -216,6 +216,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
       break;
   }
 
+  // We should probably find a better way to lauch tasks concurrently.
   for (size_t i = 0; i < index_spaces.size(); i++) {
     threads.push_back(std::thread([&, i] {
       index_spaces[i].copy(src_fields[i], dst_fields[i], profile_requests[i]);
@@ -323,4 +324,3 @@ int main(int argc, char **argv) {
 
   return 0;
 }
-
