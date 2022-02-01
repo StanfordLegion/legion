@@ -1,3 +1,4 @@
+#include "realm.h
 #include "realm.h"
 #include "realm/cmdline.h"
 #include "realm/id.h"
@@ -31,12 +32,14 @@ struct MemspeedExperiment {
   long long copy_start_time = -1;
   long long copy_end_time = -1;
   long long copied_bytes = 0;
+  long long total_copies = 0;
 };
 
 struct CopyProfResult {
   long long *copy_start_time;
   long long *copy_end_time;
   long long *copied_bytes;
+  long long *total_copies;
   UserEvent done;
 };
 
@@ -66,6 +69,7 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
   ProfilingMeasurements::OperationMemoryUsage copied_bytes;
   if (resp.get_measurement(copied_bytes)) {
     *(result->copied_bytes) += copied_bytes.size;
+    *(result->total_copies) = *(result->total_copies) + 1;
   } else {
     log_app.fatal() << "no operation memory usage in profiling response!";
     assert(0);
@@ -103,7 +107,10 @@ create_boundaries(int dims,
     assert(dims_sizes[i].second > 0);
     boundaries.lo[i] = dims_sizes[i].first;
     boundaries.hi[i] = dims_sizes[i].second;
+    log_app.info() << "Dim=" << i << " lo=" << boundaries.lo[i]
+                   << " hi=" << boundaries.hi[i];
   }
+  log_app.info() << "Created a boundary with volume=" << boundaries.volume();
   return boundaries;
 }
 
@@ -114,7 +121,6 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
     field_sizes[FID_BASE + i] = sizeof(void *);
   }
 
-  // TODO(artempriakhin): Add more sanity checks for dimensions.
   Rect<N> boundaries =
       create_boundaries<N>(TestConfig::dimensions, {{0, TestConfig::x_size},
                                                     {0, TestConfig::y_size},
@@ -125,9 +131,9 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
       {{TestConfig::x_copy_size_lo, TestConfig::x_copy_size_hi > 0
                                         ? TestConfig::x_copy_size_hi
                                         : TestConfig::x_size},
-       {TestConfig::y_copy_size_lo, TestConfig::x_copy_size_hi > 0
-                                        ? TestConfig::x_copy_size_hi
-                                        : TestConfig::x_size},
+       {TestConfig::y_copy_size_lo, TestConfig::y_copy_size_hi > 0
+                                        ? TestConfig::y_copy_size_hi
+                                        : TestConfig::y_size},
        {TestConfig::z_copy_size_lo, TestConfig::z_copy_size_hi > 0
                                         ? TestConfig::z_copy_size_hi
                                         : TestConfig::z_size}});
@@ -179,7 +185,6 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
           .wait();
       assert(dst_instances.back().exists());
 
-      // TODO(artempriakhin): Support various buffer sizes.
       for (int k = 0; k < TestConfig::copy_reps; k++) {
 
         std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
@@ -199,6 +204,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
           result.copy_start_time = &memspeed_experiments[i].copy_start_time;
           result.copy_end_time = &memspeed_experiments[i].copy_end_time;
           result.copied_bytes = &memspeed_experiments[i].copied_bytes;
+          result.total_copies = &memspeed_experiments[i].total_copies;
           result.done = done;
           ProfilingRequestSet prs;
           prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
@@ -216,7 +222,6 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
       break;
   }
 
-  // We should probably find a better way to lauch tasks concurrently.
   for (size_t i = 0; i < index_spaces.size(); i++) {
     threads.push_back(std::thread([&, i] {
       index_spaces[i].copy(src_fields[i], dst_fields[i], profile_requests[i]);
@@ -234,6 +239,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
       continue;
     log_app.print() << "Node=" << memories[i]
                     << " copy_duration=" << copy_duration
+                    << " total_copies=" << memspeed_experiments[i].total_copies
                     << " copied_bytes=" << memspeed_experiments[i].copied_bytes
                     << " bandwidth="
                     << (double)memspeed_experiments[i].copied_bytes /
@@ -250,7 +256,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
 
 void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p) {
-  log_app.print() << "Realm concurrent memory speed test";
+  log_app.print() << "Realm memory speed test";
 
   // build the list of memories that we want to test
   std::vector<Memory> memories;
@@ -324,3 +330,4 @@ int main(int argc, char **argv) {
 
   return 0;
 }
+
