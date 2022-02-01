@@ -88,18 +88,18 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
 }
 
 namespace TestConfig {
-int dimensions = 1;
-size_t x_size = 2000;
+int dimensions = 1;            // Maximum dimensionality.
+size_t x_size = 2000;          // Dimensions of the original index space.
 size_t y_size = 2000;
 size_t z_size = 2000;
-size_t x_copy_size_lo = 0;
+size_t x_copy_size_lo = 0;     // Dimensions of the index space to be copied.
 size_t x_copy_size_hi = 0;
 size_t y_copy_size_lo = 0;
 size_t y_copy_size_hi = 0;
 size_t z_copy_size_lo = 0;
 size_t z_copy_size_hi = 0;
-size_t max_src_memories = 1;
-size_t max_dst_memories = 1;
+size_t max_src_memories = 1;   // Max number of source memories
+size_t max_dst_memories = 1;   // Max number of destination memories
 size_t buffer_size = 64 << 20; // should be bigger than any cache in system
 int copy_reps = 1;             // if nonzero, average over #reps copies
 int copy_fields = 1;           // number of distinct fields to copy
@@ -184,6 +184,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
 
     size_t dst_memories = 0;
     for (size_t j = 0; j < memories.size(); j++) {
+      // We intentionally skip same memory copies.
       if (i == j) {
         continue;
       }
@@ -223,6 +224,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
               .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
           profile_requests.push_back(prs);
         }
+        // TODO(artempriakhin): Add more sanity checks for boundaries.
         index_spaces.push_back(IndexSpace<N>(copy_boundaries));
       }
 
@@ -280,10 +282,10 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p) {
   log_app.print() << "Realm memory speed test";
 
-  // build the list of memories that we want to test
   std::vector<Memory> memories;
   Machine machine = Machine::get_machine();
 
+  // TODO(artempriakin): Extend to work system memory and other types.
   for (Machine::MemoryQuery::iterator it =
            Machine::MemoryQuery(machine).begin();
        it; ++it) {
