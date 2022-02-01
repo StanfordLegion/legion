@@ -202,6 +202,7 @@ local supported_archs = {
   ["maxwell"] = 52,
   ["pascal"]  = 60,
   ["volta"]   = 70,
+  ["ampere"]  = 80,
 }
 
 local function parse_cuda_arch(arch)
