@@ -249,7 +249,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
 
 void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p) {
-  log_app.print() << "Realm memory speed test";
+  log_app.print() << "Realm concurrent memory speed test";
 
   // build the list of memories that we want to test
   std::vector<Memory> memories;
