@@ -243,7 +243,7 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
 
   int experiment_count = 0;
   long long mean_copy_duration = 0;
-  double mean_bandwith = 0.0;
+  double mean_throughput = 0.0;
   log_app.info() << "Memspeed Results";
   for (size_t i = 0; i < memspeed_experiments.size(); ++i) {
     long long copy_duration = (memspeed_experiments[i].copy_end_time -
@@ -260,12 +260,12 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
                     << " copied_bytes=" << memspeed_experiments[i].copied_bytes
                     << " throughput=" << throughput;
     mean_copy_duration += copy_duration;
-    mean_bandwith += bandwidth;
+    mean_throughput += throughput;
     experiment_count++;
   }
   log_app.print() << "Mean copy_duration="
                   << mean_copy_duration / experiment_count << " mean bandwidth="
-                  << static_cast<double>(mean_bandwith) / experiment_count;
+                  << static_cast<double>(mean_throughput) / experiment_count;
 
   for (auto &instance : dst_instances) {
     instance.destroy();
