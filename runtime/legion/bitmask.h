@@ -1384,8 +1384,6 @@
     inline int BitMask<T,MAX,SHIFT,MASK>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -2077,8 +2075,6 @@
     inline int TLBitMask<T,MAX,SHIFT,MASK>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -2825,8 +2821,6 @@
     inline int SSEBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -3500,8 +3494,6 @@
     inline int SSETLBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -4244,8 +4236,6 @@
     inline int AVXBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -4986,8 +4976,6 @@
     inline int AVXTLBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -5830,8 +5818,6 @@
     inline int PPCBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -6523,8 +6509,6 @@
     inline int PPCTLBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
-      if (start < 0)
-        start = 0;
       int idx = start / ELEMENT_SIZE; // truncate
       int offset = idx * ELEMENT_SIZE; 
       int j = start % ELEMENT_SIZE;
@@ -7319,8 +7303,6 @@
     {
       if (is_sparse())
       {
-        if (start < 0)
-          return find_first_set();
         int index = find_index(start);
 #ifdef DEBUG_LEGION
         assert(index >= 0);
