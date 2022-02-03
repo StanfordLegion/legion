@@ -88,18 +88,20 @@ void copy_profiling_task(const void *args, size_t arglen, const void *userdata,
 }
 
 namespace TestConfig {
-int dimensions = 1;            // Maximum dimensionality.
-size_t x_size = 2000;          // Dimensions of the original index space.
+int dimensions = 1; // Maximum dimensionality.
+size_t x_size = 2000;
 size_t y_size = 2000;
 size_t z_size = 2000;
-size_t x_copy_size_lo = 0;     // Dimensions of the index space to be copied.
+size_t x_copy_size_lo = 0;
 size_t x_copy_size_hi = 0;
 size_t y_copy_size_lo = 0;
 size_t y_copy_size_hi = 0;
 size_t z_copy_size_lo = 0;
 size_t z_copy_size_hi = 0;
-size_t max_src_memories = 1;   // Max number of source memories
-size_t max_dst_memories = 1;   // Max number of destination memories
+size_t src_mem_lo = 0; // Range of src and target memories for copying.
+size_t src_mem_hi = 0;
+size_t dst_mem_lo = 0;
+size_t dst_mem_hi = 1;
 size_t buffer_size = 64 << 20; // should be bigger than any cache in system
 int copy_reps = 1;             // if nonzero, average over #reps copies
 int copy_fields = 1;           // number of distinct fields to copy
@@ -158,8 +160,9 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
   std::vector<MemspeedExperiment> memspeed_experiments(memories.size());
   std::vector<std::thread> threads;
 
-  size_t src_memories = 0;
   for (size_t i = 0; i < memories.size(); i++) {
+    if (i < TestConfig::src_mem_lo || TestConfig::src_mem_hi < i)
+      continue;
     Memory m1 = memories[i];
 
     IndexSpace<N> index_space(boundaries);
@@ -182,9 +185,9 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
       index_space.copy(srcs, dsts, ProfilingRequestSet()).wait();
     }
 
-    size_t dst_memories = 0;
     for (size_t j = 0; j < memories.size(); j++) {
-      // We intentionally skip same memory copies.
+      if (j < TestConfig::dst_mem_lo || TestConfig::dst_mem_hi < j)
+        continue;
       if (i == j) {
         continue;
       }
@@ -224,15 +227,9 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
               .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
           profile_requests.push_back(prs);
         }
-        // TODO(artempriakhin): Add more sanity checks for boundaries.
         index_spaces.push_back(IndexSpace<N>(copy_boundaries));
       }
-
-      if (++dst_memories >= TestConfig::max_dst_memories)
-        break;
     }
-    if (++src_memories >= TestConfig::max_src_memories)
-      break;
   }
 
   for (size_t i = 0; i < index_spaces.size(); i++) {
@@ -254,14 +251,14 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
     if (copy_duration == 0)
       continue;
 
-    double bandwidth =
+    double throughput =
         static_cast<double>(memspeed_experiments[i].copied_bytes) /
         copy_duration;
-    log_app.print() << "Memory=" << memories[i]
+    log_app.print() << "src_memory=" << memories[i]
                     << " copy_duration=" << copy_duration
                     << " total_copies=" << memspeed_experiments[i].total_copies
                     << " copied_bytes=" << memspeed_experiments[i].copied_bytes
-                    << " bandwidth=" << bandwidth;
+                    << " throughput=" << throughput;
     mean_copy_duration += copy_duration;
     mean_bandwith += bandwidth;
     experiment_count++;
@@ -282,10 +279,10 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p) {
   log_app.print() << "Realm memory speed test";
 
+  // build the list of memories that we want to test
   std::vector<Memory> memories;
   Machine machine = Machine::get_machine();
 
-  // TODO(artempriakin): Extend to work system memory and other types.
   for (Machine::MemoryQuery::iterator it =
            Machine::MemoryQuery(machine).begin();
        it; ++it) {
@@ -330,8 +327,11 @@ int main(int argc, char **argv) {
       .add_option_int("-y_copy_size_hi", TestConfig::y_copy_size_hi)
       .add_option_int("-z_copy_size_lo", TestConfig::y_copy_size_lo)
       .add_option_int("-z_copy_size_hi", TestConfig::y_copy_size_hi)
-      .add_option_int("-max_src_memories", TestConfig::max_src_memories)
-      .add_option_int("-max_dst_memories", TestConfig::max_dst_memories);
+      .add_option_int("-src_mem_lo", TestConfig::src_mem_lo)
+      .add_option_int("-src_mem_hi", TestConfig::src_mem_hi)
+      .add_option_int("-dst_mem_lo", TestConfig::dst_mem_lo)
+      .add_option_int("-dst_mem_hi", TestConfig::dst_mem_hi);
+
   bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
   assert(ok);
 
