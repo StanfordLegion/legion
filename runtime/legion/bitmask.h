@@ -23,8 +23,11 @@
 #include <string.h>
 #include <stdint.h>
 
-#include <vector>
+#include <algorithm>
+#include <array>
 #include <set>
+#include <vector>
+#include <type_traits>
 
 #ifndef __MACH__
 // SJT: this comes first because some systems require __STDC_FORMAT_MACROS
@@ -289,6 +292,10 @@
              unsigned int SHIFT, unsigned int MASK>
     class BitMask : public BitMaskHelp::Heapify<BitMask<T,MAX,SHIFT,MASK> > {
     public:
+      static constexpr unsigned ELEMENT_SIZE = 8*sizeof(T);
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
       explicit BitMask(T init = 0);
       BitMask(const BitMask &rhs);
       ~BitMask(void);
@@ -298,9 +305,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const BitMask &rhs) const;
       inline bool operator<(const BitMask &rhs) const;
@@ -338,22 +350,24 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(
             const BitMask<unsigned,MAX,SHIFT,MASK> &mask);
-      static inline int pop_count(
+      static inline unsigned pop_count(
             const BitMask<unsigned long,MAX,SHIFT,MASK> &mask);
-      static inline int pop_count(
+      static inline unsigned pop_count(
             const BitMask<unsigned long long,MAX,SHIFT,MASK> &mask);
     protected:
-      T bit_vector[MAX/(8*sizeof(T))];
-    public:
-      static const unsigned ELEMENT_SIZE = 8*sizeof(T);
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      T bit_vector[BIT_ELMTS]; 
     };
 
     /////////////////////////////////////////////////////////////
@@ -371,6 +385,10 @@
     class TLBitMask : 
       public BitMaskHelp::Heapify<TLBitMask<T,MAX,SHIFT,MASK> > {
     public:
+      static constexpr unsigned ELEMENT_SIZE = 8*sizeof(T);
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
       explicit TLBitMask(T init = 0);
       TLBitMask(const TLBitMask &rhs);
       ~TLBitMask(void);
@@ -380,9 +398,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const TLBitMask &rhs) const;
       inline bool operator<(const TLBitMask &rhs) const;
@@ -420,23 +443,25 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(
             const TLBitMask<unsigned,MAX,SHIFT,MASK> &mask);
-      static inline int pop_count(
+      static inline unsigned pop_count(
             const TLBitMask<unsigned long,MAX,SHIFT,MASK> &mask);
-      static inline int pop_count(
+      static inline unsigned pop_count(
             const TLBitMask<unsigned long long,MAX,SHIFT,MASK> &mask);
     protected:
-      T bit_vector[MAX/(8*sizeof(T))];
-      T sum_mask;
-    public:
-      static const unsigned ELEMENT_SIZE = 8*sizeof(T);
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      T bit_vector[BIT_ELMTS];
+      T sum_mask; 
     };
 
 #ifdef __SSE2__
@@ -447,6 +472,11 @@
     class alignas(16) SSEBitMask 
       : public BitMaskHelp::Heapify<SSEBitMask<MAX> > {
     public:
+      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned SSE_ELMTS = MAX/128;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
       explicit SSEBitMask(uint64_t init = 0);
       SSEBitMask(const SSEBitMask &rhs);
       ~SSEBitMask(void);
@@ -456,9 +486,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
       inline bool operator<(const SSEBitMask &rhs) const;
@@ -501,17 +536,19 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const SSEBitMask<MAX> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const SSEBitMask<MAX> &mask);
     protected:
-      BitMaskHelp::BitVector<MAX> bits;
-    public:
-      static const unsigned ELEMENT_SIZE = 64;
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      BitMaskHelp::BitVector<MAX> bits; 
     };
 
     /////////////////////////////////////////////////////////////
@@ -520,6 +557,11 @@
     template<unsigned int MAX>
     class alignas(16) SSETLBitMask
       : public BitMaskHelp::Heapify<SSETLBitMask<MAX> > {
+    public:
+      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned SSE_ELMTS = MAX/128;
+      static constexpr unsigned MAXSIZE = MAX;
     public:
       explicit SSETLBitMask(uint64_t init = 0);
       SSETLBitMask(const SSETLBitMask &rhs);
@@ -530,9 +572,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
       inline bool operator<(const SSETLBitMask &rhs) const;
@@ -575,19 +622,21 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const SSETLBitMask<MAX> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const SSETLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m128i value);
     protected:
       BitMaskHelp::BitVector<MAX> bits;
-      uint64_t sum_mask;
-    public:
-      static const unsigned ELEMENT_SIZE = 64;
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      uint64_t sum_mask; 
     };
 #endif // __SSE2__
 
@@ -599,6 +648,11 @@
     class alignas(32) AVXBitMask 
       : public BitMaskHelp::Heapify<AVXBitMask<MAX> > {
     public:
+      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned AVX_ELMTS = MAX/256;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
       explicit AVXBitMask(uint64_t init = 0);
       AVXBitMask(const AVXBitMask &rhs);
       ~AVXBitMask(void);
@@ -608,9 +662,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
       inline bool operator<(const AVXBitMask &rhs) const;
@@ -653,17 +712,19 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const AVXBitMask<MAX> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const AVXBitMask<MAX> &mask);
     protected:
-      BitMaskHelp::BitVector<MAX> bits;
-    public:
-      static const unsigned ELEMENT_SIZE = 64;
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      BitMaskHelp::BitVector<MAX> bits; 
     };
     
     /////////////////////////////////////////////////////////////
@@ -672,6 +733,11 @@
     template<unsigned int MAX>
     class alignas(32) AVXTLBitMask
       : public BitMaskHelp::Heapify<AVXTLBitMask<MAX> > {
+    public:
+      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned AVX_ELMTS = MAX/256;
+      static constexpr unsigned MAXSIZE = MAX;
     public:
       explicit AVXTLBitMask(uint64_t init = 0);
       AVXTLBitMask(const AVXTLBitMask &rhs);
@@ -682,9 +748,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
       inline bool operator<(const AVXTLBitMask &rhs) const;
@@ -727,20 +798,22 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const AVXTLBitMask<MAX> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const AVXTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__m256i value);
       static inline uint64_t extract_mask(__m256d value);
     protected:
       BitMaskHelp::BitVector<MAX> bits;
-      uint64_t sum_mask;
-    public:
-      static const unsigned ELEMENT_SIZE = 64;
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      uint64_t sum_mask; 
     };
 #endif // __AVX__
 
@@ -752,6 +825,11 @@
     class alignas(16) PPCBitMask
       : public BitMaskHelp::Heapify<PPCBitMask<MAX> > {
     public:
+      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned PPC_ELMTS = MAX/128;
+      static constexpr unsigned MAXSIZE = MAX;
+    public:
       explicit PPCBitMask(uint64_t init = 0);
       PPCBitMask(const PPCBitMask &rhs);
       ~PPCBitMask(void);
@@ -761,9 +839,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const PPCBitMask &rhs) const;
       inline bool operator<(const PPCBitMask &rhs) const;
@@ -806,17 +889,19 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const PPCBitMask<MAX> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const PPCBitMask<MAX> &mask);
     protected:
-      BitMaskHelp::BitVector<MAX> bits;
-    public:
-      static const unsigned ELEMENT_SIZE = 64;
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      BitMaskHelp::BitVector<MAX> bits; 
     };
     
     /////////////////////////////////////////////////////////////
@@ -825,6 +910,11 @@
     template<unsigned int MAX>
     class alignas(16) PPCTLBitMask
       : public BitMaskHelp::Heapify<PPCTLBitMask<MAX> > {
+    public:
+      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
+      static constexpr unsigned PPC_ELMTS = MAX/128;
+      static constexpr unsigned MAXSIZE = MAX;
     public:
       explicit PPCTLBitMask(uint64_t init = 0);
       PPCTLBitMask(const PPCTLBitMask &rhs);
@@ -835,9 +925,14 @@
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
-      inline int find_next_set(int start) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const PPCTLBitMask &rhs) const;
       inline bool operator<(const PPCTLBitMask &rhs) const;
@@ -880,73 +975,48 @@
       inline void serialize(ST &rez) const;
       template<typename DT>
       inline void deserialize(DT &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const PPCTLBitMask<MAX> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const PPCTLBitMask<MAX> &mask);
       static inline uint64_t extract_mask(__vector unsigned long long value);
     protected:
       BitMaskHelp::BitVector<MAX> bits;
-      uint64_t sum_mask;
-    public:
-      static const unsigned ELEMENT_SIZE = 64;
-      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+      uint64_t sum_mask; 
     };
 #endif // __ALTIVEC__
 
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
+    template<typename DT, unsigned BLOAT=1, bool BIDIR=true>
     class CompoundBitMask {
     public:
-      static const int CNT_BITS = 8; // default this to 8 for now
-      static const uint64_t CNT_MASK = (1UL << CNT_BITS) - 1UL;
-    public:
-      static const int VAL_BITS = STATIC_LOG2(MAX);
-      static const uint64_t VAL_MASK = (1UL << VAL_BITS) - 1UL;
-    public:
-      static const int MAX_CNT = 
-        (WORDS*8*sizeof(uint64_t) - CNT_BITS)/VAL_BITS;
-      static const int SPARSE_CNT = MAX_CNT+1;
-      static const int DENSE_CNT = SPARSE_CNT+1;
-    public:
-      static const int WORD_SIZE = 64;
-      static const int WORD_BITS = STATIC_LOG2(WORD_SIZE);
-      static const uint64_t WORD_MASK = 0x3F;
-    public:
-      static const bool OVERLAP = ((WORD_SIZE % VAL_BITS) != 0) ||
-                          (((WORD_SIZE - CNT_BITS) % VAL_BITS) != 0);
-    public:
-      typedef std::set<int> SparseSet;
-      // Size of an STL Node object in bytes
-      // This value is approximated over different STL
-      // implementations but in general it should be close
-      static const size_t STL_SET_NODE_SIZE = 32;
-      static const int SPARSE_MAX = 
-        sizeof(BITMASK) / (sizeof(int) + sizeof(STL_SET_NODE_SIZE));
+      static constexpr unsigned ELEMENT_SIZE = DT::ELEMENT_SIZE;
+      static constexpr unsigned BIT_ELMTS = DT::BIT_ELMTS; 
+      static constexpr unsigned MAXSIZE = DT::MAXSIZE;
     public:
       explicit CompoundBitMask(uint64_t init = 0);
       CompoundBitMask(const CompoundBitMask &rhs);
       ~CompoundBitMask(void);
-    public:
-      inline int get_count(void) const;
-      inline void set_count(int size);
-      inline SparseSet* get_sparse(void) const;
-      inline void set_sparse(SparseSet *ptr);
-      inline BITMASK* get_dense(void) const;
-      inline void set_dense(BITMASK *ptr);
-      template<bool CAN_OVERLAP>
-      inline int get_value(int idx) const;
-      template<bool CAN_OVERLAP>
-      inline void set_value(int idx, int value);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
-      inline int find_index_set(int index) const;
+      inline int find_next_set(unsigned start) const;
+      inline int find_index(unsigned bit) const;
+      inline bool empty(void) const;
       inline void clear(void);
+    public:
+      inline bool contains(unsigned bit) const { return is_set(bit); }
+      inline void add(unsigned bit) { set_bit(bit); }
+      inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const CompoundBitMask &rhs) const;
       inline bool operator<(const CompoundBitMask &rhs) const;
@@ -980,120 +1050,39 @@
       inline uint64_t get_hash_key(void) const;
       template<typename ST>
       inline void serialize(ST &rez) const;
-      template<typename DT>
-      inline void deserialize(DT &derez);
+      template<typename DZ>
+      inline void deserialize(DZ &derez);
+      // The functor class must have an 'apply' method that
+      // takes one unsigned argument. This method will map
+      // the functor over all the entries in the mask.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
-      inline int pop_count(void) const;
-      static inline int pop_count(const 
-                        CompoundBitMask<BITMASK,MAX,WORDS> &mask);
+      inline unsigned pop_count(void) const;
+      static inline unsigned pop_count(const 
+                        CompoundBitMask<DT,BLOAT,BIDIR> &mask);
     protected:
-      uint64_t bits[WORDS];
-    public:
-      static const int ELEMENTS = 1;
-      static const int ELEMENT_SIZE = MAX;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Integer Set 
-    /////////////////////////////////////////////////////////////
-    template<typename IT/*int type*/, typename DT/*dense type (BitMask)*/,
-             bool BIDIR=false/*(bi-directional)*/>
-    class IntegerSet {
-    public:
-      // Size of an STL Node object in bytes
-      // This value is approximated over different STL
-      // implementations but in general it should be close
-      static const size_t STL_SET_NODE_SIZE = 32;
-    public:
-      // Need to inherit form LegionHeapify for alignment
-      struct DenseSet : public BitMaskHelp::Heapify<DenseSet> {
-      public:
-        DT set;
-      };
-      struct UnionFunctor {
-      public:
-        UnionFunctor(IntegerSet &t) : target(t) { }
-      public:
-        inline void apply(IT value) { target.add(value); }
-      private:
-        IntegerSet &target;
-      };
-      struct IntersectFunctor {
-      public:
-        IntersectFunctor(IntegerSet &t, const IntegerSet &r)
-          : target(t), rhs(r) { }
-      public:
-        inline void apply(IT value) 
-          { if (rhs.contains(value)) target.add(value); }
-      private:
-        IntegerSet &target;
-        const IntegerSet &rhs;
-      };
-      struct DifferenceFunctor {
-      public:
-        DifferenceFunctor(IntegerSet &t) : target(t) { }
-      public:
-        inline void apply(IT value) { target.remove(value); }
-      private:
-        IntegerSet &target;
-      };
-    public:
-      IntegerSet(void);
-      IntegerSet(const IntegerSet &rhs);
-      ~IntegerSet(void);
-    public:
-      IntegerSet& operator=(const IntegerSet &rhs);
-    public:
-      inline bool contains(IT index) const;
-      inline void add(IT index);
-      inline void remove(IT index);
-      inline IT find_first_set(void) const;
-      inline IT find_index_set(int index) const;
-      // The functor class must have an 'apply' method that
-      // take one argument of type IT. This method will map
-      // the functor over all the entries in the set.
-      template<typename FUNCTOR>
-      inline void map(FUNCTOR &functor) const;
-    public:
-      template<typename ST>
-      inline void serialize(ST &rez) const;
-      template<typename ZT>
-      inline void deserialize(ZT &derez);
-    public:
-      inline IntegerSet operator|(const IntegerSet &rhs) const;
-      inline IntegerSet operator&(const IntegerSet &rhs) const;
-      inline IntegerSet operator-(const IntegerSet &rhs) const;
-    public:
-      inline IntegerSet& operator|=(const IntegerSet &rhs);
-      inline IntegerSet& operator&=(const IntegerSet &rhs);
-      inline IntegerSet& operator-=(const IntegerSet &rhs);
-    public:
-      inline bool operator!(void) const;
-      inline bool empty(void) const { return !*this; }
-      inline size_t size(void) const;
-      inline void clear(void);
-      inline IntegerSet& swap(IntegerSet &rhs);
+      inline bool is_sparse(void) const;
+      inline void sparsify(void);
     protected:
-      bool sparse;
+      using IT = typename std::conditional<DT::MAXSIZE <= (1 << 8),uint8_t,
+                  typename std::conditional<DT::MAXSIZE <= (1 << 16),uint16_t,
+                    uint32_t>::type>::type;
+      static constexpr size_t MAX_SPARSE =
+        (BLOAT * sizeof(DT*) + sizeof(IT) - 1) / sizeof(IT);
+      using SA = std::array<IT,MAX_SPARSE>;
       union {
-        typename std::set<IT>* sparse;
-        DenseSet*              dense;
-      } set_ptr;
+        // The sparse array is unique and sorted
+        SA sparse;
+        DT *dense;
+      } mask;
+      unsigned sparse_size; 
     };
 
   namespace BitMaskHelp {
-
-    /**
-     * \struct BitMaskStaticAssert
-     * Help with static assertions.
-     */
-    template<bool> struct StaticAssert;
-    template<> struct StaticAssert<true> { };
-#define BITMASK_STATIC_ASSERT(condition) \
-    do { BitMaskHelp::StaticAssert<(condition)>(); } while (0)
 
     //--------------------------------------------------------------------------
     inline char* to_string(const uint64_t *bits, int count)
@@ -1146,7 +1135,7 @@
     inline void* alloc_aligned(size_t cnt)
     //--------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((SIZE % ALIGNMENT) == 0);
+      static_assert((SIZE % ALIGNMENT) == 0, "Bad size");
       size_t alloc_size = cnt;
       if (!BYTES)
         alloc_size *= SIZE;
@@ -1264,13 +1253,12 @@
 
   };
 
-#define BIT_ELMTS (MAX/(8*sizeof(T)))
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     BitMask<T,MAX,SHIFT,MASK>::BitMask(T init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = init;
@@ -1282,7 +1270,7 @@
     BitMask<T,MAX,SHIFT,MASK>::BitMask(const BitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -1366,13 +1354,13 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int BitMask<T,MAX,SHIFT,MASK>::find_index_set(int index) const
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -1393,7 +1381,7 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int BitMask<T,MAX,SHIFT,MASK>::find_next_set(int start) const
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -1642,7 +1630,7 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline bool BitMask<T,MAX,SHIFT,MASK>::operator!(void) const
+    inline bool BitMask<T,MAX,SHIFT,MASK>::empty(void) const
     //-------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -1651,6 +1639,14 @@
           return false;
       }
       return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline bool BitMask<T,MAX,SHIFT,MASK>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -1828,7 +1824,7 @@
     //-------------------------------------------------------------------------
     {
       rez.serialize(bit_vector, (MAX/8));
-    }
+    } 
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK> 
@@ -1837,6 +1833,24 @@
     //-------------------------------------------------------------------------
     {
       derez.deserialize(bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK> 
+      template<typename FUNCTOR>
+    inline void BitMask<T,MAX,SHIFT,MASK>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
     }
 
     //-------------------------------------------------------------------------
@@ -1849,24 +1863,22 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int BitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
+    inline unsigned BitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
-      {
-        result += __builtin_popcount(bit_vector[idx]);
-      }
+        result += __builtin_popcountll(bit_vector[idx]);
       return result;
     }
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    /*static*/ inline int BitMask<T,MAX,SHIFT,MASK>::pop_count(
+    /*static*/ inline unsigned BitMask<T,MAX,SHIFT,MASK>::pop_count(
                                   const BitMask<unsigned,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
@@ -1884,11 +1896,11 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    /*static*/ inline int BitMask<T,MAX,SHIFT,MASK>::pop_count(
+    /*static*/ inline unsigned BitMask<T,MAX,SHIFT,MASK>::pop_count(
                             const BitMask<unsigned long,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
@@ -1906,11 +1918,11 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    /*static*/ inline int BitMask<T,MAX,SHIFT,MASK>::pop_count(
+    /*static*/ inline unsigned BitMask<T,MAX,SHIFT,MASK>::pop_count(
                         const BitMask<unsigned long long,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
@@ -1932,7 +1944,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
         bit_vector[idx] = init;
     }
@@ -1943,7 +1955,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
+      static_assert((MAX % (8*sizeof(T))) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -2035,13 +2047,13 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_index_set(int index) const
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -2062,7 +2074,7 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_next_set(int start) const
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -2348,11 +2360,19 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline bool TLBitMask<T,MAX,SHIFT,MASK>::operator!(void) const
+    inline bool TLBitMask<T,MAX,SHIFT,MASK>::empty(void) const
     //-------------------------------------------------------------------------
     {
       // Here is another great reason to have sum mask
       return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline bool TLBitMask<T,MAX,SHIFT,MASK>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -2553,6 +2573,24 @@
     }
 
     //-------------------------------------------------------------------------
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK> 
+      template<typename FUNCTOR>
+    inline void TLBitMask<T,MAX,SHIFT,MASK>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     inline char* TLBitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -2562,16 +2600,16 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
+    inline unsigned TLBitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
       if (!sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcount(bit_vector[idx]);
+        result += __builtin_popcountll(bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -2585,13 +2623,13 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    /*static*/ inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
+    /*static*/ inline unsigned TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
                                const TLBitMask<unsigned,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
     {
       if (!mask.sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
@@ -2609,13 +2647,13 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    /*static*/ inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
+    /*static*/ inline unsigned TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
                           const TLBitMask<unsigned long,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
     {
       if (!mask.sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
@@ -2633,13 +2671,13 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    /*static*/ inline int TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
+    /*static*/ inline unsigned TLBitMask<T,MAX,SHIFT,MASK>::pop_count(
                      const TLBitMask<unsigned long long,MAX,SHIFT,MASK> &mask)
     //-------------------------------------------------------------------------
     {
       if (!mask.sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
@@ -2654,17 +2692,14 @@
 #endif
       return result;
     }
-#undef BIT_ELMTS
 
 #ifdef __SSE2__
-#define SSE_ELMTS (MAX/128)
-#define BIT_ELMTS (MAX/64)
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
     SSEBitMask<MAX>::SSEBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -2676,7 +2711,7 @@
     SSEBitMask<MAX>::SSEBitMask(const SSEBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.sse_view(idx) = rhs(idx);
@@ -2760,13 +2795,13 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSEBitMask<MAX>::find_index_set(int index) const
+    inline int SSEBitMask<MAX>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bits.bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -2787,7 +2822,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSEBitMask<MAX>::find_next_set(int start) const
+    inline int SSEBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -3048,7 +3083,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline bool SSEBitMask<MAX>::operator!(void) const
+    inline bool SSEBitMask<MAX>::empty(void) const
     //-------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -3057,6 +3092,14 @@
           return false;
       }
       return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -3249,6 +3292,23 @@
     }
 
     //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void SSEBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<unsigned int MAX>
     inline char* SSEBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -3258,14 +3318,14 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSEBitMask<MAX>::pop_count(void) const
+    inline unsigned SSEBitMask<MAX>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(bits.bit_vector[idx]);
+        result += __builtin_popcountll(bits.bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -3279,15 +3339,15 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    /*static*/ inline int SSEBitMask<MAX>::pop_count(
+    /*static*/ inline unsigned SSEBitMask<MAX>::pop_count(
                                                    const SSEBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(mask[idx]);
+        result += __builtin_popcountll(mask[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -3305,7 +3365,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -3318,7 +3378,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.sse_view(idx) = rhs(idx);
@@ -3410,13 +3470,13 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSETLBitMask<MAX>::find_index_set(int index) const
+    inline int SSETLBitMask<MAX>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bits.bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -3437,7 +3497,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSETLBitMask<MAX>::find_next_set(int start) const
+    inline int SSETLBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -3744,11 +3804,19 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline bool SSETLBitMask<MAX>::operator!(void) const
+    inline bool SSETLBitMask<MAX>::empty(void) const
     //-------------------------------------------------------------------------
     {
       // A great reason to have a summary mask
       return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -3954,6 +4022,23 @@
     }
 
     //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void SSETLBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<unsigned int MAX>
     inline char* SSETLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -3963,16 +4048,16 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSETLBitMask<MAX>::pop_count(void) const
+    inline unsigned SSETLBitMask<MAX>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
       if (!sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(bits.bit_vector[idx]);
+        result += __builtin_popcountll(bits.bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -3986,15 +4071,15 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    /*static*/ inline int SSETLBitMask<MAX>::pop_count(
+    /*static*/ inline unsigned SSETLBitMask<MAX>::pop_count(
                                                  const SSETLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(mask[idx]);
+        result += __builtin_popcountll(mask[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -4025,19 +4110,15 @@
 #endif
       return (left | right);
     }
-#undef BIT_ELMTS
-#undef SSE_ELMTS
 #endif // __SSE2__
 
 #ifdef __AVX__
-#define AVX_ELMTS (MAX/256)
-#define BIT_ELMTS (MAX/64)
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
     AVXBitMask<MAX>::AVXBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
+      static_assert((MAX % 256) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4049,7 +4130,7 @@
     AVXBitMask<MAX>::AVXBitMask(const AVXBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
+      static_assert((MAX % 256) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_view(idx) = rhs(idx);
@@ -4133,13 +4214,13 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXBitMask<MAX>::find_index_set(int index) const
+    inline int AVXBitMask<MAX>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bits.bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -4160,7 +4241,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXBitMask<MAX>::find_next_set(int start) const
+    inline int AVXBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -4488,7 +4569,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline bool AVXBitMask<MAX>::operator!(void) const
+    inline bool AVXBitMask<MAX>::empty(void) const
     //-------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -4497,6 +4578,14 @@
           return false;
       }
       return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -4689,6 +4778,23 @@
     }
 
     //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void AVXBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<unsigned int MAX>
     inline char* AVXBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -4698,14 +4804,14 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXBitMask<MAX>::pop_count(void) const
+    inline unsigned AVXBitMask<MAX>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(bits.bit_vector[idx]);
+        result += __builtin_popcountll(bits.bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -4719,15 +4825,15 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    /*static*/ inline int AVXBitMask<MAX>::pop_count(
+    /*static*/ inline unsigned AVXBitMask<MAX>::pop_count(
                                                    const AVXBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(mask[idx]);
+        result += __builtin_popcountll(mask[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -4745,7 +4851,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
+      static_assert((MAX % 256) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4758,7 +4864,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 256) == 0);
+      static_assert((MAX % 256) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_view(idx) = rhs(idx);
@@ -4850,13 +4956,13 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXTLBitMask<MAX>::find_index_set(int index) const
+    inline int AVXTLBitMask<MAX>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bits.bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -4877,7 +4983,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXTLBitMask<MAX>::find_next_set(int start) const
+    inline int AVXTLBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -5264,11 +5370,19 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline bool AVXTLBitMask<MAX>::operator!(void) const
+    inline bool AVXTLBitMask<MAX>::empty(void) const
     //-------------------------------------------------------------------------
     {
       // A great reason to have a summary mask
       return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -5474,6 +5588,23 @@
     }
 
     //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void AVXTLBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<unsigned int MAX>
     inline char* AVXTLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -5483,16 +5614,16 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXTLBitMask<MAX>::pop_count(void) const
+    inline unsigned AVXTLBitMask<MAX>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
       if (!sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(bits.bit_vector[idx]);
+        result += __builtin_popcountll(bits.bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -5506,15 +5637,15 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    /*static*/ inline int AVXTLBitMask<MAX>::pop_count(
+    /*static*/ inline unsigned AVXTLBitMask<MAX>::pop_count(
                                                  const AVXTLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(mask[idx]);
+        result += __builtin_popcountll(mask[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -5565,19 +5696,15 @@
       __m256i temp = _mm256_castpd_si256(value);
       return extract_mask(temp);
     }
-#undef BIT_ELMTS
-#undef AVX_ELMTS
 #endif // __AVX__
 
 #ifdef __ALTIVEC__
-#define PPC_ELMTS (MAX/128)
-#define BIT_ELMTS (MAX/64)
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
     PPCBitMask<MAX>::PPCBitMask(uint64_t init /*= 0*/)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -5589,7 +5716,7 @@
     PPCBitMask<MAX>::PPCBitMask(const PPCBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_view(idx) = rhs(idx);
@@ -5673,13 +5800,13 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCBitMask<MAX>::find_index_set(int index) const
+    inline int PPCBitMask<MAX>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bits.bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -5700,7 +5827,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCBitMask<MAX>::find_next_set(int start) const
+    inline int PPCBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -5979,7 +6106,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline bool PPCBitMask<MAX>::operator!(void) const
+    inline bool PPCBitMask<MAX>::empty(void) const
     //-------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
@@ -5988,6 +6115,14 @@
           return false;
       }
       return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -6180,6 +6315,23 @@
     }
 
     //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void PPCBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<unsigned int MAX>
     inline char* PPCBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -6189,14 +6341,14 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCBitMask<MAX>::pop_count(void) const
+    inline unsigned PPCBitMask<MAX>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(bits.bit_vector[idx]);
+        result += __builtin_popcountll(bits.bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -6210,15 +6362,15 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    /*static*/ inline int PPCBitMask<MAX>::pop_count(
+    /*static*/ inline unsigned PPCBitMask<MAX>::pop_count(
                                                    const PPCBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(mask[idx]);
+        result += __builtin_popcountll(mask[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -6236,7 +6388,7 @@
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -6249,7 +6401,7 @@
       : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT((MAX % 128) == 0);
+      static_assert((MAX % 128) == 0, "Bad MAX");
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_view(idx) = rhs(idx);
@@ -6341,13 +6493,13 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCTLBitMask<MAX>::find_index_set(int index) const
+    inline int PPCTLBitMask<MAX>::find_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        int local = __builtin_popcount(bits.bit_vector[idx]);
+        unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
         if (index <= local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
@@ -6368,7 +6520,7 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCTLBitMask<MAX>::find_next_set(int start) const
+    inline int PPCTLBitMask<MAX>::find_next_set(unsigned start) const
     //-------------------------------------------------------------------------
     {
       if (start < 0)
@@ -6703,11 +6855,19 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline bool PPCTLBitMask<MAX>::operator!(void) const
+    inline bool PPCTLBitMask<MAX>::empty(void) const
     //-------------------------------------------------------------------------
     {
       // A great reason to have a summary mask
       return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool PPCTLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
     }
 
     //-------------------------------------------------------------------------
@@ -6913,6 +7073,23 @@
     }
 
     //-------------------------------------------------------------------------
+    template<unsigned int MAX> template<typename FUNCTOR>
+    inline void PPCTLBitMask<MAX>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          unsigned value = idx * ELEMENT_SIZE;
+          for (unsigned i = 0; i < ELEMENT_SIZE; i++, value++)
+            if (bits.bit_vector[idx] & (1ULL << i))
+              functor.apply(value);
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<unsigned int MAX>
     inline char* PPCTLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
@@ -6922,16 +7099,16 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCTLBitMask<MAX>::pop_count(void) const
+    inline unsigned PPCTLBitMask<MAX>::pop_count(void) const
     //-------------------------------------------------------------------------
     {
       if (!sum_mask)
         return 0;
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(bits.bit_vector[idx]);
+        result += __builtin_popcountll(bits.bit_vector[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -6945,15 +7122,15 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    /*static*/ inline int PPCTLBitMask<MAX>::pop_count(
+    /*static*/ inline unsigned PPCTLBitMask<MAX>::pop_count(
                                                  const PPCTLBitMask<MAX> &mask)
     //-------------------------------------------------------------------------
     {
-      int result = 0;
+      unsigned result = 0;
 #ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcountl(mask[idx]);
+        result += __builtin_popcountll(mask[idx]);
       }
 #else
       for (unsigned idx = 0; idx < MAX; idx++)
@@ -6975,361 +7152,124 @@
       uint64_t right = value[1];
       return (left | right);
     }
-#undef BIT_ELMTS
-#undef PPC_ELMTS
 #endif // __ALTIVEC__
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    CompoundBitMask<BITMASK,MAX,WORDS>::CompoundBitMask(uint64_t init)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    CompoundBitMask<DT,BLOAT,BIDIR>::CompoundBitMask(uint64_t init)
     //-------------------------------------------------------------------------
     {
-      BITMASK_STATIC_ASSERT(WORDS >= 2);
-      BITMASK_STATIC_ASSERT(VAL_BITS <= (8*sizeof(uint64_t)));
-      BITMASK_STATIC_ASSERT((1 << VAL_BITS) >= MAX);
-      if (init == 0)
+      if (init != 0)
       {
-        set_count(0);
+        mask.dense = new DT(init);
+        sparse_size = MAX_SPARSE+1;
+        sparsify();
       }
       else
-      {
-        set_count(DENSE_CNT);
-        set_dense(new BITMASK(init));
-      }
+        sparse_size = 0;
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    CompoundBitMask<BITMASK,MAX,WORDS>::CompoundBitMask(
-                                                    const CompoundBitMask &rhs)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    CompoundBitMask<DT,BLOAT,BIDIR>::CompoundBitMask(
+                                    const CompoundBitMask<DT,BLOAT,BIDIR> &rhs)
+      : sparse_size(rhs.sparse_size)
     //-------------------------------------------------------------------------
     {
-      int rhs_count = rhs.get_count();
-      if (rhs_count == SPARSE_CNT)
-      {
-        set_count(SPARSE_CNT);
-        set_sparse(new SparseSet(*rhs.get_sparse()));
-      }
-      else if (rhs_count == DENSE_CNT)
-      {
-        set_count(DENSE_CNT); 
-        set_dense(new BITMASK(*rhs.get_dense()));
-      }
+      if (is_sparse())
+        mask.sparse = rhs.mask.sparse;
       else
+        mask.dense = new DT(*(rhs.mask.dense));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    CompoundBitMask<DT,BLOAT,BIDIR>::~CompoundBitMask(void) 
+    //-------------------------------------------------------------------------
+    {
+      if (!is_sparse())
+        delete mask.dense;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void CompoundBitMask<DT,BLOAT, BIDIR>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
       {
-        for (unsigned idx = 0; idx < WORDS; idx++)
-          bits[idx] = rhs.bits[idx];
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    CompoundBitMask<BITMASK,MAX,WORDS>::~CompoundBitMask(void) 
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count == SPARSE_CNT)
-        delete get_sparse();
-      else if (count == DENSE_CNT)
-        delete get_dense();
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline int CompoundBitMask<BITMASK,MAX,WORDS>::get_count(void) const
-    //-------------------------------------------------------------------------
-    {
-      return (CNT_MASK & bits[0]); 
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::set_count(int size) 
-    //-------------------------------------------------------------------------
-    {
-      bits[0] = (size & CNT_MASK) | (bits[0] & ~CNT_MASK);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline typename CompoundBitMask<BITMASK,MAX,WORDS>::SparseSet* 
-                    CompoundBitMask<BITMASK,MAX,WORDS>::get_sparse(void) const
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(get_count() == SPARSE_CNT);
-#endif
-      SparseSet *result = NULL;
-      static_assert(sizeof(result) == sizeof(bits[1]), "Fuck c++");
-      memcpy(&result, bits+1, sizeof(result)); // Fuck c++
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::set_sparse(SparseSet *ptr)
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(get_count() == SPARSE_CNT);
-#endif
-      static_assert(sizeof(ptr) == sizeof(bits[1]), "Fuck c++");
-      memcpy(bits+1, &ptr, sizeof(ptr)); // Fuck c++
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline BITMASK* CompoundBitMask<BITMASK,MAX,WORDS>::get_dense(void) const
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(get_count() == DENSE_CNT);
-#endif
-      BITMASK *result = NULL;
-      static_assert(sizeof(result) == sizeof(bits[1]),"Fuck c++");
-      memcpy(&result, bits+1, sizeof(result)); // Fuck c++
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::set_dense(BITMASK *ptr) 
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(get_count() == DENSE_CNT);
-#endif
-      static_assert(sizeof(ptr) == sizeof(bits[1]), "Fuck c++");
-      memcpy(bits+1, &ptr, sizeof(ptr)); // Fuck c++
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-      template<bool CAN_OVERLAP>
-    inline int CompoundBitMask<BITMASK,MAX,WORDS>::get_value(int idx) const
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < MAX_CNT);
-#endif
-      int start_bit = CNT_BITS + idx*VAL_BITS;
-      int start_index = start_bit >> WORD_BITS;
-      start_bit &= WORD_MASK;
-      if (CAN_OVERLAP)
-      {
-        // See if we straddle words 
-        if ((start_bit + (VAL_BITS-1)) < WORD_SIZE)
+        // Go through the existing elements and see if it's already here
+        if (std::binary_search(mask.sparse.begin(), 
+                               mask.sparse.begin() + sparse_size, bit))
+          return;
+        // Need to add it at this point
+        if (sparse_size == MAX_SPARSE)
         {
-#ifdef DEBUG_LEGION
-          assert(start_index < WORDS);
-#endif
-          // Common case, all in one word
-          return (bits[start_index] & (VAL_MASK << start_bit)) >> start_bit;
+          DT *newmask = new DT();
+          for (unsigned idx = 0; idx < sparse_size; idx++)
+            newmask->set_bit(mask.sparse[idx]);
+          newmask->set_bit(bit);
+          mask.dense = newmask;
+          sparse_size++;
         }
         else
         {
-#ifdef DEBUG_LEGION
-          assert((start_index+1) < WORDS);
-#endif
-          // Value split across words
-          int first_word_bits = WORD_SIZE - start_bit;
-          // Okay to shit off the end here
-          int result = 
-            int((bits[start_index] & (VAL_MASK << start_bit)) >> start_bit);
-          // Okay to shift off the end here
-          uint64_t next_mask = VAL_MASK >> first_word_bits;
-          result |= int((bits[start_index+1] & next_mask) << first_word_bits);
-          return result;
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(start_index < WORDS);
-#endif
-        return (bits[start_index] & (VAL_MASK << start_bit)) >> start_bit;
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-      template<bool CAN_OVERLAP>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::set_value(int idx, 
-                                                              int value) 
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < MAX_CNT);
-#endif
-      // Cast up the value
-      uint64_t up_value = value;
-      int start_bit = CNT_BITS + idx*VAL_BITS;
-      int start_index = start_bit >> WORD_BITS;
-      start_bit &= WORD_MASK;
-      uint64_t negative_mask = ~(VAL_MASK << start_bit);
-      if (CAN_OVERLAP)
-      {
-        // See if we straddle words
-        if ((start_bit + (VAL_BITS-1)) < WORD_SIZE)
-        {
-#ifdef DEBUG_LEGION
-          assert(start_index < WORDS);
-#endif
-          // Common case, all in one word
-          bits[start_index] = (bits[start_index] & negative_mask) |
-                              (up_value << start_bit);
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert((start_index+1) < WORDS);
-#endif
-          // Value split across words
-          // Okay to shift off the end here
-          bits[start_index] = (bits[start_index] & negative_mask) |
-                              (up_value << start_bit);
-          int first_word_bits = WORD_SIZE - start_bit;
-          // Okay to shift off the end here
-          uint64_t next_negative = ~(VAL_MASK >> first_word_bits);
-          bits[start_index+1] = (bits[start_index+1] & next_negative) |
-                                (up_value >> first_word_bits);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(start_index < WORDS);
-#endif
-        bits[start_index] = (bits[start_index] & negative_mask) |
-                            (up_value << start_bit);
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::set_bit(unsigned bit)
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count < MAX_CNT)
-      {
-        // Check to make sure it isn't already in our list
-        for (int idx = 0; idx < count; idx++)
-          if (get_value<OVERLAP>(idx) == bit)
-            return;
-        // Add it at the next available location
-        set_value<OVERLAP>(count, bit); 
-        set_count(count+1);
-      }
-      else if (count == MAX_CNT)
-      {
-        // We've maxed out, go to sparse or dense 
-        if (SPARSE_MAX > MAX_CNT)
-        {
-          SparseSet *next = new SparseSet();
-          next->insert(bit);
-          for (int idx = 0; idx < MAX_CNT; idx++)
-            next->insert(get_value<OVERLAP>(idx));
-          set_count(SPARSE_CNT);
-          set_sparse(next);
-        }
-        else
-        {
-          BITMASK *next = new BITMASK();
-          next->set_bit(bit);
-          for (int idx = 0; idx < MAX_CNT; idx++)
-            next->set_bit(get_value<OVERLAP>(idx));
-          set_count(DENSE_CNT);
-          set_dense(next);
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        // sparse case 
-        SparseSet *sparse = get_sparse();
-        if (sparse->size() == SPARSE_MAX)
-        {
-          // upgrade to dense 
-          BITMASK *next = new BITMASK();
-          for (SparseSet::const_iterator it = sparse->begin();
-                it != sparse->end(); it++)
-            next->set_bit(*it);
-          delete sparse;
-          set_count(DENSE_CNT);
-          set_dense(next);
-        }
-        else // otherwise just insert
-          sparse->insert(bit);
-      }
-      else
-      {
-        // Dense case
-        get_dense()->set_bit(bit);
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::unset_bit(unsigned bit)
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count(); 
-      if (count == 0)
-        return;
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        sparse->erase(bit);
-        if (sparse->size() == MAX_CNT)
-        {
-          set_count(MAX_CNT);
-          unsigned idx = 0;
-          for (SparseSet::const_iterator it = sparse->begin();
-                it != sparse->end(); it++, idx++)
-            set_value<OVERLAP>(idx, *it);   
-          delete sparse;
-        }
-      }
-      else if (count == DENSE_CNT)
-      {
-        BITMASK *dense = get_dense();
-        dense->unset_bit(bit);
-        // If dense is empty come back to zero
-        if (!(*dense))
-        {
-          delete dense;
-          set_count(0);
-        }
-      }
-      else
-      {
-        // Iterate through our elements and see if we find it
-        int found_idx = -1;
-        for (int idx = 0; idx < count; idx++)
-        {
-          if (get_value<OVERLAP>(idx) == bit)
+          // Insert it at the right place in the array
+          for (int idx = sparse_size-1; idx >= 0; idx--)
           {
-            found_idx = idx;
-            break;
+            if (mask.sparse[idx] < bit)
+            {
+              mask.sparse[idx+1] = bit;
+              sparse_size++;
+              return;
+            }
+            else
+              mask.sparse[idx+1] = mask.sparse[idx];
           }
+          // If we get here, we still haven't added it
+          mask.sparse[0] = bit;
+          sparse_size++;
         }
-        if (found_idx >= 0)
+      }
+      else
+        mask.dense->set_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        if (!std::binary_search(mask.sparse.begin(), 
+                                mask.sparse.begin() + sparse_size, bit))
+          return;
+        bool shifting = false;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
         {
-          // If we found it shift everyone down and decrement the count
-          for (int idx = found_idx; idx < (count-1); idx++)
+          if (mask.sparse[idx] != bit)
           {
-            int next = get_value<OVERLAP>(idx+1);
-            set_value<OVERLAP>(idx, next);
+            if (shifting)
+              mask.sparse[idx-1] = mask.sparse[idx];
           }
-          set_count(count-1);
+          else
+            shifting = true;
         }
+        if (shifting)
+          sparse_size--;
+      }
+      else
+      {
+        mask.dense->unset_bit(bit);
+        sparsify();
       }
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::assign_bit(unsigned bit,  
-                                                               bool val)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::assign_bit(unsigned bit, 
+                                                            bool val)
     //-------------------------------------------------------------------------
     {
       if (val)
@@ -7339,1863 +7279,785 @@
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline bool CompoundBitMask<BITMASK,MAX,WORDS>::is_set(unsigned bit) const
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      if (count == 0)
-        return false;
-      else if (count == DENSE_CNT)
-        return get_dense()->is_set(bit);
-      else if (count == SPARSE_CNT)
+      if (is_sparse())
+        return std::binary_search(mask.sparse.begin(), 
+                                  mask.sparse.begin() + sparse_size, bit);
+      else
+        return mask.dense->is_set(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline int CompoundBitMask<DT,BLOAT,BIDIR>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
       {
-        SparseSet *sparse = get_sparse();
-        return (sparse->find(bit) != sparse->end());
+#ifdef DEBUG_LEGION
+        assert(sparse_size > 0);
+#endif
+        return mask.sparse[0];
       }
       else
       {
-        // Iterate through our elements and see if we have it
-        for (int idx = 0; idx < count; idx++)
-        {
-          if (get_value<OVERLAP>(idx) == bit)
-            return true;
-        }
+#ifdef DEBUG_LEGION
+        assert(!!(*mask.dense));
+#endif
+        return mask.dense->find_first_set();
       }
-      return false;
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline int CompoundBitMask<BITMASK,MAX,WORDS>::find_first_set(void) const
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline int CompoundBitMask<DT,BLOAT,BIDIR>::find_next_set(
+                                                          unsigned start) const
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      if (count == 0)
-        return -1;
-      if (count == SPARSE_CNT)
-        return (*(get_sparse()->begin()));
-      if (count == DENSE_CNT)
-        return get_dense()->find_first_set();
-      return get_value<OVERLAP>(0);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline int CompoundBitMask<BITMASK,MAX,WORDS>::find_index_set(
-                                                               int index) const
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count == DENSE_CNT)
-        return get_dense()->find_index_set(index);
-      if (count == SPARSE_CNT)
+      if (is_sparse())
       {
-        SparseSet *sparse = get_sparse();
-        if (index >= sparse->size())
+        if (start < 0)
+          return find_first_set();
+        int index = find_index(start);
+#ifdef DEBUG_LEGION
+        assert(index >= 0);
+#endif
+        // Increment to the next index
+        if (++index == sparse_size)
           return -1;
-        SparseSet::const_iterator it = sparse->begin();
-        while (index > 0)
-        {
-          index--;
-          it++;
-        }
-        return (*it);
+        else
+          return mask.sparse[index];
       }
-      if (index >= count)
+      else
+        return mask.dense->find_next_set(start);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline int CompoundBitMask<DT,BLOAT,BIDIR>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bit >= 0);
+      assert(bit < pop_count());
+#endif
+      if (is_sparse())
+      {
+        // Binary search for it
+        unsigned first = 0;
+        unsigned last = sparse_size - 1;
+        unsigned mid = 0;
+        while (first <= last)
+        {
+          mid = (first + last) / 2;
+          const unsigned midval = mask.sparse[mid];
+          if (bit == midval)
+            return mid;
+          else if (bit < midval)
+            last = mid - 1;
+          else if (midval < bit)
+            first = mid + 1;
+          else
+            break;
+        }
         return -1;
-      return get_value<OVERLAP>(index);
+      }
+      else
+        return mask.dense->find_index(bit);
     }
     
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::clear(void)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::clear(void)
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      if (count == SPARSE_CNT)
-        delete get_sparse();
-      if (count == DENSE_CNT)
-        delete get_dense();
-      set_count(0);
+      if (!is_sparse())
+        delete mask.dense;
+      sparse_size = 0;
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline bool CompoundBitMask<BITMASK,MAX,WORDS>::operator==(
-                                              const CompoundBitMask &rhs) const
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::operator==(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count != rhs_count)
+      if (pop_count() != rhs.pop_count())
         return false;
-      // If they are dense see if they are equal
-      if (count == DENSE_CNT)
-        return (*get_dense() == *rhs.get_dense());
-      if (count == SPARSE_CNT)
-        return (*get_sparse() == *rhs.get_sparse());
-      // See if there are all matching bits
-      for (int idx = 0; idx < count; idx++)
-        if (!rhs.is_set(get_value<OVERLAP>(idx)))
-          return false;
-      return true;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline bool CompoundBitMask<BITMASK,MAX,WORDS>::operator<(
-                                              const CompoundBitMask &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count < rhs_count)
+      if (is_sparse())
+      {
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (mask.sparse[idx] != rhs.mask.sparse[idx])
+            return false;
         return true;
-      else if (count > rhs_count)
-        return false;
-      // Otherwise they are equal in size, see if they are actually equal
-      if (count == DENSE_CNT)
-        return (*get_dense() < *rhs.get_dense());
-      if (count == SPARSE_CNT)
-        return (*get_sparse() < *rhs.get_sparse());
-      // Now we just have indexes, nothing good to do here, we
-      // need to sort them so put them in stl sets and compare them
-      std::set<int> local_set, rhs_set;
-      for (int idx = 0; idx < count; idx++)
-        local_set.insert(get_value<OVERLAP>(idx));
-      for (int idx = 0; idx < rhs_count; idx++)
-        rhs_set.insert(rhs.get_value<OVERLAP>(idx));
-      return (local_set < rhs_set);
+      }
+      else if (rhs.is_sparse())
+      {
+        for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+          if (!mask.dense->is_set(rhs.mask.sparse[idx]))
+            return false;
+        return true;
+      }
+      else
+        return (*mask.dense) == (*rhs.mask.dense);
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline bool CompoundBitMask<BITMASK,MAX,WORDS>::operator!=(
-                                              const CompoundBitMask &rhs) const
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::operator<(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      size_t lhs_size = pop_count();
+      size_t rhs_size = rhs.pop_count();
+      if (lhs_size < rhs_size)
+        return true;
+      if (rhs_size > lhs_size)
+        return false;
+      // Same size so now we can do lexicographic comparison
+      if (is_sparse())
+      {
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (mask.sparse[idx] < rhs.mask.sparse[idx])
+            return true;
+          else if (mask.sparse[idx] > rhs.mask.sparse[idx])
+            return false;
+        // Otherwise they are equal so not strictly less than
+        return false;
+      }
+      else
+        return (*mask.dense) < (*rhs.mask.dense);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::operator!=(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
     //-------------------------------------------------------------------------
     {
       return !(*this == rhs);
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>& 
-      CompoundBitMask<BITMASK,MAX,WORDS>::operator=(const CompoundBitMask &rhs)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>& 
+        CompoundBitMask<DT,BLOAT,BIDIR>::operator=(
+                                    const CompoundBitMask<DT,BLOAT,BIDIR> &rhs)
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count != rhs_count)
+      const bool was_dense = !is_sparse();
+      sparse_size = rhs.sparse_size;
+      if (is_sparse())
       {
-        if (count == DENSE_CNT)
+        if (was_dense)
+          delete mask.dense;
+        mask.sparse = rhs.mask.sparse;
+      }
+      else
+      {
+        if (was_dense)
+          (*mask.dense) = (*rhs.mask.dense);
+        else
+          mask.dense = new DT(*rhs.mask.dense);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+                         CompoundBitMask<DT,BLOAT,BIDIR>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (is_sparse())
+      {
+        result.mask.dense = new DT(0xFFFFFFFFFFFFFFFFULL);
+        result.sparse_size = MAX_SPARSE+1;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          result.unset_bit(mask.sparse[idx]);
+      }
+      else
+      {
+        result.mask.dense = new DT(~(*mask.dense));
+        result.sparse_size = MAX_SPARSE+1;
+        result.sparsify();
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+      CompoundBitMask<DT,BLOAT,BIDIR>::operator|(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (!is_sparse())
+      {
+        result.mask.dense = new DT(*(mask.dense));
+        result.sparse_size = MAX_SPARSE+1;
+        if (rhs.is_sparse())
         {
-          // Free our dense count and copy over bits
-          delete get_dense();
-          if (rhs_count == SPARSE_CNT)
-          {
-            set_count(SPARSE_CNT);
-            set_sparse(new SparseSet(*rhs.get_sparse()));
-          }
-          else
-          {
-            for (int idx = 0; idx < WORDS; idx++)
-              bits[idx] = rhs.bits[idx];
-          }
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            result.set_bit(rhs.mask.sparse[idx]);
         }
-        else if (count == SPARSE_CNT)
+        else
+          (*result.mask.dense) |= (*rhs.mask.dense);
+      }
+      else if (!rhs.is_sparse())
+      {
+        result.mask.dense = new DT(*rhs.mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          result.set_bit(mask.sparse[idx]);
+      }
+      else
+      {
+        result.sparse_size = sparse_size;
+        result.mask.sparse = mask.sparse;
+        for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+          result.set_bit(rhs.mask.sparse[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+      CompoundBitMask<DT,BLOAT,BIDIR>::operator&(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (is_sparse())
+      {
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (rhs.is_set(mask.sparse[idx]))
+            result.set_bit(mask.sparse[idx]);
+      }
+      else if (rhs.is_sparse())
+      {
+        for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+          if (is_set(rhs.mask.sparse[idx]))
+            result.set_bit(rhs.mask.sparse[idx]);
+      }
+      else
+      {
+        result.mask.dense = new DT(*mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        (*result.mask.dense) &= (*rhs.mask.dense);
+        result.sparsify();
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+      CompoundBitMask<DT,BLOAT,BIDIR>::operator^(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (!is_sparse())
+      {
+        result.mask.dense = new DT(*mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        if (rhs.is_sparse())
         {
-          // Free our set
-          delete get_sparse();
-          if (rhs_count == DENSE_CNT)
-          {
-            // If the rhs is dense copy it over
-            set_count(DENSE_CNT);
-            set_dense(new BITMASK(*rhs.get_dense()));
-          }
-          else
-          {
-            // Otherwise it is just bit, so copy it over
-            for (int idx = 0; idx < WORDS; idx++)
-              bits[idx] = rhs.bits[idx];
-          }
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            if (is_set(rhs.mask.sparse[idx]))
+              result.unset_bit(rhs.mask.sparse[idx]);
+            else
+              result.set_bit(rhs.mask.sparse[idx]);
         }
         else
         {
-          // We are just bits, see if we need to copy over a set or a mask
-          if (rhs_count == SPARSE_CNT)
-          {
-            set_count(SPARSE_CNT);
-            set_sparse(new SparseSet(*rhs.get_sparse()));
-          }
-          else if (rhs_count == DENSE_CNT)
-          {
-            set_count(DENSE_CNT);
-            set_dense(new BITMASK(*rhs.get_dense()));
-          }
+          (*result.mask.dense) ^= (*rhs.mask.dense);
+          result.sparsify();
+        }
+      }
+      else if (!rhs.is_sparse())
+      {
+        result.mask.dense = new DT(*rhs.mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (rhs.is_set(mask.sparse[idx]))
+            result.unset_bit(mask.sparse[idx]);
           else
-          {
-            for (int idx = 0; idx < WORDS; idx++)
-              bits[idx] = rhs.bits[idx];
-          }
+            result.set_bit(mask.sparse[idx]);
+      }
+      else
+      {
+        result.mask.sparse = mask.sparse;
+        result.sparse_size = sparse_size;
+        for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+          if (is_set(rhs.mask.sparse[idx]))
+            result.unset_bit(rhs.mask.sparse[idx]);
+          else
+            result.set_bit(rhs.mask.sparse[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>& 
+            CompoundBitMask<DT,BLOAT,BIDIR>::operator|=(
+                                    const CompoundBitMask<DT,BLOAT,BIDIR> &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        if (rhs.is_sparse())
+        {
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            set_bit(rhs.mask.sparse[idx]);
+        }
+        else
+        {
+          DT *newmask = new DT(*rhs.mask.dense);
+          for (unsigned idx = 0; idx < sparse_size; idx++)
+            newmask->set_bit(mask.sparse[idx]);
+          mask.dense = newmask;
+          sparse_size = MAX_SPARSE+1;
         }
       }
       else
       {
-        if (count == DENSE_CNT)
+        if (rhs.is_sparse())
         {
-          // both dense, just copy over dense masks
-          *get_dense() = *rhs.get_dense();
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            mask.dense->set_bit(rhs.mask.sparse[idx]);
         }
-        else if (count == SPARSE_CNT)
+        else
+          (*mask.dense) |= (*rhs.mask.dense);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>& 
+            CompoundBitMask<DT,BLOAT,BIDIR>::operator&=(
+                                    const CompoundBitMask<DT,BLOAT,BIDIR> &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        unsigned offset = 0;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
         {
-          *get_sparse() = *rhs.get_sparse();
+          if (rhs.is_set(mask.sparse[idx]))
+          {
+            if (offset != idx)
+              mask.sparse[offset++] = mask.sparse[idx];
+            else
+              offset++;
+          }
+        }
+        sparse_size = offset;
+      }
+      else
+      {
+        if (rhs.is_sparse())
+        {
+          DT *oldmask = mask.dense;
+          sparse_size = 0;
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            if (oldmask->is_set(rhs.mask.sparse[idx]))
+              mask.sparse[sparse_size++] = rhs.mask.sparse[idx];
+          delete oldmask;
         }
         else
         {
-          // both not dense, copy over bits
-          for (int idx = 0; idx < WORDS; idx++)
-            bits[idx] = rhs.bits[idx];
+          (*mask.dense) &= (*rhs.mask.dense);
+          sparsify();
         }
       }
       return *this;
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-                      CompoundBitMask<BITMASK,MAX,WORDS>::operator~(void) const
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>& 
+            CompoundBitMask<DT,BLOAT,BIDIR>::operator^=(
+                                    const CompoundBitMask<DT,BLOAT,BIDIR> &rhs)
     //-------------------------------------------------------------------------
     {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      if (count == DENSE_CNT)
+      if (rhs.is_sparse())
       {
-        BITMASK next = ~(*get_dense());
-        if (!!next)
-        {
-          result.set_count(DENSE_CNT);
-          result.set_dense(new BITMASK(next));
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        BITMASK *dense = new BITMASK(0xFFFFFFFFFFFFFFFF);
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-          dense->unset_bit(*it);
-        result.set_count(DENSE_CNT);
-        result.set_dense(dense);
-      }
-      else
-      {
-        BITMASK *dense = new BITMASK(0xFFFFFFFFFFFFFFFF); 
-        for (int idx = 0; idx < count; idx++)
-          dense->unset_bit(get_value<OVERLAP>(idx));
-        result.set_count(DENSE_CNT);
-        result.set_dense(dense);
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-      CompoundBitMask<BITMASK,MAX,WORDS>::operator|(
-                                              const CompoundBitMask &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count == DENSE_CNT)
-      {
-        if (rhs_count == DENSE_CNT)
-        {
-          BITMASK *next = new BITMASK((*get_dense()) | (*rhs.get_dense()));
-          result.set_count(DENSE_CNT);
-          result.set_dense(next);
-        }
-        else if (rhs_count == SPARSE_CNT)
-        {
-          BITMASK *next = new BITMASK(*get_dense());
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-            next->set_bit(*it);
-          result.set_count(DENSE_CNT);
-          result.set_dense(next);
-        }
-        else
-        {
-          BITMASK *next = new BITMASK(*get_dense());
-          for (int idx = 0; idx < rhs_count; idx++)
-            next->set_bit(rhs.get_value<OVERLAP>(idx));
-          result.set_count(DENSE_CNT);
-          result.set_dense(next);
-        }
-      }
-      else if (rhs_count == DENSE_CNT)
-      {
-        BITMASK *next = new BITMASK(*rhs.get_dense());
-        if (count == SPARSE_CNT)
-        {
-          SparseSet *other = get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-            next->set_bit(*it);
-        }
-        else
-        {
-          for (int idx = 0; idx < count; idx++)
-            next->set_bit(get_value<OVERLAP>(idx));
-        }
-        result.set_count(DENSE_CNT);
-        result.set_dense(next);
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *next = new SparseSet(*get_sparse());
-        result.set_count(SPARSE_CNT);
-        result.set_sparse(next);
-        if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-            result.set_bit(*it);
-        }
-        else
-        {
-          for (int idx = 0; idx < rhs_count; idx++)
-            result.set_bit(rhs.get_value<OVERLAP>(idx));
-        }
-      }
-      else if (rhs_count == SPARSE_CNT)
-      {
-        SparseSet *next = new SparseSet(*rhs.get_sparse());
-        result.set_count(SPARSE_CNT);
-        result.set_sparse(next);
-        for (int idx = 0; idx < count; idx++)
-          result.set_bit(get_value<OVERLAP>(idx));
-      }
-      else
-      {
-        for (int idx = 0; idx < count; idx++)
-          result.set_bit(get_value<OVERLAP>(idx));
-        for (int idx = 0; idx < rhs_count; idx++)
-          result.set_bit(rhs.get_value<OVERLAP>(idx));
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-      CompoundBitMask<BITMASK,MAX,WORDS>::operator&(
-                                              const CompoundBitMask &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count < SPARSE_CNT)
-      {
-        for (int idx = 0; idx < count; idx++) 
-        {
-          int bit = get_value<OVERLAP>(idx);
-          if (rhs.is_set(bit))
-            result.set_bit(bit);
-        }
-      }
-      else if (rhs_count < SPARSE_CNT)
-      {
-        for (int idx = 0; idx < rhs_count; idx++)
-        {
-          int bit = rhs.get_value<OVERLAP>(idx);
-          if (is_set(bit))
-            result.set_bit(bit);
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          if (rhs.is_set(*it))
-            result.set_bit(*it);
-        }
-      }
-      else if (rhs_count == SPARSE_CNT)
-      {
-        SparseSet *sparse = rhs.get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          if (is_set(*it))
-            result.set_bit(*it);
-        }
-      }
-      else
-      {
-        // both dense
-        BITMASK next((*get_dense()) & (*rhs.get_dense()));
-        if (!!next)
-        {
-          result.set_count(DENSE_CNT);
-          result.set_dense(new BITMASK(next));
-        }
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-      CompoundBitMask<BITMASK,MAX,WORDS>::operator^(
-                                              const CompoundBitMask &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count == DENSE_CNT)
-      {
-        if (rhs_count == DENSE_CNT)
-        {
-          // both dense
-          BITMASK next((*get_dense()) ^ (*rhs.get_dense()));
-          if (!!next)
-          {
-            result.set_count(DENSE_CNT);
-            result.set_dense(new BITMASK(next));
-          }
-        }
-        else if (rhs_count == SPARSE_CNT)
-        {
-          BITMASK next((*get_dense()));
-          SparseSet *sparse = rhs.get_sparse();
-          for (SparseSet::const_iterator it = sparse->begin();
-                it != sparse->end(); it++)
-          {
-            if (!next.is_set(*it))
-              next.set_bit(*it);
-            else
-              next.unset_bit(*it);
-          }
-          if (!!next)
-          {
-            result.set_count(DENSE_CNT);
-            result.set_dense(new BITMASK(next));
-          }
-        }
-        else
-        {
-          BITMASK next((*get_dense()));
-          for (int idx = 0; idx < rhs_count; idx++)
-          {
-            int bit = rhs.get_value<OVERLAP>(idx);
-            if (!next.is_set(bit))
-              next.set_bit(bit);
-            else
-              next.unset_bit(bit);
-          }
-          if (!!next)
-          {
-            result.set_count(DENSE_CNT);
-            result.set_dense(new BITMASK(next));
-          }
-        }
-      }
-      else if (rhs_count == DENSE_CNT)
-      {
-        BITMASK next(*(rhs.get_dense()));
-        if (count == SPARSE_CNT)
-        {
-          SparseSet *sparse = get_sparse();
-          for (SparseSet::const_iterator it = sparse->begin();
-                it != sparse->end(); it++)
-          {
-            if (!next.is_set(*it))
-              next.set_bit(*it);
-            else
-              next.unset_bit(*it);
-          }
-        }
-        else
-        {
-          for (int idx = 0; idx < count; idx++)
-          {
-            int bit = get_value<OVERLAP>(idx);
-            if (!next.is_set(bit))
-              next.set_bit(bit);
-            else
-              next.unset_bit(bit);
-          }
-        }
-        if (!!next)
-        {
-          result.set_count(DENSE_CNT);
-          result.set_dense(new BITMASK(next));
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *next = new SparseSet(*get_sparse());
-        if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-          {
-            SparseSet::iterator finder = next->find(*it);
-            if (finder != next->end())
-              next->erase(finder);
-            else
-              next->insert(*it);
-          }
-        }
-        else
-        {
-          for (int idx = 0; idx < rhs_count; idx++)
-          {
-            int bit = rhs.get_value<OVERLAP>(idx);
-            SparseSet::iterator finder = next->find(bit);
-            if (finder != next->end())
-              next->erase(finder);
-            else
-              next->insert(bit);
-          }
-        }
-        if (!next->empty())
-        {
-          if (next->size() <= MAX_CNT)
-          {
-            for (SparseSet::const_iterator it = next->begin();
-                  it != next->end(); it++)
-              result.set_bit(*it);
-            delete next;
-          }
+        for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+          if (is_set(rhs.mask.sparse[idx]))
+            unset_bit(rhs.mask.sparse[idx]);
           else
-          {
-            result.set_count(SPARSE_CNT);
-            result.set_sparse(next);
-          }
-        }
-        else
-          delete next;
+            set_bit(rhs.mask.sparse[idx]);
       }
-      else if (rhs_count == SPARSE_CNT)
+      else if (is_sparse())
       {
-        SparseSet *next = new SparseSet(*rhs.get_sparse());
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx);
-          SparseSet::iterator finder = next->find(bit);
-          if (finder != next->end())
-            next->erase(finder);
+        DT *newmask = new DT(*rhs.mask.dense);
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (newmask->is_set(mask.sparse[idx]))
+            newmask->unset_bit(mask.sparse[idx]);
           else
-            next->insert(bit);
-        }
-        if (!next->empty())
-        {
-          if (next->size() <= MAX_CNT)
-          {
-            for (SparseSet::const_iterator it = next->begin();
-                  it != next->end(); it++)
-              result.set_bit(*it);
-            delete next;
-          }
-          else
-          {
-            result.set_count(SPARSE_CNT);
-            result.set_sparse(next);
-          }
-        }
-        else
-          delete next;
+            newmask->set_bit(mask.sparse[idx]);
+        mask.dense = newmask;
+        sparse_size = MAX_SPARSE+1;
+        sparsify();
       }
       else
       {
-        if (count < rhs_count)
-        {
-          for (int idx = 0; idx < WORDS; idx++)
-            result.bits[idx] = rhs.bits[idx];
-          for (int idx = 0; idx < count; idx++)
-          {
-            int bit = get_value<OVERLAP>(idx); 
-            if (!rhs.is_set(bit))
-              result.set_bit(bit);
-            else
-              result.unset_bit(bit);
-          }  
-        }
-        else
-        {
-          for (int idx = 0; idx < WORDS; idx++)
-            result.bits[idx] = bits[idx];
-          for (int idx = 0; idx < rhs_count; idx++)
-          {
-            int bit = rhs.get_value<OVERLAP>(idx);
-            if (!is_set(bit))
-              result.set_bit(bit);
-            else
-              result.unset_bit(bit);
-          }
-        }
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>& 
-     CompoundBitMask<BITMASK,MAX,WORDS>::operator|=(const CompoundBitMask &rhs)
-    //-------------------------------------------------------------------------
-    {
-      int rhs_count = rhs.get_count();
-      if (rhs_count == DENSE_CNT)
-      {
-        int count = get_count();
-        if (count == DENSE_CNT)
-        {
-          BITMASK *mask = get_dense();
-          (*mask) |= (*rhs.get_dense());
-        }
-        else
-        {
-          BITMASK *mask = new BITMASK(*rhs.get_dense());
-          if (count == SPARSE_CNT)
-          {
-            SparseSet *sparse = get_sparse();
-            for (SparseSet::const_iterator it = sparse->begin();
-                  it != sparse->end(); it++)
-              mask->set_bit(*it);
-            delete sparse;
-          }
-          else
-          {
-            for (unsigned idx = 0; idx < count; idx++)
-              mask->set_bit(get_value<OVERLAP>(idx));
-          }
-          set_count(DENSE_CNT);
-          set_dense(mask);
-        }
-      }
-      else if (rhs_count == SPARSE_CNT)
-      {
-        SparseSet *other = rhs.get_sparse();
-        for (SparseSet::const_iterator it = other->begin();
-              it != other->end(); it++)
-          set_bit(*it);
-      }
-      else
-      {
-        for (int idx = 0; idx < rhs_count; idx++)
-          set_bit(rhs.get_value<OVERLAP>(idx));
+        (*mask.dense) ^= (*rhs.mask.dense);
+        sparsify();
       }
       return *this;
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>& 
-     CompoundBitMask<BITMASK,MAX,WORDS>::operator&=(const CompoundBitMask &rhs)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::operator*(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const 
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      if (count == DENSE_CNT)
+      if (is_sparse())
       {
-        int rhs_count = rhs.get_count();
-        BITMASK *dense = get_dense();
-        if (rhs_count == DENSE_CNT)
-        {
-          (*dense) &= (*rhs.get_dense());  
-          if (!(*dense))
-          {
-            delete dense;
-            set_count(0);
-          }
-        }
-        else if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          set_count(0);
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-          {
-            if (dense->is_set(*it))
-              set_bit(*it);
-          }
-          delete dense;
-        }
-        else
-        {
-          set_count(0);
-          for (unsigned idx = 0; idx < rhs_count; idx++)
-          {
-            int bit = rhs.get_value<OVERLAP>(idx);
-            if (dense->is_set(bit))
-              set_bit(bit);
-          }
-          delete dense;
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        std::vector<int> to_delete;
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          if (!rhs.is_set(*it))
-            to_delete.push_back(*it);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<int>::const_iterator it = to_delete.begin();
-                it != to_delete.end(); it++)
-            unset_bit(*it);
-        }
-      }
-      else
-      {
-        int next_idx = 0;
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx);
-          if (rhs.is_set(bit))
-          {
-            if (next_idx != idx)
-              set_value<OVERLAP>(next_idx++, bit);
-            else
-              next_idx++;
-          }
-        }
-        if (next_idx != count)
-          set_count(next_idx);
-      }
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>& 
-     CompoundBitMask<BITMASK,MAX,WORDS>::operator^=(const CompoundBitMask &rhs)
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      int rhs_count = rhs.get_count();
-      if (count == DENSE_CNT)
-      {
-        BITMASK *dense = get_dense();
-        if (rhs_count == DENSE_CNT)
-          (*dense) ^= (*rhs.get_dense());
-        else if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-          {
-            if (dense->is_set(*it))
-              dense->unset_bit(*it);
-            else
-              dense->set_bit(*it);
-          }
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < rhs_count; idx++)
-          {
-            int bit = rhs.get_value<OVERLAP>(idx);
-            if (dense->is_set(bit))
-              dense->unset_bit(bit);
-            else
-              dense->set_bit(bit);
-          }
-        }
-        if (!(*dense))
-        {
-          delete dense;
-          set_count(0);
-        }
-      }
-      else if (rhs_count == DENSE_CNT)
-      {
-        BITMASK next = *rhs.get_dense();
-        if (count == SPARSE_CNT)
-        {
-          SparseSet *sparse = get_sparse();
-          for (SparseSet::const_iterator it = sparse->begin();
-                it != sparse->end(); it++)
-          {
-            if (next.is_set(*it))
-              next.unset_bit(*it);
-            else
-              next.set_bit(*it);
-          }
-          delete sparse;
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < count; idx++)
-          {
-            int bit = get_value<OVERLAP>(idx);
-            if (next.is_set(bit))
-              next.unset_bit(bit);
-            else
-              next.set_bit(bit);
-          }
-        }
-        if (!!next)
-        {
-          set_count(DENSE_CNT);
-          set_dense(new BITMASK(next));
-        }
-        else
-          set_count(0);
-      }
-      else if (rhs_count == SPARSE_CNT)
-      {
-        SparseSet *other = rhs.get_sparse();
-        for (SparseSet::const_iterator it = other->begin();
-              it != other->end(); it++)
-        {
-          if (is_set(*it))
-            unset_bit(*it);
-          else
-            set_bit(*it);
-        }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < rhs_count; idx++)
-        {
-          int bit = rhs.get_value<OVERLAP>(idx);
-          if (is_set(bit))
-            unset_bit(bit);
-          else
-            set_bit(bit);
-        }
-      }
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline bool CompoundBitMask<BITMASK,MAX,WORDS>::operator*(
-                                              const CompoundBitMask &rhs) const 
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count == 0)
-        return true;
-      int rhs_count = rhs.get_count();
-      if (rhs_count == 0)
-        return true;
-      if (count == DENSE_CNT)
-      {
-        if (rhs_count == DENSE_CNT)
-          return ((*get_dense()) * (*rhs.get_dense()));
-        else if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-            if (is_set(*it))
-              return false;
-        }
-        else
-          for (int idx = 0; idx < rhs_count; idx++)
-            if (is_set(rhs.get_value<OVERLAP>(idx)))
-              return false;
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-          if (rhs.is_set(*it))
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (rhs.is_set(mask.sparse[idx]))
             return false;
+        return true;
+      }
+      else if (rhs.is_sparse())
+      {
+        for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+          if (mask.dense->is_set(rhs.mask.sparse[idx]))
+            return false;
+        return true;
+      }
+      else
+        return (*mask.dense) * (*rhs.mask.dense);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::empty(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+        return (sparse_size == 0);
+      if (BIDIR)
+        return false;
+      return !(*mask.dense);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      return empty();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+      CompoundBitMask<DT,BLOAT,BIDIR>::operator-(
+                              const CompoundBitMask<DT,BLOAT,BIDIR> &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (is_sparse())
+      {
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (!rhs.is_set(mask.sparse[idx]))
+            result.set_bit(mask.sparse[idx]);
       }
       else
       {
-        for (int idx = 0; idx < count; idx++)
-          if (rhs.is_set(get_value<OVERLAP>(idx)))
-            return false;
-      }
-      return true;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline bool CompoundBitMask<BITMASK,MAX,WORDS>::operator!(void) const
-    //-------------------------------------------------------------------------
-    {
-      return (get_count() == 0); 
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-      CompoundBitMask<BITMASK,MAX,WORDS>::operator-(
-                                              const CompoundBitMask &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      if (count == DENSE_CNT)
-      {
-        BITMASK next = *(get_dense());
-        int rhs_count = rhs.get_count();
-        if (rhs_count == DENSE_CNT)
+        result.mask.dense = new DT(*mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        if (rhs.is_sparse())
         {
-          next -= (*rhs.get_dense());
-        }
-        else if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-            next.unset_bit(*it);
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            result.unset_bit(rhs.mask.sparse[idx]);
         }
         else
         {
-          for (int idx = 0; idx < rhs_count; idx++)
-            next.unset_bit(rhs.get_value<OVERLAP>(idx));
-        }
-        if (!!next)
-        {
-          result.set_count(DENSE_CNT);
-          result.set_dense(new BITMASK(next));
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          if (!rhs.is_set(*it))
-            result.set_bit(*it);
-        }
-      }
-      else
-      {
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx);
-          if (!rhs.is_set(bit))
-            result.set_bit(bit);
+          (*result.mask.dense) -= (*rhs.mask.dense);
+          result.sparsify();
         }
       }
       return result;
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>&
-     CompoundBitMask<BITMASK,MAX,WORDS>::operator-=(const CompoundBitMask &rhs)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>&
+            CompoundBitMask<DT,BLOAT,BIDIR>::operator-=(
+                                    const CompoundBitMask<DT,BLOAT,BIDIR> &rhs)
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      if (count == DENSE_CNT)
+      if (is_sparse())
       {
-        int rhs_count = rhs.get_count();
-        BITMASK *dense = get_dense();
-        if (rhs_count == DENSE_CNT)
+        unsigned offset = 0;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
         {
-          (*dense) -= (*rhs.get_dense());
-        }
-        else if (rhs_count == SPARSE_CNT)
-        {
-          SparseSet *other = rhs.get_sparse();
-          for (SparseSet::const_iterator it = other->begin();
-                it != other->end(); it++)
-            dense->unset_bit(*it);
-        }
-        else
-        {
-          for (int idx = 0; idx < rhs_count; idx++)
-            dense->unset_bit(rhs.get_value<OVERLAP>(idx));
-        }
-        if (!(*dense))
-        {
-          delete dense;
-          set_count(0);
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        std::vector<int> to_delete;
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          if (rhs.is_set(*it))
-            to_delete.push_back(*it);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<int>::const_iterator it = to_delete.begin();
-                it != to_delete.end(); it++)
-            unset_bit(*it);
-        }
-      }
-      else
-      {
-        int next_idx = 0;
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx);
-          if (!rhs.is_set(bit))
+          if (!rhs.is_set(mask.sparse[idx]))
           {
-            if (next_idx != idx)
-              set_value<OVERLAP>(next_idx++, bit);
+            if (offset != idx)
+              mask.sparse[offset++] = mask.sparse[idx];
             else
-              next_idx++;
+              offset++;
           }
         }
-        if (next_idx != count)
-          set_count(next_idx);
-      }
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-           CompoundBitMask<BITMASK,MAX,WORDS>::operator<<(unsigned shift) const
-    //-------------------------------------------------------------------------
-    {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      if (count == DENSE_CNT)
-      {
-        BITMASK dense = (*get_dense()) << shift;
-        if (!!dense)
-        {
-          result.set_count(DENSE_CNT);
-          result.set_dense(new BITMASK(dense));
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          int bit = (*it) + shift;
-          if (bit < MAX)
-            result.set_bit(bit);
-        }
+        sparse_size = offset;
       }
       else
       {
-        int next_idx = 0;
-        for (int idx = 0; idx < count; idx++)
+        if (rhs.is_sparse())
         {
-          int bit = get_value<OVERLAP>(idx) + shift;
-          if (bit < MAX)
-            result.set_value<OVERLAP>(next_idx++, bit);
-        }
-        if (next_idx > 0)
-          result.set_count(next_idx);
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS> 
-           CompoundBitMask<BITMASK,MAX,WORDS>::operator>>(unsigned shift) const
-    //-------------------------------------------------------------------------
-    {
-      CompoundBitMask<BITMASK,MAX,WORDS> result;
-      int count = get_count();
-      if (count == DENSE_CNT)
-      {
-        BITMASK dense = (*get_dense()) >> shift;
-        if (!!dense)
-        {
-          result.set_count(DENSE_CNT);
-          result.set_dense(new BITMASK(dense));
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          int bit = (*it) - shift;
-          if (bit >= 0)
-            result.set_bit(bit);
-        }
-      }
-      else
-      {
-        int next_idx = 0;
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx) - shift;
-          if (bit >= 0)
-            result.set_value<OVERLAP>(next_idx++, bit);
-        }
-        if (next_idx > 0)
-          result.set_count(next_idx);
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>& 
-                CompoundBitMask<BITMASK,MAX,WORDS>::operator<<=(unsigned shift)
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count(); 
-      if (count == DENSE_CNT)
-      {
-        BITMASK *dense = get_dense();
-        (*dense) <<= shift;
-        if (!(*dense))
-        {
-          delete dense;
-          set_count(0);
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        std::vector<int> to_delete;
-        SparseSet *sparse = get_sparse();
-        set_count(0);
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          int bit = (*it) + shift;
-          if (bit < MAX)
-            set_bit(bit);
-        }
-        delete sparse;
-      }
-      else
-      {
-        int next_idx = 0; 
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx) + shift;
-          if (bit < MAX)
-            set_value<OVERLAP>(next_idx++, bit);
-        }
-        if (next_idx != count)
-          set_count(next_idx);
-      }
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline CompoundBitMask<BITMASK,MAX,WORDS>& 
-                CompoundBitMask<BITMASK,MAX,WORDS>::operator>>=(unsigned shift)
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count == DENSE_CNT)
-      {
-        BITMASK *dense = get_dense();
-        (*dense) >>= shift;
-        if (!(*dense))
-        {
-          delete dense;
-          set_count(0);
-        }
-      }
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        set_count(0);
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-        {
-          int bit = (*it) - shift;
-          if (bit >= 0)
-            set_bit(bit);
-        }
-        delete sparse;
-      }
-      else
-      {
-        int next_idx = 0;
-        for (int idx = 0; idx < count; idx++)
-        {
-          int bit = get_value<OVERLAP>(idx) - shift;
-          if (bit >= 0)
-            set_value<OVERLAP>(next_idx++, bit);
-        }
-        if (next_idx != count)
-          set_count(next_idx);
-      }
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline uint64_t CompoundBitMask<BITMASK,MAX,WORDS>::get_hash_key(void) 
-                                                                          const
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count == DENSE_CNT)
-        return get_dense()->get_hash_key();
-      uint64_t result = 0;
-      if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-          result |= (1UL << ((*it) % (8*sizeof(result))));
-      }
-      else
-      {
-        for (int idx = 0; idx < count; idx++)
-          result |= (1UL << (get_value<OVERLAP>(idx) % (8*sizeof(result))));
-      }
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-      template<typename ST>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::serialize(ST &rez) const
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      rez.serialize(count);
-      if (count == DENSE_CNT)
-        get_dense()->serialize(rez); 
-      else if (count == SPARSE_CNT)
-      {
-        SparseSet *sparse = get_sparse();
-        rez.template serialize<size_t>(sparse->size());
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
-          rez.serialize(*it);
-      }
-      else
-      {
-        // Just serialize all the words, won't be that hard
-        for (unsigned idx = 0; idx < WORDS; idx++)
-          rez.serialize(bits[idx]);
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-      template<typename DT>
-    inline void CompoundBitMask<BITMASK,MAX,WORDS>::deserialize(DT &derez)
-    //-------------------------------------------------------------------------
-    {
-      int current_count = get_count();
-      int next_count;
-      derez.deserialize(next_count);
-      if (next_count == DENSE_CNT)
-      {
-        BITMASK *dense;
-        if (current_count != DENSE_CNT)
-        {
-          if (current_count == SPARSE_CNT)
-            delete get_sparse();
-          set_count(DENSE_CNT);
-          dense = new BITMASK();
-          set_dense(dense);
+          for (unsigned idx = 0; idx < rhs.sparse_size; idx++)
+            mask.dense->unset_bit(rhs.mask.sparse[idx]);
         }
         else
-          dense = get_dense();
-        dense->deserialize(derez);
+          (*mask.dense) -= (*rhs.mask.dense);
+        sparsify();
       }
-      else if (next_count == SPARSE_CNT)
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+              CompoundBitMask<DT,BLOAT,BIDIR>::operator<<(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (is_sparse())
       {
-        SparseSet *sparse = new SparseSet();
-        if (current_count == DENSE_CNT)
-          delete get_dense();
-        size_t num_elements;
-        derez.deserialize(num_elements);
-        for (unsigned idx = 0; idx < num_elements; idx++)
-        {
-          int bit;
-          derez.deserialize(bit);
-          sparse->insert(bit);
-        }
-        set_count(SPARSE_CNT);
-        set_sparse(sparse);
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if ((mask.sparse[idx]+shift) < DT::MAXSIZE)
+            result.set_bit(mask.sparse[idx] + shift);
       }
       else
       {
-        if (current_count == DENSE_CNT)
-          delete get_dense();
-        else if (current_count == SPARSE_CNT)
-          delete get_sparse();
-        for (unsigned idx = 0; idx < WORDS; idx++)
-          derez.deserialize(bits[idx]);
+        result.mask.dense = new DT(*mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        (*result.mask.dense) <<= shift;
+        result.sparsify();
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR> 
+              CompoundBitMask<DT,BLOAT,BIDIR>::operator>>(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      CompoundBitMask<DT,BLOAT,BIDIR> result;
+      if (is_sparse())
+      {
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (shift <= mask.sparse[idx])
+            result.set_bit(mask.sparse[idx] - shift);
+      }
+      else
+      {
+        result.mask.dense = new DT(*mask.dense);
+        result.sparse_size = MAX_SPARSE+1;
+        (*result.mask.dense) >>= shift;
+        result.sparsify();
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>& 
+                   CompoundBitMask<DT,BLOAT,BIDIR>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        unsigned offset = 0;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if ((mask.sparse[idx] + shift) < DT::MAXSIZE)
+            mask.sparse[offset++] = mask.sparse[idx] + shift;
+        sparse_size = offset;
+      }
+      else
+      {
+        (*mask.dense) <<= shift;
+        sparsify();
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline CompoundBitMask<DT,BLOAT,BIDIR>& 
+                   CompoundBitMask<DT,BLOAT,BIDIR>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        unsigned offset = 0;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          if (shift <= mask.sparse[idx])
+            mask.sparse[offset++] = mask.sparse[idx] - shift;
+        sparse_size = offset;
+      }
+      else
+      {
+        (*mask.dense) >>= shift;
+        sparsify();
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline uint64_t CompoundBitMask<DT,BLOAT,BIDIR>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        uint64_t result = 0;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          result |= (1ULL << (mask.sparse[idx] % (8*sizeof(result))));
+        return result;
+      }
+      else
+        return mask.dense->get_hash_key();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR> template<typename ST>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::serialize(ST &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(sparse_size);
+      if (is_sparse())
+      {
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          rez.serialize(mask.sparse[idx]);
+      }
+      else
+        mask.dense->serialize(rez);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR> template<typename D>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::deserialize(D &derez)
+    //-------------------------------------------------------------------------
+    {
+      const bool was_dense = !is_sparse();
+      derez.deserialize(sparse_size);
+      if (is_sparse())
+      {
+        if (was_dense)
+          delete mask.dense;
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          derez.deserialize(mask.sparse[idx]);
+      }
+      else
+      {
+        if (!was_dense)
+          mask.dense = new DT(); 
+        mask.dense->deserialize(derez);
       }
     }
 
     //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline char* CompoundBitMask<BITMASK,MAX,WORDS>::to_string(void) const
+    template<typename DT, unsigned BLOAT, bool BIDIR> template<typename FUNC>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::map(FUNC &functor) const
     //-------------------------------------------------------------------------
     {
-      int count = get_count();
-      if (count == DENSE_CNT)
+      if (is_sparse())
       {
-        return get_dense()->to_string(); 
+        for (unsigned idx = 0; idx < sparse_size; idx++)
+          functor.apply(mask.sparse[idx]);
       }
-      else if (count == SPARSE_CNT)
+      else
+        mask.dense->map(functor);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline char* CompoundBitMask<DT,BLOAT,BIDIR>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
       {
         char *result = (char*)malloc(1024*sizeof(char));
-        sprintf(result,"Compound Sparse %d:", count);
-        SparseSet *sparse = get_sparse();
-        for (SparseSet::const_iterator it = sparse->begin();
-              it != sparse->end(); it++)
+        sprintf(result,"Compound Sparse %d:", sparse_size);
+        for (unsigned idx = 0; idx < sparse_size; idx++)
         {
           char temp[64];
-          sprintf(temp, " %d", (*it));
+          sprintf(temp, " %d", mask.sparse[idx]);
           strcat(result,temp);
         }
         return result;
       }
       else
+        return mask.dense->to_string();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline unsigned CompoundBitMask<DT,BLOAT,BIDIR>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+        return sparse_size;
+      else
+        return mask.dense->pop_count();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    /*static*/ inline unsigned CompoundBitMask<DT,BLOAT,BIDIR>::pop_count(
+                                   const CompoundBitMask<DT,BLOAT,BIDIR> &mask)
+    //-------------------------------------------------------------------------
+    {
+      return mask.pop_count();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline bool CompoundBitMask<DT,BLOAT,BIDIR>::is_sparse(void) const
+    //-------------------------------------------------------------------------
+    {
+      return (sparse_size <= MAX_SPARSE);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void CompoundBitMask<DT,BLOAT,BIDIR>::sparsify(void)
+    //-------------------------------------------------------------------------
+    {
+      if (!BIDIR)
+        return;
+      if (MAX_SPARSE < mask.dense->pop_count())
+        return;
+      DT *oldmask = mask.dense;
+      sparse_size = 0;
+      for (unsigned idx = 0; idx < DT::BIT_ELMTS; idx++)
       {
-        char *result = (char*)malloc(1024*sizeof(char));
-        sprintf(result,"Compound Base %d:", count);
-        for (int idx = 0; idx < count; idx++)
+        if ((*oldmask)[idx])
         {
-          char temp[64];
-          sprintf(temp, " %d", get_value<OVERLAP>(idx));
-          strcat(result,temp);
-        }
-        return result;
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    inline int CompoundBitMask<BITMASK,MAX,WORDS>::pop_count(void) const
-    //-------------------------------------------------------------------------
-    {
-      int count = get_count();
-      if (count == DENSE_CNT)
-        return get_dense()->pop_count();
-      else if (count == SPARSE_CNT)
-        return get_sparse()->size();
-      return count;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    /*static*/ inline int CompoundBitMask<BITMASK,MAX,WORDS>::pop_count(
-                                                   const CompoundBitMask &mask)
-    //-------------------------------------------------------------------------
-    {
-      int count = mask.get_count();
-      if (count == DENSE_CNT)
-        count = BITMASK::pop_count(*mask.get_dense());
-      else if (count == SPARSE_CNT)
-        count = mask.get_sparse()->size();
-      return count;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    IntegerSet<IT,DT,BIDIR>::IntegerSet(void)
-      : sparse(true)
-    //-------------------------------------------------------------------------
-    {
-      set_ptr.sparse = 0;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    IntegerSet<IT,DT,BIDIR>::IntegerSet(const IntegerSet &rhs)
-      : sparse(rhs.sparse)
-    //-------------------------------------------------------------------------
-    {
-      if (rhs.sparse)
-      {
-	if (rhs.set_ptr.sparse && !rhs.set_ptr.sparse->empty())
-	  set_ptr.sparse = new typename std::set<IT>(*rhs.set_ptr.sparse);
-	else
-	  set_ptr.sparse = 0;
-      }
-      else
-      {
-        set_ptr.dense = new DenseSet();
-        set_ptr.dense->set = rhs.set_ptr.dense->set;
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    IntegerSet<IT,DT,BIDIR>::~IntegerSet(void)
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-      {
-	// this may be a null pointer, but delete does the right thing
-        delete set_ptr.sparse;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-	assert(set_ptr.dense != NULL);
-#endif
-        delete set_ptr.dense;
-      }
-    }
-    
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    IntegerSet<IT,DT,BIDIR>& 
-                      IntegerSet<IT,DT,BIDIR>::operator=(const IntegerSet &rhs)
-    //-------------------------------------------------------------------------
-    {
-      if (rhs.sparse)
-      {
-        if (!sparse)
-        {
-          delete set_ptr.dense;
-          set_ptr.sparse = 0;
-	  sparse = true;
-        }
-        else if (set_ptr.sparse)
-	  set_ptr.sparse->clear();
-	// if rhs has any contents, copy them over, creating set if needed
-	if (rhs.set_ptr.sparse && !rhs.set_ptr.sparse->empty())
-	{
-	  if (!set_ptr.sparse)
-	    set_ptr.sparse = new typename std::set<IT>(*rhs.set_ptr.sparse);
-	  else
-	    *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
-	}
-      }
-      else
-      {
-        if (sparse)
-        {
-          delete set_ptr.sparse;
-          set_ptr.dense = new DenseSet();
-	  sparse = false;
-        }
-        else
-          set_ptr.dense->set.clear();
-        set_ptr.dense->set = rhs.set_ptr.dense->set;
-      }
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline bool IntegerSet<IT,DT,BIDIR>::contains(IT index) const
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-        return (set_ptr.sparse &&
-		(set_ptr.sparse->find(index) != set_ptr.sparse->end()));
-      else
-        return set_ptr.dense->set.is_set(index);
-    }
-    
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void IntegerSet<IT,DT,BIDIR>::add(IT index)
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-      {
-	// Create set if this is the first addition
-	if (!set_ptr.sparse)
-	  set_ptr.sparse = new typename std::set<IT>;
-
-        // Add it and see if it is too big
-        set_ptr.sparse->insert(index);
-        if (sizeof(DT) < (set_ptr.sparse->size() * 
-                          (sizeof(IT) + STL_SET_NODE_SIZE)))
-        {
-          DenseSet *dense_set = new DenseSet();
-          for (typename std::set<IT>::const_iterator it = 
-                set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
-          {
-            dense_set->set.set_bit(*it);
-          }
-          // Delete the sparse set
-          delete set_ptr.sparse;
-          set_ptr.dense = dense_set;
-          sparse = false;
+          unsigned value = idx * DT::ELEMENT_SIZE;
+          for (unsigned i = 0; i < DT::ELEMENT_SIZE; i++, value++)
+            if (oldmask->is_set(value))
+              mask.sparse[sparse_size++] = value;
         }
       }
-      else
-        set_ptr.dense->set.set_bit(index);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void IntegerSet<IT,DT,BIDIR>::remove(IT index)
-    //-------------------------------------------------------------------------
-    {
-      if (!sparse)
-      {
-        set_ptr.dense->set.unset_bit(index); 
-        // Only check for flip back if we are bi-directional
-        if (BIDIR)
-        {
-          IT count = DT::pop_count(set_ptr.dense->set);
-          if ((count * (sizeof(IT) + STL_SET_NODE_SIZE)) < sizeof(DT))
-          {
-            typename std::set<IT> *sparse_set = new typename std::set<IT>();
-            for (IT idx = 0; idx < DT::ELEMENTS; idx++)
-            {
-              if (set_ptr.dense->set[idx])
-              {
-                for (IT i = 0; i < DT::ELEMENT_SIZE; i++)
-                {
-                  IT value = idx * DT::ELEMENT_SIZE + i;
-                  if (set_ptr.dense->set.is_set(value))
-                    sparse_set->insert(value);
-                }
-              }
-            }
-            // Delete the dense set
-            delete set_ptr.dense;
-            set_ptr.sparse = sparse_set;
-            sparse = true;
-          }
-        }
-      }
-      else
-	if (set_ptr.sparse)
-	  set_ptr.sparse->erase(index);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IT IntegerSet<IT,DT,BIDIR>::find_first_set(void) const
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-      {
-#ifdef DEBUG_LEGION
-        assert(set_ptr.sparse && !set_ptr.sparse->empty());
-#endif
-        return *(set_ptr.sparse->begin());
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(!!(set_ptr.dense->set));
-#endif
-        return set_ptr.dense->set.find_first_set();
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IT IntegerSet<IT,DT,BIDIR>::find_index_set(int index) const
-    //-------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index >= 0);
-      assert(index < int(size()));
-#endif
-      if (index == 0)
-        return find_first_set();
-      if (sparse)
-      {
-#ifdef DEBUG_LEGION
-	assert(set_ptr.sparse);
-#endif
-        typename std::set<IT>::const_iterator it = set_ptr.sparse->begin();
-        while (index > 0)
-        {
-          it++;
-          index--;
-        }
-        return *it;
-      }
-      else
-        return set_ptr.dense->set.find_index_set(index);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR> template<typename FUNCTOR>
-    inline void IntegerSet<IT,DT,BIDIR>::map(FUNCTOR &functor) const
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-      {
-	if (set_ptr.sparse)
-	{
-	  for (typename std::set<IT>::const_iterator it = 
-                set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
-          {
-	    functor.apply(*it);
-          }
-        }
-      }
-      else
-      {
-        for (IT idx = 0; idx < DT::ELEMENTS; idx++)
-        {
-          if (set_ptr.dense->set[idx])
-          {
-            IT value = idx * DT::ELEMENT_SIZE;
-            for (IT i = 0; i < DT::ELEMENT_SIZE; i++, value++)
-            {
-              if (set_ptr.dense->set.is_set(value))
-                functor.apply(value);
-            }
-          }
-        }
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR> template<typename ST>
-    inline void IntegerSet<IT,DT,BIDIR>::serialize(ST &rez) const
-    //-------------------------------------------------------------------------
-    {
-      rez.template serialize<bool>(sparse);
-      if (sparse)
-      {
-	if (set_ptr.sparse)
-	{
-          rez.template serialize<size_t>(set_ptr.sparse->size());
-          for (typename std::set<IT>::const_iterator it = 
-                set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
-          {
-            rez.serialize(*it);
-          }
-        }
-	else
-          rez.template serialize<size_t>(0);
-      }
-      else
-        rez.serialize(set_ptr.dense->set);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR> template<typename ZT>
-    inline void IntegerSet<IT,DT,BIDIR>::deserialize(ZT &derez)
-    //-------------------------------------------------------------------------
-    {
-      bool is_sparse;
-      derez.template deserialize<bool>(is_sparse);
-      if (is_sparse)
-      {
-        // If it doesn't match then replace the old one
-        if (!sparse)
-        {
-          delete set_ptr.dense;
-          set_ptr.sparse = 0;
-	  sparse = true;
-        }
-        else if (set_ptr.sparse)
-	  set_ptr.sparse->clear();
-        size_t num_elements;
-        derez.template deserialize<size_t>(num_elements);
-	if (num_elements > 0) {
-	  if (!set_ptr.sparse)
-	    set_ptr.sparse = new typename std::set<IT>;
-          for (unsigned idx = 0; idx < num_elements; idx++)
-          {
-	    IT element;
-            derez.deserialize(element);
-            set_ptr.sparse->insert(element);
-          }
-        }
-      }
-      else
-      {
-        // If it doesn't match then replace the old one
-        if (sparse)
-        {
-          delete set_ptr.sparse;
-          set_ptr.dense = new DenseSet();
-	  sparse = false;
-        }
-        else
-          set_ptr.dense->set.clear();
-        derez.deserialize(set_ptr.dense->set);
-      }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>
-                IntegerSet<IT,DT,BIDIR>::operator|(const IntegerSet &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      // Do the fast case here
-      if (!sparse)
-      {
-        IntegerSet<IT,DT,BIDIR> result(*this);
-        if (rhs.sparse)
-        {
-          UnionFunctor functor(result);
-          rhs.map(functor);
-        }
-        else
-          result.set_ptr.dense->set |= rhs.set_ptr.dense->set;
-        return result;
-      }
-      IntegerSet<IT,DT,BIDIR> result(rhs); 
-      UnionFunctor functor(result);
-      this->map(functor);
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>
-                IntegerSet<IT,DT,BIDIR>::operator&(const IntegerSet &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      // Do the fast case here
-      if (!sparse && !rhs.sparse)
-      {
-        IntegerSet<IT,DT,BIDIR> result(*this);
-        result.set_ptr.dense->set &= rhs.set_ptr.dense->set;
-        return result;
-      }
-      IntegerSet<IT,DT,BIDIR> result;
-      IntersectFunctor functor(result, *this);
-      rhs.map(functor);
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>
-                IntegerSet<IT,DT,BIDIR>::operator-(const IntegerSet &rhs) const
-    //-------------------------------------------------------------------------
-    {
-      // Do the fast case here
-      if (!sparse && !rhs.sparse)
-      {
-        IntegerSet<IT,DT,BIDIR> result(*this); 
-        result.set_ptr.dense->set -= rhs.set_ptr.dense->set;
-        return result;
-      }
-      IntegerSet<IT,DT,BIDIR> result(*this);
-      DifferenceFunctor functor(result);
-      rhs.map(functor);
-      return result;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>&
-                     IntegerSet<IT,DT,BIDIR>::operator|=(const IntegerSet &rhs)
-    //-------------------------------------------------------------------------
-    {
-      // Do the fast case here
-      if (!sparse && !rhs.sparse)
-      {
-        set_ptr.dense->set |= rhs.set_ptr.dense->set;
-        return *this;
-      }
-      UnionFunctor functor(*this);
-      rhs.map(functor);
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>&
-                     IntegerSet<IT,DT,BIDIR>::operator&=(const IntegerSet &rhs)
-    //-------------------------------------------------------------------------
-    {
-      // Do the fast case
-      if (!sparse && !rhs.sparse)
-      {
-        set_ptr.dense->set &= rhs.set_ptr.dense->set;
-        return *this;
-      }
-      // Can't overwrite ourselves
-      IntegerSet<IT,DT,BIDIR> temp;
-      IntersectFunctor functor(temp, *this);
-      rhs.map(functor);
-      (*this) = temp;
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>&
-                     IntegerSet<IT,DT,BIDIR>::operator-=(const IntegerSet &rhs)
-    //-------------------------------------------------------------------------
-    {
-      // Do the fast case
-      if (!sparse && !rhs.sparse)
-      {
-        set_ptr.dense->set -= rhs.set_ptr.dense->set;
-        return *this;
-      }
-      DifferenceFunctor functor(*this);
-      rhs.map(functor);
-      return *this;
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline bool IntegerSet<IT,DT,BIDIR>::operator!(void) const
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-        return (!set_ptr.sparse || set_ptr.sparse->empty());
-      else
-        return !(set_ptr.dense->set);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline size_t IntegerSet<IT,DT,BIDIR>::size(void) const
-    //-------------------------------------------------------------------------
-    {
-      if (sparse)
-        return (set_ptr.sparse ? set_ptr.sparse->size() : 0);
-      else
-        return set_ptr.dense->set.pop_count(set_ptr.dense->set);
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void IntegerSet<IT,DT,BIDIR>::clear(void)
-    //-------------------------------------------------------------------------
-    {
-      // always switch back to set on a clear
-      if (!sparse)
-      {
-	delete set_ptr.dense;
-	set_ptr.sparse = 0;
-	sparse = true;
-      } 
-      else if (set_ptr.sparse)
-	set_ptr.sparse->clear();
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline IntegerSet<IT,DT,BIDIR>& 
-                                 IntegerSet<IT,DT,BIDIR>::swap(IntegerSet &rhs)
-    //-------------------------------------------------------------------------
-    {
-      std::swap(sparse, rhs.sparse);
-      std::swap(set_ptr.sparse, rhs.set_ptr.sparse);
-      // don't do dense because it's a union and that'd just swap things back
-      return *this;
+      delete oldmask;
     }
 
 #endif // __BITMASK_H__
