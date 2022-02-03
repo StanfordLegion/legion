@@ -97,14 +97,14 @@ namespace Legion {
         compressed_cache.push_back(
             std::pair<FieldMask,FieldMask>(src_mask, compressed));
       }
-      int pop_count = FieldMask::pop_count(compressed);
+      const unsigned pop_count = FieldMask::pop_count(compressed);
 #ifdef DEBUG_LEGION
       assert(pop_count == FieldMask::pop_count(src_mask));
 #endif
       unsigned offset = dst_fields.size();
       dst_fields.resize(offset + pop_count);
       int next_start = 0;
-      for (int idx = 0; idx < pop_count; idx++)
+      for (unsigned idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
         CopySrcDstField &field = dst_fields[offset+idx];
@@ -360,14 +360,14 @@ namespace Legion {
       // the order in which they appear in the field mask so that 
       // they line up in the same order with the source/destination infos
       // (depending on the calling context of this function
-      int pop_count = FieldMask::pop_count(compressed);
+      const unsigned pop_count = FieldMask::pop_count(compressed);
 #ifdef DEBUG_LEGION
       assert(pop_count == FieldMask::pop_count(copy_mask));
 #endif
       unsigned offset = fields.size();
       fields.resize(offset + pop_count);
       int next_start = 0;
-      for (int idx = 0; idx < pop_count; idx++)
+      for (unsigned idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
         CopySrcDstField &field = fields[offset+idx];

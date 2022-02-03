@@ -19,7 +19,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "legion_utilities.h"
+#include "../runtime/legion/bitmask.h"
+#include "../runtime/legion/legion_allocation.h"
 
 #ifdef __MACH__
 #include <mach/clock.h>
@@ -298,7 +299,7 @@ BaseMask& BaseMask::operator>>=(unsigned shift)
 template<typename T>
 bool BaseMask::equals(const T &mask) const
 {
-  if (T::pop_count(mask) != (int)values.size())
+  if (T::pop_count(mask) != values.size())
     return false;
   for (std::set<unsigned>::const_iterator it = values.begin();
         it != values.end(); it++)
@@ -734,7 +735,7 @@ template<typename BITMASK>
 void test_mask(const int num_iterations, const char *name)
 {
   printf("Running tests for mask %s...\n", name);
-  const int MAX = BITMASK::ELEMENTS * BITMASK::ELEMENT_SIZE;
+  const int MAX = BITMASK::BIT_ELMTS * BITMASK::ELEMENT_SIZE;
   test_equality<BITMASK,MAX>(num_iterations, name);
   test_negation<BITMASK,MAX>(num_iterations, name);
   test_or<BITMASK,MAX>(num_iterations, name);
@@ -1133,29 +1134,29 @@ void test_operation_64(const int num_iterations)
     TLBitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "TLBitMask");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<8> >");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<8> >");
 }
 
@@ -1173,56 +1174,56 @@ void test_operation_128(const int num_iterations)
   test_mask_operation<MAX,SCALE,OP,SSETLBitMask<MAX> >(num_iterations, "SSETLBitMask");
 #endif
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<6> >");
     test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<8> >");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<8> >");
 
 #ifdef __SSE2__
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,2> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,4> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,6> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<6> >");
     test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,8> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<8> >");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,2> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,4> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,6> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,8> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<8> >");
 #endif
 }
@@ -1244,83 +1245,83 @@ void test_operation(const int num_iterations)
   test_mask_operation<MAX,SCALE,OP,AVXTLBitMask<MAX> >(num_iterations, "AVXTLBitMask");
 #endif
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<6> >");
     test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<BitMask<8> >");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F> > >(
         num_iterations, "CompoundBitMask<TLBitMask<8> >");
 
 #ifdef __SSE2__
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,2> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,4> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,6> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<6> >");
     test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSEBitMask<MAX>,MAX,8> >(
+    CompoundBitMask<SSEBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSEBitMask<8> >");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,2> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,4> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,6> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<SSETLBitMask<MAX>,MAX,8> >(
+    CompoundBitMask<SSETLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<SSETLBitMask<8> >");
 #endif
 #ifdef __AVX__
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXBitMask<MAX>,MAX,2> >(
+    CompoundBitMask<AVXBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXBitMask<MAX>,MAX,4> >(
+    CompoundBitMask<AVXBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXBitMask<MAX>,MAX,6> >(
+    CompoundBitMask<AVXBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXBitMask<6> >");
     test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXBitMask<MAX>,MAX,8> >(
+    CompoundBitMask<AVXBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXBitMask<8> >");
 
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXTLBitMask<MAX>,MAX,2> >(
+    CompoundBitMask<AVXTLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXTLBitMask<2> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXTLBitMask<MAX>,MAX,4> >(
+    CompoundBitMask<AVXTLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXTLBitMask<4> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXTLBitMask<MAX>,MAX,6> >(
+    CompoundBitMask<AVXTLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXTLBitMask<6> >");
   test_mask_operation<MAX,SCALE,OP,
-    CompoundBitMask<AVXTLBitMask<MAX>,MAX,8> >(
+    CompoundBitMask<AVXTLBitMask<MAX> > >(
         num_iterations, "CompoundBitMask<AVXTLBitMask<8> >");
 #endif
 }
@@ -1463,94 +1464,94 @@ int main(int argc, const char **argv)
 #endif
 
   printf("\nCompoundBitMask Tests\n");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,2> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,2>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,3> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,3>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,4> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,4>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,5> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,5>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,6> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,6>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,7> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,7>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,8> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<64,8>");
 
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,2> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,2>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,3> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,3>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,4> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,4>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,5> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,5>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,6> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,6>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,7> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,7>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,8> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<128,8>");
 
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,2> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,2>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,3> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,3>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,4> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,4>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,5> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,5>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,6> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,6>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,7> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,7>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,8> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<192,8>");
 
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,2> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,2>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,3> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,3>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,4> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,4>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,5> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,5>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,6> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,6>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,7> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,7>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,8> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<256,8>");
 
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,2> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,2>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,3> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,3>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,4> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,4>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,5> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,5>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,6> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,6>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,7> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,7>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,8> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<512,8>");
 
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,2> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,2>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,3> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,3>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,4> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,4>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,5> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,5>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,6> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,6>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,7> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,7>");
-  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,8> >(
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F> > >(
                               num_iterations,"CompoundBitMask<1024,8>");
 
 #if 0

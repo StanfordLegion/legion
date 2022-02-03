@@ -105,8 +105,8 @@ namespace Legion {
       template<unsigned int MAX>
       inline void serialize(const PPCTLBitMask<MAX> &mask);
 #endif
-      template<typename IT, typename DT, bool BIDIR>
-      inline void serialize(const IntegerSet<IT,DT,BIDIR> &integer_set);
+      template<typename DT, unsigned BLOAT, bool BIDIR>
+      inline void serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void serialize(const Domain &domain);
       inline void serialize(const DomainPoint &dp);
       inline void serialize(const void *src, size_t bytes);
@@ -188,8 +188,8 @@ namespace Legion {
       template<unsigned int MAX>
       inline void deserialize(PPCTLBitMask<MAX> &mask);
 #endif
-      template<typename IT, typename DT, bool BIDIR>
-      inline void deserialize(IntegerSet<IT,DT,BIDIR> &integer_set);
+      template<typename DT, unsigned BLOAT, bool BIDIR>
+      inline void deserialize(CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void deserialize(Domain &domain);
       inline void deserialize(DomainPoint &dp);
       inline void deserialize(void *dst, size_t bytes);
@@ -851,11 +851,11 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void Serializer::serialize(const IntegerSet<IT,DT,BIDIR> &int_set)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void Serializer::serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &m)
     //--------------------------------------------------------------------------
     {
-      int_set.serialize(*this);
+      m.serialize(*this);
     }
 
     //--------------------------------------------------------------------------
@@ -1072,11 +1072,11 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    template<typename IT, typename DT, bool BIDIR>
-    inline void Deserializer::deserialize(IntegerSet<IT,DT,BIDIR> &int_set)
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline void Deserializer::deserialize(CompoundBitMask<DT,BLOAT,BIDIR> &mask)
     //--------------------------------------------------------------------------
     {
-      int_set.deserialize(*this);
+      mask.deserialize(*this);
     }
 
     //--------------------------------------------------------------------------

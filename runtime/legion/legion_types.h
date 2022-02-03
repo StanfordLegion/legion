@@ -76,7 +76,7 @@ template<unsigned int MAX> class AVXTLBitMask;
 template<unsigned int MAX> class PPCBitMask;
 template<unsigned int MAX> class PPCTLBitMask;
 #endif
-template<typename IT, typename DT, bool BIDIR> class IntegerSet;
+template<typename DT, unsigned BLOAT, bool BIDIR> class CompoundBitMask;
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
@@ -2328,7 +2328,7 @@ namespace Legion {
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #endif
-    typedef IntegerSet<AddressSpaceID,NodeMask,false/*bidir*/> NodeSet;
+    typedef CompoundBitMask<NodeMask,1/*bloat*/,true/*bidir*/> NodeSet;
 
 #undef LEGION_NODE_MASK_NODE_SHIFT
 #undef LEGION_NODE_MASK_NODE_MASK
