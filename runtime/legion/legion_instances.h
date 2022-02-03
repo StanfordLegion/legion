@@ -116,7 +116,6 @@ namespace Legion {
     public:
       CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
       CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
-      CollectiveMapping(Deserializer &derez);
       CollectiveMapping(Deserializer &derez, size_t total_spaces);
     public:
       inline AddressSpaceID operator[](unsigned idx) const

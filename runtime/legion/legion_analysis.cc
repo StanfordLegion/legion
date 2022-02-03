@@ -17009,7 +17009,9 @@ namespace Legion {
       derez.deserialize(num_states);
       for (unsigned idx = 0; idx < num_states; idx++)
       {
-        CollectiveMapping *mapping = new CollectiveMapping(derez);
+        size_t total_spaces;
+        derez.deserialize(total_spaces);
+        CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
         FieldMask mask;
         derez.deserialize(mask);
         if (replicated_states.insert(mapping, mask))

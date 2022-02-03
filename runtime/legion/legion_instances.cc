@@ -599,27 +599,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      derez.deserialize(total_spaces);
-      if (total_spaces > 0)
-      {
-        derez.deserialize(unique_sorted_spaces);
-        derez.deserialize(radix);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t total)
       : total_spaces(total)
     //--------------------------------------------------------------------------
     {
-      if (total_spaces > 0)
-      {
-        derez.deserialize(unique_sorted_spaces);
-        derez.deserialize(radix);
-      }
+#ifdef DEBUG_LEGION
+      assert(total_spaces > 0);
+#endif
+      derez.deserialize(unique_sorted_spaces);
+#ifdef DEBUG_LEGION
+      assert(total_spaces == unique_sorted_spaces.size());
+#endif
+      derez.deserialize(radix);
     }
 
     //--------------------------------------------------------------------------
@@ -722,12 +713,12 @@ namespace Legion {
     void CollectiveMapping::pack(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(total_spaces > 0);
+#endif
       rez.serialize(total_spaces);
-      if (total_spaces > 0)
-      {
-        rez.serialize(unique_sorted_spaces);
-        rez.serialize(radix);
-      }
+      rez.serialize(unique_sorted_spaces);
+      rez.serialize(radix);
     }
 
     //--------------------------------------------------------------------------
@@ -3638,7 +3629,9 @@ namespace Legion {
       RtEvent points_ready;
       IndexSpaceNode *point_space = points_handle.exists() ?
         runtime->forest->get_node(points_handle, &points_ready) : NULL; 
-      CollectiveMapping *mapping = new CollectiveMapping(derez);
+      size_t total_spaces;
+      derez.deserialize(total_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
       PendingRemoteExpression pending;
@@ -4142,7 +4135,9 @@ namespace Legion {
       derez.deserialize(point_space);
       ApBarrier ready_barrier;
       derez.deserialize(ready_barrier);
-      CollectiveMapping *mapping = new CollectiveMapping(derez);
+      size_t total_spaces;
+      derez.deserialize(total_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
       return new PendingCollectiveManager(did, total_points, point_space,
                                           ready_barrier, mapping);
     }
