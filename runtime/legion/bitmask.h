@@ -310,8 +310,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const BitMask &rhs) const;
@@ -403,8 +405,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const TLBitMask &rhs) const;
@@ -491,8 +495,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
@@ -577,8 +583,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
@@ -667,8 +675,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
@@ -753,8 +763,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
@@ -844,8 +856,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const PPCBitMask &rhs) const;
@@ -930,8 +944,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const PPCTLBitMask &rhs) const;
@@ -1014,8 +1030,10 @@
       inline bool empty(void) const;
       inline void clear(void);
     public:
+      inline size_t size(void) const { return pop_count(); }
       inline bool contains(unsigned bit) const { return is_set(bit); }
       inline void add(unsigned bit) { set_bit(bit); }
+      inline void insert(unsigned bit) { set_bit(bit); }
       inline void remove(unsigned bit) { unset_bit(bit); }
     public:
       inline bool operator==(const CompoundBitMask &rhs) const;
