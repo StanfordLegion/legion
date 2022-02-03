@@ -16702,8 +16702,8 @@ namespace Legion {
       std::set<RtEvent> applied_events;
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->broadcast_replicated_state_updates(mask, (mapping->size() > 0) ? 
-          mapping : NULL, origin, applied_events, true/*need lock*/);
+      set->broadcast_replicated_state_updates(mask, mapping, origin,
+          applied_events, true/*need lock*/);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
