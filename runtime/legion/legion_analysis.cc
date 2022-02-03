@@ -16627,7 +16627,9 @@ namespace Legion {
         runtime->find_or_request_equivalence_set(did, ready_event);
       FieldMask mask;
       derez.deserialize(mask);
-      CollectiveMapping *mapping = new CollectiveMapping(derez);
+      size_t total_spaces;
+      derez.deserialize(total_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
       mapping->add_reference();
       PendingReplication *target;
       derez.deserialize(target);
@@ -16684,8 +16686,14 @@ namespace Legion {
         runtime->find_or_request_equivalence_set(did, ready_event);
       FieldMask mask;
       derez.deserialize(mask);
-      CollectiveMapping *mapping = new CollectiveMapping(derez);
-      mapping->add_reference();
+      size_t total_spaces;
+      derez.deserialize(total_spaces);
+      CollectiveMapping *mapping = NULL;
+      if (total_spaces > 0)
+      {
+        mapping = new CollectiveMapping(derez, total_spaces);
+        mapping->add_reference();
+      }
       AddressSpaceID origin;
       derez.deserialize(origin);
       RtUserEvent done_event;
@@ -16701,7 +16709,7 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(done_event);
-      if (mapping->remove_reference())
+      if ((mapping != NULL) && mapping->remove_reference())
         delete mapping;
     }
 
@@ -16817,7 +16825,9 @@ namespace Legion {
       derez.deserialize(num_states);
       for (unsigned idx = 0; idx < num_states; idx++)
       {
-        CollectiveMapping *mapping = new CollectiveMapping(derez);
+        size_t total_spaces;
+        derez.deserialize(total_spaces);
+        CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
         FieldMask mask;
         derez.deserialize(mask);
         if (replicated_states.insert(mapping, mask))

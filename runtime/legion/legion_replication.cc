@@ -8522,13 +8522,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(Deserializer &derez)
+    CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t total)
+      : total_spaces(total)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(total_spaces > 0);
+#endif
       derez.deserialize(unique_sorted_spaces);
-      total_spaces = unique_sorted_spaces.size();
-      if (total_spaces > 0)
-        derez.deserialize(radix);
+#ifdef DEBUG_LEGION
+      assert(unique_sorted_spaces.size() == total_spaces);
+#endif
+      derez.deserialize(radix);
     }
 
     //--------------------------------------------------------------------------
@@ -8591,9 +8596,12 @@ namespace Legion {
     void CollectiveMapping::pack(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(total_spaces > 0);
+#endif
+      rez.serialize(total_spaces);
       rez.serialize(unique_sorted_spaces);
-      if (total_spaces > 0)
-        rez.serialize(radix);
+      rez.serialize(radix);
     }
 
     //--------------------------------------------------------------------------
