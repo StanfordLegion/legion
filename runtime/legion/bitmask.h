@@ -307,6 +307,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -402,6 +403,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -492,6 +494,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -580,6 +583,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -672,6 +676,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -760,6 +765,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -853,6 +859,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -941,6 +948,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -1027,6 +1035,7 @@
       inline int find_first_set(void) const;
       inline int find_next_set(unsigned start) const;
       inline int find_index(unsigned bit) const;
+      inline int get_index(unsigned index) const;
       inline bool empty(void) const;
       inline void clear(void);
     public:
@@ -1372,7 +1381,29 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int BitMask<T,MAX,SHIFT,MASK>::find_index(unsigned index) const
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> SHIFT;
+      unsigned offset = bit & MASK;
+      if (bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bit_vector[element] << (ELEMENT_SIZE - offset)); 
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -2063,7 +2094,29 @@
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_index(unsigned index) const
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> SHIFT;
+      unsigned offset = bit & MASK;
+      if (bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bit_vector[element] << (ELEMENT_SIZE - offset)); 
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -2809,7 +2862,29 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSEBitMask<MAX>::find_index(unsigned index) const
+    inline int SSEBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> 6; 
+      unsigned offset = bit & 0x3f;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -3482,7 +3557,29 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int SSETLBitMask<MAX>::find_index(unsigned index) const
+    inline int SSETLBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> 6; 
+      unsigned offset = bit & 0x3f;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -4224,7 +4321,29 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXBitMask<MAX>::find_index(unsigned index) const
+    inline int AVXBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> 6; 
+      unsigned offset = bit & 0x3f;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -4964,7 +5083,29 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int AVXTLBitMask<MAX>::find_index(unsigned index) const
+    inline int AVXTLBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> 6; 
+      unsigned offset = bit & 0x3f;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -5806,7 +5947,29 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCBitMask<MAX>::find_index(unsigned index) const
+    inline int PPCBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> 6; 
+      unsigned offset = bit & 0x3f;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCBitMask<MAX>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -6497,7 +6660,29 @@
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
-    inline int PPCTLBitMask<MAX>::find_index(unsigned index) const
+    inline int PPCTLBitMask<MAX>::find_index(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned element = bit >> 6; 
+      unsigned offset = bit & 0x3f;
+      if (bits.bit_vector[element] & (1ULL << offset))
+      {
+        int index = 0;
+        for (unsigned idx = 0; idx < element; idx++)
+          index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Just count the bits up to but not including the actual
+        // bit we're looking for since indexes are zero-base
+        index += __builtin_popcountll(
+            bits.bit_vector[element] << (ELEMENT_SIZE - offset));
+        return index;
+      }
+      else // It's not set otherwise so we couldn't find an index
+        return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int PPCTLBitMask<MAX>::get_index(unsigned index) const
     //-------------------------------------------------------------------------
     {
       int offset = 0;
@@ -7367,6 +7552,22 @@
       }
       else
         return mask.dense->find_index(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename DT, unsigned BLOAT, bool BIDIR>
+    inline int CompoundBitMask<DT,BLOAT,BIDIR>::get_index(unsigned index) const
+    //-------------------------------------------------------------------------
+    {
+      if (is_sparse())
+      {
+        if (index < sparse_size)
+          return mask.sparse[index];
+        else // Don't have any entry at that index
+          return -1;
+      }
+      else
+        return mask.dense->get_index(index);
     }
     
     //-------------------------------------------------------------------------
