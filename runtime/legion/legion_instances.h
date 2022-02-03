@@ -116,20 +116,21 @@ namespace Legion {
     public:
       CollectiveMapping(const std::vector<AddressSpaceID> &spaces,size_t radix);
       CollectiveMapping(const ShardMapping &shard_mapping, size_t radix);
-      CollectiveMapping(Deserializer &derez, size_t size = 0);
+      CollectiveMapping(Deserializer &derez);
+      CollectiveMapping(Deserializer &derez, size_t total_spaces);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
 #ifdef DEBUG_LEGION
-        { assert(idx < size()); return unique_sorted_spaces[idx]; }
+        { assert(idx < size()); return unique_sorted_spaces.get_index(idx); }
 #else
-        { return unique_sorted_spaces[idx]; }
+        { return unique_sorted_spaces.get_index(idx); }
 #endif
-      inline size_t size(void) const { return unique_sorted_spaces.size(); }
+      inline size_t size(void) const { return total_spaces; }
       inline AddressSpaceID get_origin(void) const 
 #ifdef DEBUG_LEGION
-        { assert(size() > 0); return unique_sorted_spaces.front(); }
+        { assert(size() > 0); return unique_sorted_spaces.find_first_set(); }
 #else
-        { return unique_sorted_spaces.front(); }
+        { return unique_sorted_spaces.find_first_set(); }
 #endif
       bool operator==(const CollectiveMapping &rhs) const;
       bool operator!=(const CollectiveMapping &rhs) const;
@@ -140,17 +141,20 @@ namespace Legion {
                             const AddressSpaceID local) const;
       void get_children(const AddressSpaceID origin, const AddressSpaceID local,
                         std::vector<AddressSpaceID> &children) const;
-      bool contains(const AddressSpaceID space) const;
+      inline bool contains(const AddressSpaceID space) const
+        { return unique_sorted_spaces.contains(space); }
       bool contains(const CollectiveMapping &rhs) const;
       CollectiveMapping* clone_with(AddressSpace space) const;
     public:
       void pack(Serializer &rez) const;
-      unsigned find_index(const AddressSpaceID space) const;
+      inline unsigned find_index(const AddressSpaceID space) const
+        { return unique_sorted_spaces.find_index(space); }
     protected:
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
     protected:
-      std::vector<AddressSpaceID> unique_sorted_spaces;
+      NodeSet unique_sorted_spaces;
+      size_t total_spaces;
       size_t radix;
     };
 

@@ -409,7 +409,9 @@ namespace Legion {
                 const Point<DIM,coord_t> point = it->first; \
                 points[index++] = point; \
               } \
-              const Realm::IndexSpace<DIM,coord_t> space(points); \
+              Realm::IndexSpace<DIM,coord_t> space(points); \
+              /* Make sure this is tight for determinism */ \
+              space = space.tighten(); \
               const DomainT<DIM,coord_t> domaint(space); \
               point_domain = domaint; \
               break; \

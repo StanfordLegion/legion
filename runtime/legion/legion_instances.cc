@@ -98,14 +98,14 @@ namespace Legion {
         compressed_cache.push_back(
             std::pair<FieldMask,FieldMask>(src_mask, compressed));
       }
-      int pop_count = FieldMask::pop_count(compressed);
+      const unsigned pop_count = FieldMask::pop_count(compressed);
 #ifdef DEBUG_LEGION
       assert(pop_count == FieldMask::pop_count(src_mask));
 #endif
       unsigned offset = dst_fields.size();
       dst_fields.resize(offset + pop_count);
       int next_start = 0;
-      for (int idx = 0; idx < pop_count; idx++)
+      for (unsigned idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
         CopySrcDstField &field = dst_fields[offset+idx];
@@ -361,14 +361,14 @@ namespace Legion {
       // the order in which they appear in the field mask so that 
       // they line up in the same order with the source/destination infos
       // (depending on the calling context of this function
-      int pop_count = FieldMask::pop_count(compressed);
+      const unsigned pop_count = FieldMask::pop_count(compressed);
 #ifdef DEBUG_LEGION
       assert(pop_count == FieldMask::pop_count(copy_mask));
 #endif
       unsigned offset = fields.size();
       fields.resize(offset + pop_count);
       int next_start = 0;
-      for (int idx = 0; idx < pop_count; idx++)
+      for (unsigned idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
         CopySrcDstField &field = fields[offset+idx];
@@ -581,40 +581,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(
                             const std::vector<AddressSpaceID> &spaces, size_t r)
-      : radix(r)
+      : total_spaces(spaces.size()), radix(r)
     //--------------------------------------------------------------------------
     {
-      std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
-      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
-                                  unique_spaces.begin(), unique_spaces.end());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            spaces.begin(); it != spaces.end(); it++)
+        unique_sorted_spaces.add(*it);
     }
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
-      : radix(r)
+      : total_spaces(mapping.size()), radix(r)
     //--------------------------------------------------------------------------
     {
-      std::set<AddressSpaceID> unique_spaces;
-      for (unsigned idx = 0; idx < mapping.size(); idx++)
-        unique_spaces.insert(mapping[idx]);
-      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
-                                  unique_spaces.begin(), unique_spaces.end());
+      for (unsigned idx = 0; idx < total_spaces; idx++)
+        unique_sorted_spaces.add(mapping[idx]);
     }
 
     //--------------------------------------------------------------------------
-    CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t num_spaces)
+    CollectiveMapping::CollectiveMapping(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      if (num_spaces == 0)
-        derez.deserialize(num_spaces);
-#ifdef DEBUG_LEGION
-      assert(num_spaces > 0);
-#endif
-      unique_sorted_spaces.resize(num_spaces);
-      for (unsigned idx = 0; idx < num_spaces; idx++)
-        derez.deserialize(unique_sorted_spaces[idx]);
-      if (num_spaces > 0)
+      derez.deserialize(total_spaces);
+      if (total_spaces > 0)
+      {
+        derez.deserialize(unique_sorted_spaces);
         derez.deserialize(radix);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveMapping::CollectiveMapping(Deserializer &derez, size_t total)
+      : total_spaces(total)
+    //--------------------------------------------------------------------------
+    {
+      if (total_spaces > 0)
+      {
+        derez.deserialize(unique_sorted_spaces);
+        derez.deserialize(radix);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -623,12 +628,7 @@ namespace Legion {
     {
       if (radix != rhs.radix)
         return false;
-      if (size() != rhs.size())
-        return false;
-      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
-        if (unique_sorted_spaces[idx] != rhs[idx])
-          return false;
-      return true;
+      return unique_sorted_spaces == rhs.unique_sorted_spaces;
     }
 
     //--------------------------------------------------------------------------
@@ -639,21 +639,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin, 
+    AddressSpaceID CollectiveMapping::get_parent(const AddressSpaceID origin,
                                                const AddressSpaceID local) const
     //--------------------------------------------------------------------------
     {
       const unsigned local_index = find_index(local);
       const unsigned origin_index = find_index(origin);
 #ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(local_index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       const unsigned offset = convert_to_offset(local_index, origin_index);
       const unsigned index = convert_to_index((offset-1) / radix, origin_index);
-      return unique_sorted_spaces[index];
+      return unique_sorted_spaces.get_index(index);
     }
-
+    
     //--------------------------------------------------------------------------
     size_t CollectiveMapping::count_children(const AddressSpaceID origin,
                                              const AddressSpaceID local) const
@@ -662,16 +662,16 @@ namespace Legion {
       const unsigned local_index = find_index(local);
       const unsigned origin_index = find_index(origin);
 #ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(local_index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
-      const unsigned offset = radix * 
+      const unsigned offset = radix *
         convert_to_offset(local_index, origin_index);
       size_t result = 0;
       for (unsigned idx = 1; idx <= radix; idx++)
       {
         const unsigned child_offset = offset + idx;
-        if (child_offset < unique_sorted_spaces.size())
+        if (child_offset < total_spaces)
           result++;
       }
       return result;
@@ -685,107 +685,64 @@ namespace Legion {
       const unsigned local_index = find_index(local);
       const unsigned origin_index = find_index(origin);
 #ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(local_index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
-      const unsigned offset = radix * 
+      const unsigned offset = radix *
         convert_to_offset(local_index, origin_index);
       for (unsigned idx = 1; idx <= radix; idx++)
       {
         const unsigned child_offset = offset + idx;
-        if (child_offset < unique_sorted_spaces.size())
+        if (child_offset < total_spaces)
         {
           const unsigned index = convert_to_index(child_offset, origin_index);
-          children.push_back(unique_sorted_spaces[index]); 
+          children.push_back(unique_sorted_spaces.get_index(index));
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    bool CollectiveMapping::contains(const AddressSpaceID space) const
-    //--------------------------------------------------------------------------
-    {
-      return (find_index(space) < unique_sorted_spaces.size()); 
     }
 
     //--------------------------------------------------------------------------
     bool CollectiveMapping::contains(const CollectiveMapping &rhs) const
     //--------------------------------------------------------------------------
     {
-      unsigned index = 0;
-      for (unsigned idx = 0; idx < rhs.size(); idx++)
-      {
-        const AddressSpaceID space = rhs[idx];
-        while (unique_sorted_spaces[index] < space)
-        {
-          index++;
-          if (index == unique_sorted_spaces.size())
-            break; 
-        }
-        if ((index == unique_sorted_spaces.size()) ||
-            (space != unique_sorted_spaces[index]))
-          return false;
-      }
-      return true;
+      return !(rhs.unique_sorted_spaces - unique_sorted_spaces);
     }
 
     //--------------------------------------------------------------------------
     CollectiveMapping* CollectiveMapping::clone_with(AddressSpaceID space) const
     //--------------------------------------------------------------------------
     {
-      std::vector<AddressSpaceID> copy_spaces = unique_sorted_spaces;
-      copy_spaces.push_back(space);
-      return new CollectiveMapping(copy_spaces, radix);
+      CollectiveMapping *result = new CollectiveMapping(*this);
+      result->unique_sorted_spaces.insert(space);
+      result->total_spaces = result->unique_sorted_spaces.size();
+      return result;
     }
 
     //--------------------------------------------------------------------------
     void CollectiveMapping::pack(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(unique_sorted_spaces.size());
-      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
-        rez.serialize(unique_sorted_spaces[idx]);
-      if (!unique_sorted_spaces.empty())
-        rez.serialize(radix);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned CollectiveMapping::find_index(const AddressSpaceID space) const
-    //--------------------------------------------------------------------------
-    {
-      // Binary search, will be fast
-      unsigned first = 0;
-      unsigned last = unique_sorted_spaces.size() - 1;
-      unsigned mid = 0;
-      while (first <= last)
+      rez.serialize(total_spaces);
+      if (total_spaces > 0)
       {
-        mid = (first + last) / 2;
-        const AddressSpaceID midval = unique_sorted_spaces[mid];
-        if (space == midval)
-          return mid;
-        else if (space < midval)
-          last = mid - 1;
-        else if (midval < space)
-          first = mid + 1;
-        else
-          break;
+        rez.serialize(unique_sorted_spaces);
+        rez.serialize(radix);
       }
-      return unique_sorted_spaces.size();
     }
 
     //--------------------------------------------------------------------------
-    unsigned CollectiveMapping::convert_to_offset(unsigned index, 
+    unsigned CollectiveMapping::convert_to_offset(unsigned index,
                                                   unsigned origin_index) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       if (index < origin_index)
       {
         // Modulus arithmetic here
-        return ((index + unique_sorted_spaces.size()) - origin_index);
+        return ((index + total_spaces) - origin_index);
       }
       else
         return (index - origin_index);
@@ -797,12 +754,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(offset < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(offset < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       unsigned result = origin_index + offset;
-      if (result >= unique_sorted_spaces.size())
-        result -= unique_sorted_spaces.size();
+      if (result >= total_spaces)
+        result -= total_spaces;
       return result;
     }
 

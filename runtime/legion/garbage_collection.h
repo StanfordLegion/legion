@@ -600,7 +600,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock,1,false/*exclusive*/);
-      return remote_instances.size();
+      return remote_instances.pop_count();
     }
 
     //--------------------------------------------------------------------------
