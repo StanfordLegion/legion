@@ -2422,8 +2422,8 @@ namespace Legion {
       CollectiveMapping(Deserializer &derez);
     public:
       inline AddressSpaceID operator[](unsigned idx) const
-        { return unique_sorted_spaces[idx]; }
-      inline size_t size(void) const { return unique_sorted_spaces.size(); }
+        { return unique_sorted_spaces.get_index(idx); }
+      inline size_t size(void) const { return total_spaces; }
       bool operator==(const CollectiveMapping &rhs) const;
       bool operator!=(const CollectiveMapping &rhs) const;
     public:
@@ -2431,15 +2431,18 @@ namespace Legion {
                                 const AddressSpaceID local) const;
       void get_children(const AddressSpaceID origin, const AddressSpaceID local,
                         std::vector<AddressSpaceID> &children) const;
-      bool contains(const AddressSpaceID space) const;
+      inline bool contains(const AddressSpaceID space) const
+        { return unique_sorted_spaces.contains(space); }
     public:
       void pack(Serializer &rez) const;
     protected:
-      unsigned find_index(const AddressSpaceID space) const;
+      inline unsigned find_index(const AddressSpaceID space) const
+        { return unique_sorted_spaces.find_index(space); }
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
     protected:
-      std::vector<AddressSpaceID> unique_sorted_spaces;
+      NodeSet unique_sorted_spaces;
+      size_t total_spaces;
       size_t radix;
     };
 

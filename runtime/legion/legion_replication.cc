@@ -8504,36 +8504,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(
                             const std::vector<AddressSpaceID> &spaces, size_t r)
-      : radix(r)
+      : total_spaces(spaces.size()), radix(r)
     //--------------------------------------------------------------------------
     {
-      std::set<AddressSpaceID> unique_spaces(spaces.begin(), spaces.end());
-      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
-                                  unique_spaces.begin(), unique_spaces.end());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            spaces.begin(); it != spaces.end(); it++)
+        unique_sorted_spaces.add(*it);
     }
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(const ShardMapping &mapping, size_t r)
-      : radix(r)
+      : total_spaces(mapping.size()), radix(r)
     //--------------------------------------------------------------------------
     {
-      std::set<AddressSpaceID> unique_spaces;
-      for (unsigned idx = 0; idx < mapping.size(); idx++)
-        unique_spaces.insert(mapping[idx]);
-      unique_sorted_spaces.insert(unique_sorted_spaces.end(),
-                                  unique_spaces.begin(), unique_spaces.end());
+      for (unsigned idx = 0; idx < total_spaces; idx++)
+        unique_sorted_spaces.add(mapping[idx]);
     }
 
     //--------------------------------------------------------------------------
     CollectiveMapping::CollectiveMapping(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      size_t num_spaces;
-      derez.deserialize(num_spaces);
-      unique_sorted_spaces.resize(num_spaces);
-      for (unsigned idx = 0; idx < num_spaces; idx++)
-        derez.deserialize(unique_sorted_spaces[idx]);
-      if (num_spaces > 0)
+      derez.deserialize(unique_sorted_spaces);
+      total_spaces = unique_sorted_spaces.size();
+      if (total_spaces > 0)
         derez.deserialize(radix);
     }
 
@@ -8543,12 +8537,7 @@ namespace Legion {
     {
       if (radix != rhs.radix)
         return false;
-      if (size() != rhs.size())
-        return false;
-      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
-        if (unique_sorted_spaces[idx] != rhs[idx])
-          return false;
-      return true;
+      return unique_sorted_spaces == rhs.unique_sorted_spaces;
     }
 
     //--------------------------------------------------------------------------
@@ -8566,12 +8555,12 @@ namespace Legion {
       const unsigned local_index = find_index(local);
       const unsigned origin_index = find_index(origin);
 #ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(local_index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       const unsigned offset = convert_to_offset(local_index, origin_index);
       const unsigned index = convert_to_index((offset-1) / radix, origin_index);
-      return unique_sorted_spaces[index];
+      return unique_sorted_spaces.get_index(index);
     }
 
     //--------------------------------------------------------------------------
@@ -8582,62 +8571,29 @@ namespace Legion {
       const unsigned local_index = find_index(local);
       const unsigned origin_index = find_index(origin);
 #ifdef DEBUG_LEGION
-      assert(local_index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(local_index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       const unsigned offset = radix * 
         convert_to_offset(local_index, origin_index);
       for (unsigned idx = 1; idx <= radix; idx++)
       {
         const unsigned child_offset = offset + idx;
-        if (child_offset < unique_sorted_spaces.size())
+        if (child_offset < total_spaces)
         {
           const unsigned index = convert_to_index(child_offset, origin_index);
-          children.push_back(unique_sorted_spaces[index]); 
+          children.push_back(unique_sorted_spaces.get_index(index)); 
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    bool CollectiveMapping::contains(const AddressSpaceID space) const
-    //--------------------------------------------------------------------------
-    {
-      return (find_index(space) < unique_sorted_spaces.size()); 
     }
 
     //--------------------------------------------------------------------------
     void CollectiveMapping::pack(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(unique_sorted_spaces.size());
-      for (unsigned idx = 0; idx < unique_sorted_spaces.size(); idx++)
-        rez.serialize(unique_sorted_spaces[idx]);
-      if (!unique_sorted_spaces.empty())
+      rez.serialize(unique_sorted_spaces);
+      if (total_spaces > 0)
         rez.serialize(radix);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned CollectiveMapping::find_index(const AddressSpaceID space) const
-    //--------------------------------------------------------------------------
-    {
-      // Binary search, will be fast
-      unsigned first = 0;
-      unsigned last = unique_sorted_spaces.size() - 1;
-      unsigned mid = 0;
-      while (first <= last)
-      {
-        mid = (first + last) / 2;
-        const AddressSpaceID midval = unique_sorted_spaces[mid];
-        if (space == midval)
-          return mid;
-        else if (space < midval)
-          last = mid - 1;
-        else if (midval < space)
-          first = mid + 1;
-        else
-          break;
-      }
-      return unique_sorted_spaces.size();
     }
 
     //--------------------------------------------------------------------------
@@ -8646,13 +8602,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(index < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(index < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       if (index < origin_index)
       {
         // Modulus arithmetic here
-        return ((index + unique_sorted_spaces.size()) - origin_index);
+        return ((index + total_spaces) - origin_index);
       }
       else
         return (index - origin_index);
@@ -8664,12 +8620,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(offset < unique_sorted_spaces.size());
-      assert(origin_index < unique_sorted_spaces.size());
+      assert(offset < total_spaces);
+      assert(origin_index < total_spaces);
 #endif
       unsigned result = origin_index + offset;
-      if (result >= unique_sorted_spaces.size())
-        result -= unique_sorted_spaces.size();
+      if (result >= total_spaces)
+        result -= total_spaces;
       return result;
     }
 
