@@ -7733,7 +7733,8 @@
         return (sparse_size == 0);
       if (BIDIR)
         return false;
-      return !(*mask.dense);
+      else
+        return !(*mask.dense);
     }
 
     //-------------------------------------------------------------------------
