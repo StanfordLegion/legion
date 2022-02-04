@@ -69,7 +69,6 @@ local default_options = {
   ["vectorize"] = true,
   ["offline"] = not data.is_luajit(),
   ["separate"] = false,
-  ["ndebug"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
@@ -107,6 +106,7 @@ local default_options = {
   ["override-demand-cuda"] = false,
   ["pretty"] = false,
   ["pretty-verbose"] = false,
+  ["no-debuginfo"] = false,
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,

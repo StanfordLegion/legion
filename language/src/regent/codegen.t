@@ -2183,7 +2183,7 @@ end
 -- A helper for capturing debug information.
 local function emit_debuginfo(node)
   assert(node.span.source and node.span.start.line)
-  if std.config["ndebug"] or string.len(node.span.source) == 0 then
+  if std.config["no-debuginfo"] or string.len(node.span.source) == 0 then
     return quote end
   end
   return quote
