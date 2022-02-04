@@ -1115,7 +1115,10 @@ namespace Legion {
         for (std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator it =
               leak_allocators.begin(); it != leak_allocators.end(); it++)
           if (it->second->remove_reference())
+          {
+            it->second->free_from_runtime();
             delete it->second;
+          }
         created_fields.clear();
       }
       if (!created_field_spaces.empty())
@@ -16500,19 +16503,19 @@ namespace Legion {
                                                    bool from_application)
     //--------------------------------------------------------------------------
     {
-      if (from_application)
-      {
-        AutoRuntimeCall call(this);
-        destroy_field_allocator(node, false/*from application*/);
-        return;
-      }
-      if (runtime->safe_control_replication &&
+      if (runtime->safe_control_replication && from_application &&
           ((current_trace == NULL) || !current_trace->is_fixed()))
       {
         Murmur3Hasher hasher;
         hasher.hash(REPLICATE_DESTROY_FIELD_ALLOCATOR);
         hasher.hash(node->handle);
         verify_replicable(hasher, "destroy_field_allocator");
+      }
+      if (from_application)
+      {
+        AutoRuntimeCall call(this);
+        destroy_field_allocator(node, false/*from application*/);
+        return;
       }
       bool found = false;
       std::pair<ShardID,bool> result;
