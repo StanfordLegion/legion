@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <thread>
 
 #include <time.h>
 
@@ -151,15 +150,12 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
                                         ? TestConfig::z_copy_size_hi
                                         : TestConfig::z_size}});
 
-  std::vector<Event> done_events;
   std::vector<RegionInstance> src_instances, dst_instances;
-  std::vector<IndexSpace<N>> index_spaces;
-  std::vector<std::vector<CopySrcDstField>> src_fields, dst_fields;
-  std::vector<ProfilingRequestSet> profile_requests;
-
   std::vector<MemspeedExperiment> memspeed_experiments(memories.size());
-  std::vector<std::thread> threads;
 
+  std::vector<Event> done_events;
+  std::vector<Event> local_events;
+  const UserEvent start = UserEvent::create_user_event();
   for (size_t i = 0; i < memories.size(); i++) {
     if (i < TestConfig::src_mem_lo || TestConfig::src_mem_hi < i)
       continue;
@@ -186,11 +182,8 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
     }
 
     for (size_t j = 0; j < memories.size(); j++) {
-      if (j < TestConfig::dst_mem_lo || TestConfig::dst_mem_hi < j)
+      if (i == j || j < TestConfig::dst_mem_lo || TestConfig::dst_mem_hi < j)
         continue;
-      if (i == j) {
-        continue;
-      }
       Memory m2 = memories[j];
 
       dst_instances.push_back(RegionInstance());
@@ -205,41 +198,33 @@ void do_copies(Processor p, const std::vector<Memory> &memories) {
         std::vector<CopySrcDstField> srcs(TestConfig::copy_fields);
         for (int i = 0; i < TestConfig::copy_fields; i++)
           srcs[i].set_field(src_instances.back(), FID_BASE + i, sizeof(void *));
-        src_fields.push_back(srcs);
         std::vector<CopySrcDstField> dsts(TestConfig::copy_fields);
         for (int i = 0; i < TestConfig::copy_fields; i++)
           dsts[i].set_field(dst_instances.back(), FID_BASE + i, sizeof(void *));
-        dst_fields.push_back(dsts);
-
         UserEvent done = UserEvent::create_user_event();
-
         done_events.push_back(done);
-        {
-          CopyProfResult result;
-          result.copy_start_time = &memspeed_experiments[i].copy_start_time;
-          result.copy_end_time = &memspeed_experiments[i].copy_end_time;
-          result.copied_bytes = &memspeed_experiments[i].copied_bytes;
-          result.total_copies = &memspeed_experiments[i].total_copies;
-          result.done = done;
-          ProfilingRequestSet prs;
-          prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
-              .add_measurement<ProfilingMeasurements::OperationTimeline>()
-              .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
-          profile_requests.push_back(prs);
-        }
-        index_spaces.push_back(IndexSpace<N>(copy_boundaries));
+        CopyProfResult result;
+        result.copy_start_time = &memspeed_experiments[i].copy_start_time;
+        result.copy_end_time = &memspeed_experiments[i].copy_end_time;
+        result.copied_bytes = &memspeed_experiments[i].copied_bytes;
+        result.total_copies = &memspeed_experiments[i].total_copies;
+        result.done = done;
+        ProfilingRequestSet prs;
+        prs.add_request(p, COPYPROF_TASK, &result, sizeof(CopyProfResult))
+            .add_measurement<ProfilingMeasurements::OperationTimeline>()
+            .add_measurement<ProfilingMeasurements::OperationMemoryUsage>();
+
+        local_events.push_back(start);
+        local_events.back() =
+            copy_boundaries.copy(srcs, dsts,
+                                 prs, local_events.back());
       }
     }
   }
 
-  for (size_t i = 0; i < index_spaces.size(); i++) {
-    threads.push_back(std::thread([&, i] {
-      index_spaces[i].copy(src_fields[i], dst_fields[i], profile_requests[i]);
-    }));
-    threads.back().detach();
-  }
-
+  start.trigger();
   Event::merge_events(done_events).wait();
+  Event::merge_events(local_events).wait();
 
   int experiment_count = 0;
   long long mean_copy_duration = 0;
