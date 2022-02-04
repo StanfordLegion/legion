@@ -69,6 +69,7 @@ local default_options = {
   ["vectorize"] = true,
   ["offline"] = not data.is_luajit(),
   ["separate"] = false,
+  ["ndebug"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
@@ -91,6 +92,8 @@ local default_options = {
   ["cuda-2d-launch"] = true,
   ["cuda-licm"] = true,
   ["cuda-generate-cubin"] = false,
+  ["cuda-pretty-kernels"] = false,
+  ["cuda-dump-ptx"] = false,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
