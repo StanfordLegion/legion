@@ -91,6 +91,8 @@ local default_options = {
   ["cuda-2d-launch"] = true,
   ["cuda-licm"] = true,
   ["cuda-generate-cubin"] = false,
+  ["cuda-pretty-kernels"] = false,
+  ["cuda-dump-ptx"] = false,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
@@ -104,6 +106,7 @@ local default_options = {
   ["override-demand-cuda"] = false,
   ["pretty"] = false,
   ["pretty-verbose"] = false,
+  ["no-debuginfo"] = false,
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,

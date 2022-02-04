@@ -2183,7 +2183,7 @@ end
 -- A helper for capturing debug information.
 local function emit_debuginfo(node)
   assert(node.span.source and node.span.start.line)
-  if string.len(node.span.source) == 0 then
+  if std.config["no-debuginfo"] or string.len(node.span.source) == 0 then
     return quote end
   end
   return quote
@@ -8878,6 +8878,12 @@ function codegen.stat_for_list(cx, node)
 
       -- Register the kernel function to JIT
       local kernel_name = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
+
+      if std.config["cuda-pretty-kernels"] then
+        io.write("===== CUDA kernel @ " .. node.span.source .. ":" .. node.span.start.line .. " =====\n")
+        kernel:printpretty(false)
+      end
+
       local count = terralib.newsymbol(c.size_t, "count")
       local kernel_call =
         cudahelper.codegen_kernel_call(cuda_cx, kernel_name, count, args, shared_mem_size, false)

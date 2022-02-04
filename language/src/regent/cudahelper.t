@@ -380,6 +380,8 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     return cudalib.toptx(module, nil, version)
   end)()
 
+  if config["cuda-dump-ptx"] then io.write(ptx) end
+
   local cubin = nil
   local offline = config["offline"] or config["cuda-offline"]
   if not offline and config["cuda-generate-cubin"] then
