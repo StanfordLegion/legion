@@ -236,15 +236,15 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<typename T>
+  template<typename T> __CUDA_HD__
   /*static*/ inline coord_t DomainPoint::check_for_overflow(const T &value)
   //----------------------------------------------------------------------------
   {
     static_assert(std::is_same<coord_t,long long>::value,"coord_t changed");
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
-    if (CHECK)
-      assert(((unsigned long long)value) <= ((unsigned long long)LLONG_MAX));
+    assert(!CHECK || 
+        (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
     return coord_t(value);
   }
 
@@ -738,15 +738,15 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<typename T>
+  template<typename T> __CUDA_HD__
   /*static*/ inline coord_t Domain::check_for_overflow(const T &value)
   //----------------------------------------------------------------------------
   {
     static_assert(std::is_same<coord_t,long long>::value,"coord_t changed");
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
-    if (CHECK)
-      assert(((unsigned long long)value) <= ((unsigned long long)LLONG_MAX));
+    assert(!CHECK ||
+        (((unsigned long long)value) <= ((unsigned long long)LLONG_MAX)));
     return coord_t(value);
   }
 
@@ -994,8 +994,8 @@ namespace Legion {
     DomainT<DIM,T> result;
     if (is_id > 0)
     {
-      TypeTag tag = Internal::NT_TemplateHelper::template encode_tag<DIM,T>(); 
-      assert(is_type == tag); 
+      TypeTag type = Internal::NT_TemplateHelper::template encode_tag<DIM,T>();
+      assert(is_type == type); 
       result.sparsity.id = is_id;
     }
     else

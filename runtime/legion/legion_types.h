@@ -1853,8 +1853,8 @@ namespace Legion {
     typedef Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
                                                   Realm::DIMTYPES> SUPER;
     public:
-      template<int N, typename T>
-      static inline TypeTag encode_tag(void) {
+      template<int N, typename T> __CUDA_HD__
+      static inline constexpr TypeTag encode_tag(void) {
         return SUPER::template encode_tag<Realm::DynamicTemplates::Int<N>, T>();
       }
       template<int N, typename T>

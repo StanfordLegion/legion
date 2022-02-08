@@ -239,7 +239,7 @@ namespace Legion {
     static DomainPoint nil(void);
 
   protected:
-    template<typename T>
+    template<typename T> __CUDA_HD__
     static inline coord_t check_for_overflow(const T &value);
   public:
     int dim;
@@ -394,7 +394,7 @@ namespace Legion {
     // Helper functor classes for demux-ing templates when we have
     // non-trivial sparsity maps with unusual types
     // User's should never need to look at these hence they are private
-    template<typename T>
+    template<typename T> __CUDA_HD__
     static inline coord_t check_for_overflow(const T &value);
     struct ContainsFunctor {
     public: 
