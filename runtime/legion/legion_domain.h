@@ -373,12 +373,16 @@ namespace Legion {
       DomainPointIterator operator++(int /*i am postfix*/);
     public:
       DomainPoint p;
+      // Note: GCC 4.9 breaks even with C++11, so for now peg this on
+      // C++14 until we deprecate GCC 4.9 support.
+#if __cplusplus >= 201402L
       // Realm's iterators are copyable by value so we can just always
       // copy them in and out of some buffers
       static_assert(std::is_trivially_copyable<
           Realm::IndexSpaceIterator<MAX_RECT_DIM,coord_t> >::value, "very bad");
       static_assert(std::is_trivially_copyable<
           Realm::PointInRectIterator<MAX_RECT_DIM,coord_t> >::value,"very bad");
+#endif
       uint8_t is_iterator[
               sizeof(Realm::IndexSpaceIterator<MAX_RECT_DIM,coord_t>)];
       uint8_t rect_iterator[
