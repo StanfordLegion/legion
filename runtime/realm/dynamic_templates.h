@@ -18,6 +18,8 @@
 #ifndef REALM_DYNAMIC_TEMPLATES_H
 #define REALM_DYNAMIC_TEMPLATES_H
 
+#include "compiler_support.h"
+
 namespace Realm {
   namespace DynamicTemplates {
 
@@ -290,8 +292,8 @@ namespace Realm {
 
     template <typename L1, typename L2>
     struct ListProduct2 {
-      template <typename T1, typename T2>
-      static TagType encode_tag(void);
+      template <typename T1, typename T2> REALM_CUDA_HD
+      static constexpr TagType encode_tag(void);
 
       template <typename TARGET, typename T1>
       struct DemuxHelper2 {
@@ -330,8 +332,8 @@ namespace Realm {
 
     template <typename L1, typename L2, typename L3>
     struct ListProduct3 {
-      template <typename T1, typename T2, typename T3>
-      static TagType encode_tag(void);
+      template <typename T1, typename T2, typename T3> REALM_CUDA_HD
+      static constexpr TagType encode_tag(void);
 
       template <typename TARGET, typename T1, typename T2>
       struct DemuxHelper3 {
@@ -382,8 +384,8 @@ namespace Realm {
 
     template <typename L1, typename L2, typename L3, typename L4>
     struct ListProduct4 {
-      template <typename T1, typename T2, typename T3, typename T4>
-      static TagType encode_tag(void);
+      template <typename T1, typename T2, typename T3, typename T4> REALM_CUDA_HD
+      static constexpr TagType encode_tag(void);
 
       template <typename TARGET, typename T1, typename T2, typename T3>
       struct DemuxHelper4 {
