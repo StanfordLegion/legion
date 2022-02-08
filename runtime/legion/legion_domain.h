@@ -494,6 +494,7 @@ namespace Legion {
             functor->iterator.p = Point<N::N,coord_t>(new_rectitr.p);
             memcpy(functor->iterator.rect_iterator, &new_rectitr, 
                     sizeof(new_rectitr));
+            memcpy(functor->iterator.is_iterator, &is_itr, sizeof(is_itr));
           } 
           else
             functor->iterator.rect_valid = false;

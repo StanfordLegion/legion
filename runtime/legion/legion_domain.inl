@@ -1292,6 +1292,7 @@ namespace Legion {
               rect_valid = true; \
               p = Point<DIM,coord_t>(new_rectitr.p); \
               memcpy(rect_iterator, &new_rectitr, sizeof(new_rectitr)); \
+              memcpy(is_iterator, &is_itr, sizeof(is_itr)); \
             } else { \
               rect_valid = false; \
             } \
