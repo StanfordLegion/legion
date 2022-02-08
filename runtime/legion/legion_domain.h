@@ -127,7 +127,7 @@ namespace Legion {
    */
   class DomainPoint {
   public:
-    static constexpr size_t MAX_POINT_DIM = LEGION_MAX_DIM;
+    static constexpr int MAX_POINT_DIM = LEGION_MAX_DIM;
 
     __CUDA_HD__
     DomainPoint(void);
@@ -258,7 +258,7 @@ namespace Legion {
     typedef ::realm_id_t IDType;
     // Keep this in sync with legion_domain_max_rect_dim_t
     // in legion_config.h
-    static constexpr size_t MAX_RECT_DIM = LEGION_MAX_DIM;
+    static constexpr int MAX_RECT_DIM = LEGION_MAX_DIM;
     __CUDA_HD__
     Domain(void);
     __CUDA_HD__
