@@ -716,6 +716,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       serialize(dom.is_id);
+      if (dom.is_id > 0)
+        serialize(dom.is_type);
       serialize(dom.dim);
       for (int i = 0; i < 2*dom.dim; i++)
         serialize(dom.rect_data[i]);
@@ -937,6 +939,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deserialize(dom.is_id);
+      if (dom.is_id > 0)
+        deserialize(dom.is_type);
       deserialize(dom.dim);
       for (int i = 0; i < 2*dom.dim; i++)
         deserialize(dom.rect_data[i]);

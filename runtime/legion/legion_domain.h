@@ -44,6 +44,8 @@ namespace Legion {
    */
   template<int M, int N, typename T = coord_t>
   struct AffineTransform {
+  private:
+    static_assert(std::is_integral<T>::value, "must be integral type");
   public:
     __CUDA_HD__
     AffineTransform(void); // default to identity transform
@@ -86,6 +88,8 @@ namespace Legion {
    */
   template<int M, int N, typename T = coord_t>
   struct ScaleTransform {
+  private:
+    static_assert(std::is_integral<T>::value, "must be integral type");
   public:
     __CUDA_HD__
     ScaleTransform(void); // default to identity transform
@@ -123,7 +127,7 @@ namespace Legion {
    */
   class DomainPoint {
   public:
-    enum { MAX_POINT_DIM = LEGION_MAX_DIM };
+    static constexpr size_t MAX_POINT_DIM = LEGION_MAX_DIM;
 
     __CUDA_HD__
     DomainPoint(void);
@@ -235,6 +239,8 @@ namespace Legion {
     static DomainPoint nil(void);
 
   protected:
+    template<typename T>
+    static inline coord_t check_for_overflow(const T &value);
   public:
     int dim;
     coord_t point_data[MAX_POINT_DIM];
@@ -252,7 +258,7 @@ namespace Legion {
     typedef ::realm_id_t IDType;
     // Keep this in sync with legion_domain_max_rect_dim_t
     // in legion_config.h
-    enum { MAX_RECT_DIM = LEGION_MAX_DIM };
+    static constexpr size_t MAX_RECT_DIM = LEGION_MAX_DIM;
     __CUDA_HD__
     Domain(void);
     __CUDA_HD__
@@ -324,11 +330,11 @@ namespace Legion {
     __CUDA_HD__
     bool is_valid(void) const;
 
-    bool contains(DomainPoint point) const;
+    bool contains(const DomainPoint &point) const;
 
     // This will only check the bounds and not the sparsity map
     __CUDA_HD__
-    bool contains_bounds_only(DomainPoint point) const;
+    bool contains_bounds_only(const DomainPoint &point) const;
 
     __CUDA_HD__
     int get_dim(void) const;
@@ -367,17 +373,147 @@ namespace Legion {
       DomainPointIterator operator++(int /*i am postfix*/);
     public:
       DomainPoint p;
-      // Some buffers that we will do in-place new statements to in
-      // order to not have to call new/delete in our implementation
-      char is_iterator[
+      // Realm's iterators are copyable by value so we can just always
+      // copy them in and out of some buffers
+      static_assert(std::is_trivially_copyable<
+          Realm::IndexSpaceIterator<MAX_RECT_DIM,coord_t> >::value, "very bad");
+      static_assert(std::is_trivially_copyable<
+          Realm::PointInRectIterator<MAX_RECT_DIM,coord_t> >::value,"very bad");
+      uint8_t is_iterator[
               sizeof(Realm::IndexSpaceIterator<MAX_RECT_DIM,coord_t>)];
-      char rect_iterator[
+      uint8_t rect_iterator[
               sizeof(Realm::PointInRectIterator<MAX_RECT_DIM,coord_t>)];
+      TypeTag is_type;
       bool is_valid, rect_valid;
     };
-  protected:
+  private:
+    // Helper functor classes for demux-ing templates when we have
+    // non-trivial sparsity maps with unusual types
+    // User's should never need to look at these hence they are private
+    template<typename T>
+    static inline coord_t check_for_overflow(const T &value);
+    struct ContainsFunctor {
+    public: 
+      ContainsFunctor(const Domain &d, const DomainPoint &p, bool &res)
+        : domain(d), point(p), result(res) { }
+      template<typename N, typename T>
+      static inline void demux(ContainsFunctor *functor)
+      {
+        DomainT<N::N,T> is = functor->domain;
+        Point<N::N,T> p = functor->point;
+        functor->result = is.contains(p);
+      }
+    public:
+      const Domain &domain;
+      const DomainPoint &point;
+      bool &result;
+    };
+    struct IntersectionFunctor {
+    public:
+      IntersectionFunctor(const Domain &l, const Domain &r, Domain &res)
+        : lhs(l), rhs(r), result(res) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(IntersectionFunctor *functor)
+      {
+        DomainT<N::N,T> is1 = functor->lhs;
+        DomainT<N::N,T> is2 = functor->rhs;
+        Realm::ProfilingRequestSet dummy_requests;
+        DomainT<N::N,T> temp;
+        Internal::LgEvent wait_on(
+            DomainT<N::N,T>::compute_intersection(is1, is2,
+              temp, dummy_requests));
+        if (wait_on.exists())
+          wait_on.wait();
+        functor->result = Domain(temp.tighten());
+        temp.destroy();
+      }
+    public:
+      const Domain &lhs;
+      const Domain &rhs;
+      Domain &result;
+    };
+    struct IteratorInitFunctor {
+    public:
+      IteratorInitFunctor(const Domain &d, DomainPointIterator &i)
+        : domain(d), iterator(i) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(IteratorInitFunctor *functor)
+      {
+        DomainT<N::N,T> is = functor->domain;
+        Realm::IndexSpaceIterator<N::N,T> is_itr(is);
+        static_assert(sizeof(is_itr) <=
+            sizeof(functor->iterator.is_iterator), "very bad");
+        functor->iterator.is_valid = is_itr.valid;
+        if (is_itr.valid)
+        {
+          Realm::PointInRectIterator<N::N,T> rect_itr(is_itr.rect);
+          static_assert(sizeof(rect_itr) <=
+              sizeof(functor->iterator.rect_iterator), "very bad");
+          assert(rect_itr.valid);
+          functor->iterator.rect_valid = true;
+          functor->iterator.p = Point<N::N,T>(rect_itr.p);
+          memcpy(functor->iterator.rect_iterator, &rect_itr, sizeof(rect_itr));
+          memcpy(functor->iterator.is_iterator, &is_itr, sizeof(is_itr));
+        }
+        else
+          functor->iterator.rect_valid = false; \
+      }
+    public:
+      const Domain &domain;
+      DomainPointIterator &iterator;
+    };
+    struct IteratorStepFunctor {
+    public:
+      IteratorStepFunctor(DomainPointIterator &i)
+        : iterator(i) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(IteratorStepFunctor *functor)
+      {
+        Realm::PointInRectIterator<N::N,T> rect_itr;
+        memcpy(&rect_itr, functor->iterator.rect_iterator, sizeof(rect_itr));
+        rect_itr.step();
+        functor->iterator.rect_valid = rect_itr.valid;
+        if (!rect_itr.valid)
+        {
+          Realm::IndexSpaceIterator<N::N,T> is_itr;
+          memcpy(&is_itr, functor->iterator.is_iterator, sizeof(is_itr));
+          is_itr.step(); \
+          functor->iterator.is_valid = is_itr.valid;
+          if (is_itr.valid)
+          {
+            Realm::PointInRectIterator<N::N,T> new_rectitr(is_itr.rect);
+            assert(new_rectitr.valid);
+            functor->iterator.rect_valid = true;
+            functor->iterator.p = Point<N::N,coord_t>(new_rectitr.p);
+            memcpy(functor->iterator.rect_iterator, &new_rectitr, 
+                    sizeof(new_rectitr));
+          } 
+          else
+            functor->iterator.rect_valid = false;
+        }
+        else 
+        {
+          functor->iterator.p = Point<N::N,coord_t>(rect_itr.p);
+          memcpy(functor->iterator.rect_iterator, &rect_itr, sizeof(rect_itr));
+        }
+      }
+    public:
+      DomainPointIterator &iterator;
+    };
   public:
     IDType is_id;
+    // For Realm index spaces we need to have a type tag to know
+    // what the type of the original sparsity map was
+    // Without it you can get undefined behavior trying to interpret
+    // the sparsity map incorrectly. This doesn't matter for the bounds
+    // data because we've done the conversion for ourselves.
+    // Technically this is redundant with the dimension since it also
+    // encodes the dimension, but we'll keep them separate for now for
+    // backwards compatibility
+    TypeTag is_type;
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     // Work around an internal nvcc bug by marking this volatile 
     volatile
@@ -388,6 +524,8 @@ namespace Legion {
 
   template<int DIM, typename COORD_T = coord_t>
   class PointInRectIterator {
+  private:
+    static_assert(std::is_integral<COORD_T>::value, "must be integral type");
   public:
     __CUDA_HD__
     PointInRectIterator(void);
@@ -418,6 +556,8 @@ namespace Legion {
 
   template<int DIM, typename COORD_T = coord_t>
   class RectInDomainIterator {
+  private:
+    static_assert(std::is_integral<COORD_T>::value, "must be integral type");
   public:
     RectInDomainIterator(void);
     RectInDomainIterator(const DomainT<DIM,COORD_T> &d);
