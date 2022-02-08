@@ -244,7 +244,7 @@ namespace Legion {
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
     if (CHECK)
-      assert(value <= ((unsigned long long)LLONG_MAX));
+      assert(((unsigned long long)value) <= ((unsigned long long)LLONG_MAX));
     return coord_t(value);
   }
 
@@ -746,7 +746,7 @@ namespace Legion {
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
     if (CHECK)
-      assert(value <= ((unsigned long long)LLONG_MAX));
+      assert(((unsigned long long)value) <= ((unsigned long long)LLONG_MAX));
     return coord_t(value);
   }
 
