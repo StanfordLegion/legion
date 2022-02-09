@@ -434,6 +434,20 @@ namespace Legion {
       const DomainPoint &point;
       bool &result;
     };
+    struct VolumeFunctor {
+    public:
+      VolumeFunctor(const Domain &d, size_t &r)
+        : domain(d), result(r) { }
+      template<typename N, typename T>
+      static inline void demux(VolumeFunctor *functor)
+      {
+        DomainT<N::N,T> is = functor->domain;
+        functor->result = is.volume();
+      }
+    public:
+      const Domain &domain;
+      size_t &result;
+    };
     struct IntersectionFunctor {
     public:
       IntersectionFunctor(const Domain &l, const Domain &r, Domain &res)

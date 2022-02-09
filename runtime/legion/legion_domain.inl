@@ -1102,20 +1102,30 @@ namespace Legion {
   inline size_t Domain::get_volume(void) const
   //----------------------------------------------------------------------------
   {
-    switch (dim)
+    if (dense())
     {
+      switch (dim)
+      {
 #define DIMFUNC(DIM) \
-      case DIM: \
-        { \
-          DomainT<DIM,coord_t> is = *this; \
-          return is.volume(); \
-        }
-      LEGION_FOREACH_N(DIMFUNC)
+        case DIM: \
+          { \
+            Rect<DIM,coord_t> rect = *this; \
+            return rect.volume(); \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-      default:
-        assert(false);
+        default:
+          assert(false);
+      }
+      return 0;
     }
-    return 0;
+    else
+    {
+      size_t result = 0;
+      VolumeFunctor functor(*this, result);
+      Internal::NT_TemplateHelper::demux<VolumeFunctor>(is_type, &functor);
+      return result;
+    }
   }
 
   //----------------------------------------------------------------------------
