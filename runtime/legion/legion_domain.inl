@@ -754,7 +754,8 @@ namespace Legion {
   template<int DIM, typename T> __CUDA_HD__
   inline Domain::Domain(const DomainT<DIM,T> &other)
     : is_id(other.sparsity.id),
-      is_type(Internal::NT_TemplateHelper::template encode_tag<DIM,T>()),
+      is_type((is_id > 0) ? 
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>() : 0),
       dim(DIM)
   //----------------------------------------------------------------------------
   {
