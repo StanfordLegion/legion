@@ -801,7 +801,10 @@ namespace Legion {
     static_assert(std::is_integral<T>::value, "must be integral type");
     dim = DIM;
     is_id = other.sparsity.id;
-    is_type = Internal::NT_TemplateHelper::template encode_tag<DIM,T>();
+    if (is_id > 0)
+      is_type = Internal::NT_TemplateHelper::template encode_tag<DIM,T>();
+    else
+      is_type = 0;
     for (int i = 0; i < DIM; i++)
       rect_data[i] = check_for_overflow<T>(other.bounds.lo[i]);
     for (int i = 0; i < DIM; i++)
