@@ -742,7 +742,7 @@ namespace Legion {
   /*static*/ inline coord_t Domain::check_for_overflow(const T &value)
   //----------------------------------------------------------------------------
   {
-    static_assert(std::is_same<coord_t,long long>::value,"coord_t changed");
+    static_assert(std::is_same<coord_t,long long>::value, "coord_t changed");
     constexpr bool CHECK =
       std::is_unsigned<T>::value && (sizeof(T) >= sizeof(coord_t));
     assert(!CHECK ||
@@ -836,6 +836,7 @@ namespace Legion {
   {
     if(is_id < rhs.is_id) return true;
     if(is_id > rhs.is_id) return false;
+    // No need to check type tag, subsumed by sparsity id test
     if(dim < rhs.dim) return true;
     if(dim > rhs.dim) return false;
     for(int i = 0; i < 2*dim; i++) {
@@ -1217,26 +1218,19 @@ namespace Legion {
     if (d.dense())
     {
       // We've just got a rect so we can do the dumb thing
-      switch(p.get_dim()) {
+      switch (p.get_dim()) {
 #define DIMFUNC(DIM) \
       case DIM: \
         { \
-          DomainT<DIM,coord_t> is = d; \
-          Realm::IndexSpaceIterator<DIM,coord_t> is_itr(is); \
-          static_assert(sizeof(is_itr) <= sizeof(is_iterator), "very bad"); \
-          is_valid = is_itr.valid; \
-          if (is_valid) \
-          { \
-            Realm::PointInRectIterator<DIM,coord_t> rect_itr(is_itr.rect); \
-            static_assert(sizeof(rect_itr)<=sizeof(rect_iterator), "very bad");\
-            assert(rect_itr.valid); \
-            rect_valid = true; \
-            p = Point<DIM,coord_t>(rect_itr.p); \
+          Rect<DIM,coord_t> rect = d; \
+          Realm::PointInRectIterator<DIM,coord_t> rect_itr(rect); \
+          static_assert(sizeof(rect_itr) <= sizeof(rect_iterator), "very bad");\
+          rect_valid = rect_itr.valid; \
+          if (rect_valid) { \
+            is_valid = true; \
+            p = rect_itr.p; \
             memcpy(rect_iterator, &rect_itr, sizeof(rect_itr)); \
-            memcpy(is_iterator, &is_itr, sizeof(is_itr)); \
           } \
-          else \
-            rect_valid = false; \
           break; \
         }
       LEGION_FOREACH_N(DIMFUNC)
@@ -1271,9 +1265,10 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     assert(is_valid && rect_valid);
-    if (is_type == 0)
+    // Step the rect iterator first and see if we can just get a new point
+    // from the rect iterator without needing to demux
+    switch (p.get_dim()) 
     {
-      switch(p.get_dim()) {
 #define DIMFUNC(DIM) \
       case DIM: \
         { \
@@ -1281,23 +1276,8 @@ namespace Legion {
           memcpy(&rect_itr, rect_iterator, sizeof(rect_itr)); \
           rect_itr.step(); \
           rect_valid = rect_itr.valid; \
-          if (!rect_valid) { \
-            Realm::IndexSpaceIterator<DIM,coord_t> is_itr; \
-            memcpy(&is_itr, is_iterator, sizeof(is_itr)); \
-            is_itr.step(); \
-            is_valid = is_itr.valid; \
-            if (is_valid) { \
-              Realm::PointInRectIterator<DIM,coord_t> new_rectitr(is_itr.rect);\
-              assert(new_rectitr.valid); \
-              rect_valid = true; \
-              p = Point<DIM,coord_t>(new_rectitr.p); \
-              memcpy(rect_iterator, &new_rectitr, sizeof(new_rectitr)); \
-              memcpy(is_iterator, &is_itr, sizeof(is_itr)); \
-            } else { \
-              rect_valid = false; \
-            } \
-          } else { \
-            p = Point<DIM,coord_t>(rect_itr.p); \
+          if (rect_valid) { \
+            p = rect_itr.p; \
             memcpy(rect_iterator, &rect_itr, sizeof(rect_itr)); \
           } \
           break; \
@@ -1306,12 +1286,14 @@ namespace Legion {
 #undef DIMFUNC
       default:
         assert(0);
-      }
     }
-    else
+    if (!rect_valid && (is_type > 0))
     {
+      // If we had a sparsity map, try to step the index space iterator
+      // to the next rectangle using a demux
       IteratorStepFunctor functor(*this);
-      Internal::NT_TemplateHelper::demux<IteratorStepFunctor>(is_type,&functor);
+      Internal::NT_TemplateHelper::demux<IteratorStepFunctor>(is_type,
+                                                              &functor);
     }
     return is_valid && rect_valid;
   }

@@ -390,6 +390,24 @@ namespace Legion {
       TypeTag is_type;
       bool is_valid, rect_valid;
     };
+  protected:
+  public:
+    IDType is_id;
+    // For Realm index spaces we need to have a type tag to know
+    // what the type of the original sparsity map was
+    // Without it you can get undefined behavior trying to interpret
+    // the sparsity map incorrectly. This doesn't matter for the bounds
+    // data because we've done the conversion for ourselves.
+    // Technically this is redundant with the dimension since it also
+    // encodes the dimension, but we'll keep them separate for now for
+    // backwards compatibility
+    TypeTag is_type;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    // Work around an internal nvcc bug by marking this volatile 
+    volatile
+#endif
+    int dim;
+    coord_t rect_data[2 * MAX_RECT_DIM];
   private:
     // Helper functor classes for demux-ing templates when we have
     // non-trivial sparsity maps with unusual types
@@ -452,12 +470,14 @@ namespace Legion {
         functor->iterator.is_valid = is_itr.valid;
         if (is_itr.valid)
         {
-          Realm::PointInRectIterator<N::N,T> rect_itr(is_itr.rect);
+          // Always use coord_t for the rect so we don't demux unnecessarily
+          Realm::Rect<N::N,coord_t> rect = is_itr.rect;
+          Realm::PointInRectIterator<N::N,coord_t> rect_itr(rect);
           static_assert(sizeof(rect_itr) <=
               sizeof(functor->iterator.rect_iterator), "very bad");
           assert(rect_itr.valid);
           functor->iterator.rect_valid = true;
-          functor->iterator.p = Point<N::N,T>(rect_itr.p);
+          functor->iterator.p = rect_itr.p;
           memcpy(functor->iterator.rect_iterator, &rect_itr, sizeof(rect_itr));
           memcpy(functor->iterator.is_iterator, &is_itr, sizeof(is_itr));
         }
@@ -476,55 +496,32 @@ namespace Legion {
       template<typename N, typename T>
       static inline void demux(IteratorStepFunctor *functor)
       {
-        Realm::PointInRectIterator<N::N,T> rect_itr;
-        memcpy(&rect_itr, functor->iterator.rect_iterator, sizeof(rect_itr));
-        rect_itr.step();
-        functor->iterator.rect_valid = rect_itr.valid;
-        if (!rect_itr.valid)
+        // We already know the rect iterator is not valid here
+#ifdef DEBUG_LEGION
+        assert(!functor->iterator.rect_valid);
+#endif
+        Realm::IndexSpaceIterator<N::N,T> is_itr;
+        memcpy(&is_itr, functor->iterator.is_iterator, sizeof(is_itr));
+        is_itr.step(); \
+        functor->iterator.is_valid = is_itr.valid;
+        if (is_itr.valid)
         {
-          Realm::IndexSpaceIterator<N::N,T> is_itr;
-          memcpy(&is_itr, functor->iterator.is_iterator, sizeof(is_itr));
-          is_itr.step(); \
-          functor->iterator.is_valid = is_itr.valid;
-          if (is_itr.valid)
-          {
-            Realm::PointInRectIterator<N::N,T> new_rectitr(is_itr.rect);
-            assert(new_rectitr.valid);
-            functor->iterator.rect_valid = true;
-            functor->iterator.p = Point<N::N,coord_t>(new_rectitr.p);
-            memcpy(functor->iterator.rect_iterator, &new_rectitr, 
-                    sizeof(new_rectitr));
-            memcpy(functor->iterator.is_iterator, &is_itr, sizeof(is_itr));
-          } 
-          else
-            functor->iterator.rect_valid = false;
-        }
-        else 
-        {
-          functor->iterator.p = Point<N::N,coord_t>(rect_itr.p);
-          memcpy(functor->iterator.rect_iterator, &rect_itr, sizeof(rect_itr));
+          // Convert to rect with coord_t
+          Realm::Rect<N::N,coord_t> rect = is_itr.rect;
+          Realm::PointInRectIterator<N::N,coord_t> new_rectitr(rect);
+#ifdef DEBUG_LEGION
+          assert(new_rectitr.valid);
+#endif
+          functor->iterator.rect_valid = true;
+          functor->iterator.p = new_rectitr.p;
+          memcpy(functor->iterator.rect_iterator, &new_rectitr,
+                  sizeof(new_rectitr));
+          memcpy(functor->iterator.is_iterator, &is_itr, sizeof(is_itr));
         }
       }
     public:
       DomainPointIterator &iterator;
     };
-  public:
-    IDType is_id;
-    // For Realm index spaces we need to have a type tag to know
-    // what the type of the original sparsity map was
-    // Without it you can get undefined behavior trying to interpret
-    // the sparsity map incorrectly. This doesn't matter for the bounds
-    // data because we've done the conversion for ourselves.
-    // Technically this is redundant with the dimension since it also
-    // encodes the dimension, but we'll keep them separate for now for
-    // backwards compatibility
-    TypeTag is_type;
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    // Work around an internal nvcc bug by marking this volatile 
-    volatile
-#endif
-    int dim;
-    coord_t rect_data[2 * MAX_RECT_DIM];
   };
 
   template<int DIM, typename COORD_T = coord_t>
@@ -581,6 +578,8 @@ namespace Legion {
 
   template<int DIM, typename COORD_T = coord_t>
   class PointInDomainIterator {
+  private:
+    static_assert(std::is_integral<COORD_T>::value, "must be integral type");
   public:
     PointInDomainIterator(void);
     PointInDomainIterator(const DomainT<DIM,COORD_T> &d,
