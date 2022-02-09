@@ -16,14 +16,17 @@
 import "regent"
 
 -- The outermost scope of a Regent program is a Lua script. This
--- script executes top to bottom. The line below initializes a Lua
--- variable with the contents of a C header file.
-local c = terralib.includec("stdio.h")
+-- script executes top to bottom. The line below loads the Regent
+-- library for formatted output. The module is stored in a Lua
+-- variable (declared with "local").
 
--- Regent tasks are declared with the task keyword. Tasks may call
--- external C functions such as printf.
+local format = require("std/format")
+
+-- Regent tasks are declared with the task keyword. Tasks are
+-- functions that execute their bodies top-to-bottom.
 task hello_world()
-  c.printf("Hello World!\n")
+  -- Print "Hello World!" followed by a new line.
+  format.println("Hello World!")
 end
 
 -- Execution begins with a main task. The name "main" is arbitrary,
