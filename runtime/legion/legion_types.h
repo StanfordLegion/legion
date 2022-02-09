@@ -1855,10 +1855,14 @@ namespace Legion {
     public:
       template<int N, typename T> __CUDA_HD__
       static inline constexpr TypeTag encode_tag(void) {
+#if __cplusplus >= 201402L
         constexpr TypeTag type =
           SUPER::template encode_tag<Realm::DynamicTemplates::Int<N>, T>();
         static_assert(type != 0, "All types should be non-zero for Legion");
         return type;
+#else
+        return SUPER::template encode_tag<Realm::DynamicTemplates::Int<N>, T>();
+#endif
       }
       template<int N, typename T>
       static inline void check_type(const TypeTag t) {

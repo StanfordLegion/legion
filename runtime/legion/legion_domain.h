@@ -45,6 +45,8 @@ namespace Legion {
   template<int M, int N, typename T = coord_t>
   struct AffineTransform {
   private:
+    static_assert(M > 0, "M must be positive");
+    static_assert(N > 0, "N must be positive");
     static_assert(std::is_integral<T>::value, "must be integral type");
   public:
     __CUDA_HD__
@@ -89,6 +91,8 @@ namespace Legion {
   template<int M, int N, typename T = coord_t>
   struct ScaleTransform {
   private:
+    static_assert(M > 0, "M must be positive");
+    static_assert(M > 0, "N must be positive");
     static_assert(std::is_integral<T>::value, "must be integral type");
   public:
     __CUDA_HD__
@@ -527,6 +531,7 @@ namespace Legion {
   template<int DIM, typename COORD_T = coord_t>
   class PointInRectIterator {
   private:
+    static_assert(DIM > 0, "DIM must be positive");
     static_assert(std::is_integral<COORD_T>::value, "must be integral type");
   public:
     __CUDA_HD__
@@ -559,6 +564,7 @@ namespace Legion {
   template<int DIM, typename COORD_T = coord_t>
   class RectInDomainIterator {
   private:
+    static_assert(DIM > 0, "DIM must be positive");
     static_assert(std::is_integral<COORD_T>::value, "must be integral type");
   public:
     RectInDomainIterator(void);
@@ -579,6 +585,7 @@ namespace Legion {
   template<int DIM, typename COORD_T = coord_t>
   class PointInDomainIterator {
   private:
+    static_assert(DIM > 0, "DIM must be positive");
     static_assert(std::is_integral<COORD_T>::value, "must be integral type");
   public:
     PointInDomainIterator(void);
