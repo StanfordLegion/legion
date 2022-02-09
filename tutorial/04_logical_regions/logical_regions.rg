@@ -14,8 +14,6 @@
 
 import "regent"
 
-local c = terralib.includec("stdio.h")
-
 -- A field space (fspace) is a collection of fields, similar to a
 -- C struct.
 fspace fs {

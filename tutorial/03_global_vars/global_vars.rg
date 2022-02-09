@@ -14,7 +14,7 @@
 
 import "regent"
 
-local c = terralib.includec("stdio.h")
+local c = regentlib.c
 
 -- Global constants are simply Lua variables, defined at the top
 -- scope. (Regent does not support mutable global variables.)

@@ -14,7 +14,7 @@
 
 import "regent"
 
-local c = terralib.includec("stdio.h")
+local format = require("std/format")
 
 -- Tasks may take declare arguments and return values. The following
 -- task takes one int argument and returns an int.
@@ -34,7 +34,7 @@ end
 
 -- A second task, this time with two arguments and no return value.
 task print_result(n : int, result : int)
-  c.printf("Fibonacci(%d) = %d\n", n, result)
+  format.println("Fibonacci({}) = {}", n, result)
 end
 
 task main()
