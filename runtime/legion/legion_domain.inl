@@ -699,7 +699,7 @@ namespace Legion {
     : is_id(0), is_type(0), dim(0)
   //----------------------------------------------------------------------------
   {
-    for (int i = 0; i < MAX_RECT_DIM*2; i++)
+    for (int i = 0; i < 2*MAX_RECT_DIM; i++)
       rect_data[i] = 0;
   }
 
@@ -708,7 +708,7 @@ namespace Legion {
     : is_id(other.is_id), is_type(other.is_type), dim(other.dim)
   //----------------------------------------------------------------------------
   {
-    for (int i = 0; i < MAX_RECT_DIM*2; i++)
+    for (int i = 0; i < 2*MAX_RECT_DIM; i++)
       rect_data[i] = other.rect_data[i];
   }
 
@@ -722,6 +722,9 @@ namespace Legion {
       rect_data[i] = lo[i];
     for (int i = 0; i < dim; i++)
       rect_data[i+dim] = hi[i];
+    // Zero-out the other values in rect data to keep compilers happy
+    for (int i = 2*dim; i < 2*MAX_RECT_DIM; i++)
+      rect_data[i] = 0;
   }
 
   //----------------------------------------------------------------------------
@@ -735,6 +738,9 @@ namespace Legion {
       rect_data[i] = check_for_overflow<T>(other.lo[i]);
     for (int i = 0; i < DIM; i++)
       rect_data[DIM+i] = check_for_overflow<T>(other.hi[i]);
+    // Zero-out the other values in rect data to keep compilers happy
+    for (int i = 2*DIM; i < 2*MAX_RECT_DIM; i++)
+      rect_data[i] = 0;
   }
 
   //----------------------------------------------------------------------------
@@ -764,6 +770,9 @@ namespace Legion {
       rect_data[i] = check_for_overflow<T>(other.bounds.lo[i]);
     for (int i = 0; i < DIM; i++)
       rect_data[DIM+i] = check_for_overflow<T>(other.bounds.hi[i]);
+    // Zero-out the other values in rect data to keep compilers happy
+    for (int i = 2*DIM; i < 2*MAX_RECT_DIM; i++)
+      rect_data[i] = 0;
   }
 
   //----------------------------------------------------------------------------
@@ -773,7 +782,7 @@ namespace Legion {
     is_id = other.is_id;
     is_type = other.is_type;
     dim = other.dim;
-    for(int i = 0; i < MAX_RECT_DIM*2; i++)
+    for(int i = 0; i < 2*dim; i++)
       rect_data[i] = other.rect_data[i];
     return *this;
   }
