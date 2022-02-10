@@ -152,6 +152,7 @@ extern "C" {
    */
   typedef struct legion_domain_t {
     realm_id_t is_id;
+    legion_type_tag_t is_type;
     int dim;
 // Hack: Python CFFI isn't smart enough to do constant folding so we
 // have to do this by hand here. To avoid this bitrotting, at least
