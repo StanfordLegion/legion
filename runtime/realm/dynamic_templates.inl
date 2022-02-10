@@ -176,8 +176,8 @@ namespace Realm {
     // class ListProduct2<L1,L2>
 
     template <typename L1, typename L2>
-    template <typename T1, typename T2>
-    inline /*static*/ TagType ListProduct2<L1,L2>::encode_tag(void)
+    template <typename T1, typename T2> REALM_CUDA_HD
+    inline /*static*/ constexpr TagType ListProduct2<L1,L2>::encode_tag(void)
     {
       return (L1::template TypeToIndex<T1>::INDEX << 8) + (L2::template TypeToIndex<T2>::INDEX);
     }
@@ -263,8 +263,8 @@ namespace Realm {
     // class ListProduct3<L1,L2,L3>
 
     template <typename L1, typename L2, typename L3>
-    template <typename T1, typename T2, typename T3>
-    inline /*static*/ TagType ListProduct3<L1,L2,L3>::encode_tag(void)
+    template <typename T1, typename T2, typename T3> REALM_CUDA_HD
+    inline /*static*/ constexpr TagType ListProduct3<L1,L2,L3>::encode_tag(void)
     {
       return ((L1::template TypeToIndex<T1>::INDEX << 16) +
 	      (L2::template TypeToIndex<T2>::INDEX << 8) +
@@ -379,8 +379,8 @@ namespace Realm {
     // class ListProduct4<L1,L2,L3,L4>
 
     template <typename L1, typename L2, typename L3, typename L4>
-    template <typename T1, typename T2, typename T3, typename T4>
-    inline /*static*/ TagType ListProduct4<L1,L2,L3,L4>::encode_tag(void)
+    template <typename T1, typename T2, typename T3, typename T4> REALM_CUDA_HD
+    inline /*static*/ constexpr TagType ListProduct4<L1,L2,L3,L4>::encode_tag(void)
     {
       return ((L1::template TypeToIndex<T1>::INDEX << 24) +
 	      (L2::template TypeToIndex<T2>::INDEX << 16) +
