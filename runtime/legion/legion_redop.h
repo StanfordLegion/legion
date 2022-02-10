@@ -56,7 +56,7 @@ namespace Legion {
     typedef bool RHS;
 
     static const bool identity = false;
-    static const int REDOP_ID = LEGION_REDOP_OR_BOOL;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_BOOL;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -71,7 +71,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -86,7 +86,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -101,7 +101,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -116,7 +116,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -131,7 +131,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -146,7 +146,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -161,7 +161,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -176,7 +176,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_SUM_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -192,7 +192,7 @@ namespace Legion {
     typedef __half RHS;
 
     static const __half identity;
-    static const int REDOP_ID = LEGION_REDOP_SUM_FLOAT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_FLOAT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -208,7 +208,7 @@ namespace Legion {
     typedef float RHS;
 
     static const float identity;
-    static const int REDOP_ID = LEGION_REDOP_SUM_FLOAT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_FLOAT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -223,7 +223,7 @@ namespace Legion {
     typedef double RHS;
 
     static const double identity;
-    static const int REDOP_ID = LEGION_REDOP_SUM_FLOAT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_FLOAT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -240,7 +240,7 @@ namespace Legion {
     typedef complex<__half> RHS;
 
     static const complex<__half> identity;
-    static const int REDOP_ID = LEGION_REDOP_SUM_COMPLEX32;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_COMPLEX32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -256,7 +256,7 @@ namespace Legion {
     typedef complex<float> RHS;
 
     static const complex<float> identity;
-    static const int REDOP_ID = LEGION_REDOP_SUM_COMPLEX64;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_COMPLEX64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -275,7 +275,7 @@ namespace Legion {
     typedef complex<double> RHS;
 
     static const complex<double> identity;
-    static const int REDOP_ID = LEGION_REDOP_SUM_COMPLEX128;
+    static constexpr int REDOP_ID = LEGION_REDOP_SUM_COMPLEX128;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -297,7 +297,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -312,7 +312,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -327,7 +327,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -342,7 +342,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -357,7 +357,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -372,7 +372,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -387,7 +387,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -402,7 +402,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -418,7 +418,7 @@ namespace Legion {
     typedef __half RHS;
 
     static const __half identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_FLOAT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_FLOAT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -434,7 +434,7 @@ namespace Legion {
     typedef float RHS;
 
     static const float identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_FLOAT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_FLOAT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -449,7 +449,7 @@ namespace Legion {
     typedef double RHS;
 
     static const double identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_FLOAT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_FLOAT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -466,7 +466,7 @@ namespace Legion {
     typedef complex<__half> RHS;
 
     static const complex<__half> identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX32;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -482,7 +482,7 @@ namespace Legion {
     typedef complex<float> RHS;
 
     static const complex<float> identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX64;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -504,7 +504,7 @@ namespace Legion {
     typedef bool RHS;
 
     static const bool identity = true;
-    static const int REDOP_ID = LEGION_REDOP_AND_BOOL;
+    static constexpr int REDOP_ID = LEGION_REDOP_AND_BOOL;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -519,7 +519,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -534,7 +534,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -549,7 +549,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -564,7 +564,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -579,7 +579,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -594,7 +594,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -609,7 +609,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -624,7 +624,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -640,7 +640,7 @@ namespace Legion {
     typedef __half RHS;
 
     static const __half identity;
-    static const int REDOP_ID = LEGION_REDOP_PROD_FLOAT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_FLOAT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -656,7 +656,7 @@ namespace Legion {
     typedef float RHS;
 
     static const float identity;
-    static const int REDOP_ID = LEGION_REDOP_PROD_FLOAT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_FLOAT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -671,7 +671,7 @@ namespace Legion {
     typedef double RHS;
 
     static const double identity;
-    static const int REDOP_ID = LEGION_REDOP_PROD_FLOAT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_FLOAT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -688,7 +688,7 @@ namespace Legion {
     typedef complex<__half> RHS;
 
     static const complex<__half> identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX32;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -704,7 +704,7 @@ namespace Legion {
     typedef complex<float> RHS;
 
     static const complex<float> identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX64;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -726,7 +726,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -741,7 +741,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -756,7 +756,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -771,7 +771,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -786,7 +786,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -801,7 +801,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -816,7 +816,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -831,7 +831,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 1;
-    static const int REDOP_ID = LEGION_REDOP_PROD_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -847,7 +847,7 @@ namespace Legion {
     typedef __half RHS;
 
     static const __half identity;
-    static const int REDOP_ID = LEGION_REDOP_PROD_FLOAT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_FLOAT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -863,7 +863,7 @@ namespace Legion {
     typedef float RHS;
 
     static const float identity;
-    static const int REDOP_ID = LEGION_REDOP_PROD_FLOAT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_FLOAT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -878,7 +878,7 @@ namespace Legion {
     typedef double RHS;
 
     static const double identity;
-    static const int REDOP_ID = LEGION_REDOP_PROD_FLOAT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_PROD_FLOAT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -895,7 +895,7 @@ namespace Legion {
     typedef complex<__half> RHS;
 
     static const complex<__half> identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX32;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -911,7 +911,7 @@ namespace Legion {
     typedef complex<float> RHS;
 
     static const complex<float> identity;
-    static const int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX64;
+    static constexpr int REDOP_ID = LEGION_REDOP_DIFF_COMPLEX64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -933,7 +933,7 @@ namespace Legion {
     typedef bool RHS;
 
     static const bool identity = false;
-    static const int REDOP_ID = LEGION_REDOP_MAX_BOOL;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_BOOL;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -948,7 +948,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = SCHAR_MIN;
-    static const int REDOP_ID = LEGION_REDOP_MAX_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -963,7 +963,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = SHRT_MIN;
-    static const int REDOP_ID = LEGION_REDOP_MAX_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -978,7 +978,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = INT_MIN;
-    static const int REDOP_ID = LEGION_REDOP_MAX_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -993,7 +993,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = LLONG_MIN;
-    static const int REDOP_ID = LEGION_REDOP_MAX_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1008,7 +1008,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_MAX_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1023,7 +1023,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_MAX_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1038,7 +1038,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_MAX_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1053,7 +1053,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_MAX_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1069,7 +1069,7 @@ namespace Legion {
     typedef __half RHS;
 
     static const __half identity;
-    static const int REDOP_ID = LEGION_REDOP_MAX_FLOAT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_FLOAT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1085,7 +1085,7 @@ namespace Legion {
     typedef float RHS;
 
     static const float identity;
-    static const int REDOP_ID = LEGION_REDOP_MAX_FLOAT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_FLOAT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1100,7 +1100,7 @@ namespace Legion {
     typedef double RHS;
 
     static const double identity;
-    static const int REDOP_ID = LEGION_REDOP_MAX_FLOAT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_FLOAT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1117,7 +1117,7 @@ namespace Legion {
     typedef complex<__half> RHS;
 
     static const complex<__half> identity;
-    static const int REDOP_ID = LEGION_REDOP_MAX_COMPLEX32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_COMPLEX32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1132,7 +1132,7 @@ namespace Legion {
     typedef complex<float> RHS;
 
     static const complex<float> identity;
-    static const int REDOP_ID = LEGION_REDOP_MAX_COMPLEX64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MAX_COMPLEX64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1155,7 +1155,7 @@ namespace Legion {
     typedef bool RHS;
 
     static const bool identity = true;
-    static const int REDOP_ID = LEGION_REDOP_MIN_BOOL;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_BOOL;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1170,7 +1170,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = SCHAR_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1185,7 +1185,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = SHRT_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1200,7 +1200,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = INT_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1215,7 +1215,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = LLONG_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1230,7 +1230,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = UCHAR_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1245,7 +1245,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = USHRT_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1260,7 +1260,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = UINT_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1275,7 +1275,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = ULLONG_MAX;
-    static const int REDOP_ID = LEGION_REDOP_MIN_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1291,7 +1291,7 @@ namespace Legion {
     typedef __half RHS;
 
     static const __half identity;
-    static const int REDOP_ID = LEGION_REDOP_MIN_FLOAT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_FLOAT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1307,7 +1307,7 @@ namespace Legion {
     typedef float RHS;
 
     static const float identity;
-    static const int REDOP_ID = LEGION_REDOP_MIN_FLOAT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_FLOAT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1322,7 +1322,7 @@ namespace Legion {
     typedef double RHS;
 
     static const double identity;
-    static const int REDOP_ID = LEGION_REDOP_MIN_FLOAT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_FLOAT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1339,7 +1339,7 @@ namespace Legion {
     typedef complex<__half> RHS;
 
     static const complex<__half> identity;
-    static const int REDOP_ID = LEGION_REDOP_MIN_COMPLEX32;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_COMPLEX32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1354,7 +1354,7 @@ namespace Legion {
     typedef complex<float> RHS;
 
     static const complex<float> identity;
-    static const int REDOP_ID = LEGION_REDOP_MIN_COMPLEX64;
+    static constexpr int REDOP_ID = LEGION_REDOP_MIN_COMPLEX64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1377,7 +1377,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1392,7 +1392,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1407,7 +1407,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1422,7 +1422,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1437,7 +1437,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1452,7 +1452,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1467,7 +1467,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1482,7 +1482,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1503,7 +1503,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = (int8_t)0xFF;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1518,7 +1518,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = (int16_t)0xFFFF;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1533,7 +1533,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 0xFFFF;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1548,7 +1548,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 0xFFFFFFFFL;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1563,7 +1563,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 0xFFU;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1578,7 +1578,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 0xFFFFU;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1593,7 +1593,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 0xFFFFFFFFU;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1608,7 +1608,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 0xFFFFFFFFUL;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1629,7 +1629,7 @@ namespace Legion {
     typedef bool RHS;
 
     static const bool identity = false;
-    static const int REDOP_ID = LEGION_REDOP_OR_BOOL;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_BOOL;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1644,7 +1644,7 @@ namespace Legion {
     typedef int8_t RHS;
 
     static const int8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1659,7 +1659,7 @@ namespace Legion {
     typedef int16_t RHS;
 
     static const int16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1674,7 +1674,7 @@ namespace Legion {
     typedef int32_t RHS;
 
     static const int32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1689,7 +1689,7 @@ namespace Legion {
     typedef int64_t RHS;
 
     static const int64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_INT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_INT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1704,7 +1704,7 @@ namespace Legion {
     typedef uint8_t RHS;
 
     static const uint8_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT8;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT8;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1719,7 +1719,7 @@ namespace Legion {
     typedef uint16_t RHS;
 
     static const uint16_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT16;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT16;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1734,7 +1734,7 @@ namespace Legion {
     typedef uint32_t RHS;
 
     static const uint32_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT32;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT32;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
@@ -1749,7 +1749,7 @@ namespace Legion {
     typedef uint64_t RHS;
 
     static const uint64_t identity = 0;
-    static const int REDOP_ID = LEGION_REDOP_OR_UINT64;
+    static constexpr int REDOP_ID = LEGION_REDOP_OR_UINT64;
 
     template<bool EXCLUSIVE> __CUDA_HD__
     static void apply(LHS &lhs, RHS rhs);
