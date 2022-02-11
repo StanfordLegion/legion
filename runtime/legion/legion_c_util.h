@@ -264,6 +264,7 @@ namespace Legion {
       wrap(Domain domain) {
         legion_domain_t domain_;
         domain_.is_id = domain.is_id;
+        domain_.is_type = domain.is_type;
         domain_.dim = domain.dim;
         std::copy(domain.rect_data, domain.rect_data + 2 * LEGION_MAX_DIM, domain_.rect_data);
         return domain_;
@@ -273,6 +274,7 @@ namespace Legion {
       unwrap(legion_domain_t domain_) {
         Domain domain;
         domain.is_id = domain_.is_id;
+        domain.is_type = domain_.is_type;
         domain.dim = domain_.dim;
         std::copy(domain_.rect_data, domain_.rect_data + 2 * LEGION_MAX_DIM, domain.rect_data);
         return domain;

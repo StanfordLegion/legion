@@ -4350,9 +4350,10 @@ namespace Legion {
               Internal::LgEvent wait_on(                                \
                   Realm::IndexSpace<DIM,coord_t>::compute_union(        \
                     subspaces, summary, no_reqs));                      \
-              domains[cit->first] = DomainT<DIM,coord_t>(summary);      \
               if (wait_on.exists())                                     \
                 wait_on.wait();                                         \
+              summary = summary.tighten();                              \
+              domains[cit->first] = DomainT<DIM,coord_t>(summary);      \
             }                                                           \
             break;                                                      \
           }
@@ -4401,9 +4402,10 @@ namespace Legion {
                   Realm::IndexSpace<DIM,coord_t>::compute_union(        \
                     subspaces, summary, no_reqs));                      \
               const Point<1,coord_t> color(cit->first);                 \
-              domains[color] = DomainT<DIM,coord_t>(summary);           \
               if (wait_on.exists())                                     \
                 wait_on.wait();                                         \
+              summary = summary.tighten();                              \
+              domains[color] = DomainT<DIM,coord_t>(summary);           \
             }                                                           \
             break;                                                      \
           }

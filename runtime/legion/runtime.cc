@@ -4047,12 +4047,15 @@ namespace Legion {
       AutoLock f_lock(future_map_lock);
       if (!collective_performed)
       { 
-        if (runtime->safe_control_replication)
+        for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
-          Murmur3Hasher hasher;
-          hasher.hash(ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES);
-          repl_ctx->hash_future_map(hasher, FutureMap(this));
-          repl_ctx->verify_replicable(hasher, "FutureMap::get_all_futures");
+          Murmur3Hasher hasher(repl_ctx, 
+              runtime->safe_control_replication > 1, i > 0);
+          hasher.hash(
+              ReplicateContext::REPLICATE_FUTURE_MAP_GET_ALL_FUTURES, __func__);
+          repl_ctx->hash_future_map(hasher, FutureMap(this), "future map");
+          if (hasher.verify(__func__))
+            break;
         }
         FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
         collective.exchange_future_names(futures);

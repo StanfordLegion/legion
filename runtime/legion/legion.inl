@@ -769,6 +769,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -851,6 +854,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -944,6 +950,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1016,6 +1024,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -1099,6 +1109,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1186,6 +1199,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1287,6 +1303,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1364,6 +1382,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1454,6 +1474,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1540,6 +1563,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -1641,6 +1667,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1717,6 +1745,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1806,6 +1836,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1888,6 +1921,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::GenericAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -1982,6 +2018,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2054,6 +2092,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::GenericAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2696,6 +2736,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -2936,6 +2979,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -3230,6 +3276,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -3453,6 +3501,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -3729,6 +3779,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -3914,6 +3967,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -4155,6 +4211,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -4328,6 +4386,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -4556,6 +4616,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -4735,6 +4798,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -4963,6 +5029,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -5130,6 +5198,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -5345,6 +5415,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -5519,6 +5592,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::AffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -5732,6 +5808,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -5894,6 +5972,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::AffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -6418,6 +6498,9 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, int N, typename T, bool CB>
     class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
                         Realm::AffineAccessor<typename REDOP::RHS,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
@@ -6585,6 +6668,9 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, int N, typename T>
     class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
                           Realm::AffineAccessor<typename REDOP::RHS,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
@@ -6789,6 +6875,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, typename T, bool CB>
     class ReductionAccessor<REDOP,EXCLUSIVE,1,T,
                         Realm::AffineAccessor<typename REDOP::RHS,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
@@ -6946,6 +7034,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, typename T>
     class ReductionAccessor<REDOP,EXCLUSIVE,1,T,
                         Realm::AffineAccessor<typename REDOP::RHS,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
@@ -7139,6 +7229,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -7287,6 +7380,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_READ_ONLY,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -7470,6 +7566,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -7606,6 +7704,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_READ_ONLY,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -7776,6 +7876,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -7934,6 +8037,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_READ_WRITE,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -8141,6 +8247,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -8287,6 +8395,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_READ_WRITE,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -8481,6 +8591,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -8633,6 +8746,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -8827,6 +8943,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -8967,6 +9085,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_WRITE_DISCARD,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -9148,6 +9268,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -9295,6 +9418,9 @@ namespace Legion {
     template<typename FT, int N, typename T>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,N,T,
                         Realm::MultiAffineAccessor<FT,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -9477,6 +9603,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -9612,6 +9740,8 @@ namespace Legion {
     template<typename FT, typename T>
     class FieldAccessor<LEGION_WRITE_ONLY,FT,1,T,
                         Realm::MultiAffineAccessor<FT,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -9781,6 +9911,9 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, int N, typename T, bool CB>
     class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
                       Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,CB> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
@@ -9930,6 +10063,9 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, int N, typename T>
     class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
                     Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>,true> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
@@ -10108,6 +10244,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, typename T, bool CB>
     class ReductionAccessor<REDOP,EXCLUSIVE,1,T,
                       Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,CB> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
@@ -10246,6 +10384,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE, typename T>
     class ReductionAccessor<REDOP,EXCLUSIVE,1,T,
                     Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>,true> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
@@ -10412,6 +10552,9 @@ namespace Legion {
     // Multi-Accessor, generic, N, bounds checks and/or privilege checks
     template<typename FT, int N, typename T, bool CB, bool CP, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,CB,CP,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -10664,6 +10807,8 @@ namespace Legion {
     // Multi-Accessor, generic, 1, bounds checks and/or privilege checks
     template<typename FT, typename T, bool CB, bool CP, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,CB,CP,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -10909,6 +11054,9 @@ namespace Legion {
     template<typename FT, int N, typename T, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,
                               false,false,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -11105,6 +11253,8 @@ namespace Legion {
     template<typename FT, typename T, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,
                               false,false,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -11294,6 +11444,9 @@ namespace Legion {
     // Multi-Accessor, affine, N, with privilege checks (implies bounds checks)
     template<typename FT, int N, typename T, bool CB, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,CB,true,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -11806,6 +11959,8 @@ namespace Legion {
     // Multi-Accessor, affine, 1, with privilege checks (implies bounds checks)
     template<typename FT, typename T, bool CB, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,CB,true,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -12308,6 +12463,9 @@ namespace Legion {
     template<typename FT, int N, typename T, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,
                   true/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -12785,6 +12943,8 @@ namespace Legion {
     template<typename FT, typename T, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,
                   true/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -13252,6 +13412,9 @@ namespace Legion {
     template<typename FT, int N, typename T, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,
           false/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -13618,6 +13781,8 @@ namespace Legion {
     template<typename FT, typename T, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,
           false/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -13980,6 +14145,9 @@ namespace Legion {
     template<typename FT, int N, typename T, bool CB, int MR>
     class MultiRegionAccessor<FT,N,T,
                               Realm::MultiAffineAccessor<FT,N,T>,CB,true,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -14312,6 +14480,8 @@ namespace Legion {
     template<typename FT, typename T, bool CB, int MR>
     class MultiRegionAccessor<FT,1,T,
                               Realm::MultiAffineAccessor<FT,1,T>,CB,true,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -14630,6 +14800,9 @@ namespace Legion {
     template<typename FT, int N, typename T, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::MultiAffineAccessor<FT,N,T>,
                       true/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -14927,6 +15100,8 @@ namespace Legion {
     template<typename FT, typename T, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::MultiAffineAccessor<FT,1,T>,
                       true/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -15210,6 +15385,9 @@ namespace Legion {
     template<typename FT, int N, typename T, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::MultiAffineAccessor<FT,N,T>,
                     false/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -15420,6 +15598,8 @@ namespace Legion {
     template<typename FT, typename T, int MR>
     class MultiRegionAccessor<FT,1,T,Realm::MultiAffineAccessor<FT,1,T>,
                     false/*check bounds*/,false/*check privileges*/,MR> {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public:
@@ -15624,6 +15804,9 @@ namespace Legion {
     template<typename FT, int N, typename T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,T> >
     class UnsafeFieldAccessor {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -15675,6 +15858,8 @@ namespace Legion {
 
     template<typename FT, typename T>
     class UnsafeFieldAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T> > {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -15720,6 +15905,9 @@ namespace Legion {
 
     template<typename FT, int N, typename T>
     class UnsafeFieldAccessor<FT, N, T, Realm::AffineAccessor<FT,N,T> > {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -15867,6 +16055,8 @@ namespace Legion {
     // to avoid ambiguity for array access
     template<typename FT, typename T>
     class UnsafeFieldAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T> > {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -16004,6 +16194,9 @@ namespace Legion {
 
     template<typename FT, int N, typename T>
     class UnsafeFieldAccessor<FT, N, T, Realm::MultiAffineAccessor<FT,N,T> > {
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -16140,6 +16333,8 @@ namespace Legion {
     // to avoid ambiguity for array access
     template<typename FT, typename T>
     class UnsafeFieldAccessor<FT,1,T,Realm::MultiAffineAccessor<FT,1,T> > {
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -16217,6 +16412,9 @@ namespace Legion {
      */
     template<typename FT, int DIM, typename T = coord_t>
     class UnsafeSpanIterator {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       UnsafeSpanIterator(void) { }
       UnsafeSpanIterator(const PhysicalRegion &region, FieldID fid,

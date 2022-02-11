@@ -517,7 +517,7 @@ function ast.map_node_postorder(fn, node, filter_fn)
   elseif terralib.islist(node) then
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
-      tmp:insert(ast.map_node_postorder(fn, child, filter_fn))
+      tmp:insert((ast.map_node_postorder(fn, child, filter_fn)))
     end
     return tmp
   end
@@ -540,7 +540,7 @@ function ast.map_node_prepostorder(pre_fn, post_fn, node, filter_fn)
   elseif terralib.islist(node) then
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
-      tmp:insert(ast.map_node_prepostorder(pre_fn, post_fn, child, filter_fn))
+      tmp:insert((ast.map_node_prepostorder(pre_fn, post_fn, child, filter_fn)))
     end
     return tmp
   end

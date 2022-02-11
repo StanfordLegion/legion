@@ -16378,7 +16378,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     const VerifyReplicableExchange::ShardHashes& 
-                            VerifyReplicableExchange::exchange(uint64_t hash[2])
+                      VerifyReplicableExchange::exchange(const uint64_t hash[2])
     //--------------------------------------------------------------------------
     {
       const std::pair<uint64_t,uint64_t> key(hash[0],hash[1]);

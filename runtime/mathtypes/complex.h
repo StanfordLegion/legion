@@ -42,9 +42,7 @@
 #include "mathtypes/half.h"
 #endif
 
-template<typename T>
-
-using complex = COMPLEX_NAMESPACE::complex<T>;
+using COMPLEX_NAMESPACE::complex;
 
 #ifdef LEGION_USE_CUDA
 // We need fabs for situations where we process complex, floating point, and

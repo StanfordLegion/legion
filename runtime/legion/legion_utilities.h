@@ -555,23 +555,61 @@ namespace Legion {
      */
     class Murmur3Hasher {
     public:
-      Murmur3Hasher(uint64_t seed = 0xCC892563);
+      class HashVerifier {
+      public:
+        virtual bool verify_hash(const uint64_t hash[2],
+                                 const char *description, bool every) = 0;
+      };
+    public:
+      Murmur3Hasher(HashVerifier *verifier, bool precise,
+                    bool verify_every_call, uint64_t seed = 0xCC892563);
+      Murmur3Hasher(const Murmur3Hasher&) = delete;
+      Murmur3Hasher& operator=(const Murmur3Hasher&) = delete;
     public:
       template<typename T>
-      inline void hash(const T &value);
-      inline void hash(const void *values, size_t size);
-      inline void finalize(uint64_t result[2]);
+      inline void hash(const T &value, const char *description);
+      inline void hash(const void *values, size_t size,const char *description);
+      inline bool verify(const char *description);
     protected:
+      template<typename T>
+      inline void hash(const T &value);
+      inline void hash(const void *value, size_t size);
       inline uint64_t rotl64(uint64_t x, uint8_t r);
       inline uint64_t fmix64(uint64_t k);
     protected:
+      HashVerifier *const verifier;
       uint8_t blocks[16];
       uint64_t h1, h2, len;
       uint8_t bytes;
-      bool finalized;
+      const bool precise;
+      const bool verify_every_call;
     public:
-      static const uint64_t c1 = 0x87c37b91114253d5ULL;
-      static const uint64_t c2 = 0x4cf5ad432745937fULL;
+      static constexpr uint64_t c1 = 0x87c37b91114253d5ULL;
+      static constexpr uint64_t c2 = 0x4cf5ad432745937fULL;
+    private:
+      struct IndexSpaceHasher {
+      public:
+        IndexSpaceHasher(const Domain &d, Murmur3Hasher &h)
+          : domain(d), hasher(h) { }
+      public:
+        template<typename N, typename T>
+        static inline void demux(IndexSpaceHasher *functor)
+        {
+          const DomainT<N::N,T> is = functor->domain;
+          for (RectInDomainIterator<N::N,T> itr(is); itr(); itr.step())
+          {
+            const Rect<N::N,T> rect = *itr;
+            for (int d = 0; d < N::N; d++)
+            {
+              functor->hasher.hash(rect.lo[d]);
+              functor->hasher.hash(rect.hi[d]);
+            }
+          }
+        }
+      public:
+        const Domain &domain;
+        Murmur3Hasher &hasher;
+      };
     };
 
     /////////////////////////////////////////////////////////////
@@ -863,6 +901,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       serialize(dom.is_id);
+      if (dom.is_id > 0)
+        serialize(dom.is_type);
       serialize(dom.dim);
       for (int i = 0; i < 2*dom.dim; i++)
         serialize(dom.rect_data[i]);
@@ -1084,6 +1124,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deserialize(dom.is_id);
+      if (dom.is_id > 0)
+        deserialize(dom.is_type);
       deserialize(dom.dim);
       for (int i = 0; i < 2*dom.dim; i++)
         deserialize(dom.rect_data[i]);
@@ -1661,10 +1703,25 @@ namespace Legion {
     } 
 
     //-------------------------------------------------------------------------
-    inline Murmur3Hasher::Murmur3Hasher(uint64_t seed)
-      : h1(seed), h2(seed), len(0), bytes(0), finalized(false)
+    inline Murmur3Hasher::Murmur3Hasher(HashVerifier *v, bool pre, bool every, 
+                                        uint64_t seed)
+      : verifier(v), h1(seed), h2(seed), len(0), bytes(0), precise(pre),
+        verify_every_call(every)
     //-------------------------------------------------------------------------
     {
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T>
+    inline void Murmur3Hasher::hash(const T &value, const char *description)
+    //-------------------------------------------------------------------------
+    {
+      hash<T>(value);
+      if (verify_every_call)
+      {
+        uint64_t hash[2] = { h1, h2 };
+        verifier->verify_hash(hash, description, true/*verify every call*/);
+      }
     }
 
     //-------------------------------------------------------------------------
@@ -1672,9 +1729,6 @@ namespace Legion {
     inline void Murmur3Hasher::hash(const T &value)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!finalized);
-#endif
       const T *ptr = &value;
       const uint8_t *data = NULL;
       static_assert(sizeof(ptr) == sizeof(data), "Fuck c++");
@@ -1701,30 +1755,57 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<Domain>(const Domain &value)
+    inline void Murmur3Hasher::hash<Domain>(const Domain &value,
+                                            const char *description)
     //-------------------------------------------------------------------------
     {
-      hash(value.is_id);
       for (int i = 0; i < 2*value.dim; i++)
         hash(value.rect_data[i]);
+      if (!value.dense() && precise)
+      {
+        IndexSpaceHasher functor(value, *this);
+        Internal::NT_TemplateHelper::demux<IndexSpaceHasher>(value.is_type,
+                                                             &functor);
+      }
+      if (verify_every_call)
+      {
+        uint64_t hash[2] = { h1, h2 };
+        verifier->verify_hash(hash, description, true/*verify every call*/);
+      }
     }
 
     //-------------------------------------------------------------------------
     template<>
-    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value)
+    inline void Murmur3Hasher::hash<DomainPoint>(const DomainPoint &value,
+                                                 const char *description)
     //-------------------------------------------------------------------------
     {
       for (int i = 0; i < value.dim; i++)
         hash(value.point_data[i]);
+      if (verify_every_call)
+      {
+        uint64_t hash[2] = { h1, h2 };
+        verifier->verify_hash(hash, description, true/*verify every call*/);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    inline void Murmur3Hasher::hash(const void *value, size_t size,
+                                    const char *description)
+    //-------------------------------------------------------------------------
+    {
+      hash(value, size);
+      if (verify_every_call)
+      {
+        uint64_t hash[2] = { h1, h2 };
+        verifier->verify_hash(hash, description, true/*verify every call*/);
+      }
     }
 
     //-------------------------------------------------------------------------
     inline void Murmur3Hasher::hash(const void *value, size_t size)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!finalized);
-#endif
       const uint8_t *data = NULL;
       static_assert(sizeof(data) == sizeof(value), "Fuck c++");
       memcpy(&data, &value, sizeof(data));
@@ -1749,54 +1830,53 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    inline void Murmur3Hasher::finalize(uint64_t result[2])
+    inline bool Murmur3Hasher::verify(const char *description)
     //-------------------------------------------------------------------------
     {
-      if (!finalized)
+#ifdef DEBUG_LEGION
+      assert(!verify_every_call);
+#endif
+      // tail
+      uint64_t k1 = 0;
+      uint64_t k2 = 0;
+      switch (bytes)
       {
-        // tail
-        uint64_t k1 = 0;
-        uint64_t k2 = 0;
-        switch (bytes)
-        {
-          case 15: k2 ^= ((uint64_t)blocks[14]) << 48;
-          case 14: k2 ^= ((uint64_t)blocks[13]) << 40;
-          case 13: k2 ^= ((uint64_t)blocks[12]) << 32;
-          case 12: k2 ^= ((uint64_t)blocks[11]) << 24;
-          case 11: k2 ^= ((uint64_t)blocks[10]) << 16;
-          case 10: k2 ^= ((uint64_t)blocks[ 9]) << 8;
-          case  9: k2 ^= ((uint64_t)blocks[ 8]) << 0;
-                   k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
+        case 15: k2 ^= ((uint64_t)blocks[14]) << 48;
+        case 14: k2 ^= ((uint64_t)blocks[13]) << 40;
+        case 13: k2 ^= ((uint64_t)blocks[12]) << 32;
+        case 12: k2 ^= ((uint64_t)blocks[11]) << 24;
+        case 11: k2 ^= ((uint64_t)blocks[10]) << 16;
+        case 10: k2 ^= ((uint64_t)blocks[ 9]) << 8;
+        case  9: k2 ^= ((uint64_t)blocks[ 8]) << 0;
+                 k2 *= c2; k2  = rotl64(k2,33); k2 *= c1; h2 ^= k2;
 
-          case  8: k1 ^= ((uint64_t)blocks[ 7]) << 56;
-          case  7: k1 ^= ((uint64_t)blocks[ 6]) << 48;
-          case  6: k1 ^= ((uint64_t)blocks[ 5]) << 40;
-          case  5: k1 ^= ((uint64_t)blocks[ 4]) << 32;
-          case  4: k1 ^= ((uint64_t)blocks[ 3]) << 24;
-          case  3: k1 ^= ((uint64_t)blocks[ 2]) << 16;
-          case  2: k1 ^= ((uint64_t)blocks[ 1]) << 8;
-          case  1: k1 ^= ((uint64_t)blocks[ 0]) << 0;
-                   k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
-        }
-        
-        // finalization
-        len += bytes;
-
-        h1 ^= len; h2 ^= len;
-
-        h1 += h2;
-        h2 += h1;
-
-        h1 = fmix64(h1);
-        h2 = fmix64(h2);
-
-        h1 += h2;
-        h2 += h1;
-
-        finalized = true;
+        case  8: k1 ^= ((uint64_t)blocks[ 7]) << 56;
+        case  7: k1 ^= ((uint64_t)blocks[ 6]) << 48;
+        case  6: k1 ^= ((uint64_t)blocks[ 5]) << 40;
+        case  5: k1 ^= ((uint64_t)blocks[ 4]) << 32;
+        case  4: k1 ^= ((uint64_t)blocks[ 3]) << 24;
+        case  3: k1 ^= ((uint64_t)blocks[ 2]) << 16;
+        case  2: k1 ^= ((uint64_t)blocks[ 1]) << 8;
+        case  1: k1 ^= ((uint64_t)blocks[ 0]) << 0;
+                 k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
       }
-      result[0] = h1;
-      result[1] = h2;
+      
+      // finalization
+      len += bytes;
+
+      h1 ^= len; h2 ^= len;
+
+      h1 += h2;
+      h2 += h1;
+
+      h1 = fmix64(h1);
+      h2 = fmix64(h2);
+
+      h1 += h2;
+      h2 += h1;
+
+      uint64_t hash[2] = { h1, h2 };
+      return verifier->verify_hash(hash,description,false/*verify every call*/);
     }
 
     //-------------------------------------------------------------------------

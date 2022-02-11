@@ -117,6 +117,9 @@ namespace Legion {
      */
     template<int DIM, typename COORD_T = coord_t>
     class IndexSpaceT : public IndexSpace {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
@@ -169,6 +172,9 @@ namespace Legion {
      */
     template<int DIM, typename COORD_T = coord_t>
     class IndexPartitionT : public IndexPartition {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
@@ -262,6 +268,9 @@ namespace Legion {
      */
     template<int DIM, typename COORD_T = coord_t>
     class LogicalRegionT : public LogicalRegion {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
@@ -327,6 +336,9 @@ namespace Legion {
      */
     template<int DIM, typename COORD_T = coord_t>
     class LogicalPartitionT : public LogicalPartition {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
@@ -2640,6 +2652,9 @@ namespace Legion {
              bool CHECK_BOUNDS = false>
 #endif
     class FieldAccessor {
+    private:
+      static_assert(N > 0, "N must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2859,6 +2874,9 @@ namespace Legion {
              bool CHECK_BOUNDS = false>
 #endif
     class ReductionAccessor {
+    private:
+      static_assert(N > 0, "N must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
@@ -3016,6 +3034,9 @@ namespace Legion {
              // Especially GPU parameter space
              int MAX_REGIONS = 4>
     class MultiRegionAccessor {
+    private:
+      static_assert(N > 0, "N must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       MultiRegionAccessor(void) { }
     public: // iterator based construction of the multi-region accessors
@@ -3207,6 +3228,9 @@ namespace Legion {
      */
     template<int DIM, typename COORD_T = coord_t>
     class PieceIteratorT : public PieceIterator {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       PieceIteratorT(void);
       PieceIteratorT(const PieceIteratorT &rhs);
@@ -3239,6 +3263,9 @@ namespace Legion {
      */
     template<PrivilegeMode PM, typename FT, int DIM, typename COORD_T = coord_t>
     class SpanIterator {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       SpanIterator(void) { }
       SpanIterator(const PhysicalRegion &region, FieldID fid,
@@ -3392,6 +3419,9 @@ namespace Legion {
              bool CHECK_BOUNDS = false>
 #endif
     class DeferredBuffer {
+    private:
+      static_assert(DIM > 0, "DIM must be positive");
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       DeferredBuffer(void);
     public: // Constructors specifying a generic memory kind
@@ -3470,6 +3500,8 @@ namespace Legion {
      */
     template<typename COORD_T = coord_t>
     class UntypedDeferredBuffer {
+    private:
+      static_assert(std::is_integral<COORD_T>::value, "must be integral type");
     public:
       UntypedDeferredBuffer(void);
     public: // Constructors specifying a generic memory kind
