@@ -752,7 +752,7 @@ namespace Legion {
 #endif
     }; 
 
-    class InnerContext : public TaskContext,
+    class InnerContext : public TaskContext, public Murmur3Hasher::HashVerifier,
                          public LegionHeapify<InnerContext> {
     public:
       // Prepipeline stages need to hold a reference since the
@@ -934,6 +934,9 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
               std::set<RtEvent> &preconditions);
+    public: // Murmur3Hasher::HashVerifier method
+      virtual bool verify_hash(const uint64_t hash[2],
+                               const char *description, bool every);
     protected:
       void register_region_creations(
                      std::map<LogicalRegion,unsigned> &regions);
@@ -1924,6 +1927,9 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<std::pair<IndexPartition,bool> > &deleted_partitions,
               std::set<RtEvent> &preconditions);
+    public: // Murmur3Hasher::HashVerifier method
+      virtual bool verify_hash(const uint64_t hash[2],
+                               const char *description, bool every);
     protected:
       void receive_replicate_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -2483,9 +2489,10 @@ namespace Legion {
       IndexSpaceNode* compute_index_attach_launch_spaces(
                                             std::vector<size_t> &shard_sizes);
     public:
-      void hash_future(Murmur3Hasher &hasher, 
-                       const unsigned safe_level, const Future &future) const;
-      static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map);
+      void hash_future(Murmur3Hasher &hasher, const unsigned safe_level, 
+                       const Future &future, const char *description) const;
+      static void hash_future_map(Murmur3Hasher &hasher, const FutureMap &map,
+                                  const char *description);
       static void hash_index_space_requirements(Murmur3Hasher &hasher,
           const std::vector<IndexSpaceRequirement> &index_requirements);
       static void hash_region_requirements(Murmur3Hasher &hasher,
@@ -2494,16 +2501,16 @@ namespace Legion {
           const std::vector<Grant> &grants);
       static void hash_phase_barriers(Murmur3Hasher &hasher,
           const std::vector<PhaseBarrier> &phase_barriers);
-      static void hash_argument(Murmur3Hasher &hasher, 
-                          const unsigned safe_level, const UntypedBuffer &arg);
-      static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred);
+      static void hash_argument(Murmur3Hasher &hasher,const unsigned safe_level,
+                             const UntypedBuffer &arg, const char *description);
+      static void hash_predicate(Murmur3Hasher &hasher, const Predicate &pred,
+                                 const char *description);
       static void hash_static_dependences(Murmur3Hasher &hasher,
           const std::vector<StaticDependence> *dependences);
       void hash_task_launcher(Murmur3Hasher &hasher, 
           const unsigned safe_level, const TaskLauncher &launcher) const;
       void hash_index_launcher(Murmur3Hasher &hasher,
           const unsigned safe_level, const IndexTaskLauncher &launcher);
-      void verify_replicable(Murmur3Hasher &hasher, const char *func_name);
     public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,

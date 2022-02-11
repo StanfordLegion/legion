@@ -1095,7 +1095,7 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       typedef std::map<std::pair<uint64_t,uint64_t>,ShardID> ShardHashes;
-      const ShardHashes& exchange(uint64_t hash[2]);
+      const ShardHashes& exchange(const uint64_t hash[2]);
     public:
       ShardHashes unique_hashes;
     };
