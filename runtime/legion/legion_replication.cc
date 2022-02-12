@@ -2450,7 +2450,7 @@ namespace Legion {
         const DistributedID did = did_collective->get_value(false/*block*/);
         EquivalenceSet *set = 
           repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                    region_node, refinement_mask, did, first);
+                                                region_node, did, first);
         // Merge the state from the old equivalence sets if not overwriting
         if (first && !refinement_overwrite)
         {
@@ -2936,8 +2936,9 @@ namespace Legion {
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                      child, mask, did, first);
-              if (first)
+                                                            child, did, first);
+              // If we're the first shard of the owner we initialize the state
+              if (first && set->is_owner())
                 initialize_replicated_set(set, mask, map_applied_conditions);
               child->record_refinement(ctx, set, mask, map_applied_conditions);
               // Remove the CONTEXT_REF on the set now that it is registered
@@ -2958,8 +2959,9 @@ namespace Legion {
                 collective_dids[did_index++]->get_value(false/*block*/);
               EquivalenceSet *set = 
                 repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                      child, mask, did, first);
-              if (first)
+                                                            child, did, first);
+              // If we're the first shard of the owner we initialize the state
+              if (first && set->is_owner())
                 initialize_replicated_set(set, mask, map_applied_conditions);
               child->record_refinement(ctx, set, mask, map_applied_conditions);
               // Remove the CONTEXT_REF on the set now that it is registered
@@ -2990,8 +2992,9 @@ namespace Legion {
 #endif
           EquivalenceSet *set = 
             repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                        it->second, mask, did, first);
-          if (first)
+                                                  it->second, did, first);
+          // If we're the first shard of the owner we initialize the state
+          if (first && set->is_owner())
             initialize_replicated_set(set, mask, map_applied_conditions);
           it->second->record_refinement(ctx, set, mask, 
                                         map_applied_conditions);
@@ -10574,12 +10577,10 @@ namespace Legion {
         // Make an equivalence set to contain the initial data
         const RegionRequirement &req = original_task->regions[idx];
         RegionNode *node = runtime->forest->get_node(req.region);
-        const FieldMask mask = 
-          node->column_source->get_field_mask(req.privilege_fields);
         mapped_equivalence_sets[idx] =
           new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
               runtime->address_space, runtime->address_space, node,
-              true/*reg now*/, collective_mapping, &mask);
+              true/*reg now*/, collective_mapping);
       }
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
@@ -10685,11 +10686,6 @@ namespace Legion {
 #endif
           rez.serialize((*it)->did);
           rez.serialize((*it)->region_node->handle);
-          // In general this is not safe, but we know these equivalence
-          // sets have not been put into ciculation yet so the
-          // replicated_states data structure is not changing and
-          // therefore we don't need to hold the lock when getting this
-          rez.serialize((*it)->get_replicated_fields());
         }
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
@@ -10768,12 +10764,10 @@ namespace Legion {
         derez.deserialize(did);
         LogicalRegion handle;
         derez.deserialize(handle);
-        FieldMask mask;
-        derez.deserialize(mask);
         RegionNode *region_node = runtime->forest->get_node(handle);
         mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
             owner_space, owner_space, region_node, true/*register now*/,
-            collective_mapping, &mask);
+            collective_mapping);
         // This adds a CONTEXT_REF for each local shard
         mapped_equivalence_sets[idx]->initialize_collective_references(
                                                             num_shards);
@@ -10818,8 +10812,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
-                                 RegionNode *region_node, const FieldMask &mask,
-                                 DistributedID did, bool &first)
+                        RegionNode *region_node, DistributedID did, bool &first)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10846,7 +10839,7 @@ namespace Legion {
         }
         // Didn't find it so make it
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
-              region_node, true/*register now*/, collective_mapping, &mask);
+              region_node, true/*register now*/, collective_mapping);
         // This adds as many context refs as there are shards
         result->initialize_collective_references(local_shards.size());
         // Record it for the shards that come later
@@ -10858,7 +10851,7 @@ namespace Legion {
       else // Only one shard here on this node so just make it
       {
         result = new EquivalenceSet(runtime, did, owner_space, owner_space,
-              region_node, true/*register now*/, collective_mapping, &mask);
+              region_node, true/*register now*/, collective_mapping);
         // This adds as many context refs as there are shards
         result->initialize_collective_references(1/*local shard count*/);
       }

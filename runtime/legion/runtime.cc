@@ -12711,18 +12711,18 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
             {
-              runtime->handle_equivalence_set_replication_request(derez);
+              runtime->handle_equivalence_set_replication_request(derez,
+                                                  remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE:
             {
-              runtime->handle_equivalence_set_replication_response(derez,
-                                                    remote_address_space);
+              runtime->handle_equivalence_set_replication_response(derez);
               break;
             }
-          case SEND_EQUIVALENCE_SET_REPLICATION_UPDATE:
+          case SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION:
             {
-              runtime->handle_equivalence_set_replication_update(derez);
+              runtime->handle_equivalence_set_replication_invalidation(derez);
               break;
             }
           case SEND_EQUIVALENCE_SET_MIGRATION:
@@ -22767,13 +22767,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_replication_update(
+    void Runtime::send_equivalence_set_replication_invalidation(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-          SEND_EQUIVALENCE_SET_REPLICATION_UPDATE>( 
-                                rez, true/*flush*/);
+          SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION>( 
+                                      rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24736,25 +24736,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_replication_request(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_replication_request(derez, this);
+      EquivalenceSet::handle_replication_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_replication_response(
-                                     Deserializer &derez, AddressSpaceID source)
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_replication_response(derez, this, source);
+      EquivalenceSet::handle_replication_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_replication_update(Deserializer &derez)
+    void Runtime::handle_equivalence_set_replication_invalidation(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_replication_update(derez, this);
+      EquivalenceSet::handle_replication_invalidation(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -31890,11 +31891,6 @@ namespace Legion {
         case LG_DEFER_MAKE_OWNER_TASK_ID:
           {
             EquivalenceSet::handle_make_owner(args);
-            break;
-          }
-        case LG_DEFER_PENDING_REPLICATION_TASK_ID:
-          {
-            EquivalenceSet::handle_pending_replication(args);
             break;
           }
         case LG_DEFER_APPLY_STATE_TASK_ID:

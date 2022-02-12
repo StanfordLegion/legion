@@ -2746,7 +2746,7 @@ namespace Legion {
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       EquivalenceSet* get_initial_equivalence_set(unsigned idx) const;
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
-                      const FieldMask &mask, DistributedID did, bool &first);
+                                            DistributedID did, bool &first);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
       // Return true if we have a shard on every address space

@@ -2365,32 +2365,12 @@ namespace Legion {
         Runtime *const runtime;
       };
     public:
-      struct ReplicationChange : public LegionHeapify<ReplicationChange> {
+      struct ReplicatedOwnerState : public LegionHeapify<ReplicatedOwnerState> {
       public:
-        struct RemoteRequest {
-        public:
-          RemoteRequest(ReplicationChange *t, AddressSpaceID src)
-            : target(t), source(src) { }
-        public:
-          ReplicationChange *const target;
-          const AddressSpaceID source;
-        };
+        ReplicatedOwnerState(AddressSpaceID source);
       public:
-        ReplicationChange(CollectiveMapping *mapping,
-                          unsigned expected_arrivals, bool add);
-        ~ReplicationChange(void);
-      public:
-        void record_remote_request(ReplicationChange *target,
-            AddressSpaceID source, const FieldMask &request_mask);
-        void send_remote_responses(EquivalenceSet *set,
-                                   const FieldMask &full_mask) const;
-      public:
-        CollectiveMapping *const mapping;
-        const RtUserEvent ready_event;
-        const RtUserEvent applied_event;
-        FieldMaskSet<RemoteRequest> remote_requests;
-        unsigned remaining_arrivals;
-        const bool add;
+        NodeSet nodes;
+        const RtUserEvent ready;
       };
     public:
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
@@ -2402,18 +2382,6 @@ namespace Legion {
             set(s) { }
       public:
         EquivalenceSet *const set;
-      };
-      struct DeferPendingReplicationArgs : 
-        public LgTaskArgs<DeferPendingReplicationArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_PENDING_REPLICATION_TASK_ID;
-      public:
-        DeferPendingReplicationArgs(EquivalenceSet *s, ReplicationChange *c,
-                                    const FieldMask &m);
-      public:
-        EquivalenceSet *const set;
-        ReplicationChange *const change;
-        FieldMask *const mask;
       };
       struct DeferApplyStateArgs : public LgTaskArgs<DeferApplyStateArgs> {
       public:
@@ -2470,8 +2438,7 @@ namespace Legion {
                      AddressSpaceID logical_owner,
                      RegionNode *region_node,
                      bool register_now, 
-                     CollectiveMapping *mapping = NULL,
-                     const FieldMask *replicated = NULL);
+                     CollectiveMapping *mapping = NULL);
       EquivalenceSet(const EquivalenceSet &rhs);
       virtual ~EquivalenceSet(void);
     public:
@@ -2479,10 +2446,6 @@ namespace Legion {
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
-      inline bool are_replicated_fields(const FieldMask &mask) const
-        { return !(mask - replicated_states.get_valid_mask()); }
-      inline const FieldMask& get_replicated_fields(void) const
-        { return replicated_states.get_valid_mask(); }
     public:
       // From distributed collectable
       virtual void notify_active(ReferenceMutator *mutator);
@@ -2742,25 +2705,13 @@ namespace Legion {
     protected:
       void send_equivalence_set(AddressSpaceID target);
       void check_for_migration(PhysicalAnalysis &analysis,
-                               std::set<RtEvent> &applied_events);
+                               std::set<RtEvent> &applied_events, bool covers);
       void update_owner(const AddressSpaceID new_logical_owner); 
-      void update_replicated_state(CollectiveMapping *oldstate,
-          CollectiveMapping *newstate, const FieldMask &invalidate_mask,
-          std::set<RtEvent> &applied_events, bool need_lock = true);
-      void finalize_replication_change(ReplicationChange *change,
-                                       const FieldMask &change_mask);
-      void process_replication_request(CollectiveMapping *mapping,
-                const FieldMask &full_mask, const FieldMask &request_mask,
-                ReplicationChange *target, const AddressSpaceID source,
-                bool owner_search);
-      void send_replication_response(AddressSpaceID target,
-          ReplicationChange *remote_change, const FieldMask &full_mask,
-          const FieldMask &request_mask);
-      void process_replication_response(Deserializer &derez,
-                                        AddressSpaceID source);
-      void finalize_replication_response(ReplicationChange *change,
-                                         const FieldMask &full_mask);
-      void unpack_replicated_states(Deserializer &derez);
+      void request_replicated_owner_space(const CollectiveMapping *mapping);
+      void process_replication_request(AddressSpaceID source,
+                                       const CollectiveMapping *mapping);
+      void process_replication_response(AddressSpaceID owner);
+      void process_replication_invalidation(RtUserEvent done);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
             IndexSpaceExpression *expr, const bool expr_covers,
@@ -2828,7 +2779,6 @@ namespace Legion {
             const TraceViewSet *postcondition_updates);
     public:
       static void handle_make_owner(const void *args);
-      static void handle_pending_replication(const void *args);
       static void handle_apply_state(const void *args);
       static void handle_remove_refs(const void *args);
     public:
@@ -2841,10 +2791,11 @@ namespace Legion {
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
       static void handle_make_owner(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_trackers(Deserializer &derez, Runtime *rt);
-      static void handle_replication_request(Deserializer &derez, Runtime *rt);
-      static void handle_replication_response(Deserializer &derez, Runtime *rt,
-                                              AddressSpaceID source);
-      static void handle_replication_update(Deserializer &derez, Runtime *rt);
+      static void handle_replication_request(Deserializer &derez, Runtime *rt,
+                                             AddressSpaceID source);
+      static void handle_replication_response(Deserializer &derez, Runtime *rt);
+      static void handle_replication_invalidation(Deserializer &derez,
+                                                  Runtime *rt);
       static void handle_clone_request(Deserializer &derez, Runtime *runtime);
       static void handle_clone_response(Deserializer &derez, Runtime *runtime);
       static void handle_capture_request(Deserializer &derez, Runtime *runtime,
@@ -2894,16 +2845,16 @@ namespace Legion {
     protected:
       // This node is the node which contains the valid state data
       AddressSpaceID                                    logical_owner_space;
-      // In control replicated cases or with collective instances, we allow
-      // equivalence sets to have replicated state which requires that all
-      // the replicated equivalence sets have the same state. This also includes
-      // that they all have the same notion of the logical owner state. The
-      // logical owner state does not have to be included in the replicated states
-      // but it must maintain an up-to-date version of the replicated states if
-      // they do end up changing. The logical owner state also cannot migrate
-      // as long as there are any outstanding replicated states.
-      FieldMaskSet<CollectiveMapping>                   replicated_states;
-      FieldMaskSet<ReplicationChange>                   replication_changes; 
+      // To support control-replicated mapping of common regions in index space
+      // launches or collective instance mappings, we need to have a way to 
+      // force all analyses to see the same value for the logical owner space
+      // for the equivalence set such that we can then have a single analysis
+      // traverse the equivalence set without requiring communication between
+      // the analyses to determine which one does the traversal. The 
+      // replicated_owner_state defines a spanning tree of the existing
+      // copies of the equivalence sets that all share knowledge of the
+      // logical owner space.
+      ReplicatedOwnerState*                             replicated_owner_state;
     protected:
       // Which EqSetTracker objects on this node are
       // tracking this equivalence set and need to be invalidated

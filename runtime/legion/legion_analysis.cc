@@ -9934,31 +9934,34 @@ namespace Legion {
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID id,
                                    AddressSpaceID owner, AddressSpaceID logical,
                                    RegionNode *node, bool reg_now,
-                                   CollectiveMapping *mapping /*= NULL*/,
-                                   const FieldMask *replicated /*= NULL*/)
+                                   CollectiveMapping *mapping /*= NULL*/)
       : DistributedCollectable(rt,
           LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
           owner, reg_now, mapping), region_node(node), 
         set_expr(node->row_source), tracing_preconditions(NULL),
         tracing_anticonditions(NULL), tracing_postconditions(NULL), 
-        logical_owner_space(logical), migration_index(0), sample_count(0), 
-        init_collective_refs(false)
+        logical_owner_space(logical), replicated_owner_state(NULL), 
+        migration_index(0), sample_count(0), init_collective_refs(false)
     //--------------------------------------------------------------------------
     {
       set_expr->add_nested_expression_reference(did);
       region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
-      if (replicated != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapping != NULL);
-#endif
-        if (replicated_states.insert(mapping, *replicated))
-          mapping->add_reference();
-      }
 #ifdef DEBUG_LEGION
       active_once = true;
 #endif
+      // If we have a collective mapping then we know that everyone agrees
+      // on who the current logical owner is
+      if (mapping != NULL)
+      {
+        const AddressSpaceID origin = mapping->get_origin();
+        std::vector<AddressSpaceID> children;
+        mapping->get_children(origin, local_space, children);
+        replicated_owner_state = new ReplicatedOwnerState(local_space);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          replicated_owner_state->nodes.insert(*it);
+      }
       // Add the gc ref here with the requirement that the owner is guaranteed
       // to become valid at some point and therefore remove it eventually
       if (!is_owner())
@@ -9996,6 +9999,8 @@ namespace Legion {
       assert(tracing_anticonditions == NULL);
       assert(tracing_postconditions == NULL);
 #endif
+      if (replicated_owner_state != NULL)
+        delete replicated_owner_state;
       if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
       if (region_node->remove_nested_resource_ref(did))
@@ -10242,9 +10247,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_logical_owner() || 
-              (!(user_mask - replicated_states.get_valid_mask())) ||
-              region_node->row_source->is_empty());
+      assert(is_logical_owner() || region_node->row_source->is_empty());
       assert(sources.size() == corresponding.size());
 #endif
       WrapperReferenceMutator mutator(applied_events);
@@ -10337,12 +10340,11 @@ namespace Legion {
         return;
 #ifdef DEBUG_LEGION
       // Should only be here if we're the owner
-      assert(is_logical_owner() || are_replicated_fields(traversal_mask));
+      assert(is_logical_owner());
 #endif
       if (analysis.perform_traversal(this, expr, expr_covers, traversal_mask,
-                          deferral_events, applied_events, already_deferred) &&
-          !are_replicated_fields(traversal_mask))
-        check_for_migration(analysis, applied_events); 
+                          deferral_events, applied_events, already_deferred))
+        check_for_migration(analysis, applied_events, expr_covers); 
     }
 
     //--------------------------------------------------------------------------
@@ -11324,13 +11326,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::check_for_migration(PhysicalAnalysis &analysis,
-                                             std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &applied_events, bool covers)
     //--------------------------------------------------------------------------
     {
-#ifndef DISABLE_EQUIVALENCE_SET_MIGRATION
-      // Never migrate when we are replicated or in the process of replicating
-      if (!replicated_states.empty() || !replication_changes.empty())
-        return;
+#ifndef LEGION_DISABLE_EQUIVALENCE_SET_MIGRATION
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
@@ -11394,6 +11393,11 @@ namespace Legion {
         sample_count = 0;
         return;
       }
+      // If we're replicated and the analysis is not exclusive and covering
+      // then it's not even safe to consider migrating this equivalence set
+      if ((replicated_owner_state != NULL) && (!analysis.exclusive || !covers ||
+          (analysis.collective_mapping != NULL)))
+        return;
       // Sort the current samples so that they are in order for
       // single epoch cases, for multi-epoch cases they will be
       // sorted by the summary computation below
@@ -11522,7 +11526,46 @@ namespace Legion {
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, done_migration);
       applied_events.insert(done_migration);
-#endif // DISABLE_EQUIVALENCE_SET MIGRATION
+      // If we have any replicated state then we need to invalidate that
+      // Note that this is only safe because we know that there is an
+      // exclusive user here without any collective mapping which means that
+      // they are blocking the mapping of all other potential users so its
+      // safe for them to perform the invalidation
+      if (replicated_owner_state != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(analysis.exclusive && covers);
+        assert(analysis.collective_mapping == NULL); 
+#endif
+        // Send out invalidations to all the replicated owner nodes and
+        // make sure nothing else can map until they are done
+        // Note this is only safe because of the check above stating that
+        // the analysis is exclusive and not collective
+        struct {
+          AddressSpaceID local;
+          DistributedID did;
+          Runtime *runtime;
+          std::set<RtEvent> &applied;
+          inline void apply(AddressSpaceID space)
+          {
+            if (space == local)
+              return;
+            RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(done);
+            }
+            runtime->send_equivalence_set_replication_invalidation(space, rez);
+            applied.insert(done);
+          }
+        } functor = { local_space, did, runtime, applied_events }; 
+        replicated_owner_state->nodes.map(functor);
+        delete replicated_owner_state;
+        replicated_owner_state = NULL;
+      }
+#endif // LEGION_DISABLE_EQUIVALENCE_SET MIGRATION
     }
 
     //--------------------------------------------------------------------------
@@ -11551,64 +11594,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::ReplicationChange::ReplicationChange(
-        CollectiveMapping *map, unsigned expected_arrivals, bool ad)
-      : mapping(map), ready_event(Runtime::create_rt_user_event()),
-        applied_event(Runtime::create_rt_user_event()),
-        remaining_arrivals(expected_arrivals), add(ad)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapping != NULL);
-#endif
-      mapping->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet::ReplicationChange::~ReplicationChange(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remaining_arrivals == 0);
-#endif
-      if (mapping->remove_reference())
-        delete mapping;
-      if (!remote_requests.empty())
-      {
-        for (FieldMaskSet<RemoteRequest>::iterator it =
-              remote_requests.begin(); it != remote_requests.end(); it++)
-          delete it->first;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::ReplicationChange::record_remote_request(
-        ReplicationChange *target, AddressSpaceID source, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(add);
-#endif
-      RemoteRequest *request = new RemoteRequest(target, source);
-      remote_requests.insert(request, mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::ReplicationChange::send_remote_responses(
-                          EquivalenceSet *set, const FieldMask &full_mask) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(add);
-      assert(!remote_requests.empty());
-#endif
-      for (FieldMaskSet<RemoteRequest>::const_iterator it =
-            remote_requests.begin(); it != remote_requests.end(); it++)
-        set->send_replication_response(it->first->source, it->first->target,
-                                       full_mask, it->second);
-    }
-
-    //--------------------------------------------------------------------------
     bool EquivalenceSet::is_remote_analysis(PhysicalAnalysis &analysis,
                       FieldMask &mask, std::set<RtEvent> &deferral_events,
                       std::set<RtEvent> &applied_events, const bool expr_covers)
@@ -11620,801 +11605,283 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!analysis.immutable);
 #endif
-        CollectiveMapping *mapping = analysis.get_replicated_mapping();
-        FieldMask replicated;
-        // Scan through each of our replicated states and see if they align
-        if (!replicated_states.empty() && 
-            !(replicated_states.get_valid_mask() * mask))
+        const CollectiveMapping &mapping = *analysis.get_replicated_mapping();
+        // Check to see if we have a replicated owner node
+        if ((replicated_owner_state == NULL) ||
+            !replicated_owner_state->nodes.contains(local_space))
         {
-          FieldMaskSet<CollectiveMapping> to_add;
-          std::vector<CollectiveMapping*> to_delete;
-          for (FieldMaskSet<CollectiveMapping>::iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)
+          // If we don't then we need to get an update on the 
+          // logical owner space so we can ensure that all copies
+          // of this analysis can agree on which one is going to 
+          // actually perform the traversal of the equivalence set
+          // See if we already have an outstanding request in flight
+          // Check to see if we already have a request in flight
+          if (replicated_owner_state == NULL)
+            request_replicated_owner_space(&mapping);
+          // Defer this until we get the response
+          if (!replicated_owner_state->ready.has_triggered())
           {
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-            // Check to see if they match or not
-            // If they match then we don't need to do anything
-            // If they don't match then we need to deal with that
-            if ((it->first != mapping) && ((*it->first) != (*mapping)))
+            analysis.defer_traversal(replicated_owner_state->ready, this, mask,
+                                     deferral_events, applied_events);
+            return true;
+          }
+        }
+        // Now figure out which analysis is going to perform the traversal
+        // If an analysis is already local to an equivalence set then we'll
+        // want it to do the traversal to minimimize communication. In the 
+        // case where the current logical owner space is not contained in
+        // the mapping then we'll simply pick the space in our collective
+        // that is closest to the owner in the set of linear space names
+        // (assuming some degree of locality).
+        if (!mapping.contains(logical_owner_space))
+        {
+          // There aren't any analyses that will be local to the
+          // logical owner space so we need to pick the closest one
+          if (logical_owner_space < mapping[0])
+          {
+            // Below the lower bound
+            if (local_space == mapping[0])
+              return false;
+          }
+          else if (logical_owner_space > mapping[mapping.size() - 1])
+          {
+            // Above the upper bound
+            if (local_space == mapping[mapping.size() - 1])
+              return false;
+          }
+          else
+          {
+            // Contained somewhere in the middle so binary
+            // search for the two nearest options
+            unsigned first = 0;
+            unsigned last = mapping.size() - 1;
+            unsigned mid = 0;
+            while (first <= last)
             {
-              // Check to see if we're a strict subset of the currently
-              // replicated states. If we are then we can do our invalidations
-              // collectively and update our own replicated states
-              if (it->first->contains(*mapping))
-              {
-                to_add.insert(mapping, overlap);
-                update_replicated_state(it->first, mapping, overlap,
-                                applied_events, false/*need lock*/);
-                it.filter(overlap);
-                if (!it->second)
-                  to_delete.push_back(it->first);
-                // These fields are all still replicated
-                replicated |= overlap;
-                if (replicated == mask)
-                  break;
-              }
-              // Else: there is no overlap here or a partial overlap which 
-              // means only some points can't see the replicated state 
-              // mapping, this prevents us from coming up with a coherent
-              // collective approach to intersecting the mapping, therefore
-              // we don't do anything. In the excluisve case we'll be able
-              // to change the mapping later, and in the non-exclusive case
-              // we'll deterministically pick one of the analyses to perform
-              // the mapping (and therefore also perform the invalidations)
-              // from the logical owner space
-            }
-            else
-            {
-              // These fields are replicated the right way so nothing to do
-              replicated |= overlap;
-              if (replicated == mask)
+              mid = (first + last) / 2;
+              const AddressSpaceID midval = mapping[mid];
+#ifdef DEBUG_LEGION
+              // Should never actually find it
+              assert(local_space != midval);
+#endif
+              if (local_space < midval)
+                last = mid - 1;
+              else if (midval < local_space)
+                first = mid + 1;
+              else
                 break;
             }
-          }
-          for (std::vector<CollectiveMapping*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            if (to_add.find(*it) != to_add.end())
-              continue;
-            replicated_states.erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                to_add.begin(); it != to_add.end(); it++)
-            if (replicated_states.insert(it->first, it->second))
-              it->first->add_reference();
-          if (!replicated_states.empty())
-            replicated_states.tighten_valid_mask();
-        }
-        if (replicated != mask)
-        {
-          // If we have any unreplicated fields then check to see if
-          // we can attempt to change the replicated mapping
-          if (!analysis.exclusive || !expr_covers)
-          {
-            // We're not exclusive, so we can't change the mapping,
-            // this means we need to pick one point to go through
-            // and update the mapping for the logical owner space of
-            // the equivalence set (which will also invalidate any
-            // of replicated copies of the equivalence set elsewhere)
-            // We can't rely on the logical_owner_space to be valid
-            // here in all cases because not all points in the 
-            // replicated analysis might be seeing an equivalence
-            // set with an up-to-date value after migration, therefore
-            // we need to pick one deterministically without consulting
-            // the logical_owner_space value
-            if (mapping->contains(owner_space))
-            {
-              // Everyone can agree on the owner space, so use this
-              // as a special, but common, case where the owner space
-              // is in the collective mapping, then the first analysis
-              // on the owner space will do the analysis
-              if (is_owner() && analysis.collective_first_local)
-              {
-                if (!is_logical_owner())
-                {
-                  const FieldMask unreplicated = mask - replicated;
-                  analysis.record_remote(this,unreplicated,logical_owner_space);
-                  if (!replicated)
-                    return true;
-                  mask &= replicated;
-                }
-              }
-              else // not doing the work so filter ourselves out
-              {
-                if (!replicated)
-                  return true;
-                mask &= replicated;
-              }
-            }
-            else
-            {
-              // Mapping doesn't contain the owner space, so we'll
-              // just have the first local collective on the first
-              // address space in the mapping do the work
-              if ((local_space == mapping->get_origin()) &&
-                    analysis.collective_first_local)
-              {
-                if (!is_logical_owner())
-                {
-                  const FieldMask unreplicated = mask - replicated;
-                  analysis.record_remote(this,unreplicated,logical_owner_space);
-                  if (!replicated)
-                    return true;
-                  mask &= replicated;
-                }
-              }
-              else // not doing the work so filter ourselves out
-              {
-                if (!replicated)
-                  return true;
-                mask &= replicated;
-              }
-            }
-          }
-          else // we're exlcusive so we can change the mapping
-          {
-            // A very important note for this case: all the copies
-            // of the equivalence set need to ensure that their down-stream
-            // children have gotten the updates before any physical analysis
-            // can take place and modify the equivalence set. The only way
-            // to know we've seen all the children is to make sure every child
-            // sends a request to its parent, even if it doesn't actually
-            // need any fields. Therefore we always build the collective
-            // tree of messages so we know when it's safe to run physical
-            // analysis on each equivalence set.
-            FieldMask unreplicated = mask - replicated;
-            // See which fields are locally valid already and therefore
-            // do not need any kind of request to be performed
-            if (!is_logical_owner())
-            {
-              // Anything that has a replicated state is locally valid
-              // if we we're not on the owner nodes
-              if (!replicated_states.empty())
-                unreplicated -= replicated_states.get_valid_mask();
-            }
-            else
-              unreplicated.clear();
-            // Check to see if we already have a replication change
-            // for this request or not, if we don't then make it and
-            // send the request to the next node in the collective tree
-            for (FieldMaskSet<ReplicationChange>::iterator it =
-                  replication_changes.begin(); it != 
-                  replication_changes.end(); it++)
-            {
-              if (it->second * mask)
-                continue;
 #ifdef DEBUG_LEGION
-              // Should be the same fields if they overlap
-              assert(it->second == mask);
-              assert(it->first->remaining_arrivals > 0);
+            assert(first != last);
 #endif
-              applied_events.insert(it->first->applied_event);
-              if (--it->first->remaining_arrivals == 0)
-              {
-                // We're the last expected arrival so we can prune
-                // this out of the list of changes and run the traversal
-                finalize_replication_change(it->first, it->second);
-                replication_changes.erase(it);
+            const unsigned diff_low = logical_owner_space - mapping[first];
+            const unsigned diff_high = mapping[last] - logical_owner_space;
+            if (diff_low < diff_high)
+            {
+              if (local_space == mapping[first])
                 return false;
-              }
-              else
-              {
-                // Defer the analysis until the change is ready
-                analysis.defer_traversal(it->first->ready_event, this, mask,
-                                            deferral_events, applied_events);
-                return true;
-              }
-            }
-            // If we get here then we need to send the state request
-            const AddressSpaceID origin = mapping->get_origin();
-            ReplicationChange *change = new ReplicationChange(mapping,
-                mapping->count_children(origin, local_space), true/*add*/);
-            applied_events.insert(change->applied_event);
-            // Send the message 
-            const bool owner_search = (origin == local_space);
-            if (!owner_search || !!unreplicated)
-            {
-              const AddressSpaceID target = owner_search ?
-                logical_owner_space : mapping->get_parent(origin, local_space);
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                mapping->pack(rez);
-                rez.serialize(mask);
-                rez.serialize(unreplicated);
-                rez.serialize(change);
-                rez.serialize(local_space);
-                rez.serialize<bool>(owner_search);
-              }
-              runtime->send_equivalence_set_replication_request(target, rez);
-              // See if we're going to need to wait on a response
-              if (!!unreplicated)
-                change->remaining_arrivals++;
-            }
-            // See if we're still waiting for a response, if we are then
-            // we should defer the change, otherwise we can finalize it
-            if (change->remaining_arrivals > 0)
-            {
-              replication_changes.insert(change, mask);
-              analysis.defer_traversal(change->ready_event, this, mask,
-                                      deferral_events, applied_events);
-              return true;
             }
             else
-              // If we fall through to here then we're not expecting any
-              // kind of response so we can finalize the change
-              finalize_replication_change(change, mask);
+            {
+              if (local_space == mapping[last])
+                return false;
+            }
           }
         }
-#ifdef DEBUG_LEGION
-        assert(!!mask);
-#endif
-        // We're all local at this point so continue the analysis
-        return false;
+        else 
+        {
+          // At least one node is local, see if we're it
+          if (logical_owner_space == local_space)
+            return false;
+        }
+        return true;
       }
       else
       {
         // See if we are the logical owner or not
-        if (is_logical_owner())
+        if (!is_logical_owner())
         {
-          // See if we need to send any replicated invalidations
-          if (!analysis.immutable && !replicated_states.empty() && 
-              !(replicated_states.get_valid_mask() * mask))
-          {
-            // Send invalidations and record effects for when they are done
-            std::vector<CollectiveMapping*> to_delete;
-            for (FieldMaskSet<CollectiveMapping>::iterator it =
-                 replicated_states.begin(); it != replicated_states.end(); it++)
-            {
-              const FieldMask overlap = it->second & mask;
-              if (!overlap)
-                continue;
-              // Check to see if this owner is included in the replicated
-              // state, if it is then we can send the invalidations 
-              // asynchronously and have them complete in the background,
-              // otherwise we need to wait for an update to be flushed here
-              // because the state in this equivalence set might be invalid
-              if (!it->first->contains(local_space))
-              {
-                // Make a replication change object for the change that
-                // we're going to perform and then request an update from
-                // the first space in the previous mapping
-                ReplicationChange *change =
-                 new ReplicationChange(it->first, 1/*arrivals*/, false/*add*/);
-                Serializer rez;
-                {
-                  RezCheck z(rez);
-                  rez.serialize(did);
-                  rez.serialize<size_t>(0); // no mapping
-                  rez.serialize(overlap);
-                  rez.serialize(overlap);
-                  rez.serialize(change);
-                  rez.serialize(local_space);
-                  rez.serialize<bool>(false); // not owner search
-                }
-                runtime->send_equivalence_set_replication_request(
-                                      it->first->get_origin(), rez);
-                replication_changes.insert(change, overlap);
-                applied_events.insert(change->applied_event);
-              }
-              else
-                update_replicated_state(it->first, NULL/*not collective*/,
-                              overlap, applied_events, false/*need lock*/);
-              it.filter(overlap);
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-            for (std::vector<CollectiveMapping*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              replicated_states.erase(*it);
-              if ((*it)->remove_reference())
-                delete (*it);
-            }
-            replicated_states.tighten_valid_mask();
-          }
-          // See if there are any outstanding replication changes that
-          // we need to wait for before we can actually run
-          if (!replication_changes.empty() &&
-              !(replication_changes.get_valid_mask() * mask))
-          {
-            std::vector<RtEvent> ready_events;
-            for (FieldMaskSet<ReplicationChange>::const_iterator it =
-                  replication_changes.begin(); it !=
-                  replication_changes.end(); it++)
-            {
-              if (it->second * mask)
-                continue;
-              ready_events.push_back(it->first->ready_event);
-            }
-            if (!ready_events.empty())
-            {
-              RtEvent deferral_event = Runtime::merge_events(ready_events);
-              // No need to check to see if it is triggered or not
-              // because the only way the events trigger is if this
-              // object has already been removed
-              // Defer running this analysis until it's ready
-              analysis.defer_traversal(deferral_event, this, mask,
-                                  deferral_events, applied_events);
-              return true;
-            }
-          }
-          // At this point everything is local and we're good to go
-          return false;
-        }
-        else
-        {
-          if (analysis.immutable && !replicated_states.empty() &&
-              !(replicated_states.get_valid_mask() * mask))
-          {
-            // We can do the traversal here for anything that's
-            // replicated because we aren't mutating state
-            FieldMask replicated;
-            for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                 replicated_states.begin(); it != replicated_states.end(); it++)
-            {
-              const FieldMask overlap = mask & it->second;
-              if (!overlap)
-                continue;
-              // Can only traverse if it is local here
-              if (it->first->contains(local_space))
-                replicated |= overlap;
-            }
-            if (!!replicated)
-            {
-              if (replicated != mask)
-              {
-                // Record the unreplicated fields as remote
-                const FieldMask unreplicated = mask - replicated;
-                // Send the unreplicated ones to the owner
-                analysis.record_remote(this, unreplicated, logical_owner_space);
-                // Reduce the traversal mask down to just the replicated fields
-                mask = replicated;
-              }
-              // all remaining fields are local here, so we can traverse
-              return false;
-            }
-            // Otherwise fall through and send it remote
-          }
           // Not the logical owner, so just need to send it to the owner
           analysis.record_remote(this, mask, logical_owner_space);
           return true;
         }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::update_replicated_state(CollectiveMapping *oldstate,
-        CollectiveMapping *newstate, const FieldMask &update_mask,
-        std::set<RtEvent> &applied_events, bool need_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (need_lock)
-      {
-        AutoLock eq(eq_lock);
-        update_replicated_state(oldstate, newstate, update_mask,
-                                applied_events, false/*need lock*/);
-        return;
-      }
-      if (newstate != NULL)
-      {
-        // This is the collective update case
-        if (newstate->contains(local_space))
-        {
-          // Find all the spaces not covered by mapping and then round-robin
-          // them amongst the spaces in the mapping
-          std::vector<AddressSpaceID> uncovered;
-          const CollectiveMapping &old_ref = *oldstate;
-          const CollectiveMapping &new_ref = *newstate;
-          unsigned old_index = 0;
-          for (unsigned idx = 0; idx < new_ref.size(); idx++, old_index++)
-          {
-            const AddressSpaceID newspace = new_ref[idx];
-            while ((old_index < old_ref.size()) &&
-                   (old_ref[old_index] < newspace))
-              uncovered.push_back(old_ref[old_index++]);
-            if (old_index == old_ref.size())
-              break;
-          }
-          while (old_index < old_ref.size())
-            uncovered.push_back(old_ref[old_index++]);
-          for (unsigned idx = new_ref.find_index(local_space);
-                idx < uncovered.size(); idx += new_ref.size())
-          {
-            const RtUserEvent applied = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              oldstate->pack(rez);
-              newstate->pack(rez);
-              rez.serialize(update_mask);
-              rez.serialize(applied);
-            }
-            runtime->send_equivalence_set_replication_update(
-                                         uncovered[idx], rez);
-            applied_events.insert(applied);
-          }
-          // Also perform a check to see if the new mapping contains
-          // the logical owner space, if it doesn't then we need to 
-          // send an invalidation to the owner as well
-          if (!newstate->contains(logical_owner_space) &&
-              (local_space == newstate->get_origin()))
-          {
-            const RtUserEvent applied = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              oldstate->pack(rez);
-              newstate->pack(rez);
-              rez.serialize(update_mask);
-              rez.serialize(applied);
-            }
-            runtime->send_equivalence_set_replication_update(
-                                    logical_owner_space, rez);
-            applied_events.insert(applied);
-          }
-        }
-      }
-      else
-      {
-        // This is the tree broadcast case from the logical owner space
-        if (oldstate->contains(logical_owner_space))
-        {
-          std::vector<AddressSpaceID> children;
-          oldstate->get_children(logical_owner_space, local_space, children);
-          // Send invalidations to any children
-          for (unsigned idx = 0; idx < children.size(); idx++)
-          {
-            const RtUserEvent applied = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              oldstate->pack(rez);
-              rez.serialize<size_t>(0); // no newstate
-              rez.serialize(update_mask);
-              rez.serialize(applied);
-            }
-            runtime->send_equivalence_set_replication_update(children[idx],rez);
-            applied_events.insert(applied);
-          }
-        }
         else
-        {
-          // Old state does not contain the logical owner space, so if we're
-          // the logical owner space we send it to the origin and then start
-          // the tree broadcast from there
-          const AddressSpaceID origin = oldstate->get_origin();
-          if (!is_logical_owner())
-          {
-            std::vector<AddressSpaceID> children;
-            oldstate->get_children(origin, local_space, children);
-            // Send invalidations to any children
-            for (unsigned idx = 0; idx < children.size(); idx++)
-            {
-              const RtUserEvent applied = Runtime::create_rt_user_event();
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                oldstate->pack(rez);
-                rez.serialize<size_t>(0); // no newstate
-                rez.serialize(update_mask);
-                rez.serialize(applied);
-              }
-              runtime->send_equivalence_set_replication_update(children[idx],
-                                                               rez);
-              applied_events.insert(applied);
-            }
-          }
-          else
-          {
-            const RtUserEvent applied = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              oldstate->pack(rez);
-              rez.serialize<size_t>(0); // no newstate
-              rez.serialize(update_mask);
-              rez.serialize(applied);
-            }
-            runtime->send_equivalence_set_replication_update(origin, rez);
-            applied_events.insert(applied);
-          }
-        }
-      }
-      // Now perform the local invalidation of the replicated state
-      if ((newstate == NULL) || !newstate->contains(local_space))
-        invalidate_state(set_expr, true/*covers*/,
-                         update_mask, RtEvent::NO_RT_EVENT);
-      // When we're done find the replicated state and remove it
-      std::vector<CollectiveMapping*> to_delete;
-      for (FieldMaskSet<CollectiveMapping>::iterator it = 
-            replicated_states.begin(); it != replicated_states.end(); it++)
-      {
-        const FieldMask overlap = update_mask & it->second;
-        if (!overlap)
-          continue;
-#ifdef DEBUG_LEGION
-        assert((it->first == oldstate) || ((*it->first) == (*oldstate)));
-#endif
-        it.filter(overlap);
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      for (std::vector<CollectiveMapping*>::const_iterator it =
-            to_delete.begin(); it != to_delete.end(); it++)
-      {
-        replicated_states.erase(*it);
-        if ((*it)->remove_reference())
-          delete (*it);
-      }
-      // Now we can add the new mapping if we are on one of the nodes that
-      // is part of the new replicated state
-      if ((newstate != NULL) &&
-          (newstate->contains(local_space) || is_logical_owner()))
-      {
-        if (replicated_states.insert(newstate, update_mask))
-          newstate->add_reference();
+          return false;
       }
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::finalize_replication_change(ReplicationChange *change,
-                                                   const FieldMask &change_mask)
+    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(AddressSpaceID s)
+      : ready(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(change->remaining_arrivals == 0);
-#endif
-      if (!change->remote_requests.empty()) 
-        change->send_remote_responses(this, change_mask);
-      std::set<RtEvent> applied_events;
-      if (change->add)
-      {
-        if (!replicated_states.empty() && 
-            !(change_mask * replicated_states.get_valid_mask()))
-        {
-          FieldMask remainder = change_mask;
-          // Go through and issue updates to any replicated states
-          std::vector<CollectiveMapping*> to_delete;
-          for (FieldMaskSet<CollectiveMapping>::iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)
-          {
-            const FieldMask overlap = change_mask & it->second;
-            if (!overlap)
-              continue;
-            update_replicated_state(it->first, change->mapping, overlap,
-                                    applied_events, false/*need lock*/);
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-            remainder -= overlap;
-            if (!remainder)
-              break;
-          }
-          // Add it for any remainder fields
-          if (!!remainder && 
-              replicated_states.insert(change->mapping, remainder))
-            change->mapping->add_reference();
-          for (std::vector<CollectiveMapping*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            replicated_states.erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-        }
-        else
-        {
-          // We can just add the new mapping to the replicated states
-          // since there is nothing that needs to be updated
-          if (replicated_states.insert(change->mapping, change_mask))
-            change->mapping->add_reference();
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(is_logical_owner());
-#endif
-        update_replicated_state(change->mapping, NULL/*not collective*/,
-                        change_mask, applied_events, false/*need lock*/);
-      }
-      // Trigger our events for when they are ready
-      Runtime::trigger_event(change->ready_event);
-      if (!applied_events.empty())
-        Runtime::trigger_event(change->applied_event,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(change->applied_event);
-      delete change;
+      nodes.insert(s);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_request(CollectiveMapping *mapping,
-      const FieldMask &full_mask, const FieldMask &request_mask,
-      ReplicationChange *target, const AddressSpaceID source, bool owner_search)
+    void EquivalenceSet::request_replicated_owner_space(
+                                               const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
-      if (owner_search && !is_logical_owner())
-      {
 #ifdef DEBUG_LEGION
-        assert(mapping != NULL);
+      assert(!is_logical_owner());
+      assert(replicated_owner_state == NULL);
 #endif
-        // Keep forwarding this on to the logical owner
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          mapping->pack(rez);
-          rez.serialize(full_mask);
-          rez.serialize(request_mask);
-          rez.serialize(target);
-          rez.serialize(source);
-          rez.serialize<bool>(owner_search);
-        }
-        runtime->send_equivalence_set_replication_request(logical_owner_space,
-                                                          rez);
-        return;
-      }
-      if ((mapping != NULL) && !owner_search)
+      replicated_owner_state = new ReplicatedOwnerState(local_space);
+      if (mapping != NULL)
       {
-        // Find or create the local replication change object here
-        // and then record ourselves if we have a remote request
-        for (FieldMaskSet<ReplicationChange>::iterator it =
-              replication_changes.begin(); it !=
-              replication_changes.end(); it++)
-        {
-          if (full_mask * it->second)
-            continue;
-#ifdef DEBUG_LEGION
-          assert(full_mask == it->second);
-          assert(it->first->remaining_arrivals > 0);
-#endif
-          if (!!request_mask)
-            it->first->record_remote_request(target, source, request_mask);
-          if (--it->first->remaining_arrivals == 0)
-          {
-            finalize_replication_change(it->first, it->second);
-            replication_changes.erase(it);
-          }
-          return;
-        }
-        // If we get here then we need to make it
-        // Figure out what fields we need to request
-        FieldMask unreplicated;
-        if (!is_logical_owner())
-          // Any fields that are already replicated are good
-          unreplicated = full_mask - replicated_states.get_valid_mask();
-        // Create the replication change and record it
+        // Check to see if we're the origin of the mapping or not
         const AddressSpaceID origin = mapping->get_origin();
-        ReplicationChange *change = new ReplicationChange(mapping,
-            mapping->count_children(origin, local_space), true/*add*/);
-        if (!!request_mask)
-          change->record_remote_request(target, source, request_mask);
-        if ((origin != local_space) || !!unreplicated)
+        if (local_space != origin)
         {
-          const bool owner_search = (origin == local_space);
-          const AddressSpaceID target = owner_search ?
-            logical_owner_space : mapping->get_parent(origin, local_space);
+          const AddressSpaceID parent = mapping->get_parent(origin,local_space);
+          // Send the request on to our parent space
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
             mapping->pack(rez);
-            rez.serialize(full_mask);
-            rez.serialize(unreplicated);
-            rez.serialize(change);
-            rez.serialize(local_space);
-            rez.serialize<bool>(owner_search);
           }
-          runtime->send_equivalence_set_replication_request(target, rez);
-          // Increment the count for the expected arrivals for the response
-          // if we're actually expecting one
-          if (!!unreplicated)
-          {
-            change->remaining_arrivals++;
-            replication_changes.insert(change, full_mask);
-            return;
-          }
+          runtime->send_equivalence_set_replication_request(parent, rez);
         }
-        // If we make it here then finalize the replication change
-        finalize_replication_change(change, full_mask);
+        else
+        {
+          // Send the request on to whomever we thought was the previous owner
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(0); // no mapping
+          }
+          runtime->send_equivalence_set_replication_request(logical_owner_space,
+                                                            rez);
+        }
       }
       else
-        // In this case we should just package up the replication state
-        // and send it back to whichever node requested it
-        send_replication_response(source, target, full_mask, request_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::send_replication_response(AddressSpaceID target,
-                   ReplicationChange *remote_change, const FieldMask &full_mask,
-                   const FieldMask &request_mask)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
       {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(remote_change);
-        rez.serialize(full_mask);
-        pack_state(rez, target, set_expr, true/*covers*/,
-                   request_mask, false/*pack guards*/);
-      }
-      runtime->send_equivalence_set_replication_response(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::process_replication_response(Deserializer &derez,
-                                                      AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ReplicationChange *change;
-      derez.deserialize(change);
-      FieldMask full_mask;
-      derez.deserialize(full_mask);
-      std::set<RtEvent> unpacked_events;
-      unpack_state_and_apply(derez, source, false/*forward*/, unpacked_events);
-      // Defer the completion if there are any unpacked events that haven't
-      // fully triggered yet
-      if (!unpacked_events.empty())
-      {
-        const RtEvent unpacked = Runtime::merge_events(unpacked_events);
-        if (unpacked.exists() && !unpacked.has_triggered())
+        // Send the request on to whomever we thought was the previous owner
+        Serializer rez;
         {
-          // Defer the removal until we're done unpacking
-          DeferPendingReplicationArgs args(this, change, full_mask);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, unpacked);
-          return;
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<size_t>(0); // no mapping
         }
+        runtime->send_equivalence_set_replication_request(logical_owner_space,
+                                                          rez);
       }
-      // If we get here then we can remove our expected arrival
-      finalize_replication_response(change, full_mask);
-       
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::finalize_replication_response(
-                          ReplicationChange *change, const FieldMask &full_mask)
+    void EquivalenceSet::process_replication_request(AddressSpaceID source,
+                                               const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+      // Check to see if we are the owner
+      if (is_logical_owner())
+      {
+        // We're the owner, so record that we have replicated owners elsewhere
 #ifdef DEBUG_LEGION
-      assert(change->remaining_arrivals > 0); 
+        assert((replicated_owner_state == NULL) ||
+               !replicated_owner_state->nodes.contains(source));
 #endif
-      if ((--change->remaining_arrivals) == 0)
-        finalize_replication_change(change, full_mask);
+        if (replicated_owner_state == NULL)
+          replicated_owner_state = new ReplicatedOwnerState(local_space);
+        replicated_owner_state->nodes.insert(source);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(local_space);
+        }
+        runtime->send_equivalence_set_replication_response(source, rez);
+      }
+      else
+      {
+        // If we don't already have an outstanding request then make one
+        if (replicated_owner_state == NULL)
+          request_replicated_owner_space(mapping);
+        replicated_owner_state->nodes.insert(source);
+      }
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::DeferPendingReplicationArgs::DeferPendingReplicationArgs(
-                   EquivalenceSet *s, ReplicationChange *c, const FieldMask &m)
-      : LgTaskArgs<DeferPendingReplicationArgs>(implicit_provenance),
-        set(s), change(c), mask(new FieldMask(m))
+    void EquivalenceSet::process_replication_response(AddressSpaceID owner)
     //--------------------------------------------------------------------------
     {
+      RtUserEvent to_trigger;
+      {
+        AutoLock eq(eq_lock);
+        logical_owner_space = owner;
+#ifdef DEBUG_LEGION
+        assert(!is_logical_owner());
+        assert(replicated_owner_state != NULL);
+#endif
+        // Send out messages to all the other nodes that requested them
+        struct {
+          AddressSpaceID local, owner;
+          DistributedID did;
+          Runtime *runtime;
+          inline void apply(AddressSpaceID space) const
+          {
+            if (space == local)
+              return;
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(owner);
+            }
+            runtime->send_equivalence_set_replication_response(space, rez);
+          }
+        } functor = { local_space, owner, did, runtime };
+        replicated_owner_state->nodes.map(functor);
+        to_trigger = replicated_owner_state->ready;
+      }
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_pending_replication(const void *args)
+    void EquivalenceSet::process_replication_invalidation(RtUserEvent done)
     //--------------------------------------------------------------------------
     {
-      const DeferPendingReplicationArgs *dargs = 
-        (const DeferPendingReplicationArgs*)args;
-      dargs->set->finalize_replication_change(dargs->change, *(dargs->mask));
-      delete (dargs->mask);
+      std::vector<RtEvent> applied_events;
+      {
+        AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+        assert(replicated_owner_state != NULL);
+        assert(replicated_owner_state->ready.has_triggered());
+#endif
+        // Send out any invalidations
+        struct {
+          AddressSpaceID local;
+          DistributedID did;
+          Runtime *runtime;
+          std::vector<RtEvent> &applied;
+          inline void apply(AddressSpaceID space)
+          {
+            if (space == local)
+              return;
+            RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(done);
+            }
+            runtime->send_equivalence_set_replication_invalidation(space, rez);
+            applied.push_back(done);
+          }
+        } functor = { local_space, did, runtime, applied_events }; 
+        replicated_owner_state->nodes.map(functor);
+
+        delete replicated_owner_state;
+        replicated_owner_state = NULL;
+      }
+      if (!applied_events.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -16800,7 +16267,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_request(
-                                          Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -16817,42 +16284,15 @@ namespace Legion {
         mapping = new CollectiveMapping(derez, num_spaces);
         mapping->add_reference();
       }
-      FieldMask full_mask, request_mask;
-      derez.deserialize(full_mask);
-      derez.deserialize(request_mask);
-      ReplicationChange *change;
-      derez.deserialize(change);
-      AddressSpaceID source;
-      derez.deserialize(source);
-      bool owner_search;
-      derez.deserialize(owner_search);
-
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->process_replication_request(mapping, full_mask, request_mask,
-                                       change, source, owner_search);
+      set->process_replication_request(source, mapping);
       if ((mapping != NULL) && mapping->remove_reference())
         delete mapping;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_replication_response(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->process_replication_response(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_replication_update(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -16862,39 +16302,31 @@ namespace Legion {
       RtEvent ready_event;
       EquivalenceSet *set = 
         runtime->find_or_request_equivalence_set(did, ready_event);
-      CollectiveMapping *oldstate = NULL, *newstate = NULL;
-      size_t num_spaces;
-      derez.deserialize(num_spaces);
-      if (num_spaces > 0)
-      {
-        oldstate = new CollectiveMapping(derez, num_spaces);
-        oldstate->add_reference();
-      }
-      derez.deserialize(num_spaces);
-      if (num_spaces > 0)
-      {
-        newstate = new CollectiveMapping(derez, num_spaces);
-        newstate->add_reference();
-      }
-      FieldMask update_mask;
-      derez.deserialize(update_mask);
-      RtUserEvent applied_event;
-      derez.deserialize(applied_event);
+      AddressSpaceID owner;
+      derez.deserialize(owner);
 
-      std::set<RtEvent> applied_events;
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->update_replicated_state(oldstate, newstate,
-          update_mask, applied_events, true/*need lock*/);
-      if (!applied_events.empty())
-        Runtime::trigger_event(applied_event, 
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(applied_event);
-      if ((oldstate != NULL) && oldstate->remove_reference())
-        delete oldstate;
-      if ((newstate != NULL) && newstate->remove_reference())
-        delete newstate;
+      set->process_replication_response(owner);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_replication_invalidation(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->process_replication_invalidation(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -16944,14 +16376,6 @@ namespace Legion {
         }
         else
           rez.serialize(logical_owner_space);
-        // Also pack up any replicated states to send
-        rez.serialize<size_t>(replicated_states.size());
-        for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-              replicated_states.begin(); it != replicated_states.end(); it++)
-        {
-          it->first->pack(rez);
-          rez.serialize(it->second);
-        }
       }
       runtime->send_equivalence_set_response(target, rez);
     }
@@ -16996,27 +16420,8 @@ namespace Legion {
       else
         set = new EquivalenceSet(runtime, did, source, logical_owner,
                                  node, false/*register now*/);
-      set->unpack_replicated_states(derez);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::unpack_replicated_states(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_states;
-      derez.deserialize(num_states);
-      for (unsigned idx = 0; idx < num_states; idx++)
-      {
-        size_t total_spaces;
-        derez.deserialize(total_spaces);
-        CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
-        FieldMask mask;
-        derez.deserialize(mask);
-        if (replicated_states.insert(mapping, mask))
-          mapping->add_reference();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -17865,93 +17270,22 @@ namespace Legion {
       AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
       if (!is_logical_owner())
       {
-        FieldMask remote_mask = mask;
-        if (!invalidate_overlap && !replicated_states.empty() &&
-            !(mask * replicated_states.get_valid_mask()))
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
         {
-          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)
-          {
-            if (remote_mask * it->second)
-              continue;
-            if (!it->first->contains(local_space))
-              continue;
-            remote_mask -= it->second;
-            if (!remote_mask)
-              break;
-          }
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(dst->did);
+          rez.serialize(local_space);
+          rez.serialize(dst->region_node->row_source->handle);
+          rez.serialize(mask);
+          rez.serialize(done_event);
+          rez.serialize<bool>(invalidate_overlap);
+          rez.serialize<bool>(forward_to_owner);
         }
-        if (!!remote_mask)
-        {
-          const RtUserEvent done_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(dst->did);
-            rez.serialize(local_space);
-            rez.serialize(dst->region_node->row_source->handle);
-            rez.serialize(remote_mask);
-            rez.serialize(done_event);
-            rez.serialize<bool>(invalidate_overlap);
-            rez.serialize<bool>(forward_to_owner);
-          }
-          runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
-          applied_events.insert(done_event);
-          mask -= remote_mask;
-          if (!mask)
-            return;
-        }
-      }
-      else
-      {
-        // Another corner case here: with replicated states we can have 
-        // replicated states that don't contain the logical owner space
-        // so we might need to forward on the request to a remote copy
-        if (!replicated_states.empty() && 
-            !(mask * replicated_states.get_valid_mask()))
-        {
-          FieldMaskSet<CollectiveMapping> to_invalidate;
-          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)
-          {
-            if (it->first->contains(local_space))
-              continue;
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-            const RtUserEvent done_event = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(dst->did);
-              rez.serialize(local_space);
-              rez.serialize(dst->region_node->row_source->handle);
-              rez.serialize(overlap);
-              rez.serialize(done_event);
-              rez.serialize<bool>(invalidate_overlap);
-              rez.serialize<bool>(forward_to_owner);
-            }
-            runtime->send_equivalence_set_clone_request(it->first->get_origin(),
-                                                        rez);
-            applied_events.insert(done_event);
-            if (invalidate_overlap)
-              to_invalidate.insert(it->first, overlap);
-            mask -= overlap;
-            if (!mask)
-              break;
-          }
-          if (invalidate_overlap)
-          {
-            for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                  to_invalidate.begin(); it != to_invalidate.end(); it++)
-              update_replicated_state(it->first, NULL/*new state*/,
-                  it->second, applied_events, false/*need lock*/);
-          }
-          if (!mask)
-            return;
-        }
+        runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
+        applied_events.insert(done_event);
+        return;
       }
       // If we get here, we're performing the clone locally for these fields
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
@@ -18017,95 +17351,22 @@ namespace Legion {
       AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
       if (!is_logical_owner())
       {
-        bool forward = false;
-        if (!invalidate_overlap)
+        const RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
         {
-          // Check to see if we have replicated data for the all fields to use
-          FieldMask remaining = mask;
-          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)  
-          {
-            if (remaining * mask)
-              continue;
-            if (!it->first->contains(local_space))
-              continue;
-            remaining -= it->second;
-            if (!remaining)
-              break;
-          }
-          forward = !!remaining;
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(target);
+          rez.serialize(target_space);
+          rez.serialize(target_node->handle);
+          rez.serialize(mask);
+          rez.serialize(done_event);
+          rez.serialize<bool>(invalidate_overlap);
+          rez.serialize<bool>(forward_to_owner);
         }
-        else // Always send any invalidations back to the owner
-          forward = true;
-        if (forward)
-        {
-          const RtUserEvent done_event = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(target);
-            rez.serialize(target_space);
-            rez.serialize(target_node->handle);
-            rez.serialize(mask);
-            rez.serialize(done_event);
-            rez.serialize<bool>(invalidate_overlap);
-            rez.serialize<bool>(forward_to_owner);
-          }
-          runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
-          applied_events.insert(done_event);
-          return;
-        }
-      }
-      else
-      {
-        // Another corner case here: with replicated states we can have 
-        // replicated states that don't contain the logical owner space
-        // so we might need to forward on the request to a remote copy
-        if (!replicated_states.empty() &&
-            !(mask * replicated_states.get_valid_mask()))
-        {
-          FieldMaskSet<CollectiveMapping> to_invalidate;
-          for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                replicated_states.begin(); it != replicated_states.end(); it++)
-          {
-            if (it->first->contains(local_space))
-              continue;
-            const FieldMask overlap = mask & it->second;
-            if (!overlap)
-              continue;
-            const RtUserEvent done_event = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(target);
-              rez.serialize(target_space);
-              rez.serialize(target_node->handle);
-              rez.serialize(overlap);
-              rez.serialize(done_event);
-              rez.serialize<bool>(invalidate_overlap);
-              rez.serialize<bool>(forward_to_owner);
-            }
-            runtime->send_equivalence_set_clone_request(it->first->get_origin(),
-                                                        rez);
-            applied_events.insert(done_event);
-            if (invalidate_overlap)
-              to_invalidate.insert(it->first, overlap);
-            mask -= overlap;
-            if (!mask)
-              break;
-          }
-          if (invalidate_overlap)
-          {
-            for (FieldMaskSet<CollectiveMapping>::const_iterator it =
-                  to_invalidate.begin(); it != to_invalidate.end(); it++)
-              update_replicated_state(it->first, NULL/*new state*/,
-                  it->second, applied_events, false/*need lock*/);
-          }
-          if (!mask)
-            return;
-        }
+        runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
+        applied_events.insert(done_event);
+        return;
       }
       IndexSpaceExpression *overlap = 
         runtime->forest->intersect_index_spaces(set_expr, target_node); 

@@ -375,7 +375,6 @@ namespace Legion {
       LG_TRANSITIVE_REDUCTION_TASK_ID,
       LG_DELETE_TEMPLATE_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
-      LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
       LG_DEFER_RELEASE_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
@@ -501,7 +500,6 @@ namespace Legion {
         "Template Transitive Reduction",                          \
         "Delete Physical Template",                               \
         "Defer Equivalence Set Make Owner",                       \
-        "Defer Pending Equivalence Set Replication",              \
         "Defer Equivalence Set Apply State",                      \
         "Defer Equivalence Set Remove References",                \
         "Defer Remote Reference Update",                          \
@@ -866,7 +864,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_INVALIDATE_TRACKERS,
       SEND_EQUIVALENCE_SET_REPLICATION_REQUEST,
       SEND_EQUIVALENCE_SET_REPLICATION_RESPONSE,
-      SEND_EQUIVALENCE_SET_REPLICATION_UPDATE,
+      SEND_EQUIVALENCE_SET_REPLICATION_INVALIDATION,
       SEND_EQUIVALENCE_SET_MIGRATION,
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
       SEND_EQUIVALENCE_SET_MAKE_OWNER,
@@ -1085,7 +1083,7 @@ namespace Legion {
         "Send Equivalence Set Invalidate Trackers",                   \
         "Send Equivalence Set Replication Request",                   \
         "Send Equivalence Set Replication Response",                  \
-        "Send Equivalence Set Replication Update",                    \
+        "Send Equivalence Set Replication Invalidation",              \
         "Send Equivalence Set Migration",                             \
         "Send Equivalence Set Owner Update",                          \
         "Send Equivalence Set Make Owner",                            \
