@@ -705,7 +705,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   __CUDA_HD__ inline Domain::Domain(const Domain &other)
-    : is_id(other.is_id), is_type(other.is_type), dim(other.dim)
+    : is_id(other.is_id), is_type(is_id > 0 ? other.is_type : 0), dim(other.dim)
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < 2*MAX_RECT_DIM; i++)
@@ -780,7 +780,8 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     is_id = other.is_id;
-    is_type = other.is_type;
+    // Like this for backwards compatibility
+    is_type = (is_id > 0) ? other.is_type : 0;
     dim = other.dim;
     for(int i = 0; i < 2*dim; i++)
       rect_data[i] = other.rect_data[i];
