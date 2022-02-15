@@ -1185,16 +1185,16 @@ TARGET_BIN_FILES := $(addprefix $(strip $(PREFIX))/bin/,$(INSTALL_BIN_FILES))
 TARGET_INC_FILES := $(addprefix $(strip $(PREFIX))/include/,$(INSTALL_INC_FILES))
 TARGET_LIB_FILES := $(addprefix $(strip $(PREFIX))/lib/,$(INSTALL_LIB_FILES))
 install: $(TARGET_HEADERS) $(TARGET_BIN_FILES) $(TARGET_INC_FILES) $(TARGET_LIB_FILES)
-$(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/%
+$(TARGET_HEADERS) : $(strip $(PREFIX))/include/% : $(LG_RT_DIR)/% $(OUTFILE)
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_BIN_FILES) : $(strip $(PREFIX))/bin/% : %
+$(TARGET_BIN_FILES) : $(strip $(PREFIX))/bin/% : % $(OUTFILE)
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : %
+$(TARGET_INC_FILES) : $(strip $(PREFIX))/include/% : % $(OUTFILE)
 	mkdir -p $(dir $@)
 	cp $< $@
-$(TARGET_LIB_FILES) : $(strip $(PREFIX))/lib/% : %
+$(TARGET_LIB_FILES) : $(strip $(PREFIX))/lib/% : % $(OUTFILE)
 	mkdir -p $(dir $@)
 	cp $< $@
 else
