@@ -342,7 +342,7 @@ namespace Realm {
     };
     Strategy strategy;
     gex_Rank_t target;
-    gex_EP_Index_t target_ep_index;
+    gex_EP_Index_t source_ep_index, target_ep_index;
     unsigned short msgid;
     uintptr_t dest_payload_addr;
     void *temp_buffer;

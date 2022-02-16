@@ -1810,13 +1810,16 @@ namespace Realm {
               PendingPutHeader *new_head = prev_put->next_put.load();
               assert(new_head);
               put_head.store(new_head);
+	      // fix up 'cur_put' to the part of the list we didn't do because
+	      //   we didn't know existed until now
+	      cur_put = new_head;
             }
           }
         }
 
         // now it's safe to free the put headers we sent
         PendingPutHeader *del_put = orig_put;
-        while(del_put && (del_put != cur_put)) {
+        while(del_put != cur_put) {
           PendingPutHeader *next_del = del_put->next_put.load();
           internal->put_alloc.free_obj(del_put);
           del_put = next_del;
@@ -3601,6 +3604,7 @@ namespace Realm {
 
     msg->strategy = PreparedMessage::STRAT_UNKNOWN;
     msg->target = target;
+    msg->source_ep_index = 0; // we may adjust this below
     msg->target_ep_index = target_ep_index;
     msg->msgid = msgid;
     msg->dest_payload_addr = dest_payload_addr;
@@ -3750,6 +3754,8 @@ namespace Realm {
           assert(0);
 	}
 
+	msg->source_ep_index = srcseg->ep_index;
+
 	// we can use long if both endpoints are AM-capable (currently only
 	//  prim endpoint is), otherwise rget
 	bool use_long = (!module->cfg_force_rma &&
@@ -3759,11 +3765,15 @@ namespace Realm {
         //  per-endpoint basis?
         bool use_rmaput = (!use_long && module->cfg_use_rma_put);
 
-	// an rget is actually sent to the prim endpoint on the other side
-	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(target,
-							  ((use_long || use_rmaput) ?
-							     target_ep_index :
-							     0));
+	XmitSrcDestPair *xpair;
+	if(use_long || use_rmaput) {
+	  xpair = xmitsrcs[srcseg->ep_index]->lookup_pair(target,
+							  target_ep_index);
+	} else {
+	  // an rget is actually sent between prim endpoints
+	  xpair = xmitsrcs[0]->lookup_pair(target, 0);
+	}
+
 	if(imm_ok && xpair->has_packets_queued()) {
 	  // suppress immediate mode
 	  imm_ok = false;
@@ -4552,9 +4562,12 @@ namespace Realm {
                                  &lc_event :
                                  GEX_EVENT_DEFER);
 
+#ifdef DEBUG_REALM
 	const SegmentInfo *srcseg = find_segment(payload_base);
         assert(srcseg);
-        gex_TM_t pair = gex_TM_Pair(eps[srcseg->ep_index],
+	assert(srcseg->ep_index == msg->source_ep_index);
+#endif
+        gex_TM_t pair = gex_TM_Pair(eps[msg->source_ep_index],
                                     msg->target_ep_index);
         gex_Event_t rc_event = gex_RMA_PutNB(pair,
                                              msg->target,
@@ -4625,8 +4638,8 @@ namespace Realm {
 			    nullptr, payload_size);
 	}
 
-	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(msg->target,
-							  msg->target_ep_index);
+	XmitSrcDestPair *xpair = xmitsrcs[msg->source_ep_index]->lookup_pair(msg->target,
+									     msg->target_ep_index);
 	xpair->commit_pbuf_put(msg->pktbuf, msg->pktidx,
                                msg->put,
                                payload_base, payload_size,
