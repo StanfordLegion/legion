@@ -758,6 +758,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     cmd(['cargo', 'install',
+         '--locked',
          '--path', os.path.join(root_dir, 'tools', 'legion_prof_rs'),
          '--root', tmp_dir],
         env=env)
