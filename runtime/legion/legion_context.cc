@@ -12168,13 +12168,13 @@ namespace Legion {
         assert(finder != hashes.end());
 #endif
         if (finder->second == owner_shard->shard_id)
-          REPORT_LEGION_WARNING(ERROR_CONTROL_REPLICATION_VIOLATION,
+          log_run.error(
            "Detected control replication violation when invoking %s in "
            "task %s (UID %lld) on shard %d. The hash summary for the function "
            "does not align with the hash summaries from other call sites. "
            "We'll run the hash algorithm again to try to recognize what value "
            "differs between the shards, hang tight...",
-           description, get_task_name(), get_unique_id(), owner_shard->shard_id)
+           description, get_task_name(), get_unique_id(),owner_shard->shard_id);
       }
       else
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,

@@ -569,7 +569,7 @@ namespace Legion {
       template<typename T>
       inline void hash(const T &value, const char *description);
       inline void hash(const void *values, size_t size,const char *description);
-      inline bool verify(const char *description);
+      inline bool verify(const char *description, bool every_call = false);
     protected:
       template<typename T>
       inline void hash(const T &value);
@@ -1718,10 +1718,7 @@ namespace Legion {
     {
       hash<T>(value);
       if (verify_every_call)
-      {
-        uint64_t hash[2] = { h1, h2 };
-        verifier->verify_hash(hash, description, true/*verify every call*/);
-      }
+        verify(description, true/*verify every call*/);
     }
 
     //-------------------------------------------------------------------------
@@ -1768,10 +1765,7 @@ namespace Legion {
                                                              &functor);
       }
       if (verify_every_call)
-      {
-        uint64_t hash[2] = { h1, h2 };
-        verifier->verify_hash(hash, description, true/*verify every call*/);
-      }
+        verify(description, true/*verify every call*/);
     }
 
     //-------------------------------------------------------------------------
@@ -1783,10 +1777,7 @@ namespace Legion {
       for (int i = 0; i < value.dim; i++)
         hash(value.point_data[i]);
       if (verify_every_call)
-      {
-        uint64_t hash[2] = { h1, h2 };
-        verifier->verify_hash(hash, description, true/*verify every call*/);
-      }
+        verify(description, true/*verify every call*/);
     }
 
     //-------------------------------------------------------------------------
@@ -1796,10 +1787,7 @@ namespace Legion {
     {
       hash(value, size);
       if (verify_every_call)
-      {
-        uint64_t hash[2] = { h1, h2 };
-        verifier->verify_hash(hash, description, true/*verify every call*/);
-      }
+        verify(description, true/*verify every call*/);
     }
 
     //-------------------------------------------------------------------------
@@ -1830,12 +1818,9 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
-    inline bool Murmur3Hasher::verify(const char *description)
+    inline bool Murmur3Hasher::verify(const char *description, bool every_call)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!verify_every_call);
-#endif
       // tail
       uint64_t k1 = 0;
       uint64_t k2 = 0;
@@ -1876,7 +1861,7 @@ namespace Legion {
       h2 += h1;
 
       uint64_t hash[2] = { h1, h2 };
-      return verifier->verify_hash(hash,description,false/*verify every call*/);
+      return verifier->verify_hash(hash, description, every_call);
     }
 
     //-------------------------------------------------------------------------
