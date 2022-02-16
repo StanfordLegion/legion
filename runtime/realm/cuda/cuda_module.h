@@ -77,7 +77,9 @@ namespace Realm {
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
       size_t cfg_fb_mem_size, cfg_fb_ib_size;
       size_t cfg_uvm_mem_size;
-      unsigned cfg_num_gpus, cfg_task_streams, cfg_d2d_streams;
+      unsigned cfg_num_gpus;
+      std::string cfg_gpu_idxs;
+      unsigned cfg_task_streams, cfg_d2d_streams;
       bool cfg_use_worker_threads, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
       bool cfg_suppress_hijack_warning;

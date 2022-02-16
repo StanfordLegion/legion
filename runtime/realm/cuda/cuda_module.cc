@@ -2988,7 +2988,8 @@ namespace Realm {
 	  continue;
 
 	// enable peer access (it's ok if it's already been enabled)
-	{
+        //  (don't try if it's the same physical device underneath)
+	if(info != (*it)->info) {
 	  AutoGPUContext agc(this);
 
           CUresult ret = CUDA_DRIVER_FNPTR(cuCtxEnablePeerAccess)((*it)->context, 0);
@@ -3469,6 +3470,7 @@ namespace Realm {
 	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
           .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
+          .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
 	  .add_option_int("-ll:streams", m->cfg_task_streams)
           .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
           .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
@@ -3496,8 +3498,11 @@ namespace Realm {
 	}
       }
 
+      // if we know gpus have been requested, correct loading of libraries
+      //  and driver initialization are required
+      bool init_required = ((m->cfg_num_gpus > 0) || !m->cfg_gpu_idxs.empty());
 #ifdef REALM_CUDA_DYNAMIC_LOAD
-      if(!resolve_cuda_api_fnptrs(m->cfg_num_gpus > 0)) {
+      if(!resolve_cuda_api_fnptrs(init_required)) {
         // warning was printed in resolve function
         delete m;
         return 0;
@@ -3511,7 +3516,7 @@ namespace Realm {
         if(ret != CUDA_SUCCESS) {
           // failure to initialize the driver is a fatal error if we know gpus
           //  have been requested
-          if(m->cfg_num_gpus > 0) {
+          if(init_required) {
             const char *err_name, *err_str;
             CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &err_name);
             CUDA_DRIVER_FNPTR(cuGetErrorString)(ret, &err_str);
@@ -3640,7 +3645,10 @@ namespace Realm {
 			       << " to device " << (*it2)->index;
 		(*it1)->peers.insert((*it2)->device);
 	      }
-	    }
+	    } else {
+              // two contexts on the same device can always "peer to peer"
+              (*it1)->peers.insert((*it2)->device);
+            }
       }
 
       // give the gpu info we assembled to the module
@@ -3666,12 +3674,53 @@ namespace Realm {
 	  shared_worker->add_to_manager(&(runtime->bgwork));
       }
 
+      // decode specific device id list if given
+      std::vector<unsigned> fixed_indices;
+      if(!cfg_gpu_idxs.empty()) {
+        const char *p = cfg_gpu_idxs.c_str();
+        while(true) {
+          if(!isdigit(*p)) {
+            log_gpu.fatal() << "invalid number in cuda device list: '" << p << "'";
+            abort();
+          }
+          unsigned v = 0;
+          do {
+            v = (v * 10) + (*p++ - '0');
+          } while(isdigit(*p));
+          if(v >= gpu_info.size()) {
+            log_gpu.fatal() << "requested cuda device id out of range: " << v << " >= " << gpu_info.size();
+            abort();
+          }
+          fixed_indices.push_back(v);
+          if(!*p) break;
+          if(*p == ',') {
+            p++;  // skip comma and parse another integer
+          } else {
+            log_gpu.fatal() << "invalid separator in cuda device list: '" << p << "'";
+            abort();
+          }
+        }
+        // if num_gpus was specified, they should match
+        if(cfg_num_gpus > 0) {
+          if(cfg_num_gpus != fixed_indices.size()) {
+            log_gpu.fatal() << "mismatch between '-ll:gpu' and '-ll:gpu_ids'";
+            abort();
+          }
+        } else
+          cfg_num_gpus = fixed_indices.size();
+        // also disable skip count and skip busy options
+        cfg_skip_gpu_count = 0;
+        cfg_skip_busy_gpus = false;
+      }
+
       gpus.resize(cfg_num_gpus);
       unsigned gpu_count = 0;
       // try to get cfg_num_gpus, working through the list in order
       for(size_t i = cfg_skip_gpu_count;
           (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
           i++) {
+        int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
+
 	// try to create a context and possibly check available memory - in order
 	//  to be compatible with an application's use of the cuda runtime, we
 	//  need this to be the device's "primary context"
@@ -3683,7 +3732,7 @@ namespace Realm {
           if(cfg_lmem_resize_to_max)
             flags |= CU_CTX_LMEM_RESIZE_TO_MAX;
 
-	  CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxSetFlags)(gpu_info[i]->device, flags);
+	  CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxSetFlags)(gpu_info[idx]->device, flags);
           if(res != CUDA_SUCCESS) {
             bool lmem_ok;
             if(res == CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE) {
@@ -3703,15 +3752,15 @@ namespace Realm {
 
 	CUcontext context;
 	CUresult res = CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRetain)(&context,
-                                                                   gpu_info[i]->device);
+                                                                   gpu_info[idx]->device);
 	// a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
 	if((res == CUDA_ERROR_INVALID_DEVICE) ||
 	   (res == CUDA_ERROR_OUT_OF_MEMORY)) {
 	  if(cfg_skip_busy_gpus) {
-	    log_gpu.info() << "GPU " << gpu_info[i]->device << " appears to be busy (res=" << res << ") - skipping";
+	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " appears to be busy (res=" << res << ") - skipping";
 	    continue;
 	  } else {
-	    log_gpu.fatal() << "GPU " << gpu_info[i]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
+	    log_gpu.fatal() << "GPU " << gpu_info[idx]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
 	    abort();
 	  }
 	}
@@ -3722,8 +3771,8 @@ namespace Realm {
 	  size_t total_mem, avail_mem;
 	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemGetInfo)(&avail_mem, &total_mem) );
 	  if(avail_mem < cfg_min_avail_mem) {
-	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(gpu_info[i]->device) );
+	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
+	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDevicePrimaryCtxRelease)(gpu_info[idx]->device) );
 	    continue;
 	  }
 	}
@@ -3742,7 +3791,7 @@ namespace Realm {
 	    worker->add_to_manager(&(runtime->bgwork));
 	}
 
-	GPU *g = new GPU(this, gpu_info[i], worker, context);
+	GPU *g = new GPU(this, gpu_info[idx], worker, context);
 
 	if(!cfg_use_shared_worker)
 	  dedicated_workers[g] = worker;
