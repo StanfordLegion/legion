@@ -10817,6 +10817,22 @@ namespace Legion {
         if (!parent->send_node(target, done, send_precondition,
                                nodes_to_send, true/*above*/))
           return false;
+        // Do a quick check to see if the color space is from our same
+        // tree and if it is whether it is above us in the tree. If it
+        // is then we can skip sending it since we already would have
+        // done the analysis for it.
+        if (color_space->handle.get_tree_id() == handle.get_tree_id())
+        {
+          IndexSpaceNode *upabove = parent;
+          while (true)
+          {
+            if (color_space == upabove)
+              return true;
+            if (upabove->parent == NULL)
+              break;
+            upabove = upabove->parent->parent;
+          }
+        }
         RtEvent temp_precondition;
         color_space->send_node(target, done, temp_precondition,
                                nodes_to_send, false/*above*/);
@@ -10880,6 +10896,22 @@ namespace Legion {
           send_done = RtUserEvent::NO_RT_USER_EVENT;
         }
         return false;
+      }
+      // Do a quick check to see if the color space is from our same
+      // tree and if it is whether it is above us in the tree. If it
+      // is then we can skip sending it since we already would have
+      // done the analysis for it.
+      if (color_space->handle.get_tree_id() == handle.get_tree_id())
+      {
+        IndexSpaceNode *upabove = parent;
+        while (true)
+        {
+          if (color_space == upabove)
+            return true;
+          if (upabove->parent == NULL)
+            break;
+          upabove = upabove->parent->parent;
+        }
       }
       RtEvent temp_precondition;
       color_space->send_node(target, done, temp_precondition,
