@@ -1238,12 +1238,18 @@ namespace Legion {
       // because we called get_volume on this before we got here
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
       const DistributedID local_did = get_distributed_id();
+      size_t local_rect_count = 0;
+      KDNode<DIM,T,void> *local_tree = NULL;
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             expressions.begin(); it != expressions.end(); it++)
       {
         // We can get duplicates here
         if ((*it) == this)
+        {
+          if (local_tree != NULL)
+            delete local_tree;
           return this;
+        }
         Realm::IndexSpace<DIM,T> other_space;
         // No need to wait for the event here either, we know that if it is
         // in the 'expressions' data structure then wait has already been
@@ -1259,7 +1265,11 @@ namespace Legion {
           // Try to add the expression reference, we can race with deletions
           // here though so handle the case we're we can't add a reference
           if ((*it)->try_add_canonical_reference(local_did))
+          {
+            if (local_tree != NULL)
+              delete local_tree;
             return (*it);
+          }
           else
             continue;
         }
@@ -1282,110 +1292,106 @@ namespace Legion {
           // We know something important though here: we know that both
           // these sparsity maps contain the same number of points
           // Build lists of both sets of rectangles
-          std::vector<Rect<DIM,T> > local_rects, other_rects;
-          for (Realm::IndexSpaceIterator<DIM,T> itr(local_space);
-                itr.valid; itr.step())
-            local_rects.push_back(itr.rect);
-          for (Realm::IndexSpaceIterator<DIM,T> itr(other_space);
-                itr.valid; itr.step())
-            other_rects.push_back(itr.rect);
-          // We'll assume that the vector with more rectangles has
-          // smaller ones and will therefore test the small ones
-          // against the bigger ones, we might consider putting in
-          // an acceleration data strucutre here if these vectors
-          // are big enough
-          if (local_rects.size() <= other_rects.size())
+          KDNode<DIM,T> *other_tree = 
+            (*it)->get_sparsity_map_kd_tree()->as_kdnode<DIM,T>();
+          size_t other_rect_count = other_tree->count_rectangles();
+          if (local_rect_count == 0)
           {
-            std::vector<size_t> remaining_local(local_rects.size());
-            for (unsigned idx = 0; idx < local_rects.size(); idx++)
-              remaining_local[idx] = local_rects[idx].volume();
-            bool congruent = true;
-            for (typename std::vector<Rect<DIM,T> >::const_iterator it =
-                  other_rects.begin(); it != other_rects.end(); it++)
-            {
-              size_t remaining = it->volume();
-              for (unsigned idx = 0; idx < local_rects.size(); idx++)
-              {
-                // Can skip local rects that are fully covered
-                if (remaining_local[idx] == 0)
-                  continue;
-                const Rect<DIM,T> overlap = it->intersection(local_rects[idx]);
-                const size_t volume = overlap.volume();
-                if (volume == 0)
-                  continue;
+            // Count the number of rectangles in our sparsity map
+            for (Realm::IndexSpaceIterator<DIM,T> itr(local_space);
+                  itr.valid; itr.step())
+              local_rect_count++;
 #ifdef DEBUG_LEGION
-                assert(volume <= remaining);
-                assert(volume <= remaining_local[idx]);
+            assert(local_rect_count > 0);
 #endif
-                remaining_local[idx] -= volume;
-                remaining -= volume;
-                if (remaining == 0)
-                  break;
-              }
-              if (remaining != 0)
-              {
-                congruent = false;
-                break;
-              }
+          }
+          if (other_rect_count < local_rect_count)
+          {
+            // Build our KD tree if we haven't already
+            if (local_tree == NULL)
+            {
+              std::vector<Rect<DIM,T> > local_rects;
+              for (Realm::IndexSpaceIterator<DIM,T> itr(local_space);
+                    itr.valid; itr.step())
+                local_rects.push_back(itr.rect);
+              local_tree = new KDNode<DIM,T>(local_space.bounds, local_rects);
+            }
+            // Iterate the other rectangles and see if they are covered
+            bool congruent = true; 
+            for (Realm::IndexSpaceIterator<DIM,T> itr(other_space);
+                  itr.valid; itr.step())
+            {
+              const size_t intersecting_points = 
+                local_tree->count_intersecting_points(itr.rect);
+              if (intersecting_points == itr.rect.volume())
+                continue;
+              congruent = false;
+              break;
             }
             if (!congruent)
               continue;
-#ifdef DEBUG_LEGION
-            for (unsigned idx = 0; idx < local_rects.size(); idx++)
-              assert(remaining_local[idx] == 0);
-#endif
           }
           else
           {
-            std::vector<size_t> remaining_other(other_rects.size());
-            for (unsigned idx = 0; idx < other_rects.size(); idx++)
-              remaining_other[idx] = other_rects[idx].volume();
-            bool congruent = true;
-            for (typename std::vector<Rect<DIM,T> >::const_iterator it =
-                  local_rects.begin(); it != local_rects.end(); it++)
+            // Iterate our rectangles and see if they are all covered
+            bool congruent = true; 
+            for (Realm::IndexSpaceIterator<DIM,T> itr(local_space);
+                  itr.valid; itr.step())
             {
-              size_t remaining = it->volume();
-              for (unsigned idx = 0; idx < other_rects.size(); idx++)
-              {
-                // Can skip local rects that are fully covered
-                if (remaining_other[idx] == 0)
-                  continue;
-                const Rect<DIM,T> overlap = it->intersection(other_rects[idx]);
-                const size_t volume = overlap.volume();
-                if (volume == 0)
-                  continue;
-#ifdef DEBUG_LEGION
-                assert(volume <= remaining);
-                assert(volume <= remaining_other[idx]);
-#endif
-                remaining_other[idx] -= volume;
-                remaining -= volume;
-                if (remaining == 0)
-                  break;
-              }
-              if (remaining != 0)
-              {
-                congruent = false;
-                break;
-              }
+              const size_t intersecting_points = 
+                other_tree->count_intersecting_points(itr.rect);
+              if (intersecting_points == itr.rect.volume())
+                continue;
+              congruent = false;
+              break;
             }
             if (!congruent)
               continue;
-#ifdef DEBUG_LEGION
-            for (unsigned idx = 0; idx < other_rects.size(); idx++)
-              assert(remaining_other[idx] == 0);
-#endif
           }
-        }
+        }  
         // If we get here that means we are congruent
         // Try to add the expression reference, we can race with deletions
         // here though so handle the case we're we can't add a reference
         if ((*it)->try_add_canonical_reference(local_did))
+        {
+          if (local_tree != NULL)
+            delete local_tree;
           return (*it);
+        }
       }
       // Did not find any congruences so add ourself
       expressions.insert(this);
+      // If we have a KD tree we can save it for later congruence tests
+      if (local_tree != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(sparsity_map_kd_tree == NULL); // should not have a kd tree yet
+#endif
+        sparsity_map_kd_tree = local_tree;
+      }
       return this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline KDTree* IndexSpaceExpression::get_sparsity_map_kd_tree_internal(void)
+    //--------------------------------------------------------------------------
+    {
+      if (sparsity_map_kd_tree != NULL)
+        return sparsity_map_kd_tree;
+      Realm::IndexSpace<DIM,T> local_space;
+      // No need to wait for the event, we know it is already triggered
+      // because we called get_volume on this before we got here
+      get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
+#ifdef DEBUG_LEGION
+      assert(!local_space.dense());
+#endif
+      std::vector<Rect<DIM,T> > local_rects;
+      for (Realm::IndexSpaceIterator<DIM,T> itr(local_space);
+            itr.valid; itr.step())
+        local_rects.push_back(itr.rect);
+      sparsity_map_kd_tree = new KDNode<DIM,T>(local_space.bounds, local_rects);
+      return sparsity_map_kd_tree;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1870,6 +1876,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return find_congruent_expression_internal<DIM,T>(expressions); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDTree* IndexSpaceOperationT<DIM,T>::get_sparsity_map_kd_tree(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_sparsity_map_kd_tree_internal<DIM,T>();
     }
 
     //--------------------------------------------------------------------------
@@ -6378,6 +6392,14 @@ namespace Legion {
     {
       return find_congruent_expression_internal<DIM,T>(expressions); 
     }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDTree* IndexSpaceNodeT<DIM,T>::get_sparsity_map_kd_tree(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_sparsity_map_kd_tree_internal<DIM,T>();
+    }
     
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -6546,10 +6568,23 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline KDNode<DIM,T>* KDTree::as_kdnode(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      KDNode<DIM,T> *result = dynamic_cast<KDNode<DIM,T>*>(this);
+      assert(result != NULL);
+      return result;
+#else
+      return static_cast<KDNode<DIM,T>*>(this);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, typename T, typename RT>
     KDNode<DIM,T,RT>::KDNode(const Rect<DIM,T> &b,
-                             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects,
-                             const int consecutive_bad /* = 0*/)
+                             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects)
       : bounds(b), left(NULL), right(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6563,7 +6598,7 @@ namespace Legion {
       // so we can iterate through other dimensions to look for
       // better splitting planes
       int best_dim = -1;
-      float best_cost = 0.f;
+      float best_cost = 2.f; // worst possible cost
       Rect<DIM,T> best_left_bounds, best_right_bounds;
       std::vector<std::pair<Rect<DIM,T>,RT> > best_left_set, best_right_set;
       for (int d = 0; d < DIM; d++)
@@ -6575,6 +6610,187 @@ namespace Legion {
         for (unsigned idx = 0; idx < subrects.size(); idx++)
         {
           const Rect<DIM,T> &subset_bounds = subrects[idx].first;
+          lines.insert(KDLine(subset_bounds.lo[d], idx, true));
+          lines.insert(KDLine(subset_bounds.hi[d], idx, false));
+        }
+        // Construct two lists by scanning from left-to-right and
+        // from right-to-left of the number of rectangles that would
+        // be inlcuded on the left or right side by each splitting plane
+        std::map<coord_t,unsigned> left_exclusive, right_exclusive;
+        unsigned count = 0;
+        for (typename std::set<KDLine>::const_iterator it =
+              lines.begin(); it != lines.end(); it++)
+        {
+          // Always record the count for all splits
+          left_exclusive[it->value] = count;
+          // Only increment for new rectangles
+          if (it->start)
+            count++;
+        }
+        // If all the lines exist at the same value
+        // then we'll never have a splitting plane
+        if (left_exclusive.size() == 1)
+          continue;
+        count = 0;
+        for (typename std::set<KDLine>::const_reverse_iterator it =
+              lines.rbegin(); it != lines.rend(); it++)
+        {
+          // Always record the count for all splits
+          right_exclusive[it->value] = count;
+          // End of rectangles are the beginning in this direction
+          if (!it->start)
+            count++;
+        }
+#ifdef DEBUG_LEGION
+        assert(left_exclusive.size() == right_exclusive.size());
+#endif
+        // We want to take the mini-max of the two numbers in order
+        // to try to balance the splitting plane across the two sets
+        T split = 0;
+        unsigned split_max = subrects.size();
+        for (std::map<coord_t,unsigned>::const_iterator it =
+              left_exclusive.begin(); it != left_exclusive.end(); it++)
+        {
+          const unsigned left = it->second;
+          const unsigned right = right_exclusive[it->first];
+          const unsigned max = (left > right) ? left : right;
+          if (max < split_max)
+          {
+            split_max = max;
+            split = it->first;
+          }
+        }
+        // Check for the case where we can't find a splitting plane
+        if (split_max == subrects.size())
+          continue;
+        // Sort the subsets into left and right
+        Rect<DIM,T> left_bounds(bounds);
+        Rect<DIM,T> right_bounds(bounds);
+        left_bounds.hi[d] = split;
+        right_bounds.lo[d] = split+1;
+        std::vector<std::pair<Rect<DIM,T>,RT> > left_set, right_set;
+        for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::const_iterator
+              it = subrects.begin(); it != subrects.end(); it++)
+        {
+          const Rect<DIM,T> left_rect = it->first.intersection(left_bounds);
+          if (!left_rect.empty())
+            left_set.push_back(std::make_pair(left_rect, it->second));
+          const Rect<DIM,T> right_rect = it->first.intersection(right_bounds);
+          if (!right_rect.empty())
+            right_set.push_back(std::make_pair(right_rect, it->second));
+        }
+#ifdef DEBUG_LEGION
+        assert(left_set.size() < subrects.size());
+        assert(right_set.size() < subrects.size());
+#endif
+        // Compute the cost of this refinement
+        // First get the percentage reductions of both sets
+        float cost_left = float(left_set.size()) / float(subrects.size());
+        float cost_right = float(right_set.size()) / float(subrects.size());
+        // We want to give better scores to sets that are closer together
+        // so we'll include the absolute value of the difference in the
+        // two costs as part of computing the average cost
+        // If the savings are identical then this will be zero extra cost
+        // Note this cost metric should always produce values between
+        // 1.0 and 2.0, with 1.0 being a perfect 50% reduction on each side
+        float cost_diff = (cost_left < cost_right) ? 
+          (cost_right - cost_left) : (cost_left - cost_right);
+        float total_cost = (cost_left + cost_right + cost_diff);
+#ifdef DEBUG_LEGION
+        assert((1.f <= total_cost) && (total_cost <= 2.f));
+#endif
+        // Check to see if the cost is considered to be a "good" refinement
+        // For now we'll say that this is a good cost if it is less than
+        // or equal to 1.5, halfway between the range of costs from 1.0 to 2.0
+        if ((total_cost <= 1.5f) && (total_cost < best_cost))
+        {
+          best_dim = d;
+          best_cost = total_cost;
+          best_left_set.swap(left_set);
+          best_right_set.swap(right_set);
+          best_left_bounds = left_bounds;
+          best_right_bounds = right_bounds;
+        }
+      }
+      // See if we had at least one good refinement
+      if (best_dim >= 0)
+      {
+        // Always clear the old-subrects before recursing to reduce memory usage
+        {
+          std::vector<std::pair<Rect<DIM,T>,RT> > empty;
+          empty.swap(subrects);
+        }
+        left = new KDNode<DIM,T,RT>(best_left_bounds, best_left_set); 
+        right = new KDNode<DIM,T,RT>(best_right_bounds, best_right_set);
+      }
+      else
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_KDTREE_REFINEMENT_FAILED,
+            "Failed to find a refinement for KD tree with %d dimensions "
+            "and %zd rectangles. Please report your application to the "
+            "Legion developers' mailing list.", DIM, subrects.size())
+        // If we make it here then we couldn't find a splitting plane to refine
+        // anymore so just record all the subrects as our rects
+        rects.swap(subrects);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, typename RT>
+    KDNode<DIM,T,RT>::~KDNode(void)
+    //--------------------------------------------------------------------------
+    {
+      if (left != NULL)
+        delete left;
+      if (right != NULL)
+        delete right;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, typename RT>
+    void KDNode<DIM,T,RT>::find_interfering(const Rect<DIM,T> &test,
+                                            std::set<RT> &interfering) const
+    //--------------------------------------------------------------------------
+    {
+      if ((left != NULL) && left->bounds.overlaps(test))
+        left->find_interfering(test, interfering);
+      if ((right != NULL) && right->bounds.overlaps(test))
+        right->find_interfering(test, interfering);
+      for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::
+            const_iterator it = rects.begin(); it != rects.end(); it++)
+        if (it->first.overlaps(test))
+          interfering.insert(it->second);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    KDNode<DIM,T,void>::KDNode(const Rect<DIM,T> &b,
+                               std::vector<Rect<DIM,T> > &subrects)
+      : bounds(b), left(NULL), right(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // This is the base case
+      if (subrects.size() <= LEGION_MAX_BVH_FANOUT)
+      {
+        rects.swap(subrects);
+        return;
+      }
+      // If we have sub-optimal bad sets we will track them here
+      // so we can iterate through other dimensions to look for
+      // better splitting planes
+      int best_dim = -1;
+      float best_cost = 2.f; // worst possible cost
+      Rect<DIM,T> best_left_bounds, best_right_bounds;
+      std::vector<Rect<DIM,T> > best_left_set, best_right_set;
+      for (int d = 0; d < DIM; d++)
+      {
+        // Try to compute a splitting plane for this dimension
+        // Sort the start and end of each equivalence set bounding rectangle
+        // along the splitting dimension
+        std::set<KDLine> lines;
+        for (unsigned idx = 0; idx < subrects.size(); idx++)
+        {
+          const Rect<DIM,T> &subset_bounds = subrects[idx];
           lines.insert(KDLine(subset_bounds.lo[d], idx, true));
           lines.insert(KDLine(subset_bounds.hi[d], idx, false));
         }
@@ -6633,16 +6849,16 @@ namespace Legion {
         Rect<DIM,T> right_bounds(bounds);
         left_bounds.hi[d] = split;
         right_bounds.lo[d] = split+1;
-        std::vector<std::pair<Rect<DIM,T>,RT> > left_set, right_set;
-        for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::const_iterator
-              it = subrects.begin(); it != subrects.end(); it++)
+        std::vector<Rect<DIM,T> > left_set, right_set;
+        for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+              subrects.begin(); it != subrects.end(); it++)
         {
-          const Rect<DIM,T> left_rect = it->first.intersection(left_bounds);
+          const Rect<DIM,T> left_rect = it->intersection(left_bounds);
           if (!left_rect.empty())
-            left_set.push_back(std::make_pair(left_rect, it->second));
-          const Rect<DIM,T> right_rect = it->first.intersection(right_bounds);
+            left_set.push_back(left_rect);
+          const Rect<DIM,T> right_rect = it->intersection(right_bounds);
           if (!right_rect.empty())
-            right_set.push_back(std::make_pair(right_rect, it->second));
+            right_set.push_back(right_rect);
         }
 #ifdef DEBUG_LEGION
         assert(left_set.size() < subrects.size());
@@ -6661,9 +6877,13 @@ namespace Legion {
         float cost_diff = (cost_left < cost_right) ? 
           (cost_right - cost_left) : (cost_left - cost_right);
         float total_cost = (cost_left + cost_right + cost_diff);
-        // See if this is the first splitting plane we've found or 
-        // whether we have a better cost here
-        if ((best_dim < 0) || (total_cost < best_cost))
+#ifdef DEBUG_LEGION
+        assert((1.f <= total_cost) && (total_cost <= 2.f));
+#endif
+        // Check to see if the cost is considered to be a "good" refinement
+        // For now we'll say that this is a good cost if it is less than
+        // or equal to 1.5, halfway between the range of costs from 1.0 to 2.0
+        if ((total_cost <= 1.5f) && (total_cost < best_cost))
         {
           best_dim = d;
           best_cost = total_cost;
@@ -6673,39 +6893,32 @@ namespace Legion {
           best_right_bounds = right_bounds;
         }
       }
-      // See if we had at least one possible refinement
+      // See if we had at least one good refinement
       if (best_dim >= 0)
       {
-        // Check to see if the cost is considered to be a "good" refinement
-        // For now we'll say that this is a good cost if it is less than
-        // or equal to 1.5, halfway between the range of costs from 1.0 to 2.0
-        const bool good = (best_cost <= 1.5f);
-        if (good || (consecutive_bad < DIM))
+        // Always clear the old-subrects before recursing to reduce memory usage
         {
-          left = new KDNode<DIM,T,RT>(best_left_bounds, best_left_set, 
-                                      good ? 0 : consecutive_bad + 1);
-          right = new KDNode<DIM,T,RT>(best_right_bounds, best_right_set,
-                                       good ? 0 : consecutive_bad + 1);
-          return;
+          std::vector<Rect<DIM,T> > empty;
+          empty.swap(subrects);
         }
+        left = new KDNode<DIM,T,void>(best_left_bounds, best_left_set); 
+        right = new KDNode<DIM,T,void>(best_right_bounds, best_right_set);
       }
-      // If we make it here then we couldn't find a splitting plane to refine 
-      // anymore so just record all the subrects as our rects
-      rects.swap(subrects);
+      else
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_KDTREE_REFINEMENT_FAILED,
+            "Failed to find a refinement for KD tree with %d dimensions "
+            "and %zd rectangles. Please report your application to the "
+            "Legion developers' mailing list.", DIM, subrects.size())
+        // If we make it here then we couldn't find a splitting plane to refine
+        // anymore so just record all the subrects as our rects
+        rects.swap(subrects);
+      }
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T, typename RT>
-    KDNode<DIM,T,RT>::KDNode(const KDNode<DIM,T,RT> &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T, typename RT>
-    KDNode<DIM,T,RT>::~KDNode(void)
+    template<int DIM, typename T>
+    KDNode<DIM,T,void>::~KDNode(void)
     //--------------------------------------------------------------------------
     {
       if (left != NULL)
@@ -6715,29 +6928,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T, typename RT>
-    KDNode<DIM,T,RT>& KDNode<DIM,T,RT>::operator=(const KDNode<DIM,T,RT> &rhs)
+    template<int DIM, typename T>
+    size_t KDNode<DIM,T,void>::count_rectangles(void) const
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
+      size_t result = rects.size();
+      if (left != NULL)
+        result += left->count_rectangles();
+      if (right != NULL)
+        result += right->count_rectangles();
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM, typename T, typename RT>
-    void KDNode<DIM,T,RT>::find_interfering(const Rect<DIM,T> &test,
-                                         std::set<RT> &interfering)
+    template<int DIM, typename T>
+    size_t KDNode<DIM,T,void>::count_intersecting_points(
+                                                  const Rect<DIM,T> &rect) const
     //--------------------------------------------------------------------------
     {
-      if ((left != NULL) && left->bounds.overlaps(test))
-        left->find_interfering(test, interfering);
-      if ((right != NULL) && right->bounds.overlaps(test))
-        right->find_interfering(test, interfering);
-      for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::
-            const_iterator it = rects.begin(); it != rects.end(); it++)
-        if (it->first.overlaps(test))
-          interfering.insert(it->second);
+      size_t result = 0;
+      for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+            rects.begin(); it != rects.end(); it++)
+      {
+        const Rect<DIM,T> overlap = it->intersection(rect);
+        result += overlap.volume();
+      }
+      if (left != NULL)
+      {
+        Rect<DIM,T> left_overlap = rect.intersection(left->bounds);
+        if (!left_overlap.empty())
+          result += left->count_intersecting_points(left_overlap);
+      }
+      if (right != NULL)
+      {
+        Rect<DIM,T> right_overlap = rect.intersection(right->bounds);
+        if (!right_overlap.empty())
+          result += right->count_intersecting_points(right_overlap);
+      }
+      return result;
     }
 
     /////////////////////////////////////////////////////////////

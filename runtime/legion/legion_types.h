@@ -1782,6 +1782,7 @@ namespace Legion {
     class PartitionNode;
     class ColorSpaceIterator;
     template<int DIM, typename T> class ColorSpaceIteratorT;
+    template<int DIM, typename T, typename RT = void> class KDNode;
 
     class RegionTreeContext;
     class RegionTreePath;

@@ -7270,8 +7270,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(LocalLock &lock)
       : type_tag(0), expr_id(0), expr_lock(lock), canonical(NULL),
-        remote_owner_valid_references(0), volume(0), has_volume(false),
-        empty(false), has_empty(false)
+        remote_owner_valid_references(0), sparsity_map_kd_tree(NULL),
+        volume(0), has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7281,7 +7281,8 @@ namespace Legion {
                                                LocalLock &lock)
       : type_tag(tag), expr_id(rt->get_unique_index_space_expr_id()), 
         expr_lock(lock), canonical(NULL), remote_owner_valid_references(0),
-        volume(0), has_volume(false), empty(false), has_empty(false)
+        sparsity_map_kd_tree(NULL), volume(0), has_volume(false), empty(false),
+        has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7290,8 +7291,8 @@ namespace Legion {
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id,
                                                LocalLock &lock)
       : type_tag(tag), expr_id(id), expr_lock(lock), canonical(NULL),
-        remote_owner_valid_references(0), volume(0), has_volume(false),
-        empty(false), has_empty(false)
+        remote_owner_valid_references(0), sparsity_map_kd_tree(NULL),
+        volume(0), has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7303,6 +7304,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(derived_operations.empty());
 #endif
+      if (sparsity_map_kd_tree != NULL)
+        delete sparsity_map_kd_tree;
     }
 
     //--------------------------------------------------------------------------
