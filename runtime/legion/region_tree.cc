@@ -7374,8 +7374,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(LocalLock &lock)
       : type_tag(0), expr_id(0), expr_lock(lock), canonical(NULL),
-        remote_owner_valid_references(0), volume(0), has_volume(false),
-        empty(false), has_empty(false)
+        remote_owner_valid_references(0), sparsity_map_kd_tree(NULL),
+        volume(0), has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7385,7 +7385,8 @@ namespace Legion {
                                                LocalLock &lock)
       : type_tag(tag), expr_id(rt->get_unique_index_space_expr_id()), 
         expr_lock(lock), canonical(NULL), remote_owner_valid_references(0),
-        volume(0), has_volume(false), empty(false), has_empty(false)
+        sparsity_map_kd_tree(NULL), volume(0), has_volume(false), empty(false),
+        has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7394,8 +7395,8 @@ namespace Legion {
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id,
                                                LocalLock &lock)
       : type_tag(tag), expr_id(id), expr_lock(lock), canonical(NULL),
-        remote_owner_valid_references(0), volume(0), has_volume(false),
-        empty(false), has_empty(false)
+        remote_owner_valid_references(0), sparsity_map_kd_tree(NULL),
+        volume(0), has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7407,6 +7408,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(derived_operations.empty());
 #endif
+      if (sparsity_map_kd_tree != NULL)
+        delete sparsity_map_kd_tree;
     }
 
     //--------------------------------------------------------------------------
@@ -11685,6 +11688,22 @@ namespace Legion {
         if (!parent->send_node(target, done, send_precondition,
                                nodes_to_send, true/*above*/))
           return false;
+        // Do a quick check to see if the color space is from our same
+        // tree and if it is whether it is above us in the tree. If it
+        // is then we can skip sending it since we already would have
+        // done the analysis for it.
+        if (color_space->handle.get_tree_id() == handle.get_tree_id())
+        {
+          IndexSpaceNode *upabove = parent;
+          while (true)
+          {
+            if (color_space == upabove)
+              return true;
+            if (upabove->parent == NULL)
+              break;
+            upabove = upabove->parent->parent;
+          }
+        }
         RtEvent temp_precondition;
         color_space->send_node(target, done, temp_precondition,
                                nodes_to_send, false/*above*/);
@@ -11766,6 +11785,22 @@ namespace Legion {
           send_done = RtUserEvent::NO_RT_USER_EVENT;
         }
         return false;
+      }
+      // Do a quick check to see if the color space is from our same
+      // tree and if it is whether it is above us in the tree. If it
+      // is then we can skip sending it since we already would have
+      // done the analysis for it.
+      if (color_space->handle.get_tree_id() == handle.get_tree_id())
+      {
+        IndexSpaceNode *upabove = parent;
+        while (true)
+        {
+          if (color_space == upabove)
+            return true;
+          if (upabove->parent == NULL)
+            break;
+          upabove = upabove->parent->parent;
+        }
       }
       RtEvent temp_precondition;
       color_space->send_node(target, done, temp_precondition,

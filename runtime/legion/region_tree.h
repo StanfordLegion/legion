@@ -1136,6 +1136,18 @@ namespace Legion {
     };
 
     /**
+     * \interface KDTree
+     * A virtual interface to a KD tree
+     */
+    class KDTree {
+    public:
+      virtual ~KDTree(void) { }
+    public:
+      template<int DIM, typename T>
+      inline KDNode<DIM,T>* as_kdnode(void);
+    };
+
+    /**
      * \class IndexSpaceExpression
      * An IndexSpaceExpression represents a set computation
      * one on or more index spaces. IndexSpaceExpressions
@@ -1322,6 +1334,7 @@ namespace Legion {
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions) = 0;
+      virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
@@ -1438,6 +1451,8 @@ namespace Legion {
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
                         std::set<IndexSpaceExpression*> &expressions);
+      template<int DIM, typename T>
+      inline KDTree* get_sparsity_map_kd_tree_internal(void);
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source); 
@@ -1453,6 +1468,7 @@ namespace Legion {
       std::set<IndexSpaceOperation*> derived_operations;
       std::atomic<IndexSpaceExpression*> canonical;
       std::atomic<unsigned> remote_owner_valid_references;
+      KDTree *sparsity_map_kd_tree;
       size_t volume;
       bool has_volume;
       bool empty, has_empty;
@@ -1701,6 +1717,7 @@ namespace Legion {
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
+      virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -2761,6 +2778,7 @@ namespace Legion {
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
+      virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -3415,20 +3433,41 @@ namespace Legion {
     class KDNode {
     public:
       KDNode(const Rect<DIM,T> &bounds,
-             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects,
-             const int consecutive_bad = 0);
-      KDNode(const KDNode &rhs);
+             std::vector<std::pair<Rect<DIM,T>,RT> > &subrects);
+      KDNode(const KDNode &rhs) = delete;
       ~KDNode(void);
     public:
-      KDNode& operator=(const KDNode &rhs);
+      KDNode& operator=(const KDNode &rhs) = delete;
     public:
-      void find_interfering(const Rect<DIM,T> &test, std::set<RT> &interfering);
+      void find_interfering(const Rect<DIM,T> &test,
+                            std::set<RT> &interfering) const;
     public:
       const Rect<DIM,T> bounds;
     protected:
       KDNode<DIM,T,RT> *left;
       KDNode<DIM,T,RT> *right;
       std::vector<std::pair<Rect<DIM,T>,RT> > rects;
+    };
+    
+    // Specialization for void case
+    template<int DIM, typename T>
+    class KDNode<DIM,T,void> : public KDTree {
+    public:
+      KDNode(const Rect<DIM,T> &bounds,
+             std::vector<Rect<DIM,T> > &subrects);
+      KDNode(const KDNode &rhs) = delete;
+      virtual ~KDNode(void);
+    public:
+      KDNode& operator=(const KDNode &rhs) = delete;
+    public:
+      size_t count_rectangles(void) const;
+      size_t count_intersecting_points(const Rect<DIM,T> &rect) const;
+    public:
+      const Rect<DIM,T> bounds;
+    protected:
+      KDNode<DIM,T,void> *left;
+      KDNode<DIM,T,void> *right;
+      std::vector<Rect<DIM,T> > rects;
     };
 
     /**

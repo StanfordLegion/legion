@@ -1072,6 +1072,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       {
         switch (kind) {
+          case Memory::NO_MEMKIND: return "NO_MEMKIND";
           case Memory::GLOBAL_MEM: return "GLOBAL_MEM";
           case Memory::SYSTEM_MEM: return "SYSTEM_MEM";
           case Memory::REGDMA_MEM: return "REGDMA_MEM";
