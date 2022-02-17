@@ -2756,7 +2756,9 @@ namespace Legion {
                                                size_t exchange_index,
                                                const T &data)
       {
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
         static_assert(std::is_trivially_copyable<T>(), "not copyable");
+#endif
         exchange_shard_local_op_data(context_index, exchange_index,
                                      &data, sizeof(data));
       }
@@ -2767,7 +2769,9 @@ namespace Legion {
       inline T find_shard_local_op_data(size_t context_index,
                                         size_t exchange_index)
       {
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
         static_assert(std::is_trivially_copyable<T>(), "not copyable");
+#endif
         T result;
         find_shard_local_op_data(context_index, exchange_index, 
                                  &result, sizeof(result));

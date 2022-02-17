@@ -18963,6 +18963,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent PointDepPartOp::acquire_collective_allocation_privileges(
+                                 MappingCallKind mapper_call, unsigned index,
+                                 const std::set<Memory> &targets, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void PointDepPartOp::release_collective_allocation_privileges(
                      MappingCallKind mapper_call, unsigned index, size_t points)
     //--------------------------------------------------------------------------
@@ -18997,6 +19008,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointDepPartOp::match_collective_instances(
+         MappingCallKind mapper_call, unsigned index,
+         std::map<size_t,std::vector<DistributedID> > &instances, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     DomainPoint PointDepPartOp::get_collective_instance_point(void) const
     //--------------------------------------------------------------------------
     {
@@ -19028,6 +19049,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner->count_collective_region_occurrences(index, region);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::count_collective_region_occurrences(unsigned index,
+                          std::map<LogicalRegion,size_t> &counts, size_t points)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------

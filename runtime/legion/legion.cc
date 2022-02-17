@@ -30,7 +30,7 @@ namespace Legion {
 
     // Note: GCC 4.9 breaks even with C++11, so for now peg this on
     // C++14 until we deprecate GCC 4.9 support.
-#if __cplusplus >= 201402L
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
