@@ -119,7 +119,6 @@ namespace Legion {
         RtEvent continuation_precondition;
         info = begin_mapper_call(PREMAP_TASK_CALL,
                                  task, continuation_precondition);
-        info->supports_collectives = true;
         // Build a continuation if necessary
         if (continuation_precondition.exists())
         {
