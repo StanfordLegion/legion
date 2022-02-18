@@ -1810,13 +1810,16 @@ namespace Realm {
               PendingPutHeader *new_head = prev_put->next_put.load();
               assert(new_head);
               put_head.store(new_head);
+	      // fix up 'cur_put' to the part of the list we didn't do because
+	      //   we didn't know existed until now
+	      cur_put = new_head;
             }
           }
         }
 
         // now it's safe to free the put headers we sent
         PendingPutHeader *del_put = orig_put;
-        while(del_put && (del_put != cur_put)) {
+        while(del_put != cur_put) {
           PendingPutHeader *next_del = del_put->next_put.load();
           internal->put_alloc.free_obj(del_put);
           del_put = next_del;
@@ -2397,12 +2400,14 @@ namespace Realm {
                 // successful injection
                 pkt_sent = true;
 
+                GASNetEXEvent *leaf = 0;
                 // local completion (if needed)
                 if(meta->put->local_comp) {
                   GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
                   ev->set_event(lc_event);
                   ev->set_local_comp(meta->put->local_comp);
                   internal->poller.add_pending_event(ev);
+                  leaf = ev;  // must be connected to root event below
                 }
 
                 // remote completion (always needed)
@@ -2410,6 +2415,8 @@ namespace Realm {
                   GASNetEXEvent *ev = internal->event_alloc.alloc_obj();
                   ev->set_event(rc_event);
                   ev->set_put(meta->put);
+                  if(leaf)
+                    ev->set_leaf(leaf);
                   internal->poller.add_pending_event(ev);
                 }
 
@@ -2586,6 +2593,7 @@ namespace Realm {
     , databuf(nullptr)
     , rget(nullptr)
     , put(nullptr)
+    , leaf(nullptr)
   {}
 
   gex_Event_t GASNetEXEvent::get_event() const
@@ -2629,6 +2637,12 @@ namespace Realm {
     return *this;
   }
 
+  GASNetEXEvent& GASNetEXEvent::set_leaf(GASNetEXEvent *_leaf)
+  {
+    leaf = _leaf;
+    return *this;
+  }
+
   void GASNetEXEvent::trigger(GASNetEXInternal *internal)
   {
     event = GEX_EVENT_INVALID;
@@ -2643,6 +2657,8 @@ namespace Realm {
       rget->rgetter->reverse_get_complete(rget);
     if(put)
       put->xpair->enqueue_put_header(put);
+    if(leaf)
+      leaf->event = GEX_EVENT_NO_OP;
   }
 
 
@@ -2785,7 +2801,13 @@ namespace Realm {
       // go through events in order, either trigger or move to 'still_pending'
       while(!to_check.empty()) {
 	GASNetEXEvent *ev = to_check.pop_front();
-	int ret = gex_Event_Test(ev->get_event());
+        // if the GASNet event is GEX_EVENT_NO_OP, that means we were a leaf
+        //  event and the root event has already been successfully tested,
+        //  so we automatically succeed (it would be illegal to check again)
+        gex_Event_t gev = ev->get_event();
+        int ret = ((gev == GEX_EVENT_NO_OP) ?
+                     GASNET_OK :
+                     gex_Event_Test(gev));
 	switch(ret) {
 	case GASNET_OK:
 	  {
@@ -3601,6 +3623,7 @@ namespace Realm {
 
     msg->strategy = PreparedMessage::STRAT_UNKNOWN;
     msg->target = target;
+    msg->source_ep_index = 0; // we may adjust this below
     msg->target_ep_index = target_ep_index;
     msg->msgid = msgid;
     msg->dest_payload_addr = dest_payload_addr;
@@ -3750,6 +3773,8 @@ namespace Realm {
           assert(0);
 	}
 
+	msg->source_ep_index = srcseg->ep_index;
+
 	// we can use long if both endpoints are AM-capable (currently only
 	//  prim endpoint is), otherwise rget
 	bool use_long = (!module->cfg_force_rma &&
@@ -3759,11 +3784,15 @@ namespace Realm {
         //  per-endpoint basis?
         bool use_rmaput = (!use_long && module->cfg_use_rma_put);
 
-	// an rget is actually sent to the prim endpoint on the other side
-	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(target,
-							  ((use_long || use_rmaput) ?
-							     target_ep_index :
-							     0));
+	XmitSrcDestPair *xpair;
+	if(use_long || use_rmaput) {
+	  xpair = xmitsrcs[srcseg->ep_index]->lookup_pair(target,
+							  target_ep_index);
+	} else {
+	  // an rget is actually sent between prim endpoints
+	  xpair = xmitsrcs[0]->lookup_pair(target, 0);
+	}
+
 	if(imm_ok && xpair->has_packets_queued()) {
 	  // suppress immediate mode
 	  imm_ok = false;
@@ -4552,9 +4581,12 @@ namespace Realm {
                                  &lc_event :
                                  GEX_EVENT_DEFER);
 
+#ifdef DEBUG_REALM
 	const SegmentInfo *srcseg = find_segment(payload_base);
         assert(srcseg);
-        gex_TM_t pair = gex_TM_Pair(eps[srcseg->ep_index],
+	assert(srcseg->ep_index == msg->source_ep_index);
+#endif
+        gex_TM_t pair = gex_TM_Pair(eps[msg->source_ep_index],
                                     msg->target_ep_index);
         gex_Event_t rc_event = gex_RMA_PutNB(pair,
                                              msg->target,
@@ -4567,12 +4599,14 @@ namespace Realm {
         if(rc_event != GEX_EVENT_NO_OP) {
 	  xpair->record_immediate_packet();
 
+          GASNetEXEvent *leaf = 0;
           // local completion (if needed)
           if(msg->put->local_comp) {
             GASNetEXEvent *ev = event_alloc.alloc_obj();
             ev->set_event(lc_event);
             ev->set_local_comp(msg->put->local_comp);
             poller.add_pending_event(ev);
+            leaf = ev;  // must be connected to root event below
           }
 
           // remote completion (always needed)
@@ -4580,6 +4614,8 @@ namespace Realm {
             GASNetEXEvent *ev = event_alloc.alloc_obj();
             ev->set_event(rc_event);
             ev->set_put(msg->put);
+            if(leaf)
+              ev->set_leaf(leaf);
             poller.add_pending_event(ev);
           }
         } else {
@@ -4625,8 +4661,8 @@ namespace Realm {
 			    nullptr, payload_size);
 	}
 
-	XmitSrcDestPair *xpair = xmitsrcs[0]->lookup_pair(msg->target,
-							  msg->target_ep_index);
+	XmitSrcDestPair *xpair = xmitsrcs[msg->source_ep_index]->lookup_pair(msg->target,
+									     msg->target_ep_index);
 	xpair->commit_pbuf_put(msg->pktbuf, msg->pktidx,
                                msg->put,
                                payload_base, payload_size,
