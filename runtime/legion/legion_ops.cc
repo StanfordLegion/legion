@@ -3043,25 +3043,30 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(total_points > 0);
 #endif
-          if (total_points == 1)
-            return total_calls;
-          const RtUserEvent ready_event = Runtime::create_rt_user_event();
-          finder = pending_verifications.insert(
-           std::pair<MappingCallKind,PendingVerification>(mapper_call,
-            PendingVerification(total_calls, total_points, ready_event))).first;
-          // Handle the case where we definitely have a mismatch
-          if (total_calls < upper_bound_index)
+          if (total_points > 1)
           {
+            const RtUserEvent ready_event = Runtime::create_rt_user_event();
+            finder = pending_verifications.insert(
+             std::pair<MappingCallKind,PendingVerification>(mapper_call,
+              PendingVerification(total_calls,total_points,ready_event))).first;
+            // Handle the case where we definitely have a mismatch
+            if (total_calls < upper_bound_index)
+            {
 #ifdef DEBUG_LEGION
-            // There should be other points out there that are
-            // responsible for the additional collective calls
-            assert(finder->second.remaining_points > points); 
+              // There should be other points out there that are
+              // responsible for the additional collective calls
+              assert(finder->second.remaining_points > points); 
 #endif
-            finder->second.remaining_points -= points;
-            return upper_bound_index;
+              finder->second.remaining_points -= points;
+              return upper_bound_index;
+            }
+            wait_on = ready_event;
           }
+          else
+            pending_verifications.insert(
+             std::pair<MappingCallKind,PendingVerification>(mapper_call,
+             PendingVerification(total_calls,1,RtUserEvent::NO_RT_USER_EVENT)));
           perform_verification = true;
-          wait_on = ready_event;
         }
         else
         {
@@ -3112,11 +3117,12 @@ namespace Legion {
           pending_verifications.find(mapper_call);
 #ifdef DEBUG_LEGION
       assert(finder != pending_verifications.end());
-      assert(finder->second.ready_event.exists());
-      assert(!finder->second.ready_event.has_triggered());
+      assert(!finder->second.ready_event.exists() ||
+              !finder->second.ready_event.has_triggered());
 #endif
       finder->second.total_calls = total_calls;
-      Runtime::trigger_event(finder->second.ready_event);
+      if (finder->second.ready_event.exists())
+        Runtime::trigger_event(finder->second.ready_event);
       if (finder->second.remaining_points == 0)
         pending_verifications.erase(finder);
       else
