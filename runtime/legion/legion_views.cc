@@ -339,6 +339,8 @@ namespace Legion {
       IndexSpaceNode *user_expr = runtime->forest->get_node(handle);
       UniqueID op_id;
       derez.deserialize(op_id);
+      size_t op_ctx_index;
+      derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
       ApEvent term_event;
@@ -364,8 +366,10 @@ namespace Legion {
       InstanceView *inst_view = view->as_instance_view();
       std::set<RtEvent> applied_events;
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
-                                             op_id, index, term_event,
-                                             collect_event, applied_events, 
+                                             op_id, op_ctx_index, index,
+                                             term_event, collect_event, 
+                                             applied_events, 
+                                             NULL/*no collective mapping*/,
                                              trace_info, source);
       if (ready_event.exists())
         Runtime::trigger_event(&trace_info, ready_event, pre);
@@ -2638,21 +2642,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent MaterializedView::register_user(const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            IndexSpaceNode *user_expr,
-                                            const UniqueID op_id,
-                                            const unsigned index,
-                                            ApEvent term_event,
-                                            RtEvent collect_event,
-                                            std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info,
-                                            const AddressSpaceID source,
-                                            bool symbolic /*=false*/)
+                                          const FieldMask &user_mask,
+                                          IndexSpaceNode *user_expr,
+                                          const UniqueID op_id,
+                                          const size_t op_ctx_index,
+                                          const unsigned index,
+                                          ApEvent term_event,
+                                          RtEvent collect_event,
+                                          std::set<RtEvent> &applied_events,
+                                          CollectiveMapping *collective_mapping,
+                                          const PhysicalTraceInfo &trace_info,
+                                          const AddressSpaceID source,
+                                          bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
+      // If this is a collective analysis then we need to figure out which
+      // analysis is going to perform the traversal, do the parallel rendezvous
+      // through the instance manager which should be a collective instance
+      if (collective_mapping != NULL)
+        return manager->register_collective_user(this, usage, user_mask,
+            user_expr, op_id, op_ctx_index, index, term_event, collect_event,
+            applied_events, collective_mapping, trace_info, source, symbolic);
       if (!is_logical_owner())
       {
         ApUserEvent ready_event;
@@ -2674,6 +2687,7 @@ namespace Legion {
             rez.serialize(user_mask);
             rez.serialize(user_expr->handle);
             rez.serialize(op_id);
+            rez.serialize(op_ctx_index);
             rez.serialize(index);
             rez.serialize(term_event);
             rez.serialize(collect_event);
@@ -2794,6 +2808,7 @@ namespace Legion {
                 rez.serialize(overlap);
                 rez.serialize(user_expr->handle);
                 rez.serialize(op_id);
+                rez.serialize(op_ctx_index);
                 rez.serialize(index);
                 rez.serialize(term_event);
                 rez.serialize(collect_event);
@@ -4480,10 +4495,12 @@ namespace Legion {
                                          const FieldMask &user_mask,
                                          IndexSpaceNode *user_expr,
                                          const UniqueID op_id,
+                                         const size_t op_ctx_index,
                                          const unsigned index,
                                          ApEvent term_event,
                                          RtEvent collect_event,
                                          std::set<RtEvent> &applied_events,
+                                         CollectiveMapping *collective_mapping,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
                                          bool symbolic /*=false*/)
@@ -4495,6 +4512,13 @@ namespace Legion {
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
         return manager->get_use_event(term_event);
+      // If this is a collective analysis then we need to figure out which
+      // analysis is going to perform the traversal, do the parallel rendezvous
+      // through the instance manager which should be a collective instance
+      if (collective_mapping != NULL)
+        return manager->register_collective_user(this, usage, user_mask,
+            user_expr, op_id, op_ctx_index, index, term_event, collect_event,
+            applied_events, collective_mapping, trace_info, source, symbolic);
       if (!is_logical_owner())
       {
         // If we're not the logical owner send a message there 
@@ -4510,6 +4534,7 @@ namespace Legion {
           rez.serialize(user_mask);
           rez.serialize(user_expr->handle);
           rez.serialize(op_id);
+          rez.serialize(op_ctx_index);
           rez.serialize(index);
           rez.serialize(term_event);
           rez.serialize(collect_event);

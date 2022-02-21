@@ -612,6 +612,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_collective_barrier(ApBarrier bar, 
+                       ApEvent pre, size_t arrivals, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+#endif
+      if (local_space != origin_space)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_COLLECTIVE_BARRIER);
+          rez.serialize(done);
+          rez.serialize(bar);
+          rez.serialize(pre);
+          rez.serialize(arrivals);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+      }
+      else
+        remote_tpl->record_collective_barrier(bar, pre, arrivals, applied);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_issue_copy(Memoizable *memo, ApEvent &lhs,
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
@@ -1966,6 +1993,25 @@ namespace Legion {
               Runtime::trigger_event(done);
             if (memo->get_origin_space() != runtime->address_space)
               delete memo;
+            break;
+          }
+        case REMOTE_TRACE_COLLECTIVE_BARRIER:
+          {
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            ApBarrier barrier;
+            derez.deserialize(barrier);
+            ApEvent pre;
+            derez.deserialize(pre);
+            size_t arrivals;
+            derez.deserialize(arrivals);
+            std::set<RtEvent> applied;
+            tpl->record_collective_barrier(barrier, pre, arrivals, applied);
+            if (!applied.empty())
+              Runtime::trigger_event(done_event,
+                  Runtime::merge_events(applied));
+            else
+              Runtime::trigger_event(done_event);
             break;
           }
         default:
@@ -11637,56 +11683,8 @@ namespace Legion {
         {
           // There aren't any analyses that will be local to the
           // logical owner space so we need to pick the closest one
-          if (logical_owner_space < mapping[0])
-          {
-            // Below the lower bound
-            if (local_space == mapping[0])
-              return false;
-          }
-          else if (logical_owner_space > mapping[mapping.size() - 1])
-          {
-            // Above the upper bound
-            if (local_space == mapping[mapping.size() - 1])
-              return false;
-          }
-          else
-          {
-            // Contained somewhere in the middle so binary
-            // search for the two nearest options
-            unsigned first = 0;
-            unsigned last = mapping.size() - 1;
-            unsigned mid = 0;
-            while (first <= last)
-            {
-              mid = (first + last) / 2;
-              const AddressSpaceID midval = mapping[mid];
-#ifdef DEBUG_LEGION
-              // Should never actually find it
-              assert(local_space != midval);
-#endif
-              if (local_space < midval)
-                last = mid - 1;
-              else if (midval < local_space)
-                first = mid + 1;
-              else
-                break;
-            }
-#ifdef DEBUG_LEGION
-            assert(first != last);
-#endif
-            const unsigned diff_low = logical_owner_space - mapping[first];
-            const unsigned diff_high = mapping[last] - logical_owner_space;
-            if (diff_low < diff_high)
-            {
-              if (local_space == mapping[first])
-                return false;
-            }
-            else
-            {
-              if (local_space == mapping[last])
-                return false;
-            }
-          }
+          if (local_space == mapping.find_nearest(logical_owner_space))
+            return false;
         }
         else 
         {

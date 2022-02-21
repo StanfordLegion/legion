@@ -4537,7 +4537,9 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              used[gen[arrival->rhs]] = true;
+              for (std::vector<std::pair<unsigned,unsigned> >::const_iterator 
+                    it = arrival->rhs.begin(); it != arrival->rhs.end(); it++)
+                used[gen[it->first]] = true;
               break;
             }
           case ISSUE_COPY:
@@ -4801,6 +4803,8 @@ namespace Legion {
         else
         {
           unsigned *event_to_check = NULL;
+          // For cases where we have multiple events to check
+          std::vector<unsigned*> more_events_to_check;
           switch (inst->get_kind())
           {
             case TRIGGER_EVENT:
@@ -4810,7 +4814,13 @@ namespace Legion {
               }
             case BARRIER_ARRIVAL:
               {
-                event_to_check = &inst->as_barrier_arrival()->rhs;
+                BarrierArrival *barrier = inst->as_barrier_arrival();
+#ifdef DEBUG_LEGION
+                assert(!barrier->rhs.empty());
+#endif
+                event_to_check = &barrier->rhs.front().first;
+                for (unsigned idx = 1; idx < barrier->rhs.size(); idx++)
+                  more_events_to_check.push_back(&barrier->rhs[idx].first);
                 break;
               }
             case ISSUE_COPY:
@@ -4860,7 +4870,7 @@ namespace Legion {
                 break;
               }
           }
-          if (event_to_check != NULL)
+          while (event_to_check != NULL)
           {
             unsigned ev = *event_to_check;
             unsigned g = gen[ev];
@@ -4893,6 +4903,14 @@ namespace Legion {
                 crossing_instructions.push_back(crossing);
               }
             }
+            // Update event to check for the next loop
+            if (!more_events_to_check.empty())
+            {
+              event_to_check = more_events_to_check.back();
+              more_events_to_check.pop_back();
+            }
+            else
+              event_to_check = NULL;
           }
         }
       }
@@ -4968,8 +4986,12 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              incoming[arrival->lhs].push_back(arrival->rhs);
-              outgoing[arrival->rhs].push_back(arrival->lhs);
+              for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
+                    it = arrival->rhs.begin(); it != arrival->rhs.end(); it++)
+              {
+                incoming[arrival->lhs].push_back(it->first);
+                outgoing[it->first].push_back(arrival->lhs);
+              }
               break;
             }
           case MERGE_EVENT :
@@ -5349,8 +5371,12 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              int subst = substs[arrival->rhs];
-              if (subst >= 0) arrival->rhs = (unsigned)subst;
+              for (std::vector<std::pair<unsigned,unsigned> >::iterator it =
+                    arrival->rhs.begin(); it != arrival->rhs.end(); it++)
+              {
+                int subst = substs[it->first];
+                if (subst >= 0) it->first = (unsigned)subst;
+              }
               lhs = arrival->lhs;
               break;
             }
@@ -5610,10 +5636,14 @@ namespace Legion {
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
+              for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
+                    it = arrival->rhs.begin(); it != arrival->rhs.end(); it++)
+              {
 #ifdef DEBUG_LEGION
-              assert(gen[arrival->rhs] != -1U);
+                assert(gen[it->first] != -1U);
 #endif
-              used[gen[arrival->rhs]] = true;
+                used[gen[it->first]] = true;
+              }
               break;
             }
           case GET_TERM_EVENT:
@@ -6092,6 +6122,43 @@ namespace Legion {
     {
       // should only be called on sharded physical templates
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_collective_barrier(ApBarrier bar,
+                ApEvent pre, size_t arrivals, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+      assert(is_recording());
+#endif
+      unsigned rhs_ = fence_completion_id;
+      if (pre.exists())
+      {
+        std::map<ApEvent, unsigned>::const_iterator finder = event_map.find(pre);
+        if (finder != event_map.end())
+          rhs_ = finder->second;
+      }
+      // Check to see if we've recorded this barrier before or not
+      if (event_map.find(bar) == event_map.end())
+      {
+        BarrierArrival *arrival = new BarrierArrival(*this, bar, 
+            convert_event(bar), rhs_, arrivals, true/*managed*/);
+        insert_instruction(arrival);
+        // Save this as one of the barriers that we're managing
+        managed_barriers[bar] = arrival;
+      }
+      else
+      {
+        std::map<ApBarrier,BarrierArrival*>::const_iterator finder =
+          managed_barriers.find(bar);
+#ifdef DEBUG_LEGION
+        assert(finder != managed_barriers.end());
+#endif
+        finder->second->record_arrival(rhs_, arrivals); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7220,7 +7287,7 @@ namespace Legion {
       // Use a NO_BARRIER here since it is going to be filled in on each replay
       // by an operation that will provide the name of the barrier to use
       BarrierArrival *arrival =
-        new BarrierArrival(*this, bar, bar_, pre_, arrivals, true/*collect*/);
+        new BarrierArrival(*this, bar, bar_, pre_, arrivals, false/*managed*/);
       insert_instruction(arrival);
 #ifdef DEBUG_LEGION
       assert(collective_barriers.find(key) == collective_barriers.end());
@@ -7374,8 +7441,8 @@ namespace Legion {
 #endif
         // Then add a new instruction to arrive on the barrier with the
         // event as a precondition
-        BarrierArrival *arrival_instruction =
-          new BarrierArrival(*this, barrier, index, finder->second);
+        BarrierArrival *arrival_instruction = new BarrierArrival(*this, 
+            barrier, index, finder->second, 1/*count*/, true/*managed*/);
         insert_instruction(arrival_instruction);
         // Save this in the remote barriers
         remote_arrivals[event] = arrival_instruction;
@@ -8415,7 +8482,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != collective_barriers.end());
 #endif
-          finder->second->set_collective_barrier(it->second);
+          finder->second->set_managed_barrier(it->second);
         }
       }
       // Now call the base version of this
@@ -9769,23 +9836,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     BarrierArrival::BarrierArrival(PhysicalTemplate &tpl, ApBarrier bar,
                                    unsigned _lhs, unsigned _rhs,
-                                   size_t arrivals, bool collect)
+                                   size_t arrivals, bool manage)
       : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
-        lhs(_lhs), rhs(_rhs), arrival_count(arrivals), collective(collect)
+        lhs(_lhs), managed(manage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
-      assert(rhs < tpl.events.size());
+      assert(_rhs < tpl.events.size());
 #endif
+      rhs.push_back(std::pair<unsigned,unsigned>(_rhs, arrivals));
     }
 
     //--------------------------------------------------------------------------
     BarrierArrival::~BarrierArrival(void)
     //--------------------------------------------------------------------------
     {
-      // Destroy our barrier if we're not a collective barrier
-      if (!collective)
+      // Destroy our barrier if we're managing it
+      if (managed)
         barrier.destroy_barrier();
     }
 
@@ -9796,12 +9864,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs < events.size());
       assert(lhs < events.size());
 #endif
-      Runtime::phase_barrier_arrive(barrier, arrival_count, events[rhs]);
+      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first < events.size());
+#endif
+        Runtime::phase_barrier_arrive(barrier, it->second, events[it->first]);
+      }
       events[lhs] = barrier;
-      if (!collective)
+      if (managed)
         Runtime::advance_barrier(barrier);
     }
 
@@ -9812,8 +9886,18 @@ namespace Legion {
     {
       std::stringstream ss; 
       ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
-         << std::hex << barrier.id << std::dec << ", events[" << rhs << "], "
-         << "collective: " << (collective ? "yes" : "no") << ")";
+         << std::hex << barrier.id << std::dec << ", events["; 
+      bool first = true;
+      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        if (first)
+          first = false;
+        else
+          ss << ", ";
+        ss << "(" << it->first << "," << it->second << ")";
+      }
+      ss << "], managed : " << (managed ? "yes" : "no") << ")";
       return ss.str();
     }
 
@@ -9822,7 +9906,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!collective);
+      assert(managed);
 #endif
       subscribed_shards.push_back(remote_shard);
       return barrier;
@@ -9834,7 +9918,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!collective);
+      assert(managed);
 #endif
       // Destroy the old barrier
       barrier.destroy_barrier();
@@ -9850,20 +9934,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!collective);
+      assert(managed);
       assert(subscribed_shards.empty()); 
 #endif
       barrier = newbar;
     }
 
     //--------------------------------------------------------------------------
-    void BarrierArrival::set_collective_barrier(ApBarrier newbar)
+    void BarrierArrival::set_managed_barrier(ApBarrier newbar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(collective);
+      assert(managed);
 #endif
       barrier = newbar;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierArrival::record_arrival(unsigned rhs_, unsigned arrivals)
+    //--------------------------------------------------------------------------
+    {
+      // See if we already have an arrival
+      for (std::vector<std::pair<unsigned,unsigned> >::iterator it =
+            rhs.begin(); it != rhs.end(); it++)
+      {
+        if (it->first != rhs_)
+          continue;
+        it->second += arrivals;
+        return;
+      }
+      // If we get here we didn't find it so add it
+      rhs.push_back(std::make_pair(rhs_, arrivals));
     }
 
     /////////////////////////////////////////////////////////////

@@ -165,10 +165,12 @@ namespace Legion {
                                     const FieldMask &user_mask,
                                     IndexSpaceNode *expr,
                                     const UniqueID op_id,
+                                    const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
+                                    CollectiveMapping *collective_mapping,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     bool symbolic = false) = 0;
@@ -262,6 +264,8 @@ namespace Legion {
       // instance made for a virtual mapping
       const UniqueID owner_context;
       // This is the owner space for the purpose of logical analysis
+      // If you ever make this non-const then be sure to update the
+      // code in register_collective_user
       const AddressSpaceID logical_owner;
     private:
       // Keep track of the locks used for managing atomic coherence
@@ -602,10 +606,12 @@ namespace Legion {
                                     const FieldMask &user_mask,
                                     IndexSpaceNode *expr,
                                     const UniqueID op_id,
+                                    const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
+                                    CollectiveMapping *collective_mapping,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     bool symbolic = false);
@@ -779,10 +785,12 @@ namespace Legion {
                                     const FieldMask &user_mask,
                                     IndexSpaceNode *expr,
                                     const UniqueID op_id,
+                                    const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
                                     RtEvent collect_event,
                                     std::set<RtEvent> &applied_events,
+                                    CollectiveMapping *collective_mapping,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     bool symbolic = false);

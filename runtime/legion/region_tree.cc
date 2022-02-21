@@ -2189,6 +2189,7 @@ namespace Legion {
         // Perform the registration
         IndexSpaceNode *local_expr = analysis->node->row_source;
         const UniqueID op_id = analysis->op->get_unique_op_id();
+        const size_t op_ctx_index = analysis->op->get_ctx_index();
         const AddressSpaceID local_space = runtime->address_space;
         if (analysis->user_registered.exists())
         {
@@ -2197,9 +2198,10 @@ namespace Legion {
           {
             const FieldMask &inst_mask = targets[idx].get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
-                analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
-                analysis->term_event, collect_event,
-                user_applied, trace_info, local_space, symbolic);
+                analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
+                analysis->index, analysis->term_event, collect_event,
+                user_applied, analysis->collective_mapping, trace_info,
+                local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2221,9 +2223,10 @@ namespace Legion {
           {
             const FieldMask &inst_mask = targets[idx].get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
-                analysis->usage, inst_mask, local_expr, op_id, analysis->index,
-                analysis->term_event, collect_event, map_applied_events, 
-                trace_info, local_space, symbolic);
+                analysis->usage, inst_mask, local_expr, op_id, op_ctx_index,
+                analysis->index, analysis->term_event, collect_event,
+                map_applied_events, analysis->collective_mapping, trace_info,
+                local_space, symbolic);
             // Record the event as the precondition for the task
             targets[idx].set_ready_event(ready);
             if (trace_info.recording)
@@ -2376,6 +2379,7 @@ namespace Legion {
       unsigned inst_index = 0;
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
+      const size_t op_ctx_index = op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       // Now add users for all the instances
       for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -2388,8 +2392,9 @@ namespace Legion {
         restricted_instances[inst_index] = 
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
-            local_expr, op_id, index, term_event, collect_event,
-            map_applied_events, trace_info, runtime->address_space);
+            local_expr, op_id, op_ctx_index, index, term_event,
+            collect_event, map_applied_events, collective_mapping,
+            trace_info, runtime->address_space);
         if (ready.exists())
           acquired_events.insert(ready);
       }
@@ -2463,6 +2468,7 @@ namespace Legion {
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
+      const size_t op_ctx_index = op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::set<ApEvent> released_events;
       if (known_targets)
@@ -2477,8 +2483,9 @@ namespace Legion {
         {
           const FieldMask &mask = restricted_instances[idx].get_valid_fields();
           ApEvent ready = target_views[idx]->register_user(usage, mask,
-              local_expr, op_id, index, term_event, collect_event,
-              map_applied_events, trace_info, runtime->address_space);
+              local_expr, op_id, op_ctx_index, index, term_event,
+              collect_event, map_applied_events, collective_mapping,
+              trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
         }
@@ -2507,8 +2514,9 @@ namespace Legion {
           restricted_instances[inst_index] = 
             InstanceRef(inst_view->get_manager(), it->second);
           ApEvent ready = inst_view->register_user(usage, it->second,
-              local_expr, op_id, index, term_event, collect_event,
-              map_applied_events, trace_info, runtime->address_space);
+              local_expr, op_id, op_ctx_index, index, term_event,
+              collect_event, map_applied_events, collective_mapping,
+              trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
         }
@@ -3372,6 +3380,7 @@ namespace Legion {
       // that we have some remote equivalence sets
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
+      const size_t op_ctx_index = attach_op->get_ctx_index();
       const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> ready_events;
       FieldMaskSet<LogicalView> registration_views;
@@ -3380,9 +3389,9 @@ namespace Legion {
       {
         registration_views.insert(*it, ext_mask);
         const ApEvent ready = (*it)->register_user(usage, ext_mask,
-                    region_node->row_source, op_id, index, termination_event,
-                    collect_event, registration_applied, trace_info, 
-                    runtime->address_space);
+                    region_node->row_source, op_id, op_ctx_index, index,
+                    termination_event, collect_event, registration_applied,
+                    collective_mapping, trace_info, runtime->address_space);
         if (ready.exists())
           ready_events.push_back(ready);
       }
@@ -3438,14 +3447,16 @@ namespace Legion {
       FieldSpaceNode *fs_node = region_node->column_source;
       const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
       const UniqueID op_id = detach_op->get_unique_op_id();
+      const size_t op_ctx_index = detach_op->get_ctx_index();
       const ApEvent term_event = detach_op->get_completion_event();
       const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                      region_node->row_source,
-                                                     op_id, index, term_event,
-                                                     collect_event, 
+                                                     op_id, op_ctx_index, index,
+                                                     term_event, collect_event, 
                                                      map_applied_events, 
+                                                     collective_mapping,
                                                      trace_info,
                                                      runtime->address_space);
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,

@@ -930,6 +930,8 @@ namespace Legion {
                             const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
+      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
@@ -1101,6 +1103,7 @@ namespace Legion {
       std::map<unsigned,ApUserEvent>  user_events;
     protected:
       std::map<ApEvent,unsigned> event_map;
+      std::map<ApBarrier,BarrierArrival*> managed_barriers;
     private:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
@@ -1919,7 +1922,7 @@ namespace Legion {
     public:
       BarrierArrival(PhysicalTemplate &tpl,
                      ApBarrier bar, unsigned lhs, unsigned rhs,
-                     size_t arrival_count = 1, bool collective = false);
+                     size_t arrival_count, bool managed);
       virtual ~BarrierArrival(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1936,14 +1939,16 @@ namespace Legion {
       void refresh_barrier(ApEvent key,
           std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications);
       void remote_refresh_barrier(ApBarrier newbar);
-      void set_collective_barrier(ApBarrier newbar);
+      void set_managed_barrier(ApBarrier newbar);
+      void record_arrival(unsigned rhs_, unsigned arrivals);
     private:
       friend class PhysicalTemplate;
       ApBarrier barrier;
-      unsigned lhs, rhs;
+      unsigned lhs;
+      // RHS events and their arrival counts
+      std::vector<std::pair<unsigned,unsigned> > rhs;
       std::vector<ShardID> subscribed_shards;
-      size_t arrival_count;
-      const bool collective;
+      const bool managed;
     };
 
     /**

@@ -693,6 +693,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID CollectiveMapping::find_nearest(AddressSpaceID search) const
+    //--------------------------------------------------------------------------
+    {
+      unsigned first = 0;
+      unsigned last = size() - 1;
+      if (search < (*this)[first])
+        return (*this)[first];
+      if (search > (*this)[last])
+        return (*this)[last];
+      // Contained somewhere in the middle so binary
+      // search for the two nearest options
+      unsigned mid = 0;
+      while (first <= last)
+      {
+        mid = (first + last) / 2;
+        const AddressSpaceID midval = (*this)[mid];
+#ifdef DEBUG_LEGION
+        // Should never actually find it
+        assert(search != midval);
+#endif
+        if (search < midval)
+          last = mid - 1;
+        else if (midval < search)
+          first = mid + 1;
+        else
+          break;
+      }
+#ifdef DEBUG_LEGION
+      assert(first != last);
+#endif
+      const unsigned diff_low = search - (*this)[first];
+      const unsigned diff_high = (*this)[last] - search;
+      if (diff_low < diff_high)
+        return (*this)[first];
+      else
+        return (*this)[last];
+    }
+
+    //--------------------------------------------------------------------------
     bool CollectiveMapping::contains(const CollectiveMapping &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -1608,7 +1647,7 @@ namespace Legion {
                                                  precondition, predicate_guard);
       if (trace_info.recording)
         trace_info.record_fill_views(result, fill_expression, *tracing_srcs, 
-            *                        tracing_dsts, effects_applied,(redop > 0));
+                                     *tracing_dsts,effects_applied,(redop > 0));
       return result;
     }
 
@@ -1690,6 +1729,28 @@ namespace Legion {
                                    unique_event,
 #endif
                                    fields);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndividualManager::register_collective_user(InstanceView *view, 
+                                            const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceNode *expr,
+                                            const UniqueID op_id,
+                                            const size_t op_ctx_index,
+                                            const unsigned index,
+                                            ApEvent term_event,
+                                            RtEvent collect_event,
+                                            std::set<RtEvent> &applied_events,
+                                            const CollectiveMapping *mapping,
+                                            const PhysicalTraceInfo &trace_info,
+                                            const AddressSpaceID source,
+                                            bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+      // This should only ever be called on collective instances
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3577,8 +3638,582 @@ namespace Legion {
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-      // should never be called
+      // TODO: implement this
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CollectiveManager::register_collective_user(InstanceView *view, 
+                                            const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceNode *expr,
+                                            const UniqueID op_id,
+                                            const size_t op_ctx_index,
+                                            const unsigned index,
+                                            ApEvent term_event,
+                                            RtEvent collect_event,
+                                            std::set<RtEvent> &applied_events,
+                                            const CollectiveMapping *mapping,
+                                            const PhysicalTraceInfo &trace_info,
+                                            const AddressSpaceID source,
+                                            bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapping != NULL);
+      assert(collective_mapping != NULL);
+      assert(collective_mapping->contains(local_space));
+      // CollectiveMapping for the analyses should all align with 
+      // the CollectiveMapping for the collective manager
+      assert((mapping == collective_mapping) ||
+          ((*mapping) == (*collective_mapping)));
+      assert(term_event.exists());
+#endif
+      // This function does a parallel rendezvous across all the analyses
+      // trying to use this collective instance for an operation so that only
+      // one of them will actually do the view analysis, but it will seem to
+      // all of them like they actually did it. To that end, this function 
+      // must do five important things:
+      // 1. Make sure that the precondition return event is broadcast out
+      //    to all the participants in the rendezvous
+      // 2. Make sure that the recorded event in the view is a merge of the 
+      //    term_event from all of the participants
+      // 3. SUBTLE!!! Don't start the view analysis until all the participants
+      //    have arrived because that is the only way to know that all the 
+      //    copy effects from analyses by any participant have been recorded
+      //    by the view.
+      // 4. Do NOT block in this function call or you can risk deadlock because
+      //    we might be doing several of these calls for a region requirement
+      //    on different instances and the orders might vary on each node.
+      // 5. In the case of tracing we don't want to build any explicit event
+      //    trees, so instead we will return the actual event precondition
+      //    back out to all the particpants. Furthermore, for the term events,
+      //    we will have all of them arrive on a barrier that is shared across
+      //    all the participants and that the trace can reuse.
+      
+      // First let's figure out which node is ultimately going to do analysis
+      // If the logical owner of the view is contained in the mapping then
+      // that node will be the one to do the analysis for locality reasons
+      // If the logical owner of the view is not in the mapping then we'll
+      // pick whichever node is closest in the collective mapping to the 
+      // logical owner (assuming some degree of locality)
+      // Note this code assumes that logical_owner on the view is const
+      // which it is declared to be today
+      const AddressSpaceID origin = mapping->contains(view->logical_owner) ?
+        view->logical_owner : mapping->find_nearest(view->logical_owner);
+      // The unique tag for the rendezvous is our context ID which will be
+      // the same across all points and the index of our region requirement
+      ApEvent result;
+      RtUserEvent local_applied;
+      std::map<ApEvent,PhysicalTraceInfo*> term_events;
+      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      {
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert(!instances.empty());
+#endif
+        // Check to see if we're the first one to arrive on this node
+        std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator
+          finder = rendezvous_users.find(tag);
+        if (finder == rendezvous_users.end())
+        {
+          // If we are then make the record for knowing when we've seen
+          // all the expected arrivals
+          finder = rendezvous_users.insert(
+              std::make_pair(tag,UserRendezvous())).first; 
+          UserRendezvous &rendezvous = finder->second;
+          // Count how many expected arrivals we have
+          rendezvous.remaining_local_arrivals = instances.size();
+          rendezvous.remaining_remote_arrivals =
+            mapping->count_children(origin, local_space);
+          rendezvous.applied = Runtime::create_rt_user_event();
+          rendezvous.deferred = RtUserEvent::NO_RT_USER_EVENT;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.term_events.find(term_event) ==
+                finder->second.term_events.end());
+#endif
+        finder->second.term_events[term_event] = trace_info.recording ?
+          new PhysicalTraceInfo(trace_info) : NULL;
+        // Record the applied events
+        applied_events.insert(finder->second.applied);
+        // See if we need to make our own result event or not
+        if (trace_info.recording)
+        {
+          // Always make a new ready event in the case of tracing
+          const ApUserEvent local_ready =
+            Runtime::create_ap_user_event(&trace_info);
+          // Can re-use the trace-info from the term events, the
+          // term events will always own the trace info
+          finder->second.ready_events[local_ready] =
+            finder->second.term_events[term_event];
+          result = local_ready;
+        }
+        else
+        {
+          if (finder->second.ready_events.empty())
+          {
+            // We're first, so make the ready event
+            const ApUserEvent local_ready = 
+              Runtime::create_ap_user_event(&trace_info);
+            // no trace info required in this case
+            finder->second.ready_events[local_ready] = NULL; 
+          }
+          result = finder->second.ready_events.begin()->first;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_local_arrivals > 0);
+#endif
+        // If we're not done or we're not the owner then we can simply
+        // return the ready event since there is nothing for us to do
+        if (--finder->second.remaining_local_arrivals == 0)
+        {
+          // Check to see if we're the origin or not
+          if (local_space == origin)
+          {
+            // We're the origin node so we're the node that has to
+            // actually call back into the view to do the analysis
+            // See if we're waiting for anymore remote arrivals
+            if (finder->second.remaining_remote_arrivals > 0)
+            {
+              // Launch a meta-task to capture the arguments for
+              // when we need to actually perform the analysis
+#ifdef DEBUG_LEGION
+              assert(!finder->second.deferred.exists()); 
+#endif
+              finder->second.deferred = Runtime::create_rt_user_event();
+              PhysicalTraceInfo *info = trace_info.recording ? 
+                finder->second.term_events[term_event] : 
+                new PhysicalTraceInfo(trace_info);
+              DeferCollectiveRendezvousArgs args(this, view, usage, user_mask,
+                 expr, op_id, op_ctx_index, index, finder->second.term_events,
+                 collect_event, finder->second.applied, info, origin, source,
+                 symbolic, applied_events);
+              runtime->issue_runtime_meta_task(args,
+                  LG_LATENCY_DEFERRED_PRIORITY, finder->second.deferred);
+              return result;
+            }
+            // Otherwise we can fall through and perform the analysis now
+            // Grab the term events so we can record them for later
+            term_events.swap(finder->second.term_events);
+#ifdef DEBUG_LEGION
+            // If we're tracing we should have exactly as many term events as
+            // we do instances on the local node
+            assert(!trace_info.recording ||
+                (term_events.size() == instances.size()));
+            assert(finder->second.applied.exists());
+#endif
+            local_applied = finder->second.applied;
+          }
+          else
+          {
+            // Not the origin, so see if our arrivals are all done
+            // If they are then we can send the message
+            if (finder->second.remaining_remote_arrivals == 0)
+            {
+              // Send the message to the parent in the rendezvous tree
+              ApEvent merged_term;
+              ApUserEvent to_trigger;
+              RtUserEvent applied;
+              // Only need the merged event in the case we're not tracing
+              // In the tracing case we'll get a response message with a barrier
+              if (!trace_info.recording)
+              {
+                std::vector<ApEvent> terms;
+                terms.resize(finder->second.term_events.size());
+                for (std::map<ApEvent,PhysicalTraceInfo*>::const_iterator it =
+                      finder->second.term_events.begin(); it !=
+                      finder->second.term_events.end(); it++)
+                {
+#ifdef DEBUG_LEGION
+                  assert(it->second == NULL);
+#endif
+                  terms.push_back(it->first);
+                }
+                merged_term = Runtime::merge_events(&trace_info, terms);
+#ifdef DEBUG_LEGION
+                assert(finder->second.ready_events.size() == 1);
+#endif
+                to_trigger = finder->second.ready_events.begin()->first;
+                applied = finder->second.applied;
+              }
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(COLLECTIVE_RENDEZVOUS_REQUEST);
+                rez.serialize(origin);
+                rez.serialize(op_ctx_index);
+                rez.serialize(index);
+                rez.serialize(merged_term);
+                rez.serialize(to_trigger); 
+                rez.serialize(applied);
+              }
+              const AddressSpaceID parent = 
+                mapping->get_parent(origin, local_space);
+              runtime->send_collective_instance_message(parent, rez);
+              if (!trace_info.recording)
+                // Not expecting a response for tracing so we can
+                // remove the entry from the rendezvous_users
+                rendezvous_users.erase(finder);
+              // Otheriwse we're expecting a callback to give us the name
+              // of the barrier to use for tracing so we can just leave
+              // the rendezvous in-place for when it comes back
+            }
+            return result;
+          }
+        }
+        else
+          return result;
+      }
+      // If we get here then we're the origin so do the analysis immediately
+#ifdef DEBUG_LEGION
+      assert(local_space == origin);
+#endif
+      finalize_collective_user(view, usage, user_mask, expr, op_id,
+          op_ctx_index, index, term_events, collect_event, local_applied,
+          trace_info, origin, source, symbolic);
+      // Clean-up the physical trace infos we made if we're tracing
+      if (trace_info.recording)
+      {
+        for (std::map<ApEvent,PhysicalTraceInfo*>::iterator it =
+              term_events.begin(); it != term_events.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second != NULL);
+#endif
+          delete it->second; 
+        }
+      }
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      else
+      {
+        for (std::map<ApEvent,PhysicalTraceInfo*>::iterator it =
+              term_events.begin(); it != term_events.end(); it++)
+          assert(it->second == NULL);
+      }
+#endif
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::finalize_collective_user(
+                              InstanceView *view, 
+                              const RegionUsage &usage,
+                              const FieldMask &user_mask,
+                              IndexSpaceNode *expr,
+                              const UniqueID op_id,
+                              const size_t op_ctx_index,
+                              const unsigned index,
+                              std::map<ApEvent,PhysicalTraceInfo*> &term_events,
+                              RtEvent collect_event,
+                              RtUserEvent applied,
+                              const PhysicalTraceInfo &trace_info,
+                              const AddressSpaceID origin,
+                              const AddressSpaceID source,
+                              const bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+      // Call back into the view but without a collective mapping this time
+      std::set<RtEvent> local_applied;
+      ApEvent result;
+      ApBarrier common_term;
+      if (trace_info.recording)
+      {
+        // Create a barrier for use in the trace as the common term event
+        common_term = ApBarrier(Realm::Barrier::create_barrier(total_points));
+        result = view->register_user(usage, user_mask, expr, op_id,
+            op_ctx_index, index, common_term, collect_event, local_applied,
+            NULL/*collective mapping*/, trace_info, source, symbolic);
+        for (std::map<ApEvent,PhysicalTraceInfo*>::const_iterator it =
+              term_events.begin(); it != term_events.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second != NULL);
+#endif
+          Runtime::phase_barrier_arrive(common_term, 1/*count*/, it->first);
+          // Record the barrier with the trace
+          it->second->record_collective_barrier(common_term, it->first,
+                                                local_applied, 1/*count*/);
+        }
+      }
+      else
+      {
+        std::vector<ApEvent> terms;
+        terms.reserve(term_events.size());
+        for (std::map<ApEvent,PhysicalTraceInfo*>::const_iterator it =
+              term_events.begin(); it != term_events.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second == NULL);
+#endif
+          terms.push_back(it->first);
+        }
+        const ApEvent merged_term = Runtime::merge_events(&trace_info, terms);
+        result = view->register_user(usage, user_mask, expr, op_id,
+            op_ctx_index, index, merged_term, collect_event, local_applied,
+            NULL/*collective mapping*/, trace_info, source, symbolic);
+      }
+      const std::pair<size_t,unsigned> tag(op_ctx_index, index);
+      // Retake the lock and do what we need to do to send the results
+      // back to the other participants
+      AutoLock i_lock(inst_lock);
+      std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator finder =
+        rendezvous_users.find(tag);
+#ifdef DEBUG_LEGION
+      assert(finder != rendezvous_users.end());
+      assert(!finder->second.deferred.exists());
+      assert(finder->second.term_events.empty());
+#endif
+      if (!local_applied.empty())
+        Runtime::trigger_event(finder->second.applied, 
+            Runtime::merge_events(local_applied));
+      else
+        Runtime::trigger_event(finder->second.applied);
+      if (trace_info.recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(common_term.exists());
+#endif
+        // Send the result message back with the barrier and the ready event
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(origin, local_space, children);
+        if (!children.empty())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(COLLECTIVE_RENDEZVOUS_RESPONSE);
+            rez.serialize(origin);
+            rez.serialize(op_ctx_index);
+            rez.serialize(index);
+            rez.serialize(result);
+            rez.serialize(common_term);
+            rez.serialize(finder->second.applied);
+          }
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            runtime->send_collective_instance_message(*it, rez);
+        }
+        // Trigger any other events with the precondition
+        for (std::map<ApUserEvent,PhysicalTraceInfo*>::iterator it =
+              finder->second.ready_events.begin(); it !=
+              finder->second.ready_events.end(); it++)
+          Runtime::trigger_event(it->second, it->first, result);
+      }
+      else // trigger the broadcast tree for the ready event
+      {
+#ifdef DEBUG_LEGION
+        assert(!common_term.exists());
+        assert(finder->second.ready_events.size() == 1);
+#endif
+        std::map<ApUserEvent,PhysicalTraceInfo*>::iterator first =
+          finder->second.ready_events.begin();
+        Runtime::trigger_event(first->second, first->first, result);
+        result = first->first;
+      }
+      rendezvous_users.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::process_rendezvous_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      std::pair<size_t,unsigned> tag;
+      derez.deserialize(tag.first);
+      derez.deserialize(tag.second);
+      ApEvent remote_term;
+      derez.deserialize(remote_term);
+      ApUserEvent remote_ready;
+      derez.deserialize(remote_ready);
+      RtUserEvent remote_applied;
+      derez.deserialize(remote_applied);
+      const bool recording = !remote_ready.exists();
+
+      AutoLock i_lock(inst_lock);
+      // Check to see if we have an entry yet or not
+      std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator finder =
+        rendezvous_users.find(tag);
+      if (finder == rendezvous_users.end())
+      {
+        finder = rendezvous_users.insert(
+            std::make_pair(tag,UserRendezvous())).first; 
+        UserRendezvous &rendezvous = finder->second;
+        // Count how many expected arrivals we have
+        rendezvous.remaining_local_arrivals = instances.size();
+        rendezvous.remaining_remote_arrivals =
+          collective_mapping->count_children(origin, local_space);
+        rendezvous.applied = Runtime::create_rt_user_event();
+        rendezvous.deferred = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      if (!recording)
+      {
+        finder->second.term_events[remote_term] = NULL;
+        // If we don't have a ready event yet then make one
+        if (finder->second.ready_events.empty())
+        {
+          const ApUserEvent local_ready = Runtime::create_ap_user_event(NULL);
+          finder->second.ready_events[local_ready] = NULL;
+          Runtime::trigger_event(NULL, remote_ready, local_ready);
+        }
+        else
+          Runtime::trigger_event(NULL, remote_ready,
+              finder->second.ready_events.begin()->first);
+        Runtime::trigger_event(remote_applied, finder->second.applied);
+      }
+#ifdef DEBUG_LEGION
+      assert(finder->second.remaining_remote_arrivals > 0);
+#endif
+      if ((--finder->second.remaining_remote_arrivals == 0) &&
+          (finder->second.remaining_local_arrivals == 0))
+      {
+        // See if we're the origin or not
+        if (local_space != origin)
+        {
+          if (!recording)
+          {
+            std::vector<ApEvent> terms;
+            terms.reserve(finder->second.term_events.size());
+            for (std::map<ApEvent,PhysicalTraceInfo*>::const_iterator it =
+                  finder->second.term_events.begin(); it !=
+                  finder->second.term_events.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(it->second == NULL); 
+#endif
+              terms.push_back(it->first);
+            }
+            remote_term = Runtime::merge_events(NULL, terms);
+#ifdef DEBUG_LEGION
+            assert(finder->second.ready_events.size() == 1);
+#endif
+            remote_ready = finder->second.ready_events.begin()->first;
+            remote_applied = finder->second.applied;
+            // We can prune this entry out now since we know we're
+            // not going to get a response
+            rendezvous_users.erase(finder);
+          }
+          // Not the origin so continue sending to the next parent
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(COLLECTIVE_RENDEZVOUS_REQUEST);
+            rez.serialize(origin);
+            rez.serialize(tag.first);
+            rez.serialize(tag.second);
+            rez.serialize(remote_term);
+            rez.serialize(remote_ready);
+            rez.serialize(remote_applied);
+          }
+          const AddressSpaceID parent = 
+            collective_mapping->get_parent(origin, local_space);
+          runtime->send_collective_instance_message(parent, rez);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          // Better have a deferred event in this case for us to trigger
+          assert(finder->second.deferred.exists());
+#endif
+          Runtime::trigger_event(finder->second.deferred);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::process_rendezvous_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      std::pair<size_t,unsigned> tag;
+      derez.deserialize(tag.first);
+      derez.deserialize(tag.second);
+      ApEvent ready;
+      derez.deserialize(ready);
+      ApBarrier common_term;
+      derez.deserialize(common_term);
+      RtEvent applied;
+      derez.deserialize(applied);
+
+      // Forward this on to any children first
+      std::vector<AddressSpaceID> children;
+      collective_mapping->get_children(origin, local_space, children);
+      if (!children.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_RENDEZVOUS_RESPONSE);
+          rez.serialize(origin);
+          rez.serialize(tag.first);
+          rez.serialize(tag.second);
+          rez.serialize(ready);
+          rez.serialize(common_term);
+          // Get our local term event here for scalability
+          // rather than passing along the applied event
+          AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+          std::map<std::pair<size_t,unsigned>,UserRendezvous>::const_iterator
+            finder = rendezvous_users.find(tag);
+#ifdef DEBUG_LEGION
+          assert(finder != rendezvous_users.end());
+#endif
+          rez.serialize(finder->second.applied);
+        }
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          runtime->send_collective_instance_message(*it, rez);
+      }
+      // Now take the lock and do our local updates
+      AutoLock i_lock(inst_lock);
+      std::map<std::pair<size_t,unsigned>,UserRendezvous>::iterator finder =
+        rendezvous_users.find(tag);
+#ifdef DEBUG_LEGION
+      assert(finder != rendezvous_users.end());
+      assert(finder->second.term_events.size() == instances.size());
+      assert(finder->second.ready_events.size() == instances.size());
+#endif
+      // Do the ready events first so we can delete the trace infos
+      // when we do the term_events
+      for (std::map<ApUserEvent,PhysicalTraceInfo*>::const_iterator it =
+            finder->second.ready_events.begin(); it !=
+            finder->second.ready_events.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->second != NULL);
+#endif
+        Runtime::trigger_event(it->second, it->first, ready);
+      }
+      std::set<RtEvent> local_applied;
+      for (std::map<ApEvent,PhysicalTraceInfo*>::iterator it =
+            finder->second.term_events.begin(); it !=
+            finder->second.term_events.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->second != NULL);
+#endif
+        Runtime::phase_barrier_arrive(common_term, 1/*count*/, it->first);
+        it->second->record_collective_barrier(common_term, it->first, 
+                                              local_applied, 1/*count*/);
+        // Now we can delete the trace info
+        delete it->second;
+      }
+      if (!local_applied.empty())
+      {
+        local_applied.insert(applied);
+        Runtime::trigger_event(finder->second.applied,
+            Runtime::merge_events(local_applied));
+      }
+      else
+        Runtime::trigger_event(finder->second.applied, applied);
+      rendezvous_users.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3752,6 +4387,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CollectiveManager::DeferCollectiveRendezvousArgs::
+      DeferCollectiveRendezvousArgs(CollectiveManager *man, InstanceView *v,
+          const RegionUsage &use, const FieldMask &m, IndexSpaceNode *n,
+          UniqueID id, size_t ctx, unsigned idx, 
+          std::map<ApEvent,PhysicalTraceInfo*> &terms, RtEvent collect,
+          RtUserEvent ap, const PhysicalTraceInfo *info, AddressSpaceID orig,
+          AddressSpaceID src, bool sym, std::set<RtEvent> &applied_events)
+      : LgTaskArgs<DeferCollectiveRendezvousArgs>(id), manager(man), view(v),
+        usage(use), mask(new FieldMask(m)), expr(n), op_id(id),
+        op_ctx_index(ctx), index(idx), 
+        term_events(new std::map<ApEvent,PhysicalTraceInfo*>()),
+        collect_event(collect), applied(ap), trace_info(info), origin(orig),
+        source(src), symbolic(sym)
+    //--------------------------------------------------------------------------
+    {
+      term_events->swap(terms);
+      WrapperReferenceMutator mutator(applied_events);
+      expr->add_base_expression_reference(META_TASK_REF, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::handle_defer_rendezvous(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCollectiveRendezvousArgs *dargs =
+        (const DeferCollectiveRendezvousArgs*)args;
+      dargs->manager->finalize_collective_user(dargs->view, dargs->usage,
+          *(dargs->mask), dargs->expr, dargs->op_id, dargs->op_ctx_index,
+          dargs->index, *(dargs->term_events), dargs->collect_event,
+          dargs->applied, *(dargs->trace_info), dargs->origin, dargs->source,
+          dargs->symbolic);
+      // Clean up our allocated data
+      if (dargs->trace_info->recording)
+      {
+        for (std::map<ApEvent,PhysicalTraceInfo*>::const_iterator it =
+             dargs->term_events->begin(); it != dargs->term_events->end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(it->second != NULL);
+#endif
+          delete it->second;
+        }
+        // dargs->trace_info is one of the trace infos in term_events
+      }
+      else
+        delete dargs->trace_info;
+      delete dargs->term_events;
+      delete dargs->mask;
+      if (dargs->expr->remove_base_expression_reference(META_TASK_REF))
+        delete dargs->expr;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void CollectiveManager::create_collective_manager(
           Runtime *runtime, DistributedID did, AddressSpaceID owner_space, 
           IndexSpaceNode *point_space, size_t points,
@@ -3895,6 +4583,16 @@ namespace Legion {
             derez.deserialize(to_trigger);
             manager->record_remote_physical_instances(insts);
             Runtime::trigger_event(to_trigger);
+            break;
+          }
+        case COLLECTIVE_RENDEZVOUS_REQUEST:
+          {
+            manager->process_rendezvous_request(derez);
+            break;
+          }
+        case COLLECTIVE_RENDEZVOUS_RESPONSE:
+          {
+            manager->process_rendezvous_response(derez);
             break;
           }
         default:

@@ -31975,6 +31975,11 @@ namespace Legion {
             CollectiveManager::handle_defer_manager(args, runtime);
             break;
           }
+        case LG_DEFER_COLLECTIVE_RENDEZVOUS_TASK_ID:
+          {
+            CollectiveManager::handle_defer_rendezvous(args);
+            break;
+          }
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:
           {
             InnerContext::handle_partition_verification(args);

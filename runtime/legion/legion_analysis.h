@@ -159,6 +159,8 @@ namespace Legion {
                          const std::vector<ApEvent>& rhs, Memoizable *memo) = 0;
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                  const std::pair<size_t,size_t> &key, size_t arrival_count) = 0;
+      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied) = 0;
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -261,6 +263,7 @@ namespace Legion {
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_COMPLETE_REPLAY,
         REMOTE_TRACE_ACQUIRE_RELEASE,
+        REMOTE_TRACE_COLLECTIVE_BARRIER,
 #ifdef LEGION_GPU_REDUCTIONS
         REMOTE_TRACE_GPU_REDUCTION,
 #endif
@@ -300,6 +303,8 @@ namespace Legion {
                             const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
+      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -458,6 +463,12 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_collective_barrier(bar, pre, key, arrival_count);
+        }
+      inline void record_collective_barrier(ApBarrier bar, ApEvent pre,
+                    std::set<RtEvent> &applied, size_t arrival_count = 1) const
+        {
+          base_sanity_check();
+          rec->record_collective_barrier(bar, pre, arrival_count, applied);
         }
       inline void record_op_sync_event(ApEvent &result) const
         {

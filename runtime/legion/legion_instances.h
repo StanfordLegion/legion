@@ -140,6 +140,7 @@ namespace Legion {
                             const AddressSpaceID local) const;
       void get_children(const AddressSpaceID origin, const AddressSpaceID local,
                         std::vector<AddressSpaceID> &children) const;
+      AddressSpaceID find_nearest(AddressSpaceID start) const;
       inline bool contains(const AddressSpaceID space) const
         { return unique_sorted_spaces.contains(space); }
       bool contains(const CollectiveMapping &rhs) const;
@@ -322,6 +323,20 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields) = 0;
+      virtual ApEvent register_collective_user(InstanceView *view, 
+                                const RegionUsage &usage,
+                                const FieldMask &user_mask,
+                                IndexSpaceNode *expr,
+                                const UniqueID op_id,
+                                const size_t op_ctx_index,
+                                const unsigned index,
+                                ApEvent term_event,
+                                RtEvent collect_event,
+                                std::set<RtEvent> &applied_events,
+                                const CollectiveMapping *mapping,
+                                const PhysicalTraceInfo &trace_info,
+                                const AddressSpaceID source,
+                                bool symbolic) = 0;
     public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 
@@ -546,6 +561,20 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper = NULL);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
+      virtual ApEvent register_collective_user(InstanceView *view, 
+                                const RegionUsage &usage,
+                                const FieldMask &user_mask,
+                                IndexSpaceNode *expr,
+                                const UniqueID op_id,
+                                const size_t op_ctx_index,
+                                const unsigned index,
+                                ApEvent term_event,
+                                RtEvent collect_event,
+                                std::set<RtEvent> &applied_events,
+                                const CollectiveMapping *mapping,
+                                const PhysicalTraceInfo &trace_info,
+                                const AddressSpaceID source,
+                                bool symbolic);
     public:
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
@@ -637,6 +666,8 @@ namespace Legion {
         COLLECTIVE_FINALIZE_MESSAGE,
         COLLECTIVE_REMOTE_INSTANCE_REQUEST,
         COLLECTIVE_REMOTE_INSTANCE_RESPONSE,
+        COLLECTIVE_RENDEZVOUS_REQUEST,
+        COLLECTIVE_RENDEZVOUS_RESPONSE,
       };
     public:
       struct DeferCollectiveManagerArgs : 
@@ -667,6 +698,36 @@ namespace Legion {
         const void *const piece_list;
         const size_t piece_list_size;
         const AddressSpaceID source;
+      };
+      struct DeferCollectiveRendezvousArgs :
+        public LgTaskArgs<DeferCollectiveRendezvousArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_RENDEZVOUS_TASK_ID;
+      public:
+        DeferCollectiveRendezvousArgs(CollectiveManager *manager,
+            InstanceView *view, const RegionUsage &usage, const FieldMask &mask,
+            IndexSpaceNode *expr, UniqueID op_id, size_t op_ctx_index,
+            unsigned index, std::map<ApEvent,PhysicalTraceInfo*> &term_events,
+            RtEvent collect_event, RtUserEvent applied,
+            const PhysicalTraceInfo *trace_info, AddressSpaceID origin,
+            AddressSpaceID source, bool symbolic,
+            std::set<RtEvent> &applied_events);
+      public:
+        CollectiveManager *const manager;
+        InstanceView *const view;
+        const RegionUsage usage;
+        FieldMask *const mask;
+        IndexSpaceNode *const expr;
+        const UniqueID op_id;
+        const size_t op_ctx_index;
+        const unsigned index;
+        std::map<ApEvent,PhysicalTraceInfo*> *const term_events;
+        const RtEvent collect_event;
+        const RtUserEvent applied;
+        const PhysicalTraceInfo *const trace_info;
+        const AddressSpaceID origin;
+        const AddressSpaceID source;
+        const bool symbolic;
       };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
@@ -763,6 +824,37 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper = NULL);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
+      virtual ApEvent register_collective_user(InstanceView *view, 
+                                const RegionUsage &usage,
+                                const FieldMask &user_mask,
+                                IndexSpaceNode *expr,
+                                const UniqueID op_id,
+                                const size_t op_ctx_index,
+                                const unsigned index,
+                                ApEvent term_event,
+                                RtEvent collect_event,
+                                std::set<RtEvent> &applied_events,
+                                const CollectiveMapping *mapping,
+                                const PhysicalTraceInfo &trace_info,
+                                const AddressSpaceID source,
+                                bool symbolic);
+    protected:
+      void finalize_collective_user(InstanceView *view, 
+                                const RegionUsage &usage,
+                                const FieldMask &user_mask,
+                                IndexSpaceNode *expr,
+                                const UniqueID op_id,
+                                const size_t op_ctx_index,
+                                const unsigned index,
+                                std::map<ApEvent,PhysicalTraceInfo*> &terms,
+                                RtEvent collect_event,
+                                RtUserEvent applied_event,
+                                const PhysicalTraceInfo &trace_info,
+                                const AddressSpaceID origin,
+                                const AddressSpaceID source,
+                                const bool symbolic);
+      void process_rendezvous_request(Deserializer &derez);
+      void process_rendezvous_response(Deserializer &derez);
 #ifdef LEGION_GPU_REDUCTIONS
     public:
       virtual bool is_gpu_visible(PhysicalManager *other) const;
@@ -778,6 +870,7 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
       static void handle_defer_manager(const void *args, Runtime *runtime);
+      static void handle_defer_rendezvous(const void *args);
       static void handle_collective_message(Deserializer &derez,
                                             Runtime *runtime);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
@@ -801,6 +894,21 @@ namespace Legion {
       std::map<DomainPoint,
                std::pair<PhysicalInstance,unsigned/*index*/> > remote_instances;
     protected:
+      struct UserRendezvous {
+      public:
+        // events for when users are done
+        // In the case we're recording, save the trace infos for each of
+        // the term events so we can update the traces when we get the 
+        // name of the barrier back from the origin node
+        std::map<ApEvent,PhysicalTraceInfo*> term_events; 
+        std::map<ApUserEvent,PhysicalTraceInfo*> ready_events;
+        RtUserEvent applied; // event for when mapping is done
+        RtUserEvent deferred; // event to trigger to start local analysis
+        unsigned remaining_local_arrivals;
+        unsigned remaining_remote_arrivals;
+      };
+      std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
+    protected:
       ApBarrier collective_barrier;
       RtEvent detached;
       unsigned finalize_messages;
@@ -811,7 +919,7 @@ namespace Legion {
      * \class VirtualManager
      * This is a singleton class of which there will be exactly one
      * on every node in the machine. The virtual manager class will
-     * represent all the virtual virtual/composite instances.
+     * represent all the virtual instances.
      */
     class VirtualManager : public InstanceManager,
                            public LegionHeapify<VirtualManager> {

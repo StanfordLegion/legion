@@ -399,6 +399,7 @@ namespace Legion {
       LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
+      LG_DEFER_COLLECTIVE_RENDEZVOUS_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
@@ -523,7 +524,8 @@ namespace Legion {
         "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Instance Manager Deletion",                        \
-        "Defer Reduction Manager Registration",                   \
+        "Defer Collective Manager Registration",                  \
+        "Defer Collective Manager Rendezvous",                    \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
