@@ -650,7 +650,9 @@ namespace Realm {
     //  mutex ownership (because it might take them a while to wake up), so
     //  decrement both the waiter count AND the lock held LSB
     if(db && db->is_sleeping()) {
-      uint32_t prev = state.fetch_sub(3);
+      // since we're releasing the lock to an unknown thread, this needs to
+      //  have release semantics
+      uint32_t prev = state.fetch_sub_acqrel(3);
       assert(((prev & 1) != 0) && (prev >= 3));
       (void)prev;
 
