@@ -3920,10 +3920,13 @@ namespace Legion {
       std::set<RtEvent> local_applied;
       ApEvent result;
       ApBarrier common_term;
+      ShardID owner_shard = 0;
       if (trace_info.recording)
       {
         // Create a barrier for use in the trace as the common term event
         common_term = ApBarrier(Realm::Barrier::create_barrier(total_points));
+        owner_shard = 
+          trace_info.record_managed_barrier(common_term, total_points);
         result = view->register_user(usage, user_mask, expr, op_id,
             op_ctx_index, index, common_term, collect_event, local_applied,
             NULL/*collective mapping*/, trace_info, source, symbolic);
@@ -3935,8 +3938,8 @@ namespace Legion {
 #endif
           Runtime::phase_barrier_arrive(common_term, 1/*count*/, it->first);
           // Record the barrier with the trace
-          it->second->record_collective_barrier(common_term, it->first,
-                                                local_applied, 1/*count*/);
+          it->second->record_barrier_arrival(common_term, it->first, 1/*count*/,
+                                             local_applied, owner_shard);
         }
       }
       else
@@ -3992,6 +3995,7 @@ namespace Legion {
             rez.serialize(index);
             rez.serialize(result);
             rez.serialize(common_term);
+            rez.serialize(owner_shard);
             rez.serialize(finder->second.applied);
           }
           for (std::vector<AddressSpaceID>::const_iterator it =
@@ -4139,6 +4143,8 @@ namespace Legion {
       derez.deserialize(ready);
       ApBarrier common_term;
       derez.deserialize(common_term);
+      ShardID owner_shard;
+      derez.deserialize(owner_shard);
       RtEvent applied;
       derez.deserialize(applied);
 
@@ -4157,6 +4163,7 @@ namespace Legion {
           rez.serialize(tag.second);
           rez.serialize(ready);
           rez.serialize(common_term);
+          rez.serialize(owner_shard);
           // Get our local term event here for scalability
           // rather than passing along the applied event
           AutoLock i_lock(inst_lock,1,false/*exclusive*/);
@@ -4200,8 +4207,8 @@ namespace Legion {
         assert(it->second != NULL);
 #endif
         Runtime::phase_barrier_arrive(common_term, 1/*count*/, it->first);
-        it->second->record_collective_barrier(common_term, it->first, 
-                                              local_applied, 1/*count*/);
+        it->second->record_barrier_arrival(common_term, it->first, 1/*count*/,
+                                           local_applied, owner_shard);
         // Now we can delete the trace info
         delete it->second;
       }

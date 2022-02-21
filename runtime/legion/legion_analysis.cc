@@ -612,8 +612,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_collective_barrier(ApBarrier bar, 
-                       ApEvent pre, size_t arrivals, std::set<RtEvent> &applied)
+    ShardID RemoteTraceRecorder::record_managed_barrier(ApBarrier bar,
+                                                        size_t total_arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+#endif
+      if (local_space != origin_space)
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        std::atomic<ShardID> owner(0);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_tpl);
+          rez.serialize(REMOTE_TRACE_RECORD_BARRIER);
+          rez.serialize(done);
+          rez.serialize(bar);
+          rez.serialize(total_arrivals);
+          rez.serialize(&owner);
+        }
+        runtime->send_remote_trace_update(origin_space, rez);
+        done.wait();
+        return owner.load();
+      }
+      else
+        return remote_tpl->record_managed_barrier(bar, total_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTraceRecorder::record_barrier_arrival(ApBarrier bar, ApEvent pre,
+               size_t arrivals, std::set<RtEvent> &applied, ShardID owner_shard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -626,16 +656,19 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(remote_tpl);
-          rez.serialize(REMOTE_TRACE_COLLECTIVE_BARRIER);
+          rez.serialize(REMOTE_TRACE_BARRIER_ARRIVAL);
           rez.serialize(done);
           rez.serialize(bar);
           rez.serialize(pre);
           rez.serialize(arrivals);
+          rez.serialize(owner_shard);
         }
         runtime->send_remote_trace_update(origin_space, rez);
+        applied.insert(done);
       }
       else
-        remote_tpl->record_collective_barrier(bar, pre, arrivals, applied);
+        remote_tpl->record_barrier_arrival(bar, pre, arrivals,
+                                           applied, owner_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -1995,7 +2028,29 @@ namespace Legion {
               delete memo;
             break;
           }
-        case REMOTE_TRACE_COLLECTIVE_BARRIER:
+        case REMOTE_TRACE_RECORD_BARRIER:
+          {
+            RtUserEvent done_event;
+            derez.deserialize(done_event);
+            ApBarrier barrier;
+            derez.deserialize(barrier);
+            size_t arrivals;
+            derez.deserialize(arrivals);
+            std::atomic<ShardID> *target;
+            derez.deserialize(target);
+            ShardID owner = tpl->record_managed_barrier(barrier, arrivals);
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(REMOTE_TRACE_RECORD_BARRIER);
+              rez.serialize(target);
+              rez.serialize(owner);
+              rez.serialize(done_event);
+            }
+            runtime->send_remote_trace_response(source, rez);
+            break;
+          }
+        case REMOTE_TRACE_BARRIER_ARRIVAL:
           {
             RtUserEvent done_event;
             derez.deserialize(done_event);
@@ -2005,8 +2060,10 @@ namespace Legion {
             derez.deserialize(pre);
             size_t arrivals;
             derez.deserialize(arrivals);
+            ShardID owner;
+            derez.deserialize(owner);
             std::set<RtEvent> applied;
-            tpl->record_collective_barrier(barrier, pre, arrivals, applied);
+            tpl->record_barrier_arrival(barrier, pre, arrivals, applied, owner);
             if (!applied.empty())
               Runtime::trigger_event(done_event,
                   Runtime::merge_events(applied));
@@ -2044,6 +2101,18 @@ namespace Legion {
             derez.deserialize(*event_ptr);
             RtUserEvent done;
             derez.deserialize(done);
+            Runtime::trigger_event(done);
+            break;
+          }
+        case REMOTE_TRACE_RECORD_BARRIER:
+          {
+            std::atomic<ShardID> *target;
+            derez.deserialize(target);
+            ShardID owner;
+            derez.deserialize(owner);
+            RtUserEvent done;
+            derez.deserialize(done);
+            target->store(owner);
             Runtime::trigger_event(done);
             break;
           }

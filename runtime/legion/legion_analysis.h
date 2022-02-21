@@ -157,10 +157,17 @@ namespace Legion {
                             const std::set<ApEvent>& rhs, Memoizable *memo) = 0;
       virtual void record_merge_events(ApEvent &lhs,
                          const std::vector<ApEvent>& rhs, Memoizable *memo) = 0;
+      // This collective barrier is managed by the operations and is auto
+      // refreshed by the operations on each replay
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                  const std::pair<size_t,size_t> &key, size_t arrival_count) = 0;
-      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
-                    size_t arrival_count, std::set<RtEvent> &applied) = 0;
+      // This collective barrier is managed by the template and will be
+      // refreshed as necessary when barrier generations are exhausted
+      virtual ShardID record_managed_barrier(ApBarrier bar,
+                                             size_t total_arrivals) = 0;
+      virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied,
+                    ShardID owner_shard) = 0;
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -263,7 +270,8 @@ namespace Legion {
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_COMPLETE_REPLAY,
         REMOTE_TRACE_ACQUIRE_RELEASE,
-        REMOTE_TRACE_COLLECTIVE_BARRIER,
+        REMOTE_TRACE_RECORD_BARRIER,
+        REMOTE_TRACE_BARRIER_ARRIVAL,
 #ifdef LEGION_GPU_REDUCTIONS
         REMOTE_TRACE_GPU_REDUCTION,
 #endif
@@ -303,8 +311,11 @@ namespace Legion {
                             const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
-      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
-                    size_t arrival_count, std::set<RtEvent> &applied);
+      virtual ShardID record_managed_barrier(ApBarrier bar,
+                                             size_t total_arrivals);
+      virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied,
+                    ShardID owner_shard);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                            IndexSpaceExpression *expr,
@@ -464,11 +475,17 @@ namespace Legion {
           base_sanity_check();
           rec->record_collective_barrier(bar, pre, key, arrival_count);
         }
-      inline void record_collective_barrier(ApBarrier bar, ApEvent pre,
-                    std::set<RtEvent> &applied, size_t arrival_count = 1) const
+      inline ShardID record_managed_barrier(ApBarrier bar, 
+                                            size_t total_arrivals) const
         {
           base_sanity_check();
-          rec->record_collective_barrier(bar, pre, arrival_count, applied);
+          return rec->record_managed_barrier(bar, total_arrivals);
+        }
+      inline void record_barrier_arrival(ApBarrier bar, ApEvent pre,
+          size_t arrival_count, std::set<RtEvent> &applied, ShardID owner) const
+        {
+          base_sanity_check();
+          rec->record_barrier_arrival(bar, pre, arrival_count, applied, owner);
         }
       inline void record_op_sync_event(ApEvent &result) const
         {

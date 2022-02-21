@@ -800,9 +800,8 @@ namespace Legion {
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
                                      bool need_lock = true);
       virtual void perform_replay(Runtime *rt, 
-                                  std::set<RtEvent> &replayed_events,
-                                  RtEvent replay_precondition = 
-                                    RtEvent::NO_RT_EVENT);
+                                  std::set<RtEvent> &replayed_events);
+      virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
@@ -930,8 +929,11 @@ namespace Legion {
                             const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
-      virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
-                    size_t arrival_count, std::set<RtEvent> &applied);
+      virtual ShardID record_managed_barrier(ApBarrier bar,
+                                             size_t total_arrivals);
+      virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied,
+                    ShardID owner_shard);
     public:
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
@@ -1079,6 +1081,12 @@ namespace Legion {
       PhysicalTrace * const trace;
       const TaskTreeCoordinates coordinates;
       std::atomic<bool> recording;
+      // Count how many times we've been replayed so we know when we're going
+      // to run out of phase barrier generations
+      // Note we start this at 1 since some barriers are used as part of the
+      // capture, while others are not used until the first replay, that throws
+      // away one barrier generation on some barriers, but whatever
+      size_t total_replays;
       Replayable replayable;
     protected:
       mutable LocalLock template_lock;
@@ -1103,7 +1111,7 @@ namespace Legion {
       std::map<unsigned,ApUserEvent>  user_events;
     protected:
       std::map<ApEvent,unsigned> event_map;
-      std::map<ApBarrier,BarrierArrival*> managed_barriers;
+      std::map<ApEvent,BarrierArrival*> managed_barriers;
     private:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
@@ -1192,6 +1200,7 @@ namespace Legion {
         FIND_FRONTIER_RESPONSE,
         TEMPLATE_BARRIER_REFRESH,
         FRONTIER_BARRIER_REFRESH,
+        REMOTE_BARRIER_SUBSCRIBE,
       };
     public:
       struct DeferTraceUpdateArgs : public LgTaskArgs<DeferTraceUpdateArgs> {
@@ -1252,9 +1261,8 @@ namespace Legion {
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
                                      bool need_lock = true);
       virtual void perform_replay(Runtime *runtime, 
-                                  std::set<RtEvent> &replayed_events,
-                                  RtEvent replay_precondition =
-                                    RtEvent::NO_RT_EVENT);
+                                  std::set<RtEvent> &replayed_events);
+      virtual RtEvent refresh_managed_barriers(void);
       virtual void finish_replay(std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
       using PhysicalTemplate::record_merge_events;
@@ -1264,6 +1272,11 @@ namespace Legion {
                             const std::vector<ApEvent>& rhs, Memoizable *memo);
       virtual void record_collective_barrier(ApBarrier bar, ApEvent pre,
                     const std::pair<size_t,size_t> &key, size_t arrival_count);
+      virtual ShardID record_managed_barrier(ApBarrier bar,
+                                             size_t total_arrivals);
+      virtual void record_barrier_arrival(ApBarrier bar, ApEvent pre,
+                    size_t arrival_count, std::set<RtEvent> &applied,
+                    ShardID owner_shard);
       virtual void record_issue_copy(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -1367,10 +1380,9 @@ namespace Legion {
       static const unsigned NO_INDEX = UINT_MAX;
     protected:
       std::map<ApEvent,RtEvent> pending_event_requests;
-      // Barriers that need to send remote refreshes
-      std::map<ApEvent,BarrierArrival*> remote_arrivals;
-      // Barriers to receive refreshes
+      // Barriers we don't managed and need to receive refreshes for
       std::map<ApEvent,BarrierAdvance*> local_advances;
+      std::map<ApEvent,BarrierArrival*> local_arrivals;
       // Collective barriers from application operations
       // These will be updated by the application before each replay
       // Key is <trace local id, unique barrier name for this op>
@@ -1384,9 +1396,6 @@ namespace Legion {
       std::map<unsigned/*Trace Local ID*/,IndexSpace> local_spaces;
       std::map<unsigned/*Trace Local ID*/,ShardingFunction*> sharding_functions;
     protected:
-      // Count how many times we've been replayed so we know when we're going
-      // to run out of phase barrier generations
-      size_t total_replays;
       // Count how many refereshed barriers we've seen updated for when
       // we need to reset the phase barriers for a new round of generations
       size_t refreshed_barriers;
@@ -1921,7 +1930,7 @@ namespace Legion {
     class BarrierArrival : public Instruction {
     public:
       BarrierArrival(PhysicalTemplate &tpl,
-                     ApBarrier bar, unsigned lhs, unsigned rhs,
+                     ApBarrier bar, unsigned lhs,
                      size_t arrival_count, bool managed);
       virtual ~BarrierArrival(void);
       virtual void execute(std::vector<ApEvent> &events,
@@ -1948,6 +1957,7 @@ namespace Legion {
       // RHS events and their arrival counts
       std::vector<std::pair<unsigned,unsigned> > rhs;
       std::vector<ShardID> subscribed_shards;
+      const size_t total_arrivals;
       const bool managed;
     };
 
