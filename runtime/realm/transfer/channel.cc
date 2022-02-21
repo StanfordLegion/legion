@@ -4228,6 +4228,29 @@ namespace Realm {
 	  { os << "src=rdma(lcl)"; break; }
 	case Channel::SupportedPath::REMOTE_RDMA:
 	  { os << "src=rdma(rem)"; break; }
+        case Channel::SupportedPath::MEMORY_BITMASK:
+          { os << "src=" << p.src_bitmask.node << '/';
+            bool first = true;
+            for(int i = 0; i < Channel::SupportedPath::MemBitmask::BITMASK_SIZE; i++)
+              for(int j = 0; j < 64; j++)
+                if((p.src_bitmask.mems[i] & (uint64_t(1) << j)) != 0) {
+                  if(!first) os << ",";
+                  first = false;
+                  os << (64*i + j);
+                }
+            if(first) os << '-';
+            os << '/';
+            first = true;
+            for(int i = 0; i < Channel::SupportedPath::MemBitmask::BITMASK_SIZE; i++)
+              for(int j = 0; j < 64; j++)
+                if((p.src_bitmask.ib_mems[i] & (uint64_t(1) << j)) != 0) {
+                  if(!first) os << ",";
+                  first = false;
+                  os << (64*i + j);
+                }
+            if(first) os << '-';
+            break;
+          }
 	default:
 	  assert(0);
 	}
@@ -4242,6 +4265,29 @@ namespace Realm {
 	  { os << " dst=rdma(lcl)"; break; }
 	case Channel::SupportedPath::REMOTE_RDMA:
 	  { os << " dst=rdma(rem)"; break; }
+        case Channel::SupportedPath::MEMORY_BITMASK:
+          { os << " dst=" << p.dst_bitmask.node << '/';
+            bool first = true;
+            for(int i = 0; i < Channel::SupportedPath::MemBitmask::BITMASK_SIZE; i++)
+              for(int j = 0; j < 64; j++)
+                if((p.dst_bitmask.mems[i] & (uint64_t(1) << j)) != 0) {
+                  if(!first) os << ",";
+                  first = false;
+                  os << (64*i + j);
+                }
+            if(first) os << '-';
+            os << '/';
+            first = true;
+            for(int i = 0; i < Channel::SupportedPath::MemBitmask::BITMASK_SIZE; i++)
+              for(int j = 0; j < 64; j++)
+                if((p.dst_bitmask.ib_mems[i] & (uint64_t(1) << j)) != 0) {
+                  if(!first) os << ",";
+                  first = false;
+                  os << (64*i + j);
+                }
+            if(first) os << '-';
+            break;
+          }
 	default:
 	  assert(0);
 	}

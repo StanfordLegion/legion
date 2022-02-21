@@ -342,7 +342,7 @@ namespace Realm {
     };
     Strategy strategy;
     gex_Rank_t target;
-    gex_EP_Index_t target_ep_index;
+    gex_EP_Index_t source_ep_index, target_ep_index;
     unsigned short msgid;
     uintptr_t dest_payload_addr;
     void *temp_buffer;
@@ -511,6 +511,7 @@ namespace Realm {
     GASNetEXEvent& set_databuf(OutbufMetadata *_databuf);
     GASNetEXEvent& set_rget(PendingReverseGet *_rget);
     GASNetEXEvent& set_put(PendingPutHeader *_put);
+    GASNetEXEvent& set_leaf(GASNetEXEvent *_leaf);
 
     void trigger(GASNetEXInternal *internal);
 
@@ -525,6 +526,7 @@ namespace Realm {
     OutbufMetadata *databuf;
     PendingReverseGet *rget;
     PendingPutHeader *put;
+    GASNetEXEvent *leaf;
   };
 
   // an injector tries to send packets, but is not allowed to stall -
