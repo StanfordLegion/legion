@@ -1484,7 +1484,8 @@ namespace Legion {
                                RemoteContext *target);
     public:
       void convert_source_views(const std::vector<PhysicalManager*> &sources,
-                                std::vector<InstanceView*> &source_views);
+                                std::vector<InstanceView*> &source_views,
+                                CollectiveMapping *mapping = NULL);
       void convert_target_views(const InstanceSet &targets, 
                                 std::vector<InstanceView*> &target_views,
                                 CollectiveMapping *mapping = NULL);

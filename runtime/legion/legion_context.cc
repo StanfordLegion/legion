@@ -10030,7 +10030,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::convert_source_views(
                                    const std::vector<PhysicalManager*> &sources,
-                                   std::vector<InstanceView*> &source_views)
+                                   std::vector<InstanceView*> &source_views,
+                                   CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       source_views.resize(sources.size());
@@ -10056,7 +10057,8 @@ namespace Legion {
               still_needed.begin(); it != still_needed.end(); it++)
         {
           PhysicalManager *manager = sources[*it];
-          source_views[*it] = create_instance_top_view(manager, local_space);
+          source_views[*it] =
+            create_instance_top_view(manager, local_space, mapping);
         }
       }
     }
