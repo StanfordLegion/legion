@@ -52,7 +52,8 @@ namespace Legion {
     class LogicalView : public DistributedCollectable {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
-                  AddressSpaceID owner_proc, bool register_now);
+                  AddressSpaceID owner_proc, bool register_now,
+                  CollectiveMapping *mapping);
       virtual ~LogicalView(void);
     public:
       inline bool deterministic_pointer_less(const LogicalView *rhs) const
@@ -147,7 +148,8 @@ namespace Legion {
     public:
       InstanceView(RegionTreeForest *ctx,DistributedID did,PhysicalManager *man,
                    AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
-                   UniqueID owner_context, bool register_now); 
+                   UniqueID owner_context, bool register_now,
+                   CollectiveMapping *mapping); 
       virtual ~InstanceView(void);
     public:
       inline bool is_logical_owner(void) const
@@ -574,7 +576,8 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, 
                        AddressSpaceID logical_owner, PhysicalManager *manager,
-                       UniqueID owner_context, bool register_now);
+                       UniqueID owner_context, bool register_now,
+                       CollectiveMapping *mapping = NULL);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -762,7 +765,8 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc,
                     AddressSpaceID logical_owner, PhysicalManager *manager,
-                    UniqueID owner_context, bool register_now);
+                    UniqueID owner_context, bool register_now,
+                    CollectiveMapping *mapping = NULL);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:

@@ -526,9 +526,6 @@ namespace Legion {
       // invalidate_region_tree_contexts have been applied 
       virtual void free_region_tree_context(void) = 0;
     public:
-      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                                     AddressSpaceID source) = 0;
-    public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                    Legion::Runtime *&runtime);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
@@ -829,22 +826,6 @@ namespace Legion {
         FrameOp *const frame;
         const ApEvent frame_termination;
       };
-      struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
-      public:
-        RemoteCreateViewArgs(InnerContext *proxy, PhysicalManager *man,
-         std::atomic<InstanceView*> *tar, RtUserEvent trig, AddressSpaceID src)
-          : LgTaskArgs<RemoteCreateViewArgs>(implicit_provenance),
-            proxy_this(proxy), manager(man), target(tar), 
-            to_trigger(trig), source(src) { }
-      public:
-        InnerContext *const proxy_this;
-        PhysicalManager *const manager;
-        std::atomic<InstanceView*> *const target;
-        const RtUserEvent to_trigger;
-        const AddressSpaceID source;
-      };
       struct VerifyPartitionArgs : public LgTaskArgs<VerifyPartitionArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_VERIFY_PARTITION_TASK_ID;
@@ -920,6 +901,7 @@ namespace Legion {
     public:
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
+      virtual ReplicationID get_replication_id(void) const { return 0; }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -1430,18 +1412,17 @@ namespace Legion {
       virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:
-      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                                     AddressSpaceID source);
       virtual FillView* find_or_create_fill_view(FillOp *op, 
                              std::set<RtEvent> &map_applied_events,
                              const void *value, const size_t value_size,
                              bool &took_ownership);
-      static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted); 
+#if 0
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
+#endif
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
@@ -1505,10 +1486,15 @@ namespace Legion {
       void convert_source_views(const std::vector<PhysicalManager*> &sources,
                                 std::vector<InstanceView*> &source_views);
       void convert_target_views(const InstanceSet &targets, 
-                                std::vector<InstanceView*> &target_views);
+                                std::vector<InstanceView*> &target_views,
+                                CollectiveMapping *mapping = NULL);
       // I hate the container problem, same as previous except MaterializedView
       void convert_target_views(const InstanceSet &targets, 
-                                std::vector<MaterializedView*> &target_views); 
+                                std::vector<MaterializedView*> &target_views,
+                                CollectiveMapping *mapping = NULL);
+      InstanceView* create_instance_top_view(PhysicalManager *manager,
+                                             AddressSpaceID source,
+                                             CollectiveMapping *mapping = NULL);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1913,6 +1899,7 @@ namespace Legion {
         { return shard_collective_participating_shards; }
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; }
+      virtual ReplicationID get_replication_id(void) const;
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -2371,13 +2358,6 @@ namespace Legion {
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
-      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                                     AddressSpaceID source);
-      InstanceView* create_replicate_instance_top_view(PhysicalManager *manager,
-                                                       AddressSpaceID source);
-      void record_replicate_instance_top_view(PhysicalManager *manager, 
-                                              InstanceView *result);
-    public:
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
@@ -2732,6 +2712,7 @@ namespace Legion {
       RemoteContext& operator=(const RemoteContext &rhs);
     public:
       virtual Task* get_task(void);
+      virtual ReplicationID get_replication_id(void) const { return repl_id; }
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
       virtual InnerContext* find_parent_context(void);
@@ -2743,8 +2724,6 @@ namespace Legion {
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
       virtual InnerContext* find_parent_physical_context(unsigned index);
-      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                                     AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -3191,9 +3170,6 @@ namespace Legion {
                             std::set<RtEvent> &applied_events,size_t num_shards,
                             InnerContext *source_context);
       virtual void free_region_tree_context(void);
-    public:
-      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                                     AddressSpaceID source);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                         PhysicalInstance inst, FutureFunctor *callback_functor,
