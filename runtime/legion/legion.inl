@@ -22166,6 +22166,15 @@ namespace Legion {
 #if defined (__CUDACC__) || defined (__HIPCC__)
 #define LEGION_THREADS_PER_BLOCK 256
 #define LEGION_MIN_BLOCKS_PER_SM 4
+#define LEGION_CHECK_CUDART(cmd) do { \
+  cudaError_t ret = (cmd); \
+  if (ret != cudaSuccess) { \
+    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, cudaGetErrorString(ret)); \
+    assert(0); \
+    exit(1); \
+  } \
+} while(0)
+
     namespace Internal {
 
       template<int N>
@@ -22360,12 +22369,14 @@ namespace Legion {
             Realm::AffineAccessor<size_t,1,coord_t> device_scan_volumes =
               create_temporary_buffer<size_t>(memory, scan_bounds);
 #ifdef LEGION_USE_CUDA            
-            cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+            LEGION_CHECK_CUDART(
+                cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
                 &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
-                cudaMemcpyHostToDevice);
-            cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo), 
+                cudaMemcpyHostToDevice) );
+            LEGION_CHECK_CUDART(
+                cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo), 
                 &scan_volumes.front(), scan_volumes.size() * sizeof(size_t), 
-                cudaMemcpyHostToDevice);
+                cudaMemcpyHostToDevice) );
 #endif
 #ifdef LEGION_USE_HIP
 #ifdef __HIP_PLATFORM_HCC__
@@ -22562,6 +22573,7 @@ namespace Legion {
       CodeDescriptor desc(Internal::gpu_reduction_helper<REDOP>);
       preregister_gpu_reduction_op(redop, desc);
     }
+#undef LEGION_CHECK_CUDART
 #undef LEGION_THREADS_PER_BLOCK
 #undef LEGION_MIN_BLOCKS_PER_SM
 #endif // __CUDACC__ || __HIPCC__

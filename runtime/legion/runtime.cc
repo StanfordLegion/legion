@@ -11037,6 +11037,16 @@ namespace Legion {
             break;
           }
 #ifdef LEGION_USE_CUDA
+#define CHECK_CUDA(cmd) do { \
+  CUresult ret = (cmd); \
+  if (ret != CUDA_SUCCESS) { \
+    const char *name, *str; \
+    cuGetErrorName(ret, &name); \
+    cuGetErrorString(ret, &str); \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } \
+}
         case Memory::GPU_FB_MEM:
           {
             cuMemFree((CUdeviceptr)ptr);
@@ -11047,6 +11057,7 @@ namespace Legion {
             cuMemFreeHost((void*)ptr);
             break;
           }
+#undef CHECK_CUDA
 #endif
 #ifdef LEGION_USE_HIP
         case Memory::GPU_FB_MEM:
