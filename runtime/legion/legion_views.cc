@@ -38,8 +38,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
-                             AddressSpaceID own_addr, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, own_addr, register_now), 
+                             AddressSpaceID own_addr, bool register_now,
+                             CollectiveMapping *map)
+      : DistributedCollectable(ctx->runtime, did, own_addr, register_now, map),
         context(ctx)
     //--------------------------------------------------------------------------
     {
@@ -77,8 +78,9 @@ namespace Legion {
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                PhysicalManager *man, AddressSpaceID owner_sp,
                                AddressSpaceID log_own,
-                               UniqueID own_ctx, bool register_now)
-      : LogicalView(ctx, did, owner_sp, register_now), manager(man),
+                               UniqueID own_ctx, bool register_now,
+                               CollectiveMapping *mapping)
+      : LogicalView(ctx, did, owner_sp, register_now, mapping), manager(man),
         owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
@@ -2475,9 +2477,10 @@ namespace Legion {
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr,
                                AddressSpaceID log_own, PhysicalManager *man,
-                               UniqueID own_ctx, bool register_now)
+                               UniqueID own_ctx, bool register_now,
+                               CollectiveMapping *mapping)
       : InstanceView(ctx, encode_materialized_did(did), man, own_addr,
-                     log_own, own_ctx, register_now), 
+                     log_own, own_ctx, register_now, mapping), 
         expr_cache_uses(0), outstanding_additions(0)
 #ifdef ENABLE_VIEW_REPLICATION
         , remote_added_users(0), remote_pending_users(NULL)
@@ -2503,7 +2506,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, NULL, 0, 0, 0, false)
+      : InstanceView(NULL, 0, NULL, 0, 0, 0, false, NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3899,7 +3902,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, bool register_now)
-      : LogicalView(ctx, did, owner_sp, register_now)
+      : LogicalView(ctx, did, owner_sp, register_now, NULL/*no collective map*/)
     //--------------------------------------------------------------------------
     {
     }
@@ -4651,9 +4654,9 @@ namespace Legion {
                                  AddressSpaceID own_sp,
                                  AddressSpaceID log_own,
                                  PhysicalManager *man, UniqueID own_ctx, 
-                                 bool register_now)
+                                 bool register_now, CollectiveMapping *mapping)
       : InstanceView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
-                     own_ctx, register_now),
+                     own_ctx, register_now, mapping),
         fill_view(runtime->find_or_create_reduction_fill_view(manager->redop))
     //--------------------------------------------------------------------------
     {
@@ -4666,7 +4669,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, NULL, 0, 0, 0, false), fill_view(NULL)
+      : InstanceView(NULL, 0, NULL, 0, 0, 0, false, NULL), fill_view(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called

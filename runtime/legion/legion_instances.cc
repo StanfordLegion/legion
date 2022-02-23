@@ -23,6 +23,7 @@
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
 #include "legion/legion_views.h"
+#include "legion/legion_replication.h"
 
 namespace LegionRuntime {
   namespace Accessor {
@@ -842,58 +843,203 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* PhysicalManager::create_instance_top_view(
-                            InnerContext *own_ctx, AddressSpaceID logical_owner)
+    InstanceView* PhysicalManager::construct_top_view(
+                                           AddressSpaceID logical_owner,
+                                           DistributedID view_did, UniqueID uid,
+                                           CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      const DistributedID view_did = 
-        context->runtime->get_available_distributed_id();
-      const UniqueID context_uid = own_ctx->get_context_uid();
-      register_active_context(own_ctx);
       if (redop > 0)
         return new ReductionView(context, view_did, owner_space,
-            logical_owner, this, context_uid, true/*register now*/);
+            logical_owner, this, uid, true/*register now*/, mapping);
       else
         return new MaterializedView(context, view_did, owner_space, 
-              logical_owner, this, context_uid, true/*register now*/);
+              logical_owner, this, uid, true/*register now*/, mapping);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::register_active_context(InnerContext *context)
+    InstanceView* PhysicalManager::find_or_create_instance_top_view(
+                                                   InnerContext *own_ctx,
+                                                   AddressSpaceID logical_owner,
+                                                   CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
+      ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
+      // If we're a replicate context then we want to ignore the specific
+      // context UID since there might be several shards on this node
+      if (key.first > 0)
+        key.second = 0;
+      // No matter what we're going to store the context so grab a reference
+      own_ctx->add_reference();
+      RtEvent wait_for;
+      {
+        AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert(is_owner()); // should always be on the owner node
+        // All contexts should always be new since they should be deduplicating
+        // on their side before calling this method
+        assert(active_contexts.find(own_ctx) == active_contexts.end());
 #endif
-      context->add_reference();
-      AutoLock inst(inst_lock);
+        std::map<ContextKey,ViewEntry>::iterator finder =
+          context_views.find(key);
+        if (finder != context_views.end())
+        {
 #ifdef DEBUG_LEGION
-      assert(active_contexts.find(context) == active_contexts.end());
+          // This should only happen with control replication because normal
+          // contexts should be deduplicating on their side
+          assert(key.first > 0);
 #endif
-      active_contexts.insert(context);
+          // This better be a new context so bump the reference count
+          active_contexts.insert(own_ctx);
+          finder->second.second++;
+          return finder->second.first;
+        }
+        // Check to see if someone else from this context is making the view 
+        if (key.first > 0)
+        {
+          // Only need to do this for control replication, otherwise the
+          // context will have deduplicated for us
+          std::map<ReplicationID,RtUserEvent>::iterator pending_finder =
+            pending_views.find(key.first);
+          if (pending_finder != pending_views.end())
+          {
+            if (!pending_finder->second.exists())
+              pending_finder->second = Runtime::create_rt_user_event();
+            wait_for = pending_finder->second;
+          }
+          else
+            pending_views[key.first] = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
+      if (wait_for.exists())
+      {
+        if (!wait_for.has_triggered())
+          wait_for.wait();
+        AutoLock i_lock(inst_lock);
+        std::map<ContextKey,ViewEntry>::iterator finder =
+          context_views.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != context_views.end());
+        assert(key.first > 0);
+#endif
+        // This better be a new context so bump the reference count
+        active_contexts.insert(own_ctx);
+        finder->second.second++;
+        return finder->second.first;
+      }
+      // At this point we're repsonsibile for doing the work to make the view 
+      InstanceView *result = NULL;
+      // Check to see if we're the owner
+      if (is_owner())
+      {
+        // We're going to construct the view no matter what, see which 
+        // node is going to be the logical owner
+        DistributedID view_did = runtime->get_available_distributed_id(); 
+        result = construct_top_view((mapping == NULL) ? logical_owner :
+            owner_space, view_did, own_ctx->get_context_uid(), mapping);
+      }
+      else if (mapping != NULL)
+      {
+        // If we're collectively making this view then we're just going to
+        // do that and use the owner node as the logical owner for the view
+        // We still need to get the distributed ID from the next node down
+        // in the collective mapping though
+        std::atomic<DistributedID> view_did(0);
+        RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(key.first);
+          rez.serialize(key.second);
+          rez.serialize(owner_space);
+          mapping->pack(rez);
+          rez.serialize(&view_did);
+          rez.serialize(ready);
+        }
+        AddressSpaceID target = mapping->get_parent(owner_space, local_space);
+        runtime->send_create_top_view_request(target, rez); 
+        ready.wait();
+        result = construct_top_view(owner_space, view_did.load(), 
+                            own_ctx->get_context_uid(), mapping);
+      }
+      else
+      {
+        // We're not collective and not the owner so send the request
+        // to the owner to make the logical view and send back the result
+        std::atomic<DistributedID> view_did(0);
+        RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(key.first);
+          rez.serialize(key.second);
+          rez.serialize(logical_owner);
+          rez.serialize<size_t>(0); // no mapping
+          rez.serialize(&view_did);
+          rez.serialize(ready);
+        }
+        runtime->send_create_top_view_request(owner_space, rez); 
+        ready.wait();
+        RtEvent view_ready;
+        result = static_cast<InstanceView*>(
+            runtime->find_or_request_logical_view(view_did.load(), view_ready));
+        if (view_ready.exists() && !view_ready.has_triggered())
+          view_ready.wait();
+      }
+      // Retake the lock, save the view, and signal any other waiters
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(context_views.find(key) == context_views.end());
+#endif
+      ViewEntry &entry = context_views[key];
+      entry.first = result;
+      entry.second = 1/*only a single initial reference*/;
+      active_contexts.insert(own_ctx);
+      if (key.first > 0)
+      {
+        std::map<ReplicationID,RtUserEvent>::iterator finder =
+          pending_views.find(key.first);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_views.end());
+#endif
+        if (finder->second.exists())
+          Runtime::trigger_event(finder->second);
+        pending_views.erase(finder);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::unregister_active_context(InnerContext *context)
+    void PhysicalManager::unregister_active_context(InnerContext *own_ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner()); // should always be on the owner node
-#endif
+      ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
+      // If we're a replicate context then we want to ignore the specific
+      // context UID since there might be several shards on this node
+      if (key.first > 0)
+        key.second = 0;
       {
         AutoLock inst(inst_lock);
         std::set<InnerContext*>::iterator finder = 
-          active_contexts.find(context);
+          active_contexts.find(own_ctx);
         // We could already have removed this context if this
         // physical instance was deleted
         if (finder == active_contexts.end())
           return;
         active_contexts.erase(finder);
+        // Remove the reference on the view entry and remove it from our
+        // manager if it no longer has anymore active contexts
+        std::map<ContextKey,ViewEntry>::iterator view_finder =
+          context_views.find(key);
+#ifdef DEBUG_LEGION
+        assert(view_finder != context_views.end());
+        assert(view_finder->second.second > 0);
+#endif
+        if (--view_finder->second.second == 0)
+          context_views.erase(view_finder);
       }
-      if (context->remove_reference())
+      if (own_ctx->remove_reference())
         delete context;
     }
 
@@ -1077,6 +1223,120 @@ namespace Legion {
       if (!ready.exists())
         return use_event;
       return Runtime::merge_events(NULL, ready, use_event);
+    } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_top_view_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent man_ready;
+      PhysicalManager *manager =
+        runtime->find_or_request_instance_manager(did, man_ready);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      UniqueID ctx_uid;
+      derez.deserialize(ctx_uid);
+      RtEvent ctx_ready;
+      InnerContext *context = NULL;
+      if (repl_id > 0)
+      {
+        // See if we're on a node where there is a shard manager for
+        // this replicated context
+        ShardManager *shard_manager = 
+          runtime->find_shard_manager(repl_id, true/*can fail*/);
+        if (shard_manager != NULL)
+          context = shard_manager->find_local_context();
+      }
+      if (context == NULL)
+        context = runtime->find_context(ctx_uid,false/*can't fail*/,&ctx_ready);
+      AddressSpaceID logical_owner;
+      derez.deserialize(logical_owner);
+      CollectiveMapping *mapping = NULL;
+      size_t total_spaces;
+      derez.deserialize(total_spaces);
+      if (total_spaces > 0)
+      {
+        mapping = new CollectiveMapping(derez, total_spaces);
+        mapping->add_reference();
+      }
+      std::atomic<DistributedID> *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      // See if we're ready or we need to defer this until later
+      if ((man_ready.exists() && !man_ready.has_triggered()) ||
+          (ctx_ready.exists() && !ctx_ready.has_triggered()))
+      {
+        RemoteCreateViewArgs args(manager, context, logical_owner,
+                                  mapping, target, source, done);
+        if (!man_ready.exists())
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
+        else if (!ctx_ready.exists())
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, man_ready);
+        else
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+              Runtime::merge_events(man_ready, ctx_ready));
+        return;
+      }
+      process_top_view_request(manager, context, logical_owner, mapping,
+                               target, source, done, runtime);
+      if ((mapping != NULL) && mapping->remove_reference())
+        delete mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::process_top_view_request(
+        PhysicalManager *manager, InnerContext *context, AddressSpaceID logical,
+        CollectiveMapping *mapping, std::atomic<DistributedID> *target,
+        AddressSpaceID source, RtUserEvent done_event, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Get the view from the context
+      InstanceView *view =
+        context->create_instance_top_view(manager, logical, mapping); 
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(target);
+        rez.serialize(view->did);
+        rez.serialize(done_event);
+      }
+      runtime->send_create_top_view_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_top_view_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::atomic<DistributedID> *target;
+      derez.deserialize(target);
+      DistributedID did;
+      derez.deserialize(did);
+      target->store(did);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_top_view_creation(const void *args,
+                                                              Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const RemoteCreateViewArgs *rargs = (const RemoteCreateViewArgs*)args; 
+      process_top_view_request(rargs->manager, rargs->context,
+          rargs->logical_owner, rargs->mapping, rargs->target,
+          rargs->source, rargs->done_event, runtime);
+      if ((rargs->mapping != NULL) && rargs->mapping->remove_reference())
+        delete rargs->mapping;
     }
 
 #ifdef LEGION_GPU_REDUCTIONS
@@ -1877,6 +2137,10 @@ namespace Legion {
           return;
         copy_active_contexts = active_contexts;
         active_contexts.clear();
+#ifdef DEBUG_LEGION
+        assert(pending_views.empty());
+#endif
+        context_views.clear();
       }
       for (std::set<InnerContext*>::const_iterator it = 
            copy_active_contexts.begin(); it != copy_active_contexts.end(); it++)
@@ -3061,6 +3325,10 @@ namespace Legion {
           return;
         copy_active_contexts = active_contexts;
         active_contexts.clear();
+#ifdef DEBUG_LEGION
+        assert(pending_views.empty());
+#endif
+        context_views.clear();
       }
       for (std::set<InnerContext*>::iterator it = copy_active_contexts.begin(); 
             it != copy_active_contexts.end(); it++)
@@ -3601,16 +3869,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* VirtualManager::create_instance_top_view(
-                            InnerContext *context, AddressSpaceID logical_owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return NULL;
     }
 
     /////////////////////////////////////////////////////////////
