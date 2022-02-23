@@ -3116,12 +3116,14 @@ namespace Realm {
     AutoGPUContext::AutoGPUContext(GPU *_gpu)
       : gpu(_gpu)
     {
-      gpu->push_context();
+      if(gpu)
+        gpu->push_context();
     }
 
     AutoGPUContext::~AutoGPUContext(void)
     {
-      gpu->pop_context();
+      if(gpu)
+        gpu->pop_context();
     }
  
 
