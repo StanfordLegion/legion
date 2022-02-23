@@ -113,7 +113,7 @@ namespace Realm {
                           ((gpu->least_stream_priority -
                             gpu->greatest_stream_priority + 1) / 2));
       // CUDA promises to clamp to the actual range, so we don't have to
-      CHECK_CU( hipStreamCreateWithPriority(&stream, hipStreamNonBlocking,
+      CHECK_HIP( hipStreamCreateWithPriority(&stream, hipStreamNonBlocking,
                                            abs_priority) );
       log_stream.info() << "stream created: gpu=" << gpu
                         << " stream=" << stream << " priority=" << abs_priority;
@@ -124,7 +124,7 @@ namespace Realm {
       // log_stream.info() << "HIP stream " << stream << " destroyed - max copies = " 
       // 			<< pending_copies.capacity() << ", max events = " << pending_events.capacity();
 
-      CHECK_CU( hipStreamDestroy(stream) );
+      CHECK_HIP( hipStreamDestroy(stream) );
     }
 
     GPU *GPUStream::get_gpu(void) const
@@ -162,7 +162,7 @@ namespace Realm {
     {
       hipEvent_t e = gpu->event_pool.get_event();
 
-      CHECK_CU( hipEventRecord(e, stream) );
+      CHECK_HIP( hipEventRecord(e, stream) );
 
       log_stream.debug() << "HIP fence event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
@@ -173,7 +173,7 @@ namespace Realm {
     {
       hipEvent_t e = gpu->event_pool.get_event();
 
-      CHECK_CU( hipEventRecord(e, stream) );
+      CHECK_HIP( hipEventRecord(e, stream) );
 
       log_stream.debug() << "HIP start event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
@@ -185,7 +185,7 @@ namespace Realm {
     {
       hipEvent_t e = gpu->event_pool.get_event();
 
-      CHECK_CU( hipEventRecord(e, stream) );
+      CHECK_HIP( hipEventRecord(e, stream) );
 
       add_event(e, 0, notification);
     }
@@ -227,12 +227,12 @@ namespace Realm {
           continue;
         hipEvent_t e = gpu->event_pool.get_event();
 
-        CHECK_CU( hipEventRecord(e, (*it)->get_stream()) );
+        CHECK_HIP( hipEventRecord(e, (*it)->get_stream()) );
 
         log_stream.debug() << "HIP stream " << stream << " waiting on stream " 
                            << (*it)->get_stream() << " (GPU " << gpu << ")";
 
-        CHECK_CU( hipStreamWaitEvent(stream, e, 0) );
+        CHECK_HIP( hipStreamWaitEvent(stream, e, 0) );
 
         // record this event on our stream
         add_event(e, 0);
@@ -427,7 +427,7 @@ namespace Realm {
       {
         case GPU_MEMCPY_HOST_TO_DEVICE:
           {
-            CHECK_CU( hipMemcpyHtoDAsync((hipDeviceptr_t)(((char*)dst)+span_start),
+            CHECK_HIP( hipMemcpyHtoDAsync((hipDeviceptr_t)(((char*)dst)+span_start),
                                         (((char*)src)+span_start),
                                         span_bytes,
                                         raw_stream) );
@@ -435,7 +435,7 @@ namespace Realm {
           }
         case GPU_MEMCPY_DEVICE_TO_HOST:
           {
-            CHECK_CU( hipMemcpyDtoHAsync((((char*)dst)+span_start),
+            CHECK_HIP( hipMemcpyDtoHAsync((((char*)dst)+span_start),
                                         (hipDeviceptr_t)(((char*)src)+span_start),
                                         span_bytes,
                                         raw_stream) );
@@ -447,7 +447,7 @@ namespace Realm {
         case GPU_MEMCPY_DEVICE_TO_DEVICE:
         case GPU_MEMCPY_PEER_TO_PEER:
           {
-            CHECK_CU( hipMemcpyDtoDAsync((hipDeviceptr_t)(((char*)dst)+span_start),
+            CHECK_HIP( hipMemcpyDtoDAsync((hipDeviceptr_t)(((char*)dst)+span_start),
                                         (hipDeviceptr_t)(((char*)src)+span_start),
                                         span_bytes,
                                         raw_stream) );
@@ -488,12 +488,12 @@ namespace Realm {
       }
 #ifdef HIP_DLOPEN
       printf("use dlopen for memcpy\n");
-      CHECK_CU( hip_api->hipMemcpyAsync((void *)(((char*)dst)+span_start),
+      CHECK_HIP( hip_api->hipMemcpyAsync((void *)(((char*)dst)+span_start),
                                         (const void*)(((char*)src)+span_start),
                                         span_bytes, copy_type,
                                         raw_stream) );
 #else
-      CHECK_CU( hipMemcpyAsync((void *)(((char*)dst)+span_start),
+      CHECK_HIP( hipMemcpyAsync((void *)(((char*)dst)+span_start),
                                (const void*)(((char*)src)+span_start),
                                span_bytes, copy_type,
                                raw_stream) );
@@ -568,7 +568,7 @@ namespace Realm {
       copy_info.dstXInBytes = 0;
       copy_info.WidthInBytes = bytes;
       copy_info.Height = lines;
-      CHECK_CU( hipMemcpyParam2DAsync(&copy_info, stream->get_stream()) );
+      CHECK_HIP( hipMemcpyParam2DAsync(&copy_info, stream->get_stream()) );
 #else
       hipMemcpyKind copy_type;
       if (kind == GPU_MEMCPY_PEER_TO_PEER) {
@@ -584,7 +584,7 @@ namespace Realm {
        assert(0);
       }
 
-      CHECK_CU( hipMemcpy2DAsync(dst, dst_stride, src, src_stride, bytes, lines, copy_type, stream->get_stream()) );
+      CHECK_HIP( hipMemcpy2DAsync(dst, dst_stride, src, src_stride, bytes, lines, copy_type, stream->get_stream()) );
       
 #endif
 
@@ -669,7 +669,7 @@ namespace Realm {
         copy_info.dstPos = make_hipPos(0,0,0);
         copy_info.extent = make_hipExtent(bytes, height, depth);
         copy_info.kind = copy_type;
-        CHECK_CU( hipMemcpy3DAsync(&copy_info, stream->get_stream()) );
+        CHECK_HIP( hipMemcpy3DAsync(&copy_info, stream->get_stream()) );
       } else {
       	// we can unroll either lines (height) or planes (depth) - choose the
       	//  smaller of the two to minimize API calls
@@ -710,7 +710,7 @@ namespace Realm {
         }
 
       	for(size_t i = 0; i < count; i++) {
-      	  CHECK_CU( hipMemcpy2DAsync((void*)dst_ptr, dst_pitch, (void*)src_ptr, src_pitch, bytes, lines_2d, copy_type, stream->get_stream()) );
+      	  CHECK_HIP( hipMemcpy2DAsync((void*)dst_ptr, dst_pitch, (void*)src_ptr, src_pitch, bytes, lines_2d, copy_type, stream->get_stream()) );
       	  src_ptr += src_delta;
           dst_ptr += dst_delta;
       	}
@@ -768,7 +768,7 @@ namespace Realm {
         {
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
-          CHECK_CU( hipMemsetD8Async(hipDeviceptr_t(dst), 
+          CHECK_HIP( hipMemsetD8Async(hipDeviceptr_t(dst), 
                                      fill_u8, bytes,
                                      raw_stream) );
           break;
@@ -777,7 +777,7 @@ namespace Realm {
         {
           unsigned short fill_u16;
           memcpy(&fill_u16, fill_data.direct, 2);
-          CHECK_CU( hipMemsetD16Async(hipDeviceptr_t(dst), 
+          CHECK_HIP( hipMemsetD16Async(hipDeviceptr_t(dst), 
                                       fill_u16, bytes >> 1,
                                       raw_stream) );
           break;
@@ -786,7 +786,7 @@ namespace Realm {
         {
           unsigned int fill_u32;
           memcpy(&fill_u32, fill_data.direct, 4);
-          CHECK_CU( hipMemsetD32Async(hipDeviceptr_t(dst), 
+          CHECK_HIP( hipMemsetD32Async(hipDeviceptr_t(dst), 
                                       fill_u32, bytes >> 2,
                                       raw_stream) );
           break;
@@ -803,7 +803,7 @@ namespace Realm {
           if((fill_data_size & 3) == 0) {
             for(size_t offset = 0; offset < fill_data_size; offset += 4) {
               unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
-              CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset,
+              CHECK_HIP( cuMemsetD2D32Async(CUdeviceptr(dst) + offset,
                   fill_data_size /*pitch*/,
                   val,
                   1 /*width*/, elements /*height*/,
@@ -812,7 +812,7 @@ namespace Realm {
           } else if((fill_data_size & 1) == 0) {
             for(size_t offset = 0; offset < fill_data_size; offset += 2) {
               unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
-              CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset,
+              CHECK_HIP( cuMemsetD2D16Async(CUdeviceptr(dst) + offset,
                   fill_data_size /*pitch*/,
                   val,
                   1 /*width*/, elements /*height*/,
@@ -824,7 +824,7 @@ namespace Realm {
             for(size_t offset = 0; offset < fill_data_size; offset += 1) {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
-              CHECK_CU( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset),
+              CHECK_HIP( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset),
                                          fill_data_size /*pitch*/,
                                          fill_u8,
                                          1 /*width*/, elements /*height*/,
@@ -885,7 +885,7 @@ namespace Realm {
         {
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
-          CHECK_CU( hipMemset2DAsync((void *)(dst), dst_stride,
+          CHECK_HIP( hipMemset2DAsync((void *)(dst), dst_stride,
                                      fill_u8, bytes, lines,
                                      raw_stream) );
           break;
@@ -903,7 +903,7 @@ namespace Realm {
             for(size_t offset = 0; offset < fill_data_size; offset += 4) {
               unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
               for(size_t l = 0; l < lines; l++)
-          CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+          CHECK_HIP( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
                     fill_data_size /*pitch*/,
                     val,
                     1 /*width*/, elements /*height*/,
@@ -913,7 +913,7 @@ namespace Realm {
             for(size_t offset = 0; offset < fill_data_size; offset += 2) {
               unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
               for(size_t l = 0; l < lines; l++)
-          CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+          CHECK_HIP( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
                     fill_data_size /*pitch*/,
                     val,
                     1 /*width*/, elements /*height*/,
@@ -926,7 +926,7 @@ namespace Realm {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
               for(size_t l = 0; l < lines; l++)
-                CHECK_CU( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset + (l * dst_stride)),
+                CHECK_HIP( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset + (l * dst_stride)),
                                            fill_data_size /*pitch*/,
                                            fill_u8,
                                            1 /*width*/, elements /*height*/,
@@ -990,7 +990,7 @@ namespace Realm {
       	{
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
-      	  CHECK_CU( hipMemset2DAsync((void*)(dst), dst_stride,
+      	  CHECK_HIP( hipMemset2DAsync((void*)(dst), dst_stride,
                                      fill_u8, bytes, height,
                                      raw_stream) );
       	  break;
@@ -1008,7 +1008,7 @@ namespace Realm {
       	    for(size_t offset = 0; offset < fill_data_size; offset += 4) {
       	      unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
       	      for(size_t l = 0; l < height; l++)
-            		CHECK_CU( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+            		CHECK_HIP( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
             					     fill_data_size /*pitch*/,
             					     val,
             					     1 /*width*/, elements /*height*/,
@@ -1018,7 +1018,7 @@ namespace Realm {
       	    for(size_t offset = 0; offset < fill_data_size; offset += 2) {
       	      unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
       	      for(size_t l = 0; l < height; l++)
-            		CHECK_CU( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+            		CHECK_HIP( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
             					     fill_data_size /*pitch*/,
             					     val,
             					     1 /*width*/, elements /*height*/,
@@ -1031,7 +1031,7 @@ namespace Realm {
       	      unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
       	      for(size_t l = 0; l < height; l++)
-            		CHECK_CU( hipMemset2DAsync((void*)(static_cast<char*>(dst) + offset + (l * dst_stride)),
+            		CHECK_HIP( hipMemset2DAsync((void*)(static_cast<char*>(dst) + offset + (l * dst_stride)),
                                            fill_data_size /*pitch*/,
                                            fill_u8,
                                            1 /*width*/, elements /*height*/,
@@ -1059,7 +1059,7 @@ namespace Realm {
           unsigned char *dstDevice = (unsigned char*)dst + (done * dst_pstride);
           copy_info.dstPtr = make_hipPitchedPtr((void*)dstDevice, dst_stride, bytes, dst_pstride/dst_stride);
           copy_info.extent = make_hipExtent(bytes, height, todo);
-          CHECK_CU( hipMemcpy3DAsync(&copy_info, raw_stream) );
+          CHECK_HIP( hipMemcpy3DAsync(&copy_info, raw_stream) );
         }
       }
 
@@ -1153,7 +1153,7 @@ namespace Realm {
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
-	CHECK_CU( hipStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
+	CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
       } else {
 	stream->add_fence(this);
       }
@@ -1183,7 +1183,7 @@ namespace Realm {
     void GPUWorkStart::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
-	CHECK_CU( hipStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
+	CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
       } else {
 	stream->add_start_event(this);
       }
@@ -1219,7 +1219,7 @@ namespace Realm {
       //log_stream.info() << "gpu memcpy fence " << this << " (fence = " << fence << ") executed";
       fence->enqueue_on_stream(stream);
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( hipStreamSynchronize(stream->get_stream()) );
+      CHECK_HIP( hipStreamSynchronize(stream->get_stream()) );
 #endif
     }
 
@@ -1252,7 +1252,7 @@ namespace Realm {
       // TODO: measure how much benefit is derived from CU_EVENT_DISABLE_TIMING and
       //  consider using them for completion callbacks
       for(int i = 0; i < init_size; i++)
-	CHECK_CU( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
+	CHECK_HIP( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
     }
 
     void GPUEventPool::empty_pool(void)
@@ -1263,7 +1263,7 @@ namespace Realm {
         log_stream.warning() << "Application leaking " << external_count << " cuda events";
 
       for(int i = 0; i < current_size; i++)
-	CHECK_CU( hipEventDestroy(available_events[i]) );
+	CHECK_HIP( hipEventDestroy(available_events[i]) );
 
       current_size = 0;
       total_size = 0;
@@ -1287,7 +1287,7 @@ namespace Realm {
 	available_events.resize(total_size);
 
 	for(int i = 0; i < batch_size; i++)
-	  CHECK_CU( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
+	  CHECK_HIP( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
       }
 
       if(external)
@@ -1622,7 +1622,7 @@ namespace Realm {
       
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
-      CHECK_CU( hipStreamSynchronize(s->get_stream()) );
+      CHECK_HIP( hipStreamSynchronize(s->get_stream()) );
 #endif
       
       // pop the HIP context for this GPU back off
@@ -1672,7 +1672,7 @@ namespace Realm {
       }
 
       // we didn't use streams here, so synchronize the whole context
-      CHECK_CU( hipDeviceSynchronize() );
+      CHECK_HIP( hipDeviceSynchronize() );
       gpu_proc->block_on_synchronize = false;
 
       // pop the HIP context for this GPU back off
@@ -2083,7 +2083,7 @@ namespace Realm {
       {
         AutoGPUContext agc(gpu);
 
-	CHECK_CU( hipDeviceSynchronize() );
+	CHECK_HIP( hipDeviceSynchronize() );
       }
     }
 
@@ -2450,10 +2450,10 @@ namespace Realm {
     void GPUProcessor::stream_wait_on_event(hipStream_t stream, hipEvent_t event)
     {
       if (IS_DEFAULT_STREAM(stream))
-        CHECK_CU( hipStreamWaitEvent(
+        CHECK_HIP( hipStreamWaitEvent(
               ThreadLocal::current_gpu_stream->get_stream(), event, 0) );
       else
-        CHECK_CU( hipStreamWaitEvent(stream, event, 0) );
+        CHECK_HIP( hipStreamWaitEvent(stream, event, 0) );
     }
 
     void GPUProcessor::stream_synchronize(hipStream_t stream)
@@ -2480,11 +2480,11 @@ namespace Realm {
               << stream << " that Realm did not create which suggests "
               << "that there is another copy of the HIP runtime "
               << "somewhere making its own streams... be VERY careful.";
-            CHECK_CU( hipStreamSynchronize(stream) );
+            CHECK_HIP( hipStreamSynchronize(stream) );
           }
         } else {
           // oh well...
-          CHECK_CU( hipStreamSynchronize(stream) );
+          CHECK_HIP( hipStreamSynchronize(stream) );
         }
       }
       else
@@ -2537,7 +2537,7 @@ namespace Realm {
         waiter.preempt();
       } else {
         // oh well...
-        CHECK_CU( hipStreamSynchronize(current->get_stream()) ); 	
+        CHECK_HIP( hipStreamSynchronize(current->get_stream()) ); 	
       }
     }
 
@@ -2569,14 +2569,14 @@ namespace Realm {
       hipEvent_t e = event;
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( hipEventRecord(e, stream) );
+      CHECK_HIP( hipEventRecord(e, stream) );
     }
 
     void GPUProcessor::event_synchronize(hipEvent_t event)
     {
       // TODO: consider suspending task rather than busy-waiting here...
       hipEvent_t e = event;
-      CHECK_CU( hipEventSynchronize(e) );
+      CHECK_HIP( hipEventSynchronize(e) );
     }
       
     void GPUProcessor::event_elapsed_time(float *ms, hipEvent_t start, hipEvent_t end)
@@ -2584,7 +2584,7 @@ namespace Realm {
       // TODO: consider suspending task rather than busy-waiting here...
       hipEvent_t e1 = start;
       hipEvent_t e2 = end;
-      CHECK_CU( hipEventElapsedTime(ms, e1, e2) );
+      CHECK_HIP( hipEventElapsedTime(ms, e1, e2) );
     }
       
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
@@ -2636,7 +2636,7 @@ namespace Realm {
       log_stream.debug() << "kernel " << func << " added to stream " << config.stream;
 
       // Launch the kernel on our stream dammit!
-      CHECK_CU( hipModuleLaunchKernel(f, 
+      CHECK_HIP( hipModuleLaunchKernel(f, 
 			                                config.grid.x, config.grid.y, config.grid.z,
                                       config.block.x, config.block.y, config.block.z,
                                       config.shared,
@@ -2662,7 +2662,7 @@ namespace Realm {
       log_stream.debug() << "kernel " << func << " added to stream " << stream;
       /*
       // Launch the kernel on our stream dammit!
-      CHECK_CU( hipLaunchKernelGGL(func,
+      CHECK_HIP( hipLaunchKernelGGL(func,
                                grid_dim, block_dim,
                                shared_memory,
                                stream,
@@ -2677,7 +2677,7 @@ namespace Realm {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
       //  synchronization to just the right stream
-      CHECK_CU( hipMemcpyAsync(dst, src, size, kind, current) );
+      CHECK_HIP( hipMemcpyAsync(dst, src, size, kind, current) );
       stream_synchronize(current);    
     }
 
@@ -2686,7 +2686,7 @@ namespace Realm {
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( hipMemcpyAsync(dst, src, size, kind, stream) );
+      CHECK_HIP( hipMemcpyAsync(dst, src, size, kind, stream) );
       // no synchronization here
     }
 
@@ -2697,7 +2697,7 @@ namespace Realm {
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(dst);
-      CHECK_CU( hipMemcpyAsync((void *)(var_base + offset),
+      CHECK_HIP( hipMemcpyAsync((void *)(var_base + offset),
 			      src, size, kind, current) );
       stream_synchronize(current);
     }
@@ -2709,7 +2709,7 @@ namespace Realm {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(dst);
-      CHECK_CU( hipMemcpyAsync((void *)(var_base + offset),
+      CHECK_HIP( hipMemcpyAsync((void *)(var_base + offset),
 			                                  src, size, kind, stream) );
       // no synchronization here   
     }
@@ -2720,7 +2720,7 @@ namespace Realm {
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(src);
-      CHECK_CU( hipMemcpyAsync(dst,
+      CHECK_HIP( hipMemcpyAsync(dst,
 			      (void *)(var_base + offset),
 			      size, kind, current) );
       stream_synchronize(current);    
@@ -2733,7 +2733,7 @@ namespace Realm {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(src);
-      CHECK_CU( hipMemcpyAsync(dst,
+      CHECK_HIP( hipMemcpyAsync(dst,
 			                        (void *)(var_base + offset),
 			                        size, kind, stream) );
       // no synchronization here    
@@ -2743,7 +2743,7 @@ namespace Realm {
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( hipMemsetAsync(dst, (unsigned char)value, 
+      CHECK_HIP( hipMemsetAsync(dst, (unsigned char)value, 
                                   count, current) );    
     }
 
@@ -2752,7 +2752,7 @@ namespace Realm {
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( hipMemsetAsync(dst, (unsigned char)value,
+      CHECK_HIP( hipMemsetAsync(dst, (unsigned char)value,
                                count, stream) );    
     }
     
@@ -2769,7 +2769,7 @@ namespace Realm {
     {
       push_context();
 
-      CHECK_CU( hipDeviceGetStreamPriorityRange(&least_stream_priority,
+      CHECK_HIP( hipDeviceGetStreamPriorityRange(&least_stream_priority,
                                                 &greatest_stream_priority) );
 
       event_pool.init_pool();
@@ -2829,25 +2829,25 @@ namespace Realm {
 
       // free memory
       if(fbmem_base)
-        CHECK_CU( hipFree((void *)fbmem_base) );
+        CHECK_HIP( hipFree((void *)fbmem_base) );
       
       if(fb_ibmem_base)
-        CHECK_CU( hipFree((void *)fb_ibmem_base) );
+        CHECK_HIP( hipFree((void *)fb_ibmem_base) );
 
-      //CHECK_CU( hipDevicePrimaryCtxRelease(info->device) );
+      //CHECK_HIP( hipDevicePrimaryCtxRelease(info->device) );
     }
 
     void GPU::push_context(void)
     {
-      //CHECK_CU( hipCtxPushCurrent(context) );
-      CHECK_CU( hipSetDevice(device_id) );
+      //CHECK_HIP( hipCtxPushCurrent(context) );
+      CHECK_HIP( hipSetDevice(device_id) );
     }
 
     void GPU::pop_context(void)
     {
       // the context we pop had better be ours...
       //hipCtx_t popped;
-      //CHECK_CU( hipCtxPopCurrent(&popped) );
+      //CHECK_HIP( hipCtxPopCurrent(&popped) );
       //assert(popped == context);
     }
 
@@ -2897,7 +2897,7 @@ namespace Realm {
       	{
           printf("id %d\n", (*it)->device_id);
       	  AutoGPUContext agc(this);
-          CHECK_CU( hipDeviceEnablePeerAccess((*it)->device_id, 0) );
+          CHECK_HIP( hipDeviceEnablePeerAccess((*it)->device_id, 0) );
       	}
       	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
       	peer_fbs.insert((*it)->fbmem->me);
@@ -2928,7 +2928,7 @@ namespace Realm {
 	      if(ret != hipSuccess) {
 	        if(ret == hipErrorMemoryAllocation) {
       	    size_t free_bytes, total_bytes;
-      	    CHECK_CU( hipMemGetInfo(&free_bytes, &total_bytes) );
+      	    CHECK_HIP( hipMemGetInfo(&free_bytes, &total_bytes) );
       	    log_gpu.fatal() << "insufficient memory on gpu " << info->index
                             << ": " << size << " bytes needed (from -ll:fsize), "
                             << free_bytes << " (out of " << total_bytes << ") available";
@@ -2958,7 +2958,7 @@ namespace Realm {
           if(ret != hipSuccess) {
             if(ret == hipErrorMemoryAllocation) {
               size_t free_bytes, total_bytes;
-              CHECK_CU( hipMemGetInfo(&free_bytes, &total_bytes) );
+              CHECK_HIP( hipMemGetInfo(&free_bytes, &total_bytes) );
               log_gpu.fatal() << "insufficient memory on gpu " << info->index
                               << ": " << ib_size << " bytes needed (from -ll:ib_fsize), "
                               << free_bytes << " (out of " << total_bytes << ") available";
@@ -3021,7 +3021,7 @@ namespace Realm {
 
       hipDeviceptr_t ptr;
       size_t size;
-      CHECK_CU( hipModuleGetGlobal(&ptr, &size, module, var->device_name) );
+      CHECK_HIP( hipModuleGetGlobal(&ptr, &size, module, var->device_name) );
       device_variables[var->host_var] = static_cast<char*>(ptr);
     }
     
@@ -3043,7 +3043,7 @@ namespace Realm {
       hipModule_t module = it->second;
 
       hipFunction_t f;
-      CHECK_CU( hipModuleGetFunction(&f, module, func->device_fun) );
+      CHECK_HIP( hipModuleGetFunction(&f, module, func->device_fun) );
       device_functions[func->host_fun] = f;
     }
 
@@ -3255,7 +3255,7 @@ namespace Realm {
       std::vector<GPUInfo *> infos;
       {
         int num_devices;
-      	CHECK_CU( hipGetDeviceCount(&num_devices) );
+      	CHECK_HIP( hipGetDeviceCount(&num_devices) );
       	if(num_devices == 0) {
           // continue on so that we recognize things like -ll:gpu, but there
           //  are no devices to be found
@@ -3267,7 +3267,7 @@ namespace Realm {
       	    info->index = i;
       	    info->device = i;
             hipDeviceProp_t dev_prop;
-            CHECK_CU( hipGetDeviceProperties(&dev_prop, info->device) );
+            CHECK_HIP( hipGetDeviceProperties(&dev_prop, info->device) );
             memcpy(info->name, dev_prop.name, GPUInfo::MAX_NAME_LEN);
             info->major = dev_prop.major;
             info->minor = dev_prop.minor;
@@ -3277,7 +3277,7 @@ namespace Realm {
 #define GET_DEVICE_PROP(member, name)					\
             do {								\
               int tmp;								\
-              CHECK_CU( hipDeviceGetAttribute(&tmp, hipDeviceAttribute##name, info->device) ); \
+              CHECK_HIP( hipDeviceGetAttribute(&tmp, hipDeviceAttribute##name, info->device) ); \
               info->member = tmp;						\
             } while(0)
             // SCREW TEXTURES AND SURFACES FOR NOW!
@@ -3364,7 +3364,7 @@ namespace Realm {
       	      it2++)
       	    if(it1 != it2) {
       	      int can_access;
-      	      CHECK_CU( hipDeviceCanAccessPeer(&can_access,
+      	      CHECK_HIP( hipDeviceCanAccessPeer(&can_access,
       					      (*it1)->device,
       					      (*it2)->device) );
       	      if(can_access) {
@@ -3421,7 +3421,7 @@ namespace Realm {
         //         hipError_t res = hipDevicePrimaryCtxRetain(&context,
         //                                                    gpu_info[i]->device);
         hipError_t res = hipSetDevice(gpu_info[i]->device);
-        CHECK_CU( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );  
+        CHECK_HIP( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );  
         printf("set device %d\n", gpu_info[i]->device);	    	
         // a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
       	if((res == hipErrorInvalidDevice) ||
@@ -3435,14 +3435,14 @@ namespace Realm {
       	  }
       	}
       	// any other error is a (unknown) problem
-      	CHECK_CU(res);
+      	CHECK_HIP(res);
 
       	if(cfg_min_avail_mem > 0) {
       	  size_t total_mem, avail_mem;
-      	  CHECK_CU( hipMemGetInfo(&avail_mem, &total_mem) );
+      	  CHECK_HIP( hipMemGetInfo(&avail_mem, &total_mem) );
       	  if(avail_mem < cfg_min_avail_mem) {
       	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
-      	    //CHECK_CU( hipDevicePrimaryCtxRelease(gpu_info[i]->device) );
+      	    //CHECK_HIP( hipDevicePrimaryCtxRelease(gpu_info[i]->device) );
       	    continue;
       	  }
       	}
@@ -3513,7 +3513,7 @@ namespace Realm {
 	    }
 	    abort();
 	  }
-	  CHECK_CU( hipHostGetDevicePointer((void **)&zcmem_gpu_base,
+	  CHECK_HIP( hipHostGetDevicePointer((void **)&zcmem_gpu_base,
 					      zcmem_cpu_base,
 					      0) );
 	  // right now there are asssumptions in several places that unified addressing keeps
@@ -3548,10 +3548,10 @@ namespace Realm {
         char *zcib_gpu_base;
         {
           AutoGPUContext agc(gpus[0]);
-          CHECK_CU( hipHostMalloc(&zcib_cpu_base,
+          CHECK_HIP( hipHostMalloc(&zcib_cpu_base,
                                    cfg_zc_ib_size,
                                    hipHostMallocPortable | hipHostMallocMapped) );
-          CHECK_CU( hipHostGetDevicePointer((void **)&zcib_gpu_base,
+          CHECK_HIP( hipHostGetDevicePointer((void **)&zcib_gpu_base,
                                               zcib_cpu_base, 0) );
           // right now there are asssumptions in several places that unified addressing keeps
           //  the CPU and GPU addresses the same
@@ -3728,7 +3728,7 @@ namespace Realm {
                 it2 != (*it)->hipipc_mappings.end();
                 ++it2) {
               ipc_peers.add(it2->owner);
-              CHECK_CU( hipIpcCloseMemHandle((void*)(it2->local_base)) );
+              CHECK_HIP( hipIpcCloseMemHandle((void*)(it2->local_base)) );
             }
           }
         }
@@ -3783,13 +3783,13 @@ namespace Realm {
       if(zcmem_cpu_base) {
         assert(!gpus.empty());
         AutoGPUContext agc(gpus[0]);
-        CHECK_CU( hipHostFree(zcmem_cpu_base) );
+        CHECK_HIP( hipHostFree(zcmem_cpu_base) );
       }
 
       if(zcib_cpu_base) {
         assert(!gpus.empty());
         AutoGPUContext agc(gpus[0]);
-        CHECK_CU( hipHostFree(zcib_cpu_base) );
+        CHECK_HIP( hipHostFree(zcib_cpu_base) );
       }
 
       // also unregister any host memory at this time
@@ -3798,7 +3798,7 @@ namespace Realm {
         for(std::vector<void *>::const_iterator it = registered_host_ptrs.begin();
             it != registered_host_ptrs.end();
             ++it)
-          CHECK_CU( hipHostUnregister(*it) );
+          CHECK_HIP( hipHostUnregister(*it) );
         registered_host_ptrs.clear();
       }
 

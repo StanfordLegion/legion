@@ -192,7 +192,7 @@ namespace Realm {
                 } else {
                   copy_type = hipMemcpyHostToDevice;
                 }
-                CHECK_CU( hipMemcpyAsync(reinterpret_cast<void *>(out_base + out_offset),
+                CHECK_HIP( hipMemcpyAsync(reinterpret_cast<void *>(out_base + out_offset),
                                          reinterpret_cast<const void *>(in_base + in_offset),
                                          bytes, copy_type,
                                          stream->get_stream()) );
@@ -277,7 +277,7 @@ namespace Realm {
                   const void *src = reinterpret_cast<const void *>(in_base + in_offset);
                   void *dst = reinterpret_cast<void *>(out_base + out_offset);
 
-                  CHECK_CU( hipMemcpy2DAsync(dst, out_lstride, src, in_lstride, contig_bytes, lines, copy_type, stream->get_stream()) );
+                  CHECK_HIP( hipMemcpy2DAsync(dst, out_lstride, src, in_lstride, contig_bytes, lines, copy_type, stream->get_stream()) );
 
                   log_gpudma.info() << "gpu memcpy 2d: dst="
                                     << std::hex << (out_base + out_offset) << std::dec
@@ -355,7 +355,7 @@ namespace Realm {
                     const void *src = reinterpret_cast<const void *>(in_base + in_offset + (act_planes * in_pstride));
                     void *dst = reinterpret_cast<void *>(out_base + out_offset + (act_planes * out_pstride));
 
-                    CHECK_CU( hipMemcpy2DAsync(dst, out_lstride, src, in_lstride, contig_bytes, lines, copy_type, stream->get_stream()) );
+                    CHECK_HIP( hipMemcpy2DAsync(dst, out_lstride, src, in_lstride, contig_bytes, lines, copy_type, stream->get_stream()) );
                     act_planes++;
 
                     if(work_until.is_expired())
@@ -728,7 +728,7 @@ namespace Realm {
                 memcpy(&fill_u8, fill_data, 1);
                 if(out_dim == 1) {
                   size_t bytes = out_alc.remaining(0);
-                  CHECK_CU( hipMemsetD8Async((hipDeviceptr_t)(out_base + out_offset),
+                  CHECK_HIP( hipMemsetD8Async((hipDeviceptr_t)(out_base + out_offset),
                                             fill_u8,
                                             bytes,
                                             stream->get_stream()) );
@@ -737,7 +737,7 @@ namespace Realm {
                 } else {
                   size_t bytes = out_alc.remaining(0);
                   size_t lines = out_alc.remaining(1);
-                  CHECK_CU( hipMemset2DAsync((void*)(out_base + out_offset),
+                  CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset),
                                               out_alc.get_stride(1),
                                               *reinterpret_cast<const uint8_t *>(fill_data),
                                               bytes, lines,
@@ -757,7 +757,7 @@ namespace Realm {
   #ifdef DEBUG_REALM
                   assert((bytes & 1) == 0);
   #endif
-                  CHECK_CU( hipMemsetD16Async((hipDeviceptr_t)(out_base + out_offset),
+                  CHECK_HIP( hipMemsetD16Async((hipDeviceptr_t)(out_base + out_offset),
                                              fill_u16,
                                              bytes >> 1,
                                              stream->get_stream()) );
@@ -770,7 +770,7 @@ namespace Realm {
                   assert((bytes & 1) == 0);
                   assert((out_alc.get_stride(1) & 1) == 0);
   #endif
-                  CHECK_CU( hipMemset2DAsync((void*)(out_base + out_offset),
+                  CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset),
                                                out_alc.get_stride(1),
                                                *reinterpret_cast<const uint8_t *>(fill_data),
                                                bytes, lines,
@@ -790,7 +790,7 @@ namespace Realm {
   #ifdef DEBUG_REALM
                   assert((bytes & 3) == 0);
   #endif
-                  CHECK_CU( hipMemsetD32Async((hipDeviceptr_t)(out_base + out_offset),
+                  CHECK_HIP( hipMemsetD32Async((hipDeviceptr_t)(out_base + out_offset),
                                              fill_u32,
                                              bytes >> 2,
                                              stream->get_stream()) );
@@ -803,7 +803,7 @@ namespace Realm {
                   assert((bytes & 3) == 0);
                   assert((out_alc.get_stride(1) & 3) == 0);
   #endif
-                  CHECK_CU( hipMemset2DAsync((void*)(out_base + out_offset),
+                  CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset),
                                                out_alc.get_stride(1),
                                                *reinterpret_cast<const uint8_t *>(fill_data),
                                                bytes, lines,
@@ -831,7 +831,7 @@ namespace Realm {
                 //     memcpy(&fill_u32,
                 //            reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                 //            4);
-                //     CHECK_CU( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
+                //     CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
                 //                                  reduced_fill_size,
                 //                                  fill_u32,
                 //                                  1 /*"width"*/, elems /*"height"*/,
@@ -846,7 +846,7 @@ namespace Realm {
                 //     memcpy(&fill_u16,
                 //            reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                 //            2);                                              
-                //     CHECK_CU( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
+                //     CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
                 //                                  reduced_fill_size,
                 //                                  fill_u16,
                 //                                  1 /*"width"*/, elems /*"height"*/,
@@ -860,7 +860,7 @@ namespace Realm {
                   memcpy(&fill_u8,
                          reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                          1);
-                  CHECK_CU( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
+                  CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
                                              reduced_fill_size,
                                              fill_u8,
                                              1 /*"width"*/, elems /*"height"*/,
@@ -884,7 +884,7 @@ namespace Realm {
                     size_t todo = std::min(lines_done, lines - lines_done);
                     void *dstDevice = (void*)(out_base + out_offset +
                                                    (lines_done * lstride));
-                    CHECK_CU( hipMemcpy2DAsync(dstDevice, lstride, srcDevice, lstride, bytes, todo, hipMemcpyDeviceToDevice, stream->get_stream()) );
+                    CHECK_HIP( hipMemcpy2DAsync(dstDevice, lstride, srcDevice, lstride, bytes, todo, hipMemcpyDeviceToDevice, stream->get_stream()) );
                     lines_done += todo;
                   }
 
@@ -917,7 +917,7 @@ namespace Realm {
                                                   (planes_done * pstride));
                         copy3d.dstPtr = make_hipPitchedPtr(dstDevice, lstride, bytes, pstride/lstride);
                         copy3d.extent = make_hipExtent(bytes, lines, todo);
-                        CHECK_CU( hipMemcpy3DAsync(&copy3d, stream->get_stream()) );
+                        CHECK_HIP( hipMemcpy3DAsync(&copy3d, stream->get_stream()) );
                         planes_done += todo;
                       }
 
@@ -930,7 +930,7 @@ namespace Realm {
                       for(size_t p = 1; p < planes; p++) {
                         void *dstDevice = (void*)(out_base + out_offset +
                                                        (p * pstride));
-                        CHECK_CU( hipMemcpy2DAsync(dstDevice, lstride, srcDevice, lstride, bytes, lines, hipMemcpyDeviceToDevice, stream->get_stream()) );
+                        CHECK_HIP( hipMemcpy2DAsync(dstDevice, lstride, srcDevice, lstride, bytes, lines, hipMemcpyDeviceToDevice, stream->get_stream()) );
                       }
                     }
                   }

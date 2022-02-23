@@ -42,7 +42,7 @@
   } \
 } while(0)
   
-#define REPORT_CU_ERROR(cmd, ret) \
+#define REPORT_HIP_ERROR(cmd, ret) \
   do { \
     const char *name, *str; \
     name = hipGetErrorName(ret); \
@@ -51,9 +51,9 @@
     abort(); \
   } while(0)
 
-#define CHECK_CU(cmd) do {                      \
+#define CHECK_HIP(cmd) do {                      \
   hipError_t ret = (cmd); \
-  if(ret != hipSuccess) REPORT_CU_ERROR(#cmd, ret); \
+  if(ret != hipSuccess) REPORT_HIP_ERROR(#cmd, ret); \
 } while(0)
 
 
