@@ -1584,33 +1584,41 @@ namespace Realm {
         ThreadLocal::created_gpu_streams = 0;
       }
 
+      // if this is our first task, we might need to decide whether
+      //  full context synchronization is required for a task to be
+      //  "complete"
+      if(gpu_proc->gpu->module->cfg_task_context_sync < 0) {
 #ifdef REALM_USE_HIP_HIJACK
-      // if our hijack code is not active, the application may have put some work for this
-      //  task on streams we don't know about, so it takes an expensive device synchronization
-      //  to guarantee that any work enqueued on a stream in the future is ordered with respect
-      //  to this task's results
-      if(!cudart_hijack_active) {
-      	// print a warning if this is the first time and it hasn't been suppressed
-      	if(!(gpu_proc->gpu->module->cfg_suppress_hijack_warning ||
-      	     already_issued_hijack_warning)) {
-      	  already_issued_hijack_warning = true;
-      	  log_gpu.warning() << "HIP hijack code not active"
-      			    << " - device synchronizations required after every GPU task!";
-      	}
-      	gpu_proc->ctxsync.add_fence(fence);
-      } else {
-        if (!already_issued_hijack_enabled_warning) {
-          already_issued_hijack_enabled_warning = true;
-    	    log_gpu.warning() << "HIP hijack is active"
-    			      << " - device synchronizations not required after every GPU task!";
+        // normally hijack code will catch all the work and put it on the
+        //  right stream, but if we haven't seen it used, there may be a
+        //  static copy of the cuda runtime that's in use and foiling the
+        //  hijack
+        if(cudart_hijack_active) {
+          gpu_proc->gpu->module->cfg_task_context_sync = 0;
+          if (!already_issued_hijack_enabled_warning) {
+            already_issued_hijack_enabled_warning = true;
+            log_gpu.warning() << "HIP hijack is active"
+                  << " - device synchronizations not required after every GPU task!";
+          }
+        } else {
+          if(!(gpu_proc->gpu->module->cfg_suppress_hijack_warning ||
+               already_issued_hijack_warning)) {
+            already_issued_hijack_warning = true;
+            log_gpu.warning() << "HIP hijack code not active"
+                              << " - device synchronizations required after every GPU task!";
+          }
+          gpu_proc->gpu->module->cfg_task_context_sync = 1;
         }
-      	// a fence on the local stream is sufficient when hijack is active
-      	fence->enqueue_on_stream(s);
-      }
 #else
-      // always use a full ctx synchronization to capture task effects
-      gpu_proc->ctxsync.add_fence(fence);
+        // without hijack or legacy sync requested, ctxsync is needed
+        gpu_proc->gpu->module->cfg_task_context_sync = 1;
 #endif
+      }
+
+      if(gpu_proc->gpu->module->cfg_task_context_sync)
+        gpu_proc->ctxsync.add_fence(fence);
+      else
+	      fence->enqueue_on_stream(s);
       
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
@@ -3158,6 +3166,7 @@ namespace Realm {
       , cfg_skip_gpu_count(0)
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
+      , cfg_task_context_sync(-1)
       , cfg_max_ctxsync_threads(4)
       , cfg_multithread_dma(false)
       , cfg_hostreg_limit(1 << 30)
@@ -3209,17 +3218,18 @@ namespace Realm {
           .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
       	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
       	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
-      	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
-      	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)	
-      	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
-      	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-      	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-          .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
-          .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
-          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm')
-          .add_option_int("-cuda:ipc", m->cfg_use_hip_ipc);
+      	  .add_option_bool("-hip:callbacks", m->cfg_fences_use_callbacks)
+      	  .add_option_bool("-hip:nohijack", m->cfg_suppress_hijack_warning)	
+      	  .add_option_int("-hip:skipgpus", m->cfg_skip_gpu_count)
+      	  .add_option_bool("-hip:skipbusy", m->cfg_skip_busy_gpus)
+      	  .add_option_int_units("-hip:minavailmem", m->cfg_min_avail_mem, 'm')
+          .add_option_int("-hip:contextsync", m->cfg_task_context_sync)
+          .add_option_int("-hip:maxctxsync", m->cfg_max_ctxsync_threads)
+          .add_option_int("-hip:mtdma", m->cfg_multithread_dma)
+          .add_option_int_units("-hip:hostreg", m->cfg_hostreg_limit, 'm')
+          .add_option_int("-hip:ipc", m->cfg_use_hip_ipc);
 #ifdef REALM_USE_HIP_HIJACK
-        cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
+        cp.add_option_int("-hip:nongpusync", cudart_hijack_nongpu_sync);
 #endif	
         
         bool ok = cp.parse_command_line(cmdline);

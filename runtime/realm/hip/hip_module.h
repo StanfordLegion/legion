@@ -88,6 +88,7 @@ namespace Realm {
       unsigned cfg_skip_gpu_count;
       bool cfg_skip_busy_gpus;
       size_t cfg_min_avail_mem;
+      int cfg_task_context_sync; // 0 = no, 1 = yes, -1 = default (based on hijack)
       int cfg_max_ctxsync_threads;
       bool cfg_multithread_dma;
       size_t cfg_hostreg_limit;
