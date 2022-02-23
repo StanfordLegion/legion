@@ -1546,9 +1546,6 @@ namespace Realm {
     //  silently permitted (0), warned (1), or a fatal error (2) based on this
     //  setting
     /*extern*/ int cudart_hijack_nongpu_sync = 2;
-
-    // used in GPUTaskScheduler<T>::execute_task below
-    static bool already_issued_hijack_warning = false;
 #endif
 
     template <typename T>
@@ -1594,28 +1591,47 @@ namespace Realm {
         ThreadLocal::created_gpu_streams = 0;
       }
 
+      // if this is our first task, we might need to decide whether
+      //  full context synchronization is required for a task to be
+      //  "complete"
+      if(gpu_proc->gpu->module->cfg_task_context_sync < 0) {
+        // if legacy stream sync was requested, default for ctxsync is off
+        if(gpu_proc->gpu->module->cfg_task_legacy_sync) {
+          gpu_proc->gpu->module->cfg_task_context_sync = 0;
+        } else {
 #ifdef REALM_USE_CUDART_HIJACK
-      // if our hijack code is not active, the application may have put some work for this
-      //  task on streams we don't know about, so it takes an expensive device synchronization
-      //  to guarantee that any work enqueued on a stream in the future is ordered with respect
-      //  to this task's results
-      if(!cudart_hijack_active) {
-	// print a warning if this is the first time and it hasn't been suppressed
-	if(!(gpu_proc->gpu->module->cfg_suppress_hijack_warning ||
-	     already_issued_hijack_warning)) {
-	  already_issued_hijack_warning = true;
-	  log_gpu.warning() << "CUDART hijack code not active"
-			    << " - device synchronizations required after every GPU task!";
-	}
-	gpu_proc->ctxsync.add_fence(fence);
-      } else {
-	// a fence on the local stream is sufficient when hijack is active
-	fence->enqueue_on_stream(s);
-      }
+          // normally hijack code will catch all the work and put it on the
+          //  right stream, but if we haven't seen it used, there may be a
+          //  static copy of the cuda runtime that's in use and foiling the
+          //  hijack
+          if(cudart_hijack_active) {
+            gpu_proc->gpu->module->cfg_task_context_sync = 0;
+          } else {
+            if(!gpu_proc->gpu->module->cfg_suppress_hijack_warning)
+              log_gpu.warning() << "CUDART hijack code not active"
+                                << " - device synchronizations required after every GPU task!";
+            gpu_proc->gpu->module->cfg_task_context_sync = 1;
+          }
 #else
-      // always use a full ctx synchronization to capture task effects
-      gpu_proc->ctxsync.add_fence(fence);
+          // without hijack or legacy sync requested, ctxsync is needed
+          gpu_proc->gpu->module->cfg_task_context_sync = 1;
 #endif
+        }
+      }
+
+      // if requested, use a cuda event to couple legacy stream work into
+      //  the current task's stream
+      if(gpu_proc->gpu->module->cfg_task_legacy_sync) {
+        CUevent e = gpu_proc->gpu->event_pool.get_event();
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, CU_STREAM_LEGACY) );
+        CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(s->get_stream(), e, 0) );
+        gpu_proc->gpu->event_pool.return_event(e);
+      }
+
+      if(gpu_proc->gpu->module->cfg_task_context_sync)
+        gpu_proc->ctxsync.add_fence(fence);
+      else
+	fence->enqueue_on_stream(s);
 
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
@@ -2369,8 +2385,13 @@ namespace Realm {
       : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
-      // advertise ourselves as a host memory
-      local_segment.assign(NetworkSegmentInfo::HostMem, cpu_base, size);
+      // advertise ourselves as a host or managed memory, as appropriate
+      NetworkSegmentInfo::MemoryType mtype;
+      if(_kind == MemoryImpl::MKIND_MANAGED)
+        mtype = NetworkSegmentInfo::CudaManagedMem;
+      else
+        mtype = NetworkSegmentInfo::HostMem;
+      local_segment.assign(mtype, cpu_base, size);
       segment = &local_segment;
     }
 
@@ -3277,12 +3298,14 @@ namespace Realm {
     AutoGPUContext::AutoGPUContext(GPU *_gpu)
       : gpu(_gpu)
     {
-      gpu->push_context();
+      if(gpu)
+        gpu->push_context();
     }
 
     AutoGPUContext::~AutoGPUContext(void)
     {
-      gpu->pop_context();
+      if(gpu)
+        gpu->pop_context();
     }
 
 
@@ -3312,6 +3335,8 @@ namespace Realm {
       , cfg_skip_gpu_count(0)
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
+      , cfg_task_legacy_sync(-1)
+      , cfg_task_context_sync(-1)
       , cfg_max_ctxsync_threads(4)
       , cfg_lmem_resize_to_max(false)
       , cfg_multithread_dma(false)
@@ -3482,6 +3507,8 @@ namespace Realm {
 	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
 	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
 	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+          .add_option_int("-cuda:legacysync", m->cfg_task_legacy_sync)
+          .add_option_int("-cuda:contextsync", m->cfg_task_context_sync)
 	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
           .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max)
 	  .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)

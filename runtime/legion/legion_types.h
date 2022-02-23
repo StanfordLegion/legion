@@ -826,8 +826,6 @@ namespace Legion {
       SEND_FUTURE_MAP_RESPONSE,
       SEND_REPL_FUTURE_MAP_REQUEST,
       SEND_REPL_FUTURE_MAP_RESPONSE,
-      SEND_REPL_TOP_VIEW_REQUEST,
-      SEND_REPL_TOP_VIEW_RESPONSE,
       SEND_REPL_DISJOINT_COMPLETE_REQUEST,
       SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
       SEND_REPL_INTRA_SPACE_DEP,
@@ -1045,8 +1043,6 @@ namespace Legion {
         "Send Future Map Future Response",                            \
         "Send Replicate Future Map Request",                          \
         "Send Replicate Future Map Response",                         \
-        "Send Replicate Top View Request",                            \
-        "Send Replicate Top View Response",                           \
         "Send Replicate Disjoint Complete Request",                   \
         "Send Replicate Disjoint Complete Response",                  \
         "Send Replicate Intra Space Dependence",                      \

@@ -11043,6 +11043,16 @@ namespace Legion {
             break;
           }
 #ifdef LEGION_USE_CUDA
+#define CHECK_CUDA(cmd) do { \
+  CUresult ret = (cmd); \
+  if (ret != CUDA_SUCCESS) { \
+    const char *name, *str; \
+    cuGetErrorName(ret, &name); \
+    cuGetErrorString(ret, &str); \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } \
+}
         case Memory::GPU_FB_MEM:
           {
             cuMemFree((CUdeviceptr)ptr);
@@ -11053,6 +11063,7 @@ namespace Legion {
             cuMemFreeHost((void*)ptr);
             break;
           }
+#undef CHECK_CUDA
 #endif
 #ifdef LEGION_USE_HIP
         case Memory::GPU_FB_MEM:
@@ -12492,17 +12503,6 @@ namespace Legion {
           case SEND_REPL_FUTURE_MAP_RESPONSE:
             {
               runtime->handle_control_replicate_future_map_response(derez);
-              break;
-            }
-          case SEND_REPL_TOP_VIEW_REQUEST:
-            {
-              runtime->handle_control_replicate_top_view_request(derez,
-                                                        remote_address_space);
-              break;
-            }
-          case SEND_REPL_TOP_VIEW_RESPONSE:
-            {
-              runtime->handle_control_replicate_top_view_response(derez);
               break;
             }
           case SEND_REPL_DISJOINT_COMPLETE_REQUEST:
@@ -22406,25 +22406,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_top_view_request(AddressSpaceID target,
-                                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REPL_TOP_VIEW_REQUEST>(
-                                                    rez, true/*flush*/);
-
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_top_view_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REPL_TOP_VIEW_RESPONSE>(
-                                  rez, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_disjoint_complete_request(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24224,14 +24205,14 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InnerContext::handle_create_top_view_request(derez, this, source);
+      PhysicalManager::handle_top_view_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      InnerContext::handle_create_top_view_response(derez, this);
+      PhysicalManager::handle_top_view_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24356,22 +24337,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureImpl::handle_future_create_instance_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_top_view_request(Deserializer &derez,
-                                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_top_view_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_top_view_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_top_view_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -28611,6 +28576,7 @@ namespace Legion {
       ReplicationID result = 
         __sync_fetch_and_add(&unique_control_replication_id, runtime_stride);
 #ifdef DEBUG_LEGION
+      assert(result > 0); // should never be giving out zero
       assert(result <= unique_control_replication_id);
 #endif
       return result;
@@ -31776,7 +31742,7 @@ namespace Legion {
           }
         case LG_REMOTE_VIEW_CREATION_TASK_ID:
           {
-            InnerContext::handle_remote_view_creation(args);
+            PhysicalManager::handle_top_view_creation(args, runtime);
             break;
           }
         case LG_DEFER_DISTRIBUTE_TASK_ID:

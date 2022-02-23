@@ -1059,9 +1059,8 @@ namespace Legion {
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
       ApBarrier handle_find_trace_shard_event(size_t temp_index, ApEvent event,
                                               ShardID remote_shard);
+      ReplicateContext* get_shard_execution_context(void) const;
     public:
-      InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                             AddressSpaceID source);
       void initialize_implicit_task(InnerContext *context, TaskID tid,
                                     MapperID mid, Processor proxy);
       void complete_startup_initialization(void);

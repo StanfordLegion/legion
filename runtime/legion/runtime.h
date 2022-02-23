@@ -3176,10 +3176,6 @@ namespace Legion {
                                                      Serializer &rez);
       void send_control_replicate_future_map_response(AddressSpaceID target,
                                                       Serializer &rez);
-      void send_control_replicate_top_view_request(AddressSpaceID target,
-                                                   Serializer &rez);
-      void send_control_replicate_top_view_response(AddressSpaceID target,
-                                                    Serializer &rez);
       void send_control_replicate_disjoint_complete_request(
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_disjoint_complete_response(
@@ -3606,9 +3602,6 @@ namespace Legion {
       void handle_control_replicate_collective_message(Deserializer &derez);
       void handle_control_replicate_future_map_request(Deserializer &derez);
       void handle_control_replicate_future_map_response(Deserializer &derez);
-      void handle_control_replicate_top_view_request(Deserializer &derez,
-                                                     AddressSpaceID source);
-      void handle_control_replicate_top_view_response(Deserializer &derez);
       void handle_control_replicate_disjoint_complete_request(
                                                            Deserializer &derez);
       void handle_control_replicate_disjoint_complete_response(
@@ -5570,10 +5563,6 @@ namespace Legion {
         case SEND_REPL_FUTURE_MAP_REQUEST:
           break;
         case SEND_REPL_FUTURE_MAP_RESPONSE:
-          break;
-        case SEND_REPL_TOP_VIEW_REQUEST:
-          break;
-        case SEND_REPL_TOP_VIEW_RESPONSE:
           break;
         case SEND_REPL_DISJOINT_COMPLETE_REQUEST:
           break;

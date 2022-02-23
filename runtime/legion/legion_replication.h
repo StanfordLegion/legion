@@ -2732,6 +2732,8 @@ namespace Legion {
         { return (local_shards[0] == task); }
       inline const std::set<AddressSpace>& get_unique_shard_spaces(void) const
         { return unique_shard_spaces; }
+      inline ReplicateContext* find_local_context(void) const
+        { return local_shards[0]->get_shard_execution_context(); }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       void set_address_spaces(const std::vector<AddressSpaceID> &spaces);
@@ -2835,9 +2837,6 @@ namespace Legion {
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
       static void handle_future_map_request(Deserializer &derez, Runtime *rt);
-      static void handle_top_view_request(Deserializer &derez, Runtime *rt,
-                                          AddressSpaceID request_source);
-      static void handle_top_view_response(Deserializer &derez, Runtime *rt);
       static void handle_disjoint_complete_request(Deserializer &derez, 
                                                    Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
@@ -2853,11 +2852,6 @@ namespace Legion {
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:
-      void create_instance_top_view(PhysicalManager *manager, 
-                                    AddressSpaceID source, 
-                                    ReplicateContext *request_context,
-                                    AddressSpaceID request_source,
-                                    bool handle_now = false);
 #ifdef LEGION_USE_LIBDL
       void perform_global_registration_callbacks(
                      Realm::DSOReferenceImplementation *dso, RtEvent local_done,

@@ -190,8 +190,6 @@ namespace Legion {
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
                      get_pointer_constraint(const DomainPoint &key) const = 0;
-      virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner) = 0;
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_physical_manager(void) const;
@@ -248,6 +246,26 @@ namespace Legion {
      * of data; this includes both individual instances and collective instances
      */
     class PhysicalManager : public InstanceManager {
+      struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
+      public:
+        RemoteCreateViewArgs(PhysicalManager *man, InnerContext *ctx, 
+                             AddressSpaceID log, CollectiveMapping *map,
+                             std::atomic<DistributedID> *tar, 
+                             AddressSpaceID src, RtUserEvent done)
+          : LgTaskArgs<RemoteCreateViewArgs>(implicit_provenance),
+            manager(man), context(ctx), logical_owner(log), mapping(map),
+            target(tar), source(src), done_event(done) { }
+      public:
+        PhysicalManager *const manager;
+        InnerContext *const context;
+        const AddressSpaceID logical_owner;
+        CollectiveMapping *const mapping;
+        std::atomic<DistributedID> *const target;
+        const AddressSpaceID source;
+        const RtUserEvent done_event;
+      };
     public:
       enum InstanceKind {
         // Normal Realm allocations
@@ -372,9 +390,11 @@ namespace Legion {
 #endif
     public:
       // Methods for creating/finding/destroying logical top views
-      virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner);
-      void register_active_context(InnerContext *context);
+      InstanceView* find_or_create_instance_top_view(InnerContext *context,
+          AddressSpaceID logical_owner, CollectiveMapping *mapping);
+      InstanceView* construct_top_view(AddressSpaceID logical_owner,
+                                       DistributedID did, UniqueID uid,
+                                       CollectiveMapping *mapping);
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
@@ -391,6 +411,14 @@ namespace Legion {
       void prune_gc_events(void);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
+      static void process_top_view_request(PhysicalManager *manager,
+          InnerContext *context, AddressSpaceID logical_owner,
+          CollectiveMapping *mapping, std::atomic<DistributedID> *target,
+          AddressSpaceID source, RtUserEvent done_event, Runtime *runtime);
+      static void handle_top_view_request(Deserializer &derez, Runtime *runtime,
+                                          AddressSpaceID source);
+      static void handle_top_view_response(Deserializer &derez);
+      static void handle_top_view_creation(const void *args, Runtime *runtime);
     public:
       size_t instance_footprint;
       const ReductionOp *reduction_op;
@@ -403,6 +431,10 @@ namespace Legion {
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
+      typedef std::pair<ReplicationID,UniqueID> ContextKey;
+      typedef std::pair<InstanceView*,unsigned> ViewEntry;
+      std::map<ContextKey,ViewEntry> context_views;
+      std::map<ReplicationID,RtUserEvent> pending_views;
 #ifdef LEGION_GPU_REDUCTIONS
     protected:
       std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>
@@ -950,8 +982,6 @@ namespace Legion {
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
       virtual void send_manager(AddressSpaceID target);
-      virtual InstanceView* create_instance_top_view(InnerContext *context,
-                                            AddressSpaceID logical_owner);
     };
 
     /**

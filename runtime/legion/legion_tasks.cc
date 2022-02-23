@@ -8213,8 +8213,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* ShardTask::create_instance_top_view(PhysicalManager *manager,
-                                                      AddressSpaceID source)
+    ReplicateContext* ShardTask::get_shard_execution_context(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8222,12 +8221,11 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         dynamic_cast<ReplicateContext*>(execution_context);
       assert(repl_ctx != NULL);
+      return repl_ctx;
 #else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
+      return static_cast<ReplicateContext*>(execution_context);
 #endif
-      return repl_ctx->create_replicate_instance_top_view(manager, source);
-    } 
+    }
 
     //--------------------------------------------------------------------------
     void ShardTask::initialize_implicit_task(InnerContext *context, TaskID tid,
