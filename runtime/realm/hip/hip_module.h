@@ -28,6 +28,10 @@ namespace Realm {
     // HIP device memory - extra is a uintptr_t'd pointer to the GPU
     //  object
     static const MemoryType HipDeviceMem = 3;
+
+    // CUDA managed memory - extra is a uintptr_t'd pointer to _one of_
+    //  the GPU objects
+    static const MemoryType HipManagedMem = 4;
   };
   
   namespace Hip {

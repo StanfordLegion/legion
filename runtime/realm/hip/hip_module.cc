@@ -824,7 +824,7 @@ namespace Realm {
             for(size_t offset = 0; offset < fill_data_size; offset += 1) {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
-              CHECK_CU( hipMemset2DAsync((void *)(hipDeviceCharptr_t(dst) + offset),
+              CHECK_CU( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset),
                                          fill_data_size /*pitch*/,
                                          fill_u8,
                                          1 /*width*/, elements /*height*/,
@@ -926,7 +926,7 @@ namespace Realm {
               unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
               for(size_t l = 0; l < lines; l++)
-                CHECK_CU( hipMemset2DAsync((void *)(hipDeviceCharptr_t(dst) + offset + (l * dst_stride)),
+                CHECK_CU( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset + (l * dst_stride)),
                                            fill_data_size /*pitch*/,
                                            fill_u8,
                                            1 /*width*/, elements /*height*/,
@@ -1031,7 +1031,7 @@ namespace Realm {
       	      unsigned char fill_u8;
               memcpy(&fill_u8, srcdata + offset, 1);
       	      for(size_t l = 0; l < height; l++)
-            		CHECK_CU( hipMemset2DAsync((void*)(hipDeviceCharptr_t(dst) + offset + (l * dst_stride)),
+            		CHECK_CU( hipMemset2DAsync((void*)(static_cast<char*>(dst) + offset + (l * dst_stride)),
                                            fill_data_size /*pitch*/,
                                            fill_u8,
                                            1 /*width*/, elements /*height*/,
@@ -2320,7 +2320,7 @@ namespace Realm {
     //
     // class GPUFBMemory
 
-    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, hipDeviceCharptr_t _base, size_t _size)
+    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size)
       : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
       , gpu(_gpu), base(_base)
     {
@@ -2361,12 +2361,18 @@ namespace Realm {
     // class GPUZCMemory
 
     GPUZCMemory::GPUZCMemory(Memory _me,
-			     hipDeviceCharptr_t _gpu_base, void *_cpu_base, size_t _size)
+                             char *_gpu_base, void *_cpu_base, size_t _size,
+                             MemoryKind _kind, Memory::Kind _lowlevel_kind)
       : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
-      // advertise ourselves as a host memory
-      local_segment.assign(NetworkSegmentInfo::HostMem, cpu_base, size);
+      // advertise ourselves as a host or managed memory, as appropriate
+      NetworkSegmentInfo::MemoryType mtype;
+      if(_kind == MemoryImpl::MKIND_MANAGED)
+        mtype = NetworkSegmentInfo::HipManagedMem;
+      else
+        mtype = NetworkSegmentInfo::HostMem;
+      local_segment.assign(mtype, cpu_base, size);
       segment = &local_segment;
     }
 
@@ -2392,7 +2398,7 @@ namespace Realm {
     // class GPUFBIBMemory
 
     GPUFBIBMemory::GPUFBIBMemory(Memory _me, GPU *_gpu,
-                                 hipDeviceCharptr_t _base, size_t _size)
+                                 char *_base, size_t _size)
       : IBMemory(_me, _size, MKIND_GPUFB, Memory::GPU_FB_MEM,
                  reinterpret_cast<void *>(_base), 0)
       , gpu(_gpu)
@@ -2682,7 +2688,7 @@ namespace Realm {
 					    hipMemcpyKind kind)
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
-      hipDeviceCharptr_t var_base = gpu->lookup_variable(dst);
+      char *var_base = gpu->lookup_variable(dst);
       CHECK_CU( hipMemcpyAsync((void *)(var_base + offset),
 			      src, size, kind, current) );
       stream_synchronize(current);
@@ -2694,7 +2700,7 @@ namespace Realm {
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      hipDeviceCharptr_t var_base = gpu->lookup_variable(dst);
+      char *var_base = gpu->lookup_variable(dst);
       CHECK_CU( hipMemcpyAsync((void *)(var_base + offset),
 			                                  src, size, kind, stream) );
       // no synchronization here   
@@ -2705,7 +2711,7 @@ namespace Realm {
 					      hipMemcpyKind kind)
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
-      hipDeviceCharptr_t var_base = gpu->lookup_variable(src);
+      char *var_base = gpu->lookup_variable(src);
       CHECK_CU( hipMemcpyAsync(dst,
 			      (void *)(var_base + offset),
 			      size, kind, current) );
@@ -2718,7 +2724,7 @@ namespace Realm {
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
-      hipDeviceCharptr_t var_base = gpu->lookup_variable(src);
+      char *var_base = gpu->lookup_variable(src);
       CHECK_CU( hipMemcpyAsync(dst,
 			                        (void *)(var_base + offset),
 			                        size, kind, stream) );
@@ -2930,7 +2936,7 @@ namespace Realm {
       }
 
       Memory m = runtime->next_local_memory_id();
-      fbmem = new GPUFBMemory(m, this, (hipDeviceCharptr_t)fbmem_base, size);
+      fbmem = new GPUFBMemory(m, this, static_cast<char*>(fbmem_base), size);
       runtime->add_memory(fbmem);
       
       // FB ibmem is a separate allocation for now (consider merging to make
@@ -3008,7 +3014,7 @@ namespace Realm {
       hipDeviceptr_t ptr;
       size_t size;
       CHECK_CU( hipModuleGetGlobal(&ptr, &size, module, var->device_name) );
-      device_variables[var->host_var] = (hipDeviceCharptr_t)ptr;
+      device_variables[var->host_var] = static_cast<char*>(ptr);
     }
     
     void GPU::register_function(const RegisteredFunction *func)
@@ -3040,9 +3046,9 @@ namespace Realm {
       return finder->second;
     }
 
-    hipDeviceCharptr_t GPU::lookup_variable(const void *var)
+    char* GPU::lookup_variable(const void *var)
     {
-      std::map<const void *, hipDeviceCharptr_t>::iterator finder = device_variables.find(var);
+      std::map<const void *, char *>::iterator finder = device_variables.find(var);
       assert(finder != device_variables.end());
       return finder->second;
     }
@@ -3475,7 +3481,7 @@ namespace Realm {
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size > 0) && !gpus.empty()) {
-	hipDeviceCharptr_t zcmem_gpu_base;
+	char *zcmem_gpu_base;
 	// borrow GPU 0's context for the allocation call
 	{
 	  AutoGPUContext agc(gpus[0]);
@@ -3507,12 +3513,13 @@ namespace Realm {
 
 	Memory m = runtime->next_local_memory_id();
 	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-				cfg_zc_mem_size);
+                          cfg_zc_mem_size,
+                          MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
 	runtime->add_memory(zcmem);
 
 	// add the ZC memory as a pinned memory to all GPUs
 	for(unsigned i = 0; i < gpus.size(); i++) {
-	  hipDeviceCharptr_t gpuptr;
+	  char *gpuptr;
 	  hipError_t ret;
 	  {
 	    AutoGPUContext agc(gpus[i]);
@@ -3528,7 +3535,7 @@ namespace Realm {
 
       // allocate intermediate buffers in ZC memory for DMA engine
       if ((cfg_zc_ib_size > 0) && !gpus.empty()) {
-        hipDeviceCharptr_t zcib_gpu_base;
+        char *zcib_gpu_base;
         {
           AutoGPUContext agc(gpus[0]);
           CHECK_CU( hipHostMalloc(&zcib_cpu_base,
@@ -3548,7 +3555,7 @@ namespace Realm {
         runtime->add_ib_memory(ib_mem);
         // add the ZC memory as a pinned memory to all GPUs
         for (unsigned i = 0; i < gpus.size(); i++) {
-          hipDeviceCharptr_t gpuptr;
+          char *gpuptr;
           hipError_t ret;
           {
             AutoGPUContext agc(gpus[i]);
@@ -3633,7 +3640,7 @@ namespace Realm {
           // now go through each GPU and verify that it got a GPU pointer (it may not match the CPU
           //  pointer, but that's ok because we'll never refer to it directly)
           for(unsigned i = 0; i < gpus.size(); i++) {
-            hipDeviceCharptr_t gpuptr;
+            char *gpuptr;
             hipError_t ret;
             {
               AutoGPUContext agc(gpus[i]);
