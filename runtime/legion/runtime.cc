@@ -7404,6 +7404,16 @@ namespace Legion {
             break;
           }
 #ifdef LEGION_USE_CUDA
+#define CHECK_CUDA(cmd) do { \
+  CUresult ret = (cmd); \
+  if (ret != CUDA_SUCCESS) { \
+    const char *name, *str; \
+    cuGetErrorName(ret, &name); \
+    cuGetErrorString(ret, &str); \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } \
+}
         case Z_COPY_MEM:
         case GPU_FB_MEM:
           {
@@ -7425,12 +7435,13 @@ namespace Legion {
             else
             {
               if (memory.kind() == Memory::GPU_FB_MEM)
-                cuMemFree((CUdeviceptr)ptr);
+                CHECK_CUDA( cuMemFree((CUdeviceptr)ptr) );
               else
-                cuMemFreeHost((void*)ptr);
+                CHECK_CUDA( cuMemFreeHost((void*)ptr) );
             }
             break;
           }
+#undef CHECK_CUDA
 #endif
 #ifdef LEGION_USE_HIP
         case Z_COPY_MEM:
