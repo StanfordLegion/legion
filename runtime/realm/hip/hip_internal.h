@@ -36,7 +36,7 @@
 #define CHECK_CUDART(cmd) do { \
   hipError_t ret = (cmd); \
   if(ret != hipSuccess) { \
-    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, hipGetErrorString(ret)); \
+    fprintf(stderr, "HIP: %s = %d (%s)\n", #cmd, ret, hipGetErrorString(ret)); \
     assert(0); \
     exit(1); \
   } \
@@ -47,7 +47,7 @@
     const char *name, *str; \
     name = hipGetErrorName(ret); \
     str = hipGetErrorString(ret); \
-    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } while(0)
 

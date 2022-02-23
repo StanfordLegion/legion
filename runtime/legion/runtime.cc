@@ -7403,17 +7403,6 @@ namespace Legion {
             free((void*)ptr);
             break;
           }
-#ifdef LEGION_USE_CUDA
-#define CHECK_CUDA(cmd) do { \
-  CUresult ret = (cmd); \
-  if (ret != CUDA_SUCCESS) { \
-    const char *name, *str; \
-    cuGetErrorName(ret, &name); \
-    cuGetErrorString(ret, &str); \
-    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
-    abort(); \
-  } \
-}
         case Z_COPY_MEM:
         case GPU_FB_MEM:
           {
@@ -7434,44 +7423,43 @@ namespace Legion {
             }
             else
             {
+#ifdef LEGION_USE_CUDA
+#define CHECK_CUDA(cmd) do { \
+  CUresult ret = (cmd); \
+  if (ret != CUDA_SUCCESS) { \
+    const char *name, *str; \
+    cuGetErrorName(ret, &name); \
+    cuGetErrorString(ret, &str); \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } \
+}
               if (memory.kind() == Memory::GPU_FB_MEM)
                 CHECK_CUDA( cuMemFree((CUdeviceptr)ptr) );
               else
                 CHECK_CUDA( cuMemFreeHost((void*)ptr) );
-            }
-            break;
-          }
 #undef CHECK_CUDA
 #endif
 #ifdef LEGION_USE_HIP
-        case Z_COPY_MEM:
-        case GPU_FB_MEM:
-          {
-            if (needs_defer)
-            {
-              // Put the allocation back in for when we go to look
-              // for it on the second pass
-              {
-                AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-                assert(allocations.find(ptr) == allocations.end());
-#endif
-                allocations[ptr] = size;
-              }
-              FreeInstanceArgs args(this, ptr);
-              runtime->issue_application_processor_task(args, LG_LOW_PRIORITY,
-                                                        local_gpu, defer);
-            }
-            else
-            {
+#define CHECK_HIP(cmd) do { \
+  CUresult ret = (cmd); \
+  if (ret != hipSuccess) { \
+    const char *name, *str; \
+    hipGetErrorName(ret, &name); \
+    hipGetErrorString(ret, &str); \
+    fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } \
+}
               if (memory.kind() == Memory::GPU_FB_MEM)
-                hipFree((void*)ptr);
+                CHECK_HIP( hipFree((void*)ptr) );
               else
-                hipHostFree((void*)ptr);
+                CHECK_HIP( hipHostFree((void*)ptr) );
+#undef CHECK_HIP
+#endif
             }
             break;
           }
-#endif
         default:
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
               "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
