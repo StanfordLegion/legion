@@ -28,6 +28,10 @@ namespace Realm {
     // HIP device memory - extra is a uintptr_t'd pointer to the GPU
     //  object
     static const MemoryType HipDeviceMem = 3;
+
+    // CUDA managed memory - extra is a uintptr_t'd pointer to _one of_
+    //  the GPU objects
+    static const MemoryType HipManagedMem = 4;
   };
   
   namespace Hip {
@@ -84,6 +88,7 @@ namespace Realm {
       unsigned cfg_skip_gpu_count;
       bool cfg_skip_busy_gpus;
       size_t cfg_min_avail_mem;
+      int cfg_task_context_sync; // 0 = no, 1 = yes, -1 = default (based on hijack)
       int cfg_max_ctxsync_threads;
       bool cfg_multithread_dma;
       size_t cfg_hostreg_limit;
