@@ -121,11 +121,9 @@ def execute_as_script():
         return False, False # no idea what's going on here, just return
     if os.path.basename(args[0]) != 'legion_python':
         return False, False # not in legion_python
-    if len(args) < 2 or args[1].startswith('-'):
-        return True, False # argument is a flag
-    # If it has an extension, we're going to guess that it was
-    # intended to be a script.
-    return True, len(os.path.splitext(args[1])[1]) > 1
+    # At this point, we're in legion_python. We know that legion_python always
+    # uses script mode, so no need for further checks.
+    return True, True
 
 is_legion_python, is_script = execute_as_script()
 
@@ -2537,9 +2535,9 @@ if is_script:
     num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
     c.legion_runtime_disable_scheduler_lock()
 
+    if num_procs > 1 and not legion_top.is_control_replicated():
+        raise RuntimeError("Pygion must be executed with control replication for multi-process runs")
+
     global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
 elif is_legion_python:
-    print('WARNING: Executing Python modules via legion_python has been deprecated.')
-    print('It is now recommended to run the script directly by passing the path')
-    print('to legion_python.')
-    print()
+    raise RuntimeError('Executing Python modules via legion_python is deprecated for Pygion.')
