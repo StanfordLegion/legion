@@ -22175,6 +22175,15 @@ namespace Legion {
   } \
 } while(0)
 
+#define LEGION_CHECK_HIP(cmd) do { \
+  hipError_t ret = (cmd); \
+  if (ret != hipSuccess) { \
+    fprintf(stderr, "HIP: %s = %d (%s)\n", #cmd, ret, hipGetErrorString(ret)); \
+    assert(0); \
+    exit(1); \
+  } \
+} while(0)
+
     namespace Internal {
 
       template<int N>
@@ -22380,19 +22389,23 @@ namespace Legion {
 #endif
 #ifdef LEGION_USE_HIP
 #ifdef __HIP_PLATFORM_HCC__
-            hipMemcpyAsync(device_piece_rects.ptr(bounds.lo),
-                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
-                hipMemcpyHostToDevice, hipGetTaskStream());
-            hipMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
-                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
-                hipMemcpyHostToDevice, hipGetTaskStream());
+            LEGION_CHECK_HIP(
+              hipMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                  &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                  hipMemcpyHostToDevice, hipGetTaskStream()) );
+            LEGION_CHECK_HIP(
+              hipMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                  &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                  hipMemcpyHostToDevice, hipGetTaskStream()) );
 #else
-            cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
-                &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
-                cudaMemcpyHostToDevice, hipGetTaskStream());
-            cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
-                &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
-                cudaMemcpyHostToDevice, hipGetTaskStream());
+            LEGION_CHECK_CUDART(
+              cudaMemcpyAsync(device_piece_rects.ptr(bounds.lo),
+                  &piece_rects.front(), piece_rects.size() * sizeof(Rect<N,T>),
+                  cudaMemcpyHostToDevice, hipGetTaskStream()) );
+            LEGION_CHECK_CUDART(
+              cudaMemcpyAsync(device_scan_volumes.ptr(scan_bounds.lo),
+                  &scan_volumes.front(), scan_volumes.size() * sizeof(size_t),
+                  cudaMemcpyHostToDevice, hipGetTaskStream()) );
 #endif
 #endif
             const size_t blocks = (sum_volume + LEGION_THREADS_PER_BLOCK - 1) / 
@@ -22573,6 +22586,7 @@ namespace Legion {
       CodeDescriptor desc(Internal::gpu_reduction_helper<REDOP>);
       preregister_gpu_reduction_op(redop, desc);
     }
+#undef LEGION_CHECK_HIP
 #undef LEGION_CHECK_CUDART
 #undef LEGION_THREADS_PER_BLOCK
 #undef LEGION_MIN_BLOCKS_PER_SM

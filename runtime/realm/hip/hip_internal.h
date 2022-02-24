@@ -20,9 +20,6 @@
 #include <hip/hip_runtime.h>
 #ifdef __HIP_PLATFORM_NVCC__
 #define hipDeviceScheduleBlockingSync CU_CTX_SCHED_BLOCKING_SYNC 
-typedef char* hipDeviceCharptr_t;
-#else
-typedef char* hipDeviceCharptr_t;
 #endif
 
 #include "realm/realm_config.h"
@@ -39,24 +36,24 @@ typedef char* hipDeviceCharptr_t;
 #define CHECK_CUDART(cmd) do { \
   hipError_t ret = (cmd); \
   if(ret != hipSuccess) { \
-    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, hipGetErrorString(ret)); \
+    fprintf(stderr, "HIP: %s = %d (%s)\n", #cmd, ret, hipGetErrorString(ret)); \
     assert(0); \
     exit(1); \
   } \
 } while(0)
   
-#define REPORT_CU_ERROR(cmd, ret) \
+#define REPORT_HIP_ERROR(cmd, ret) \
   do { \
     const char *name, *str; \
     name = hipGetErrorName(ret); \
     str = hipGetErrorString(ret); \
-    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } while(0)
 
-#define CHECK_CU(cmd) do {                      \
+#define CHECK_HIP(cmd) do {                      \
   hipError_t ret = (cmd); \
-  if(ret != hipSuccess) REPORT_CU_ERROR(#cmd, ret); \
+  if(ret != hipSuccess) REPORT_HIP_ERROR(#cmd, ret); \
 } while(0)
 
 
@@ -499,7 +496,7 @@ namespace Realm {
       void register_function(const RegisteredFunction *func);
 
       hipFunction_t lookup_function(const void *func);
-      hipDeviceCharptr_t lookup_variable(const void *var);
+      char* lookup_variable(const void *var);
 #endif
 
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
@@ -608,7 +605,7 @@ namespace Realm {
 
       //hipCtx_t context;
       int device_id;
-      hipDeviceCharptr_t fbmem_base, fb_ibmem_base;
+      char *fbmem_base, *fb_ibmem_base;
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
@@ -645,7 +642,7 @@ namespace Realm {
 #ifdef REALM_USE_HIP_HIJACK
       std::map<const FatBin *, hipModule_t> device_modules;
       std::map<const void *, hipFunction_t> device_functions;
-      std::map<const void *, hipDeviceCharptr_t> device_variables;
+      std::map<const void *, char *> device_variables;
 #endif
     };
 
@@ -741,7 +738,7 @@ namespace Realm {
 
     class GPUFBMemory : public LocalManagedMemory {
     public:
-      GPUFBMemory(Memory _me, GPU *_gpu, hipDeviceCharptr_t _base, size_t _size);
+      GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size);
 
       virtual ~GPUFBMemory(void);
 
@@ -753,13 +750,15 @@ namespace Realm {
 
     public:
       GPU *gpu;
-      hipDeviceCharptr_t base;
+      char *base;
       NetworkSegment local_segment;
     };
 
     class GPUZCMemory : public LocalManagedMemory {
     public:
-      GPUZCMemory(Memory _me, hipDeviceCharptr_t _gpu_base, void *_cpu_base, size_t _size);
+      GPUZCMemory(Memory _me, char *_gpu_base, 
+                  void *_cpu_base, size_t _size,
+                  MemoryKind _kind, Memory::Kind _lowlevel_kind);
 
       virtual ~GPUZCMemory(void);
 
@@ -770,18 +769,18 @@ namespace Realm {
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
     public:
-      hipDeviceCharptr_t gpu_base;
+      char *gpu_base;
       char *cpu_base;
       NetworkSegment local_segment;
     };
     
     class GPUFBIBMemory : public IBMemory {
     public:
-      GPUFBIBMemory(Memory _me, GPU *_gpu, hipDeviceCharptr_t _base, size_t _size);
+      GPUFBIBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size);
 
     public:
       GPU *gpu;
-      hipDeviceCharptr_t base;
+      char *base;
       NetworkSegment local_segment;
     };
     

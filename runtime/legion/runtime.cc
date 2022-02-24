@@ -11060,16 +11060,27 @@ namespace Legion {
 #undef CHECK_CUDA
 #endif
 #ifdef LEGION_USE_HIP
+#define CHECK_HIP(cmd) do { \
+  CUresult ret = (cmd); \
+  if (ret != hipSuccess) { \
+    const char *name, *str; \
+    hipGetErrorName(ret, &name); \
+    hipGetErrorString(ret, &str); \
+    fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    abort(); \
+  } \
+}
         case Memory::GPU_FB_MEM:
           {
-            hipFree((void*)ptr);
+            CHECK_HIP( hipFree((void*)ptr) );
             break;
           }
         case Memory::Z_COPY_MEM:
           {
-            hipHostFree((void*)ptr);
+            CHECK_HIP( hipHostFree((void*)ptr) );
             break;
           }
+#undef CHECK_HIP
 #endif
         default:
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
