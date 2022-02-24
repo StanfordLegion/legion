@@ -2535,9 +2535,9 @@ if is_script:
     num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
     c.legion_runtime_disable_scheduler_lock()
 
+    if num_procs > 1 and not legion_top.is_control_replicated():
+        raise RuntimeError("Pygion must be executed with control replication for multi-process runs")
+
     global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
 elif is_legion_python:
-    print('WARNING: Executing Python modules via legion_python has been deprecated.')
-    print('It is now recommended to run the script directly by passing the path')
-    print('to legion_python.')
-    print()
+    raise RuntimeError('Executing Python modules via legion_python is deprecated for Pygion.')
