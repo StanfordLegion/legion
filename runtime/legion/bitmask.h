@@ -1391,6 +1391,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -2104,6 +2107,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -2872,6 +2878,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -3567,6 +3576,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -4331,6 +4343,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -5093,6 +5108,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -5957,6 +5975,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -6670,6 +6691,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
