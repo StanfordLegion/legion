@@ -115,17 +115,7 @@ def inside_legion_executable():
 
 input_args = legion_top.input_args
 
-def execute_as_script():
-    args = input_args(True)
-    if len(args) < 1:
-        return False, False # no idea what's going on here, just return
-    if os.path.basename(args[0]) != 'legion_python':
-        return False, False # not in legion_python
-    # At this point, we're in legion_python. We know that legion_python always
-    # uses script mode, so no need for further checks.
-    return True, True
-
-is_legion_python, is_script = execute_as_script()
+is_script = c.legion_runtime_has_context()
 
 # The Legion context is stored in thread-local storage. This assumes
 # that the Python processor maintains the invariant that every task
@@ -2539,5 +2529,3 @@ if is_script:
         raise RuntimeError("Pygion must be executed with control replication for multi-process runs")
 
     global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
-elif is_legion_python:
-    raise RuntimeError('Executing Python modules via legion_python is deprecated for Pygion.')
