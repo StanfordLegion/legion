@@ -1195,7 +1195,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t Operation::count_collective_region_occurrences(unsigned index,
-                                                          LogicalRegion region)
+                                   LogicalRegion region, DistributedID inst_did)
     //--------------------------------------------------------------------------
     {
       // should only be called for inherited types
@@ -3132,12 +3132,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     size_t CollectiveInstanceCreator<OP>::count_collective_region_occurrences(
-                                           unsigned index, LogicalRegion region)
+                   unsigned index, LogicalRegion region, DistributedID inst_did)
     //--------------------------------------------------------------------------
     {
       RtEvent ready_event;
       bool perform_count = false;
-      std::map<LogicalRegion,size_t> perform_counts;
+      RegionInstanceCounts perform_counts;
+      const std::pair<LogicalRegion,DistributedID> key(region, inst_did);
       {
         AutoLock o_lock(this->op_lock);
         typename std::map<unsigned,PendingCounts>::iterator finder =
@@ -3152,17 +3153,17 @@ namespace Legion {
           finder = pending_counts.insert(
             std::pair<unsigned,PendingCounts>(index,
               PendingCounts(total_points, done))).first;
-          finder->second.counts[region] = 1;
+          finder->second.counts[key] = 1;
           ready_event = done;
         }
         else
         {
           ready_event = finder->second.ready_event;
-          std::map<LogicalRegion,size_t>::iterator count_finder =
-            finder->second.counts.find(region);
+          RegionInstanceCounts::iterator count_finder =
+            finder->second.counts.find(key);
           if (count_finder == finder->second.counts.end())
             finder->second.counts.insert(
-                std::pair<LogicalRegion,size_t>(region,1));
+              std::pair<std::pair<LogicalRegion,DistributedID>,size_t>(key,1));
           else
             count_finder->second++;
         }
@@ -3187,8 +3188,8 @@ namespace Legion {
       assert(finder != pending_counts.end());
       assert(finder->second.remaining_points >= 1);
 #endif
-      std::map<LogicalRegion,size_t>::const_iterator count_finder =
-          finder->second.counts.find(region);
+      RegionInstanceCounts::const_iterator count_finder =
+        finder->second.counts.find(key);
 #ifdef DEBUG_LEGION
       assert(count_finder != finder->second.counts.end());
 #endif
@@ -3202,17 +3203,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     void CollectiveInstanceCreator<OP>::count_collective_region_occurrences(
-          unsigned index, std::map<LogicalRegion,size_t> &counts, size_t points)
+                    unsigned index, RegionInstanceCounts &counts, size_t points)
     //--------------------------------------------------------------------------
     {
       RtEvent ready_event;
       bool perform_count = false;
       // Keep track of the original regions that we used for the output
-      std::vector<LogicalRegion> original_regions;
-      original_regions.reserve(counts.size());
-      for (std::map<LogicalRegion,size_t>::const_iterator it =
+      std::vector<std::pair<LogicalRegion,DistributedID> > original_keys;
+      original_keys.reserve(counts.size());
+      for (RegionInstanceCounts::const_iterator it =
             counts.begin(); it != counts.end(); it++)
-        original_regions.push_back(it->first);
+        original_keys.push_back(it->first);
       {
         AutoLock o_lock(this->op_lock);
         typename std::map<unsigned,PendingCounts>::iterator finder =
@@ -3233,16 +3234,16 @@ namespace Legion {
         else
         {
           ready_event = finder->second.ready_event;
-          for (std::map<LogicalRegion,size_t>::iterator it =
+          for (RegionInstanceCounts::iterator it = 
                 counts.begin(); it != counts.end(); /*nothing*/)
           {
-            std::map<LogicalRegion,size_t>::iterator count_finder =
+            RegionInstanceCounts::iterator count_finder =
               finder->second.counts.find(it->first);
             if (count_finder == finder->second.counts.end())
               finder->second.counts.insert(*it);
             else
               count_finder->second += it->second;
-            std::map<LogicalRegion,size_t>::iterator to_delete = it++;
+            RegionInstanceCounts::iterator to_delete = it++;
             counts.erase(to_delete);
           }
         }
@@ -3268,10 +3269,10 @@ namespace Legion {
       assert(finder != pending_counts.end());
       assert(finder->second.remaining_points >= points);
 #endif
-      for (std::vector<LogicalRegion>::const_iterator it =
-            original_regions.begin(); it != original_regions.end(); it++)
+      for (std::vector<std::pair<LogicalRegion,DistributedID> >::const_iterator
+            it = original_keys.begin(); it != original_keys.end(); it++)
       {
-        std::map<LogicalRegion,size_t>::const_iterator count_finder =
+        RegionInstanceCounts::const_iterator count_finder =
           finder->second.counts.find(*it);
 #ifdef DEBUG_LEGION
         assert(count_finder != finder->second.counts.end());
@@ -3287,7 +3288,7 @@ namespace Legion {
     template<typename OP>
     void
      CollectiveInstanceCreator<OP>::return_count_collective_region_occurrences(
-                         unsigned index, std::map<LogicalRegion,size_t> &counts)
+                                   unsigned index, RegionInstanceCounts &counts) 
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(this->op_lock);
@@ -3426,7 +3427,7 @@ namespace Legion {
     template<typename OP>
     void
      CollectiveInstanceCreator<OP>::perform_count_collective_region_occurrences(
-                         unsigned index, std::map<LogicalRegion,size_t> &counts)
+                                   unsigned index, RegionInstanceCounts &counts)
     //--------------------------------------------------------------------------
     {
       // A straight pass-through since we did all the work before
@@ -6600,11 +6601,13 @@ namespace Legion {
           Runtime::create_ap_user_event(&trace_info);
         std::set<RtEvent> local_applied_events;
         copy_complete_events.insert(local_completion);
+        std::vector<PhysicalManager*> src_sources;
         // Do the conversion and check for errors
         src_composite = 
           perform_conversion<SRC_REQ>(idx, src_requirements[idx],
                                       output.src_instances[idx],
-                                      src_targets,
+                                      output.src_source_instances[idx],
+                                      src_sources, src_targets,
                                       IS_REDUCE(dst_requirements[idx]));
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
@@ -6640,12 +6643,7 @@ namespace Legion {
           PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
-          std::vector<PhysicalManager*> src_sources;
           const RegionRequirement &src_req = src_requirements[idx];
-          if (!output.src_source_instances[idx].empty())
-            runtime->forest->physical_convert_sources(this, src_req,
-             output.src_source_instances[idx], src_sources, 
-             !runtime->unsafe_mapper ? &acquired_instances : NULL);
           runtime->forest->physical_perform_updates_and_registration(
                                               src_req, src_versions[idx],
                                               this, idx,
@@ -6680,18 +6678,16 @@ namespace Legion {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_READ_WRITE;
+        std::vector<PhysicalManager*> dst_sources;
         perform_conversion<DST_REQ>(idx, dst_requirements[idx],
-                                    output.dst_instances[idx], dst_targets);
+                                    output.dst_instances[idx], 
+                                    output.dst_source_instances[idx],
+                                    dst_sources, dst_targets);
         // Now do the registration
         const size_t dst_idx = src_requirements.size() + idx;
         // Don't track target views of copy across operations here,
         // as they will do later when the realm copies are recorded.
         PhysicalTraceInfo dst_info(trace_info,dst_idx,false/*update_validity*/);
-        std::vector<PhysicalManager*> dst_sources;
-        if (!output.dst_source_instances[idx].empty())
-          runtime->forest->physical_convert_sources(this, dst_requirements[idx],
-             output.dst_source_instances[idx], dst_sources, 
-             !runtime->unsafe_mapper ? &acquired_instances : NULL);
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                                           dst_requirements[idx],
@@ -6728,20 +6724,17 @@ namespace Legion {
             gather_instances[0] = output.src_indirect_instances[idx];
           else
             gather_instances.clear();
+          std::vector<PhysicalManager*> gather_sources;
           perform_conversion<GATHER_REQ>(idx, src_indirect_requirements[idx],
-                                         gather_instances, gather_targets);
+                                     gather_instances,
+                                     output.src_indirect_source_instances[idx],
+                                     gather_sources, gather_targets);
           // Now do the registration
           const size_t gather_idx = src_requirements.size() + 
             dst_requirements.size() + idx;
           PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
-          std::vector<PhysicalManager*> gather_sources;
-          if (!output.src_indirect_source_instances[idx].empty())
-            runtime->forest->physical_convert_sources(this, 
-                src_indirect_requirements[idx], 
-                output.src_indirect_source_instances[idx], gather_sources, 
-                !runtime->unsafe_mapper ? &acquired_instances : NULL);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                        src_indirect_requirements[idx],
@@ -6771,20 +6764,17 @@ namespace Legion {
             scatter_instances[0] = output.dst_indirect_instances[idx];
           else
             scatter_instances.clear();
+          std::vector<PhysicalManager*> scatter_sources;
           perform_conversion<SCATTER_REQ>(idx, dst_indirect_requirements[idx],
-                                          scatter_instances, scatter_targets);
+                                    scatter_instances,
+                                    output.dst_indirect_source_instances[idx],
+                                    scatter_sources, scatter_targets);
           // Now do the registration
           const size_t scatter_idx = src_requirements.size() + 
             dst_requirements.size() + src_indirect_requirements.size() + idx;
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
           PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
-          std::vector<PhysicalManager*> scatter_sources;
-          if (!output.dst_indirect_source_instances[idx].empty())
-            runtime->forest->physical_convert_sources(this,
-                dst_indirect_requirements[idx], 
-                output.dst_indirect_source_instances[idx], scatter_sources, 
-                !runtime->unsafe_mapper ? &acquired_instances : NULL);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                       dst_indirect_requirements[idx],
@@ -7846,12 +7836,17 @@ namespace Legion {
     template<CopyOp::ReqType REQ_TYPE>
     int CopyOp::perform_conversion(unsigned ridx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
+                                   std::vector<MappingInstance> &input,
+                                   std::vector<PhysicalManager*> &sources,
                                    InstanceSet &targets, bool is_reduce)
     //--------------------------------------------------------------------------
     {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
+      if (!input.empty())
+        runtime->forest->physical_convert_sources(this, req, input, sources,
+            !runtime->unsafe_mapper ? &acquired_instances : NULL);
       int composite_idx = runtime->forest->physical_convert_mapping(this,
                               req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
@@ -7946,7 +7941,7 @@ namespace Legion {
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->unsafe_mapper)
         return composite_idx;
-      size_t region_occurrences = SIZE_MAX;
+      size_t collective_occurrences = SIZE_MAX;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -7981,22 +7976,108 @@ namespace Legion {
                         get_req_type_name<REQ_TYPE>(), ridx,
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-          if (region_occurrences == SIZE_MAX)
-            region_occurrences =
-              count_collective_region_occurrences(ridx, req.region); 
-          if (collective_manager->total_points != region_occurrences)
+          if (collective_occurrences == 0)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper attempted to mix collective and "
+                        "non-collective instances when mapping %s region "
+                        "requirement at index %d for point copy (ID %lld) "
+                        "launched in task %s (ID %lld).",
+                        mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), ridx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+          // Note that this is a collective operation and the only way
+          // that we know that it is safe is because physical_convert_mapping
+          // will sort the lists of the instances for this region requirement
+          // for us whenever the runtime is doing mapper checks so we know
+          // all the points will iterate their instances in the same order
+          const size_t occurrences = count_collective_region_occurrences(ridx,
+                                         req.region, collective_manager->did);
+          if (collective_manager->total_points == occurrences)
+          {
+            if (occurrences != collective_occurrences)
+            {
+              if (collective_occurrences == SIZE_MAX)
+              {
+                // First time
+                collective_occurrences = occurrences;
+                // Since this is the first time, we need to check that
+                // all the source instances are the same.
+                for (std::vector<PhysicalManager*>::const_iterator it =
+                      sources.begin(); it != sources.end(); it++)
+                {
+                  const size_t src_occurrences =
+                    count_collective_region_occurrences(ridx,
+                                      req.region, (*it)->did);
+                  // It's really subtle why this check is correct
+                  // See the comment in finalize_map_task_output to
+                  // see the logic for why it does what we want
+                  if (src_occurrences < occurrences)
+                    REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of "
+                            "'map_copy' on mapper %s. Mapper specified "
+                            "different 'source_instances' for collective "
+                            "instance mapping for %s region requirement %d "
+                            "of point copy (UID %lld) launched in task "
+                            "%s (UID %lld). All mappings to the same "
+                            "collective instance must have identical "
+                            "source instances across all point tasks ",
+                            mapper->get_mapper_name(), 
+                            get_req_type_name<REQ_TYPE>(),
+                            ridx, get_unique_op_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+                }
+              }
+              else
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper selected multiple collective "
+                        "instances with %zd and %zd points when mapping "
+                        "%s region requirement at index %d of point copy "
+                        "(ID %lld) launched in task %s (ID %lld). All "
+                        "collective instances for the same region requirement "
+                        "must have the same number of points.",
+                        mapper->get_mapper_name(), collective_occurrences,
+                        occurrences, get_req_type_name<REQ_TYPE>(), ridx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+            }
+          }
+          else
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper selected a collective instance "
                         "for %s region requirement at index %d of point copy "
                         "(ID %lld) launched in task %s (ID %lld) but the "
                         "collective instance has %zd points which differs "
-                        "from the %zd points that mapped to the same region.", 
+                        "from the %zd points that mapped to the same instance.",
                         mapper->get_mapper_name(), 
                         get_req_type_name<REQ_TYPE>(), ridx,
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id(),
-                        collective_manager->total_points, region_occurrences)
+                        collective_manager->total_points, occurrences)
+        }
+        else 
+        {
+          if (collective_occurrences > 0)
+          {
+            if (collective_occurrences < SIZE_MAX)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper attempted to mix collective and "
+                        "non-collective instances when mapping %s region "
+                        "requirement at index %d for point copy (ID %lld) "
+                        "launched in task %s (ID %lld). All instances for "
+                        "the same region requirement must be all collective "
+                        "or all non-collective.", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), ridx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+            else // Set it to zero to signal we have a non-collective instance
+              collective_occurrences = 0;
+          }
         }
       }
       // Make sure all the destinations are real instances, this has
@@ -9387,10 +9468,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t PointCopyOp::count_collective_region_occurrences(
-                                           unsigned index, LogicalRegion region)
+                   unsigned index, LogicalRegion region, DistributedID inst_did)
     //--------------------------------------------------------------------------
     {
-      return owner->count_collective_region_occurrences(index, region);
+      return owner->count_collective_region_occurrences(index, region,inst_did);
     }
 
     //--------------------------------------------------------------------------
@@ -17958,7 +18039,7 @@ namespace Legion {
         return output.track_valid_region;
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
-      size_t region_occurrences = SIZE_MAX;
+      size_t collective_occurrences = SIZE_MAX;
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
@@ -17989,17 +18070,78 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected a "
-                        "collective instance for region requirement %d but "
+                        "collective instance for the region requirement but "
                         "point partition (ID %lld) launched in task %s "
                         "(ID %lld) is not contained within the point space "
                         "for the collective instace.",
-                        mapper->get_mapper_name(), idx, 
-                        get_unique_op_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-          if (region_occurrences == SIZE_MAX)
-            region_occurrences =
-             count_collective_region_occurrences(0/*index*/,requirement.region);
-          if (collective_manager->total_points != region_occurrences)
+                        mapper->get_mapper_name(), get_unique_op_id(),
+                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
+          if (collective_occurrences == 0)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper attempted to mix "
+                        "collective and non-collective instances when mapping "
+                        "the region requirement for point partition (ID %lld) "
+                        "launched in task %s (ID %lld).",
+                        mapper->get_mapper_name(), get_unique_op_id(),
+                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
+          // Note that this is a collective operation and the only way
+          // that we know that it is safe is because physical_convert_mapping
+          // will sort the lists of the instances for this region requirement
+          // for us whenever the runtime is doing mapper checks so we know
+          // all the points will iterate their instances in the same order
+          const size_t occurrences = count_collective_region_occurrences(
+                    0/*idx*/, requirement.region, collective_manager->did);
+          if (collective_manager->total_points == occurrences)
+          {
+            if (occurrences != collective_occurrences)
+            {
+              if (collective_occurrences == SIZE_MAX)
+              {
+                // First time 
+                collective_occurrences = occurrences;
+                // Since this is the first time, we need to check that
+                // all the source instances are the same.
+                for (std::vector<PhysicalManager*>::const_iterator it =
+                      source_instances.begin(); it !=
+                      source_instances.end(); it++)
+                {
+                  const size_t src_occurrences =
+                    count_collective_region_occurrences(0/*idx*/,
+                                  requirement.region, (*it)->did);
+                  // It's really subtle why this check is correct
+                  // See the comment in finalize_map_task_output to
+                  // see the logic for why it does what we want
+                  if (src_occurrences < occurrences)
+                    REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of "
+                            "'map_partition' on mapper %s. Mapper specified "
+                            "different 'source_instances' for collective "
+                            "instance mapping of the region requirement "
+                            "of point partition (UID %lld) launched in task "
+                            "%s (UID %lld). All mappings to the same "
+                            "collective instance must have identical "
+                            "source instances across all point tasks ",
+                            mapper->get_mapper_name(), get_unique_op_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+                }
+              }
+              else
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper selected "
+                        "multiple collective instances with %zd and %zd points "
+                        "when mapping the region requirement for point copy "
+                        "(ID %lld) launched in task %s (ID %lld). All "
+                        "collective instances for the same region requirement "
+                        "must have the same number of points.",
+                        mapper->get_mapper_name(), collective_occurrences,
+                        occurrences, get_unique_op_id(),
+                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
+            }
+          }
+          else
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected a "
@@ -18007,10 +18149,29 @@ namespace Legion {
                         "point partition (ID %lld) launched in task %s "
                         "(ID %lld) but the collective instance has %zd points "
                         "which differs from the %zd points that mapped to the "
-                        "same region.", mapper->get_mapper_name(),
+                        "same instance.", mapper->get_mapper_name(),
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id(),
-                        collective_manager->total_points, region_occurrences)
+                        collective_manager->total_points, occurrences)
+        }
+        else
+        {
+          if (collective_occurrences > 0)
+          {
+            if (collective_occurrences < SIZE_MAX)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper attempted to "
+                        "mix collective and non-collective instances when "
+                        "mapping the region requirement for point "
+                        "partition (ID %lld) launched in task %s (ID %lld). "
+                        "All instances for the same region requirement must "
+                        "be all collective or all non-collective.",
+                        mapper->get_mapper_name(), get_unique_op_id(),
+                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
+            else // Set it to zero to signal we have a non-collective instance
+              collective_occurrences = 0;
+          }
         }
         // This is a temporary check to guarantee that instances for 
         // dependent partitioning operations are in memories that 
@@ -18622,19 +18783,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t DependentPartitionOp::count_collective_region_occurrences(
-                                           unsigned index, LogicalRegion region)
+                        unsigned index, LogicalRegion region, DistributedID did)
     //--------------------------------------------------------------------------
     {
       if (this->points.empty())
-        return Operation::count_collective_region_occurrences(index, region);
+        return Operation::count_collective_region_occurrences(index,region,did);
       else
         return CollectiveInstanceCreator<Operation>::
-                          count_collective_region_occurrences(index, region);
+                          count_collective_region_occurrences(index,region,did);
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::count_collective_region_occurrences(
-          unsigned index, std::map<LogicalRegion,size_t> &counts, size_t points)
+                    unsigned index, RegionInstanceCounts &counts, size_t points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19051,15 +19212,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t PointDepPartOp::count_collective_region_occurrences(
-                                           unsigned index, LogicalRegion region)
+                   unsigned index, LogicalRegion region, DistributedID inst_did)
     //--------------------------------------------------------------------------
     {
-      return owner->count_collective_region_occurrences(index, region);
+      return owner->count_collective_region_occurrences(index, region,inst_did);
     }
 
     //--------------------------------------------------------------------------
     void PointDepPartOp::count_collective_region_occurrences(unsigned index,
-                          std::map<LogicalRegion,size_t> &counts, size_t points)
+                                    RegionInstanceCounts &counts, size_t points)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20554,10 +20715,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t PointFillOp::count_collective_region_occurrences(
-                                           unsigned index, LogicalRegion region)
+                   unsigned index, LogicalRegion region, DistributedID inst_did)
     //--------------------------------------------------------------------------
     {
-      return owner->count_collective_region_occurrences(index, region);
+      return owner->count_collective_region_occurrences(index, region,inst_did);
     }
 
     //--------------------------------------------------------------------------

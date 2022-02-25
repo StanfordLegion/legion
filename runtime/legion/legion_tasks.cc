@@ -3140,7 +3140,7 @@ namespace Legion {
         // the instances align with the privileges
         if (!virtual_mapped[idx])
         {
-          size_t region_occurrences = SIZE_MAX;
+          size_t collective_occurrences = SIZE_MAX;
           std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
@@ -3167,20 +3167,118 @@ namespace Legion {
                             "the point for task %s (ID %lld).", "map_task",
                             mapper->get_mapper_name(), idx, get_task_name(),
                             get_unique_id())
-              if (region_occurrences == SIZE_MAX)
-                region_occurrences = 
-                  count_collective_region_occurrences(idx, regions[idx].region);
-              if (collective_manager->total_points != region_occurrences)
+              if (collective_occurrences == 0)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_task' "
+                        "on mapper %s. Mapper attempted to mix collective and "
+                        "non-collective instances when mapping region "
+                        "requirement %d for point task %s (ID %lld) "
+                        "launched in task %s (ID %lld).",
+                        mapper->get_mapper_name(), idx, get_task_name(), 
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+              // Note that this is a collective operation and the only way
+              // that we know that it is safe is because physical_convert_mapping
+              // will sort the lists of the instances for this region requirement
+              // for us whenever the runtime is doing mapper checks so we know
+              // all the points will iterate their instances in the same order
+              const size_t occurrences = count_collective_region_occurrences(
+                  idx, regions[idx].region, collective_manager->did);
+              if (collective_manager->total_points == occurrences)
+              {
+                if (occurrences != collective_occurrences)
+                {
+                  if (collective_occurrences == SIZE_MAX)
+                  {
+                    // First time through
+                    collective_occurrences = occurrences;
+                    // Check to see if we have any sources instances that
+                    // we need to check are the same everywhere as well
+                    for (std::vector<PhysicalManager*>::const_iterator it =
+                          source_instances[idx].begin(); it !=
+                          source_instances[idx].end(); it++)
+                    {
+                      const size_t src_occurrences = 
+                        count_collective_region_occurrences(idx,
+                            regions[idx].region, (*it)->did); 
+                      // Checking this condition is tricky and subtle
+                      // We want to see the same order of source instances
+                      // for all the point tasks that map to the same 
+                      // collective instances. This call though might match
+                      // up more collective instances from points that map
+                      // to the same region but with different collective
+                      // instances (e.g. points 0,1,2,3 all map to region R
+                      // with read-only privileges, points 0,1 use collective
+                      // instance A and points 2,3 use collective instance B).
+                      // It's fine for them to have the same sources so we
+                      // might return more occurrences than we recorded for
+                      // the collective instance. You might think that is 
+                      // unsound because a point task might match incorrectly
+                      // with another group of points and mask its error.
+                      // That is true, but if that happens then the other 
+                      // point task mapping to the same collective instance
+                      // will not find enough occurrences and report the error.
+                      if (src_occurrences < occurrences)
+                        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
-                            "'%s' on mapper %s. Mapper selected a collective "
-                            "instance for region requirement at index %d "
-                            "of point task %s (ID %lld) but the collective "
-                            "instance has %zd points which differs from the "
-                            "%zd points that mapped to the same region.",
-                            "map_task", mapper->get_mapper_name(), idx,
-                            get_task_name(), get_unique_id(),
-                            collective_manager->total_points,region_occurrences)
+                            "'map_task' on mapper %s. Mapper specified "
+                            "different 'source_instances' for collective "
+                            "instance mapping for region requirement %d "
+                            "of point task %s (UID %lld) launched in task "
+                            "%s (UID %lld). All mappings to the same "
+                            "collective instance must have identical "
+                            "source instances across all point tasks ",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_op_id(), parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+                    }
+                  }
+                  else
+                    REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_task' "
+                        "on mapper %s. Mapper selected multiple collective "
+                        "instances with %zd and %zd points when mapping "
+                        "region requirement %d of point task %s "
+                        "(ID %lld) launched in task %s (ID %lld). All "
+                        "collective instances for the same region requirement "
+                        "must have the same number of points.",
+                        mapper->get_mapper_name(), collective_occurrences,
+                        occurrences, idx, get_task_name(), get_unique_op_id(),
+                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
+                }
+              }
+              else
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_task' "
+                        "on mapper %s. Mapper selected a collective instance "
+                        "for region requirement %d of point task %s "
+                        "(ID %lld) launched in task %s (ID %lld) but the "
+                        "collective instance has %zd points which differs "
+                        "from the %zd points that mapped to the same instance.",
+                        mapper->get_mapper_name(), idx, get_task_name(),
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        collective_manager->total_points, occurrences)
+            }
+            else 
+            {
+              if (collective_occurrences > 0)
+              {
+                if (collective_occurrences < SIZE_MAX)
+                  REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of "
+                            "'map_task' on mapper %s. Mapper attempted to mix "
+                            "collective and non-collective instances when "
+                            "mapping region requirement %d of point task %s "
+                            "(ID %lld) launched in task %s (ID %lld). All "
+                            "instances for the same region requirement must "
+                            "be all collective or all non-collective.",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_op_id(), parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id())
+                else // Set it to zero to signal we have a non-collective instance
+                  collective_occurrences = 0;
+              }
             }
           }
           if (!regions[idx].is_no_access() &&
@@ -7529,10 +7627,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     size_t PointTask::count_collective_region_occurrences(
-                                           unsigned index, LogicalRegion region)
+                        unsigned index, LogicalRegion region, DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->count_collective_region_occurrences(index, region);
+      return slice_owner->count_collective_region_occurrences(index,region,did);
     }
 
     //--------------------------------------------------------------------------
@@ -9325,7 +9423,7 @@ namespace Legion {
       {
         VersionInfo &version_info = get_version_info(*it);
         InstanceSet &chosen_instances = early_mapped_regions[*it];
-        std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
+        std::map<unsigned,std::vector<MappingInstance> >::iterator 
           finder = output.premapped_instances.find(*it);
         if (finder == output.premapped_instances.end())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -9466,7 +9564,7 @@ namespace Legion {
         // Always defer the users, the point tasks will do that
         // for themselves when they map their regions
         std::vector<PhysicalManager*> sources;
-        std::map<unsigned,std::vector<MappingInstance> >::const_iterator
+        std::map<unsigned,std::vector<MappingInstance> >::iterator
           source_finder = output.premapped_sources.find(*it);
         if (source_finder != output.premapped_sources.end())
           runtime->forest->physical_convert_sources(this, regions[*it],
@@ -12432,7 +12530,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::perform_count_collective_region_occurrences(
-                         unsigned index, std::map<LogicalRegion,size_t> &counts)
+                                   unsigned index, RegionInstanceCounts &counts)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
@@ -12446,10 +12544,11 @@ namespace Legion {
           rez.serialize(SLICE_COLLECTIVE_COUNT_REGIONS);
           rez.serialize(index);
           rez.serialize<size_t>(counts.size());
-          for (std::map<LogicalRegion,size_t>::const_iterator it =
+          for (RegionInstanceCounts::const_iterator it =
                 counts.begin(); it != counts.end(); it++)
           {
-            rez.serialize(it->first);
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
             rez.serialize(it->second);
           }
           rez.serialize<size_t>(points.size());
@@ -12694,12 +12793,13 @@ namespace Legion {
             derez.deserialize(index);
             size_t num_counts;
             derez.deserialize(num_counts);
-            std::map<LogicalRegion,size_t> counts;
+            RegionInstanceCounts counts;
             for (unsigned idx = 0; idx < num_counts; idx++)
             {
-              LogicalRegion region;
-              derez.deserialize(region);
-              derez.deserialize(counts[region]);
+              std::pair<LogicalRegion,DistributedID> key;
+              derez.deserialize(key.first);
+              derez.deserialize(key.second);
+              derez.deserialize(counts[key]);
             }
             size_t points;
             derez.deserialize(points);
@@ -12716,10 +12816,11 @@ namespace Legion {
               rez.serialize<MappingCallKind>(GET_MAPPER_NAME_CALL);
               rez.serialize(index);
               rez.serialize<size_t>(counts.size());
-              for (std::map<LogicalRegion,size_t>::const_iterator it =
+              for (RegionInstanceCounts::const_iterator it =
                     counts.begin(); it != counts.end(); it++)
               {
-                rez.serialize(it->first);
+                rez.serialize(it->first.first);
+                rez.serialize(it->first.second);
                 rez.serialize(it->second);
               }
               rez.serialize(target);
@@ -12829,12 +12930,13 @@ namespace Legion {
             derez.deserialize(index);
             size_t num_counts;
             derez.deserialize(num_counts);
-            std::map<LogicalRegion,size_t> counts;
+            RegionInstanceCounts counts;
             for (unsigned idx = 0; idx < num_counts; idx++)
             {
-              LogicalRegion region;
-              derez.deserialize(region);
-              derez.deserialize(counts[region]);
+              std::pair<LogicalRegion,DistributedID> key;
+              derez.deserialize(key.first);
+              derez.deserialize(key.second);
+              derez.deserialize(counts[key]);
             }
             SliceTask *target;
             derez.deserialize(target);

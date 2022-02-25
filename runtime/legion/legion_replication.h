@@ -913,10 +913,10 @@ namespace Legion {
     class CheckCollectiveMapping : public BroadcastCollective {
     public:
       CheckCollectiveMapping(ReplicateContext *ctx, CollectiveID id);
-      CheckCollectiveMapping(const CheckCollectiveMapping &rhs);
+      CheckCollectiveMapping(const CheckCollectiveMapping&) = delete;
       virtual ~CheckCollectiveMapping(void);
     public:
-      CheckCollectiveMapping& operator=(const CheckCollectiveMapping &rhs);
+      CheckCollectiveMapping& operator=(const CheckCollectiveMapping&) = delete;
     public:
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
@@ -924,6 +924,27 @@ namespace Legion {
       bool verify(const FieldMaskSet<CollectiveManager> &instances);
     protected:
       LegionMap<DistributedID,FieldMask> chosen_instances;
+    };
+
+    /**
+     * \class CheckCollectiveSources
+     * A class for exchanging the names of source instances for confirming
+     * that all shards have listed the same instances for mapping
+     */
+    class CheckCollectiveSources : public BroadcastCollective {
+    public:
+      CheckCollectiveSources(ReplicateContext *ctx, CollectiveID id);
+      CheckCollectiveSources(const CheckCollectiveSources&) = delete;
+      virtual ~CheckCollectiveSources(void);
+    public:
+      CheckCollectiveSources& operator=(const CheckCollectiveSources&) = delete;
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      bool verify(const std::vector<PhysicalManager*> &instances);
+    protected:
+      std::vector<DistributedID> source_instances;
     };
 
     /**
@@ -1346,6 +1367,9 @@ namespace Legion {
     template<typename OP>
     class ReplCollectiveInstanceCreator : public OP,
             public ReplCollectiveInstanceHandler {
+    public:
+      typedef std::map<
+        std::pair<LogicalRegion,DistributedID>,size_t> RegionInstanceCounts;
     private:
       enum ReplCollectiveInstanceMessageKind {
         REPL_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE,
@@ -1405,7 +1429,8 @@ namespace Legion {
                                   MappingCallKind mapper_call,
                                   unsigned total_calls);
       virtual void perform_count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts);
+                                  std::map<std::pair<LogicalRegion,
+                                           DistributedID>,size_t> &counts);
     protected:
       std::atomic<ShardedMapping*> shard_mapping;
     };
@@ -2191,7 +2216,7 @@ namespace Legion {
     protected:
       virtual ShardedMapping* get_collective_instance_sharded_mapping(void);
     protected:
-      CollectiveID collective_check;
+      CollectiveID mapping_check, sources_check;
       IndexSpace shard_space;
       ShardingFunction *shard_fn;
       RtBarrier collective_map_barrier; 
@@ -2400,10 +2425,12 @@ namespace Legion {
       virtual bool is_collective_first_local_shard(void) const 
         { return is_first_local_shard; }
       virtual RtEvent finalize_complete_mapping(RtEvent event);
+      virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
     protected:
+      CollectiveID sources_check;
       RtBarrier collective_map_barrier;
       bool is_first_local_shard;
     };

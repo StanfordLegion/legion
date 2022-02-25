@@ -951,7 +951,8 @@ namespace Legion {
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
     public:
       void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
@@ -1431,7 +1432,8 @@ namespace Legion {
                                   MappingCallKind mapper_call,
                                   unsigned total_calls);
       virtual void perform_count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts);
+                                  std::map<std::pair<LogicalRegion,
+                                           DistributedID>,size_t> &counts);
       static void handle_collective_instance_request(Deserializer &derez,
                                 AddressSpaceID source, Runtime *runtime);
       static void handle_collective_instance_response(Deserializer &derez,

@@ -764,7 +764,7 @@ namespace Legion {
     template<typename OP>
     void ReplCollectiveInstanceCreator<OP>::
               perform_count_collective_region_occurrences(unsigned index,
-                                         std::map<LogicalRegion,size_t> &counts)
+                                                   RegionInstanceCounts &counts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -790,10 +790,11 @@ namespace Legion {
         rez.serialize(index);
         rez.serialize<bool>(true); // request
         rez.serialize<size_t>(counts.size());
-        for (std::map<LogicalRegion,size_t>::const_iterator it =
+        for (RegionInstanceCounts::const_iterator it =
               counts.begin(); it != counts.end(); it++)
         {
-          rez.serialize(it->first);
+          rez.serialize(it->first.first);
+          rez.serialize(it->first.second);
           rez.serialize(it->second);
         }
         rez.serialize(repl_ctx->owner_shard->shard_id);
@@ -1128,12 +1129,13 @@ namespace Legion {
             {
               size_t num_counts;
               derez.deserialize(num_counts);
-              std::map<LogicalRegion,size_t> counts;
+              RegionInstanceCounts counts;
               for (unsigned idx = 0; idx < num_counts; idx++)
               {
-                LogicalRegion region;
-                derez.deserialize(region);
-                derez.deserialize(counts[region]);
+                std::pair<LogicalRegion,DistributedID> key;
+                derez.deserialize(key.first);
+                derez.deserialize(key.second);
+                derez.deserialize(counts[key]);
               }
               ShardID source_shard;
               derez.deserialize(source_shard);
@@ -1149,10 +1151,11 @@ namespace Legion {
               rez.serialize(index);
               rez.serialize<bool>(false); // this is not a request
               rez.serialize<size_t>(counts.size());
-              for (std::map<LogicalRegion,size_t>::const_iterator it =
+              for (RegionInstanceCounts::const_iterator it =
                     counts.begin(); it != counts.end(); it++)
               {
-                rez.serialize(it->first);
+                rez.serialize(it->first.first);
+                rez.serialize(it->first.second);
                 rez.serialize(it->second);
               }
 
@@ -1163,12 +1166,13 @@ namespace Legion {
             {
               size_t num_counts;
               derez.deserialize(num_counts);
-              std::map<LogicalRegion,size_t> counts;
+              RegionInstanceCounts counts;
               for (unsigned idx = 0; idx < num_counts; idx++)
               {
-                LogicalRegion region;
-                derez.deserialize(region);
-                derez.deserialize(counts[region]);
+                std::pair<LogicalRegion,DistributedID> key;
+                derez.deserialize(key.first);
+                derez.deserialize(key.second);
+                derez.deserialize(counts[key]);
               }
               this->return_count_collective_region_occurrences(index, counts);
             }
@@ -7074,7 +7078,10 @@ namespace Legion {
       shard_fn = fn;
       is_first_local_shard = first_local_shard;
       if (!remap_region && !runtime->unsafe_mapper)
-        collective_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);
+      {
+        mapping_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);
+        sources_check = ctx->get_next_collective_index(COLLECTIVE_LOC_104);
+      }
       if (!grants.empty())
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
             "Illegal use of grants with an inline mapping in control "
@@ -7175,7 +7182,7 @@ namespace Legion {
     {
       const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
 #ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
@@ -7234,18 +7241,29 @@ namespace Legion {
                 mapped_instances[idx].get_valid_fields());
           }
           // Then check that all the mappers agreed on the mapping
-          CheckCollectiveMapping exchange(repl_ctx, collective_check);
-          if (!exchange.verify(collective_instances))
+          CheckCollectiveMapping mapping_collective(repl_ctx, mapping_check);
+          if (!mapping_collective.verify(collective_instances))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                   "Invalid mapper output from invocation of 'map_inline' "
                   "by mapper %s. Mapper selected different collective "
-                  "instances on different on shard 0 and shard %d when "
+                  "instances on shard 0 and shard %d when "
                   "mapping an inline mapping in control-replicated "
                   "parent task %s (UID %lld). Each inline mapping in a "
                   "control-replicated parent task must map to the same "
                   "collective instances across all shards.",
                   mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
                   parent_ctx->get_task_name(), parent_ctx->get_unique_id()) 
+          CheckCollectiveSources sources_collective(repl_ctx, sources_check);
+          if (!sources_collective.verify(source_instances))
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected different 'source_instances' "
+                  "on shard 0 and shard %d when mapping an inline mapping in "
+                  "control-replicated parent task %s (UID %lld). Each inline "
+                  "mapping in a control-replicated parent task must provide "
+                  "same 'source_instances' across all shards.",
+                  mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
         // First mapping so set the references now
         region.impl->set_references(mapped_instances);
@@ -7400,7 +7418,8 @@ namespace Legion {
     {
       MapOp::activate();
       activate_collective_instance_creator();
-      collective_check = 0;
+      mapping_check = 0;
+      sources_check = 0;
       shard_space = IndexSpace::NO_SPACE;
       shard_fn = NULL;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
@@ -7746,12 +7765,12 @@ namespace Legion {
         InstanceSet external(1);
         external[0] = external_instance;
         InnerContext *context = find_physical_context(0/*index*/);
+        CollectiveMapping *mapping = &shard_manager->get_collective_mapping();
         std::vector<InstanceView*> external_views;
-        context->convert_target_views(external, external_views);
+        context->convert_target_views(external, external_views, mapping);
 #ifdef DEBUG_LEGION
         assert(external_views.size() == 1);
 #endif
-        CollectiveMapping *mapping = &shard_manager->get_collective_mapping();
         attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                          requirement,
                                                          external_views,
@@ -8354,13 +8373,13 @@ namespace Legion {
           requirement.privilege = LEGION_READ_WRITE;
         }
         InnerContext *context = find_physical_context(0/*index*/);
+        CollectiveMapping *mapping = &shard_manager->get_collective_mapping(); 
         std::vector<InstanceView*> external_views;
-        context->convert_target_views(references, external_views);
+        context->convert_target_views(references, external_views, mapping);
 #ifdef DEBUG_LEGION
         assert(external_views.size() == 1);
 #endif
         InstanceView *ext_view = external_views[0];
-        CollectiveMapping *mapping = &shard_manager->get_collective_mapping(); 
         detach_event = runtime->forest->detach_external(requirement, this,
                                           0/*idx*/, version_info, ext_view, 
                                           trace_info, map_applied_conditions,
@@ -8964,6 +8983,8 @@ namespace Legion {
                                                bool first_local_shard)
     //--------------------------------------------------------------------------
     {
+      if (!runtime->unsafe_mapper)
+        sources_check = context->get_next_collective_index(COLLECTIVE_LOC_105);
       is_first_local_shard = first_local_shard;
     }
 
@@ -8972,6 +8993,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_release();
+      sources_check = 0;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       is_first_local_shard = false;
     }
@@ -9092,6 +9114,37 @@ namespace Legion {
 #else
       return collective_map_barrier;
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplReleaseOp::invoke_mapper(
+                                std::vector<PhysicalManager*> &source_instances)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call
+      ReleaseOp::invoke_mapper(source_instances);
+      // If we're checking the mapping then do that now to make sure
+      // all the shards have the same source instances
+      if (!runtime->unsafe_mapper)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        CheckCollectiveSources sources_collective(repl_ctx, sources_check);
+        if (!sources_collective.verify(source_instances))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Invalid mapper output from the invocation of 'map_release' "
+              "by mapper %s. Mapper selected difference 'source_instances' "
+              "on shard 0 and shard %d when mapping a release operation in "
+              "control-replicated parent task %s (UID %lld). Each release "
+              "mapping in a control-replicated parent task must provide the "
+              "same 'source_instances' across all the shards.",
+              mapper->get_mapper_name(), repl_ctx->owner_shard->shard_id,
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -15509,29 +15562,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CheckCollectiveMapping::CheckCollectiveMapping(
-                                              const CheckCollectiveMapping &rhs)
-      : BroadcastCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     CheckCollectiveMapping::~CheckCollectiveMapping(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CheckCollectiveMapping& CheckCollectiveMapping::operator=(
-                                              const CheckCollectiveMapping &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -15588,6 +15621,69 @@ namespace Legion {
           if (finder->second != it->second)
             return false;
         }
+      }
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Check Collective Sources
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CheckCollectiveSources::CheckCollectiveSources(ReplicateContext *ctx,
+                                                   CollectiveID id)
+      : BroadcastCollective(ctx, id, 0/*origin shard*/)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CheckCollectiveSources::~CheckCollectiveSources(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void CheckCollectiveSources::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(source_instances.size());
+      for (std::vector<DistributedID>::const_iterator it =
+            source_instances.begin(); it != source_instances.end(); it++)
+        rez.serialize(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void CheckCollectiveSources::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_instances;
+      derez.deserialize(num_instances);
+      source_instances.resize(num_instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+        derez.deserialize(source_instances[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CheckCollectiveSources::verify(
+                                 const std::vector<PhysicalManager*> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shard == 0)
+      {
+        source_instances.resize(instances.size());
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+          source_instances[idx] = instances[idx]->did;
+        perform_collective_async();
+      }
+      else
+      {
+        perform_collective_wait();
+        if (instances.size() != source_instances.size())
+          return false;
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+          if (source_instances[idx] != instances[idx]->did)
+            return false;
       }
       return true;
     }

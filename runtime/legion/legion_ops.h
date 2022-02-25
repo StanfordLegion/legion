@@ -511,7 +511,8 @@ namespace Legion {
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
     public:
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
@@ -807,6 +808,9 @@ namespace Legion {
      */
     template<typename OP>
     class CollectiveInstanceCreator : public OP {
+    public:
+      typedef std::map<
+        std::pair<LogicalRegion,DistributedID>,size_t> RegionInstanceCounts;
     protected:
       struct PendingCollective {
       public:
@@ -881,9 +885,10 @@ namespace Legion {
                                   MappingCallKind call, unsigned total_calls,
                                   size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
       virtual void count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts,
+                                  RegionInstanceCounts &counts,
                                   size_t points);
     public:
       // invoked when all the points have been seen
@@ -911,7 +916,7 @@ namespace Legion {
                                   MappingCallKind mapper_call,
                                   unsigned total_calls);
       virtual void perform_count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts);
+                                  RegionInstanceCounts &counts);
     public:
       // Called to return the result of the actions
       void return_create_pending_collective_managers(
@@ -930,7 +935,7 @@ namespace Legion {
       void return_verify_total_collective_instance_calls(
                                   MappingCallKind mapper_call, unsigned count); 
       void return_count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts);
+                                  RegionInstanceCounts &counts);
     private:
       typedef std::pair<MappingCallKind,unsigned> InstanceKey;
       struct PendingPrivilege {
@@ -1001,7 +1006,7 @@ namespace Legion {
         PendingCounts(size_t points, RtUserEvent ready)
           : remaining_points(points), ready_event(ready) { }
       public:
-        std::map<LogicalRegion,size_t> counts;
+        RegionInstanceCounts counts;
         size_t remaining_points;
         RtUserEvent ready_event;
       };
@@ -1574,6 +1579,8 @@ namespace Legion {
       template<ReqType REQ_TYPE>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
+                             std::vector<MappingInstance> &input,
+                             std::vector<PhysicalManager*> &sources,
                              InstanceSet &targets, bool is_reduce = false);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
@@ -1763,7 +1770,8 @@ namespace Legion {
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -2584,12 +2592,12 @@ namespace Legion {
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
       virtual bool is_collective_first_local_shard(void) const { return false; }
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     protected:
       void activate_release(void);
       void deactivate_release(void);
       void check_release_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(std::vector<PhysicalManager*> &source_instances);
       void log_release_requirement(void);
       virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, bool fill);
@@ -3640,10 +3648,10 @@ namespace Legion {
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
       virtual void count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts,
-                                  size_t points);
+                                  RegionInstanceCounts &counts, size_t points);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -3757,10 +3765,10 @@ namespace Legion {
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
       virtual void count_collective_region_occurrences(unsigned index,
-                                  std::map<LogicalRegion,size_t> &counts,
-                                  size_t points);
+                                  RegionInstanceCounts &counts, size_t points);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -3977,7 +3985,8 @@ namespace Legion {
                                   MappingCallKind call,
                                   unsigned total_calls, size_t points = 1);
       virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region);
+                                  unsigned index, LogicalRegion region,
+                                  DistributedID inst_did);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;

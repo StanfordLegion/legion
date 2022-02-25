@@ -704,7 +704,7 @@ namespace Legion {
                                std::map<PhysicalManager*,unsigned> *acquired);
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
-                               const std::vector<MappingInstance> &chosen,
+                               std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
                                std::map<PhysicalManager*,unsigned> *acquired,
@@ -713,7 +713,7 @@ namespace Legion {
                                const bool allow_partial_virtual = false);
       bool physical_convert_postmapping(Operation *op,
                                const RegionRequirement &req,
-                               const std::vector<MappingInstance> &chosen,
+                               std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,

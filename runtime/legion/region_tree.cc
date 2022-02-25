@@ -2045,10 +2045,12 @@ namespace Legion {
 #endif
       // Perform the registration
       std::vector<InstanceView*> target_views;
-      context->convert_target_views(targets, target_views);
+      context->convert_target_views(targets, target_views, 
+                                    analysis->collective_mapping);
       std::vector<InstanceView*> source_views;
       if (!sources.empty())
-        context->convert_source_views(sources, source_views);
+        context->convert_source_views(sources, source_views,
+                                      analysis->collective_mapping);
 #ifdef DEBUG_LEGION
       assert(analysis == NULL);
       // Should be recording or must be read-only
@@ -2432,14 +2434,16 @@ namespace Legion {
       if (known_targets)
       {
         InnerContext *context = op->find_physical_context(index);
-        context->convert_target_views(restricted_instances, target_views);
+        context->convert_target_views(restricted_instances, target_views,
+                                      collective_mapping);
         if (!sources.empty())
-          context->convert_source_views(sources, source_views);
+          context->convert_source_views(sources, source_views,
+                                        collective_mapping);
       }
       else if (!sources.empty())
       {
         InnerContext *context = op->find_physical_context(index);
-        context->convert_source_views(sources, source_views);
+        context->convert_source_views(sources, source_views,collective_mapping);
       }
       // Iterate through the equivalence classes and find all the restrictions
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -3569,7 +3573,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(Operation *op,
                                   const RegionRequirement &req,
-                                  const std::vector<MappingInstance> &chosen,
+                                  std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
                                   std::map<PhysicalManager*,unsigned> *acquired,
@@ -3586,6 +3590,9 @@ namespace Legion {
       const RegionTreeID req_tid = req.parent.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_virtual = false;
+      // If we're doing safe mapping, then sort these in order for determinism
+      if (!runtime->unsafe_mapper)
+        std::sort(chosen.begin(), chosen.end());
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
             it != chosen.end(); it++)
       {
@@ -3664,7 +3671,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool RegionTreeForest::physical_convert_postmapping(Operation *op,
                                   const RegionRequirement &req,
-                                  const std::vector<MappingInstance> &chosen,
+                                  std::vector<MappingInstance> &chosen,
                                   InstanceSet &result,RegionTreeID &bad_tree,
                                   std::map<PhysicalManager*,unsigned> *acquired,
                                   std::vector<PhysicalManager*> &unacquired,
@@ -3681,6 +3688,9 @@ namespace Legion {
       const RegionTreeID reg_tree = req.region.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
+      // If we're doing safe mapping, then sort these in order for determinism
+      if (!runtime->unsafe_mapper)
+        std::sort(chosen.begin(), chosen.end());
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
             it != chosen.end(); it++)
       {
