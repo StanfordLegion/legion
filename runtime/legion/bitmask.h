@@ -101,11 +101,11 @@
       };
 
 #ifdef __SSE2__
-      template<bool READ_ONLY>
+      template<bool READ_ONLY, typename T = uint64_t>
       class SSEView {
       public:
-        inline SSEView(uint64_t *base, unsigned index) 
-          : ptr(base + ((sizeof(__m128d)/sizeof(uint64_t))*index)) { }
+        inline SSEView(T *base, unsigned index) 
+          : ptr(base + ((sizeof(__m128d)/sizeof(T))*index)) { }
       public:
         inline operator __m128i(void) const {
           __m128i result;
@@ -129,13 +129,13 @@
           memcpy(ptr, rhs.ptr, sizeof(__m128d));
         }
       public:
-        uint64_t *const ptr;
+        T *const ptr;
       };
-      template<>
-      class SSEView<true> {
+      template<typename T>
+      class SSEView<true,T> {
       public:
-        inline SSEView(const uint64_t *base, unsigned index) 
-          : ptr(base + ((sizeof(__m128d)/sizeof(uint64_t))*index)) { }
+        inline SSEView(const T *base, unsigned index) 
+          : ptr(base + ((sizeof(__m128d)/sizeof(T))*index)) { }
       public:
         inline operator __m128i(void) const {
           __m128i result;
@@ -148,15 +148,15 @@
           return result;
         };
       public:
-        const uint64_t *const ptr;
+        const T *const ptr;
       };
 #endif
 #ifdef __AVX__
-      template<bool READ_ONLY>
+      template<bool READ_ONLY, typename T = uint64_t>
       class AVXView {
       public:
-        inline AVXView(uint64_t *base, unsigned index) 
-          : ptr(base + ((sizeof(__m256d)/sizeof(uint64_t))*index)) { }
+        inline AVXView(T *base, unsigned index) 
+          : ptr(base + ((sizeof(__m256d)/sizeof(T))*index)) { }
       public:
         inline operator __m256i(void) const {
           __m256i result;
@@ -180,13 +180,13 @@
           memcpy(ptr, rhs.ptr, sizeof(__m256d));
         }
       public:
-        uint64_t *const ptr;
+        T *const ptr;
       };
-      template<>
-      class AVXView<true> {
+      template<typename T>
+      class AVXView<true,T> {
       public:
-        inline AVXView(const uint64_t *base, unsigned index) 
-          : ptr(base + ((sizeof(__m256d)/sizeof(uint64_t))*index)) { }
+        inline AVXView(const T *base, unsigned index) 
+          : ptr(base + ((sizeof(__m256d)/sizeof(T))*index)) { }
       public:
         inline operator __m256i(void) const {
           __m256i result;
@@ -199,15 +199,15 @@
           return result;
         };
       public:
-        const uint64_t *const ptr;
+        const T *const ptr;
       };
 #endif
 #ifdef __ALTIVEC__
-      template<bool READ_ONLY>
+      template<bool READ_ONLY, typename T = uint64_t>
       class PPCView {
       public:
-        inline PPCView(uint64_t *base, unsigned index) 
-          : ptr(base + ((sizeof(__vector double)/sizeof(uint64_t))*index)) { }
+        inline PPCView(T *base, unsigned index) 
+          : ptr(base + ((sizeof(__vector double)/sizeof(T))*index)) { }
       public:
         inline operator __vector unsigned long long(void) const {
           __vector unsigned long long result;
@@ -231,13 +231,13 @@
           memcpy(ptr, rhs.ptr, sizeof(__vector double));
         }
       public:
-        uint64_t *const ptr;
+        T *const ptr;
       };
-      template<>
-      class PPCView<true> {
+      template<typename T>
+      class PPCView<true,T> {
       public:
-        inline PPCView(const uint64_t *base, unsigned index) 
-          : ptr(base + ((sizeof(__vector double)/sizeof(uint64_t))*index)) { }
+        inline PPCView(const T *base, unsigned index) 
+          : ptr(base + ((sizeof(__vector double)/sizeof(T))*index)) { }
       public:
         inline operator __vector unsigned long long(void) const {
           __vector unsigned long long result;
@@ -250,7 +250,7 @@
           return result;
         };
       public:
-        const uint64_t *const ptr;
+        const T *const ptr;
       };
 #endif
 
@@ -258,30 +258,36 @@
       // This is only because C++ is a stupid fucking language
       // and doesn't even follow the same semantics as C's union
       // As a result we explode our compilation time and generate worse code
-      template<int MAX>
+      template<int MAX, typename ELEMENT_TYPE = uint64_t>
       struct BitVector {
       public:
 #ifdef __SSE2__
-        inline SSEView<false> sse_view(unsigned index)
-          { return SSEView<false>(bit_vector, index); }
-        inline SSEView<true> sse_view(unsigned index) const
-          { return SSEView<true>(bit_vector, index); }
+        inline SSEView<false,ELEMENT_TYPE> sse_view(unsigned index)
+          { return SSEView<false,ELEMENT_TYPE>(bit_vector, index); }
+        inline SSEView<true,ELEMENT_TYPE> sse_view(unsigned index) const
+          { return SSEView<true,ELEMENT_TYPE>(bit_vector, index); }
 #endif
 #ifdef __AVX__
-        inline AVXView<false> avx_view(unsigned index)
-          { return AVXView<false>(bit_vector, index); }
-        inline AVXView<true> avx_view(unsigned index) const
-          { return AVXView<true>(bit_vector, index); }
+        inline AVXView<false,ELEMENT_TYPE> avx_view(unsigned index)
+          { return AVXView<false,ELEMENT_TYPE>(bit_vector, index); }
+        inline AVXView<true,ELEMENT_TYPE> avx_view(unsigned index) const
+          { return AVXView<true,ELEMENT_TYPE>(bit_vector, index); }
 #endif
 #ifdef __ALTIVEC__
-        inline PPCView<false> ppc_view(unsigned index)
-          { return PPCView<false>(bit_vector, index); }
-        inline PPCView<true> ppc_view(unsigned index) const
-          { return PPCView<true>(bit_vector, index); }
+        inline PPCView<false,ELEMENT_TYPE> ppc_view(unsigned index)
+          { return PPCView<false,ELEMENT_TYPE>(bit_vector, index); }
+        inline PPCView<true,ELEMENT_TYPE> ppc_view(unsigned index) const
+          { return PPCView<true,ELEMENT_TYPE>(bit_vector, index); }
 #endif
       public:
-        static_assert((MAX % 64) == 0, "Bad bitmask size");
-        uint64_t bit_vector[MAX/64];
+        // Number of bits in the bit vector based element
+        static constexpr unsigned ELEMENT_SIZE = 8 * sizeof(ELEMENT_TYPE);
+        static_assert((MAX % ELEMENT_SIZE) == 0, "Bad bitmask size");
+        ELEMENT_TYPE bit_vector[MAX/ELEMENT_SIZE];
+        // Shift to get the upper bits for indexing assuming a 64-bit base type
+        static constexpr unsigned SHIFT = STATIC_LOG2(ELEMENT_SIZE);
+        // Mask to get the lower bits for indexing assuming a 64-bit base type
+        static constexpr unsigned MASK = ELEMENT_SIZE - 1;
       };
     };
 
@@ -478,7 +484,8 @@
     class alignas(16) SSEBitMask 
       : public BitMaskHelp::Heapify<SSEBitMask<MAX> > {
     public:
-      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
       static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
       static constexpr unsigned SSE_ELMTS = MAX/128;
       static constexpr unsigned MAXSIZE = MAX;
@@ -567,7 +574,8 @@
     class alignas(16) SSETLBitMask
       : public BitMaskHelp::Heapify<SSETLBitMask<MAX> > {
     public:
-      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
       static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
       static constexpr unsigned SSE_ELMTS = MAX/128;
       static constexpr unsigned MAXSIZE = MAX;
@@ -660,7 +668,8 @@
     class alignas(32) AVXBitMask 
       : public BitMaskHelp::Heapify<AVXBitMask<MAX> > {
     public:
-      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
       static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
       static constexpr unsigned AVX_ELMTS = MAX/256;
       static constexpr unsigned MAXSIZE = MAX;
@@ -749,7 +758,8 @@
     class alignas(32) AVXTLBitMask
       : public BitMaskHelp::Heapify<AVXTLBitMask<MAX> > {
     public:
-      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
       static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
       static constexpr unsigned AVX_ELMTS = MAX/256;
       static constexpr unsigned MAXSIZE = MAX;
@@ -843,7 +853,8 @@
     class alignas(16) PPCBitMask
       : public BitMaskHelp::Heapify<PPCBitMask<MAX> > {
     public:
-      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
       static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
       static constexpr unsigned PPC_ELMTS = MAX/128;
       static constexpr unsigned MAXSIZE = MAX;
@@ -932,7 +943,8 @@
     class alignas(16) PPCTLBitMask
       : public BitMaskHelp::Heapify<PPCTLBitMask<MAX> > {
     public:
-      static constexpr unsigned ELEMENT_SIZE = 64;
+      static constexpr unsigned ELEMENT_SIZE =
+        BitMaskHelp::BitVector<MAX>::ELEMENT_SIZE;
       static constexpr unsigned BIT_ELMTS = MAX/ELEMENT_SIZE;
       static constexpr unsigned PPC_ELMTS = MAX/128;
       static constexpr unsigned MAXSIZE = MAX;
@@ -1391,6 +1403,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -2104,6 +2119,9 @@
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -2865,13 +2883,16 @@
     inline int SSEBitMask<MAX>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      unsigned element = bit >> 6; 
-      unsigned offset = bit & 0x3f;
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
       if (bits.bit_vector[element] & (1ULL << offset))
       {
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -3560,13 +3581,16 @@
     inline int SSETLBitMask<MAX>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      unsigned element = bit >> 6; 
-      unsigned offset = bit & 0x3f;
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
       if (bits.bit_vector[element] & (1ULL << offset))
       {
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -4324,13 +4348,16 @@
     inline int AVXBitMask<MAX>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      unsigned element = bit >> 6; 
-      unsigned offset = bit & 0x3f;
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
       if (bits.bit_vector[element] & (1ULL << offset))
       {
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -5086,13 +5113,16 @@
     inline int AVXTLBitMask<MAX>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      unsigned element = bit >> 6; 
-      unsigned offset = bit & 0x3f;
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
       if (bits.bit_vector[element] & (1ULL << offset))
       {
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -5950,13 +5980,16 @@
     inline int PPCBitMask<MAX>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      unsigned element = bit >> 6; 
-      unsigned offset = bit & 0x3f;
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
       if (bits.bit_vector[element] & (1ULL << offset))
       {
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
@@ -6663,13 +6696,16 @@
     inline int PPCTLBitMask<MAX>::find_index(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-      unsigned element = bit >> 6; 
-      unsigned offset = bit & 0x3f;
+      unsigned element = bit >> bits.SHIFT; 
+      unsigned offset = bit & bits.MASK;
       if (bits.bit_vector[element] & (1ULL << offset))
       {
         int index = 0;
         for (unsigned idx = 0; idx < element; idx++)
           index += __builtin_popcountll(bits.bit_vector[idx]);
+        // Handle dumb c++ shift overflow
+        if (offset == 0)
+          return index;
         // Just count the bits up to but not including the actual
         // bit we're looking for since indexes are zero-base
         index += __builtin_popcountll(
