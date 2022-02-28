@@ -3335,7 +3335,7 @@ namespace Realm {
       , cfg_skip_gpu_count(0)
       , cfg_skip_busy_gpus(false)
       , cfg_min_avail_mem(0)
-      , cfg_task_legacy_sync(-1)
+      , cfg_task_legacy_sync(0)
       , cfg_task_context_sync(-1)
       , cfg_max_ctxsync_threads(4)
       , cfg_lmem_resize_to_max(false)
@@ -4562,4 +4562,3 @@ namespace Realm {
 
   }; // namespace Cuda
 }; // namespace Realm
-
