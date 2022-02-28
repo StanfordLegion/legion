@@ -2342,6 +2342,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain RemoteTaskOp::get_slice_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We're mapping a point task if we've made one of these
+      return Domain(index_point, index_point);
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteTaskOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -4918,6 +4926,18 @@ namespace Legion {
         memcpy(this->predicate_false_result, rhs->predicate_false_result,
                this->predicate_false_size);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    Domain MultiTask::get_slice_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(internal_space.exists());
+#endif
+      Domain result;
+      runtime->forest->find_launch_space_domain(internal_space, result);
+      return result; 
     }
 
     //--------------------------------------------------------------------------

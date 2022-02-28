@@ -407,6 +407,7 @@ namespace Legion {
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
+      virtual Domain get_slice_domain(void) const;
       virtual void set_context_index(size_t index);
     public:
       virtual const char* get_logging_name(void) const;
@@ -642,6 +643,7 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_reducing_future(void) const { return (redop > 0); }
+      virtual Domain get_slice_domain(void) const;
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -738,6 +740,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
+      virtual Domain get_slice_domain(void) const { return Domain::NO_DOMAIN; }
     public:
       Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher,
@@ -847,6 +850,8 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
+      virtual Domain get_slice_domain(void) const 
+        { return Domain(index_point,index_point); }
       virtual bool is_reducing_future(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
