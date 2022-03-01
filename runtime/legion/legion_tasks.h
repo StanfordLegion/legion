@@ -973,6 +973,7 @@ namespace Legion {
     public:
       virtual void activate(void); 
       virtual void deactivate(void);
+      virtual Domain get_slice_domain(void) const;
       virtual SingleTask* get_origin_task(void) const 
         { assert(false); return NULL; }
       virtual bool is_shard_task(void) const { return true; }

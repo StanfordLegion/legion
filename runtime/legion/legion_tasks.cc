@@ -7613,6 +7613,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain ShardTask::get_slice_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Shards have already been sliced down to single points
+      return Domain(index_point, index_point);
+    }
+
+    //--------------------------------------------------------------------------
     bool ShardTask::is_top_level_task(void) const
     //--------------------------------------------------------------------------
     {
