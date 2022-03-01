@@ -721,6 +721,10 @@ namespace Legion {
         assert(false);
         return NULL;
       }
+      virtual Domain get_slice_domain(void) const {
+        assert(false);
+        return Domain::NO_DOMAIN;
+      }
     };
 };
 

@@ -3701,9 +3701,14 @@ namespace Legion {
     public:
       Task(void);
     public:
-      // Check whether this task has a parent task
+      // Check whether this task has a parent task.
       virtual bool has_parent_task(void) const = 0;
+      // Return the name of the task.
       virtual const char* get_task_name(void) const = 0;
+      // Returns the current slice of the index domain that this
+      // task is operating over. This method will only return a
+      // valid domain if this is part of an index space task.
+      virtual Domain get_slice_domain(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_TASK_MAPPABLE; }
