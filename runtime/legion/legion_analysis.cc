@@ -936,7 +936,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_fill_views(ApEvent lhs,
                                  IndexSpaceExpression *expr, 
-                                 const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events,
                                  const bool reduction_initialization)
@@ -953,13 +952,6 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
-          rez.serialize<size_t>(tracing_srcs.size());
-          for (FieldMaskSet<FillView>::const_iterator it = 
-                tracing_srcs.begin(); it != tracing_srcs.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
           rez.serialize<size_t>(tracing_dsts.size());
           for (FieldMaskSet<InstanceView>::const_iterator it = 
                 tracing_dsts.begin(); it != tracing_dsts.end(); it++)
@@ -973,7 +965,7 @@ namespace Legion {
         applied_events.insert(done);
       }
       else
-        remote_tpl->record_fill_views(lhs, expr, tracing_srcs, tracing_dsts,
+        remote_tpl->record_fill_views(lhs, expr, tracing_dsts,
                                       applied_events, reduction_initialization);
     }
 
@@ -1709,23 +1701,7 @@ namespace Legion {
             RegionTreeForest *forest = runtime->forest;
             IndexSpaceExpression *expr = 
               IndexSpaceExpression::unpack_expression(derez, forest, source);
-            FieldMaskSet<FillView> tracing_srcs;
             std::set<RtEvent> ready_events;
-            size_t num_srcs;
-            derez.deserialize(num_srcs);
-            for (unsigned idx = 0; idx < num_srcs; idx++)
-            {
-              DistributedID did;
-              derez.deserialize(did);
-              RtEvent ready;
-              FillView *view = static_cast<FillView*>(
-                  runtime->find_or_request_logical_view(did, ready));
-              if (ready.exists() && !ready.has_triggered())
-                ready_events.insert(ready);
-              FieldMask mask;
-              derez.deserialize(mask);
-              tracing_srcs.insert(view, mask);
-            }
             FieldMaskSet<InstanceView> tracing_dsts;
             size_t num_dsts;
             derez.deserialize(num_dsts);
@@ -1751,7 +1727,7 @@ namespace Legion {
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
-            tpl->record_fill_views(lhs, expr, tracing_srcs, tracing_dsts, 
+            tpl->record_fill_views(lhs, expr, tracing_dsts, 
                                    ready_events, reduction_initialization);
             if (!ready_events.empty())
               Runtime::trigger_event(done, Runtime::merge_events(ready_events));
@@ -4640,8 +4616,7 @@ namespace Legion {
         guard_precondition((previous == NULL) ? RtEvent::NO_RT_EVENT :
                             RtEvent(previous->effects_applied)),
 #endif
-        predicate_guard(p), track_events(t), tracing_src_fills(NULL), 
-        tracing_srcs(NULL), tracing_dsts(NULL)
+        predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
       // Need to transitively chain effects across aggregators since they
@@ -4671,8 +4646,7 @@ namespace Legion {
         guard_precondition((previous == NULL) ? alternative_precondition:
                             RtEvent(previous->effects_applied)),
 #endif
-        predicate_guard(p), track_events(t), tracing_src_fills(NULL), 
-        tracing_srcs(NULL), tracing_dsts(NULL)
+        predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4733,13 +4707,6 @@ namespace Legion {
             delete it->first;
         }
       }
-      // Clean up any data structures that we made for tracing
-      if (tracing_src_fills != NULL)
-        delete tracing_src_fills;
-      if (tracing_srcs != NULL)
-        delete tracing_srcs;
-      if (tracing_dsts != NULL)
-        delete tracing_dsts;
     }
 
     //--------------------------------------------------------------------------
@@ -4784,26 +4751,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::CopyUpdate::compute_source_preconditions(
-                     RegionTreeForest *forest, const FieldMask &src_mask,
-                     const std::map<InstanceView*,EventFieldMap> &src_pre,
-                     std::set<ApEvent> &preconditions) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<InstanceView*,EventFieldMap>::const_iterator finder = 
-        src_pre.find(source);
-      if (finder == src_pre.end())
-        return;
-      for (EventFieldMap::const_iterator it =
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        if (src_mask * it->second)
-          continue;
-        preconditions.insert(it->first);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void CopyFillAggregator::CopyUpdate::sort_updates(
                     std::map<InstanceView*, std::vector<CopyUpdate*> > &copies,
                     std::vector<FillUpdate*> &fills)
@@ -4818,16 +4765,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do nothing, we have no source expressions
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyFillAggregator::FillUpdate::compute_source_preconditions(
-                     RegionTreeForest *forest, const FieldMask &src_mask,
-                     const std::map<InstanceView*,EventFieldMap> &src_pre,
-                     std::set<ApEvent> &preconditions) const
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing, we have no source preconditions to worry about
     }
 
     //--------------------------------------------------------------------------
@@ -5572,125 +5509,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::record_preconditions(InstanceView *view, 
-                                     bool reading, EventFieldMap &preconditions)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!preconditions.empty());
-#endif
-      WrapperReferenceMutator mutator(effects);
-      AutoLock p_lock(pre_lock);
-      std::map<InstanceView*,EventFieldMap>::iterator finder = 
-        reading ? src_pre.find(view) : dst_pre.find(view);
-      if (finder != (reading ? src_pre.end() : dst_pre.end()))
-      {
-        for (EventFieldMap::const_iterator it =
-              preconditions.begin(); it != preconditions.end(); it++)
-          finder->second[it->first] |= it->second;
-      }
-      else
-      {
-        EventFieldMap &pre = reading ? src_pre[view] : dst_pre[view];
-        pre.swap(preconditions);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyFillAggregator::record_precondition(InstanceView *view,
-                             bool reading, ApEvent event, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock p_lock(pre_lock);
-      EventFieldMap &pre = reading ? src_pre[view] : dst_pre[view];
-      pre[event] |= mask;
-    }
-
-    //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
-                                       ApEvent precondition,
-                                       const bool has_src_preconditions,
-                                       const bool has_dst_preconditions,
-                                       const bool need_deferral, unsigned pass,
-                                       bool need_pass_preconditions)
+                      ApEvent precondition, const bool manage_dst_events,
+                      std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!sources.empty() || !reductions.empty());
 #endif
-      if (need_deferral || 
-          (guard_precondition.exists() && !guard_precondition.has_triggered()))
+      if (guard_precondition.exists() && !guard_precondition.has_triggered())
       {
-        CopyFillAggregation args(this, trace_info, precondition, 
-                    has_src_preconditions, has_dst_preconditions, 
-                    op->get_unique_op_id(), pass, need_pass_preconditions);
+        CopyFillAggregation args(this, trace_info, precondition,
+            manage_dst_events, op->get_unique_op_id(), dst_events);
         op->runtime->issue_runtime_meta_task(args, 
-                           LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
+            LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return;
       }
 #ifdef DEBUG_LEGION
       assert(!guard_precondition.exists() || 
               guard_precondition.has_triggered());
 #endif
-      if (pass == 0)
-      {
-        // Perform updates from any sources first
-        if (!sources.empty())
-        {
-          const RtEvent deferral_event = 
-            perform_updates(sources, trace_info, precondition, 
-                -1/*redop index*/, has_src_preconditions, 
-                has_dst_preconditions, need_pass_preconditions);
-          if (deferral_event.exists())
-          {
-            CopyFillAggregation args(this, trace_info, precondition, 
-                        has_src_preconditions, has_dst_preconditions,
-                        op->get_unique_op_id(), pass, false/*need pre*/);
-            op->runtime->issue_runtime_meta_task(args, 
-                             LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
-            return;
-          }
-        }
-        // We made it through the first pass
-        pass++;
-        need_pass_preconditions = true;
-      }
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+      std::set<RtEvent> recorded_events;
+#endif
+      // Perform updates from any sources first
+      if (!sources.empty())
+        perform_updates(sources, trace_info, precondition, 
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+            effects,
+#else
+            recorded_events,
+#endif
+            -1/*redop index*/, manage_dst_events, dst_events);
       // Then apply any reductions that we might have
       if (!reductions.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(pass > 0);
-#endif
         // Skip any passes that we might have already done
-        for (unsigned idx = pass-1; idx < reductions.size(); idx++)
-        {
-          const RtEvent deferral_event = 
-            perform_updates(reductions[idx], trace_info, precondition,
-                            idx/*redop index*/, has_src_preconditions, 
-                            has_dst_preconditions, need_pass_preconditions);
-          if (deferral_event.exists())
-          {
-            CopyFillAggregation args(this, trace_info, precondition, 
-                        has_src_preconditions, has_dst_preconditions,
-                        op->get_unique_op_id(), pass, false/*need pre*/);
-            op->runtime->issue_runtime_meta_task(args, 
-                             LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
-            return;
-          }
-          // Made it through this pass
-          pass++;
-          need_pass_preconditions = true;
-        }
+        for (unsigned idx = 0; idx < reductions.size(); idx++)
+          perform_updates(reductions[idx], trace_info, precondition,
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+                          effects,
+#else
+                          recorded_events,
+#endif
+                          idx/*redop index*/, manage_dst_events, dst_events);
       }
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-      Runtime::trigger_event(guard_postcondition);
-#endif
-      // We can also trigger our guard event once the effects are applied
+      if (!recorded_events.empty())
+        Runtime::trigger_event(guard_postcondition,
+            Runtime::merge_events(recorded_events));
+      else
+        Runtime::trigger_event(guard_postcondition);
+      // Make sure the guard postcondition is chained on the deletion
+      if (!effects.empty())
+      {
+        effects.insert(guard_postcondition);
+        Runtime::trigger_event(effects_applied,
+            Runtime::merge_events(effects));
+      }
+      else
+        Runtime::trigger_event(effects_applied, guard_postcondition);
+#else
+      // We can also trigger our effects event once the effects are applied
       if (!effects.empty())
         Runtime::trigger_event(effects_applied,
             Runtime::merge_events(effects));
       else
         Runtime::trigger_event(effects_applied);
+#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -5741,210 +5627,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::find_reduction_preconditions(InstanceView *view,
-        const PhysicalTraceInfo &trace_info, IndexSpaceExpression *copy_expr,
-        const FieldMask &copy_mask, UniqueID op_id, unsigned redop_index,
-        std::set<RtEvent> &preconditions_ready)
-    //--------------------------------------------------------------------------
-    {
-      // Break up the fields in the copy mask based on their
-      // different reduction operators, we'll handle the special
-      // case where they all have the same reduction ID since
-      // it is going to be very common
-      FieldMask first_mask;
-      ReductionOpID first_redop = 0;
-      LegionMap<ReductionOpID,FieldMask> *other_masks = NULL;
-      int fidx = copy_mask.find_first_set();
-      while (fidx >= 0)
-      {
-        const std::pair<InstanceView*,unsigned> key(view, fidx);
-#ifdef DEBUG_LEGION
-        assert(reduction_epochs.find(key) != reduction_epochs.end());
-        assert(redop_index < reduction_epochs[key].size());
-#endif
-        const ReductionOpID op = reduction_epochs[key][redop_index];
-        if (op != first_redop)
-        {
-          if (first_redop != 0)
-          {
-            if (other_masks == NULL)
-              other_masks = new LegionMap<ReductionOpID,FieldMask>();
-            (*other_masks)[op].set_bit(fidx);
-          }
-          else
-          {
-            first_redop = op;
-            first_mask.set_bit(fidx);
-          }
-        }
-        else
-          first_mask.set_bit(fidx);
-        fidx = copy_mask.find_next_set(fidx+1);
-      }
-      RtEvent first_ready = view->find_copy_preconditions(
-          false/*reading*/, first_redop, first_mask, copy_expr, op_id,
-          dst_index, *this, trace_info.recording, local_space);
-      if (first_ready.exists())
-        preconditions_ready.insert(first_ready);
-      if (other_masks != NULL)
-      {
-        for (LegionMap<ReductionOpID,FieldMask>::const_iterator it =
-              other_masks->begin(); it != other_masks->end(); it++)
-        {
-          RtEvent pre_ready = view->find_copy_preconditions(
-              false/*reading*/, it->first, it->second, copy_expr, op_id, 
-              dst_index, *this, trace_info.recording, local_space);
-          if (pre_ready.exists())
-            preconditions_ready.insert(pre_ready);
-        }
-        delete other_masks;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent CopyFillAggregator::perform_updates(
+    void CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> > &updates,
-         const PhysicalTraceInfo &trace_info, const ApEvent all_precondition,
-         int redop_index, const bool has_src_preconditions, 
-         const bool has_dst_preconditions, const bool needs_preconditions)
+         const PhysicalTraceInfo &trace_info, const ApEvent precondition,
+         std::set<RtEvent> &recorded_events,
+         const int redop_index, const bool manage_dst_events,
+         std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
     //--------------------------------------------------------------------------
     {
-      if (needs_preconditions && 
-          (!has_src_preconditions || !has_dst_preconditions))
-      {
-        // First compute the access expressions for all the copies
-        InstanceFieldExprs dst_exprs, src_exprs;
-        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
-              uit = updates.begin(); uit != updates.end(); uit++)
-        {
-          FieldMaskSet<IndexSpaceExpression> &dst_expr = dst_exprs[uit->first];
-          for (FieldMaskSet<Update>::const_iterator it = 
-                uit->second.begin(); it != uit->second.end(); it++)
-          {
-            // Update the destinations first
-            if (!has_dst_preconditions)
-            {
-#ifdef DEBUG_LEGION
-              // We should not have an across helper in this case
-              assert(it->first->across_helper == NULL);
-#endif
-              FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-                dst_expr.find(it->first->expr);
-              if (finder == dst_expr.end())
-                dst_expr.insert(it->first->expr, it->second);
-              else
-                finder.merge(it->second);
-            }
-            // Now record the source expressions
-            if (!has_src_preconditions)
-              it->first->record_source_expressions(src_exprs);
-          }
-        }
-        // Next compute the event preconditions for these accesses
-        std::set<RtEvent> preconditions_ready; 
-        const UniqueID op_id = op->get_unique_op_id();
-        if (!has_dst_preconditions)
-        {
-          dst_pre.clear();
-          for (InstanceFieldExprs::const_iterator dit = 
-                dst_exprs.begin(); dit != dst_exprs.end(); dit++)
-          {
-            if (dit->second.size() == 1)
-            {
-              // No need to do any kind of sorts here
-              IndexSpaceExpression *copy_expr = dit->second.begin()->first;
-              const FieldMask &copy_mask = dit->second.get_valid_mask();
-              // See if we're doing reductions or not
-              if (redop_index < 0)
-              {
-                // No reductions so do the normal precondition test
-                RtEvent pre_ready = dit->first->find_copy_preconditions(
-                    false/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id, 
-                    dst_index, *this, trace_info.recording, local_space);
-                if (pre_ready.exists())
-                  preconditions_ready.insert(pre_ready);
-              }
-              else
-                find_reduction_preconditions(dit->first, trace_info, copy_expr,
-                    copy_mask, op_id, redop_index, preconditions_ready);
-            }
-            else
-            {
-              // Sort into field sets and merge expressions
-              LegionList<FieldSet<IndexSpaceExpression*> > sorted_exprs;
-              dit->second.compute_field_sets(FieldMask(), sorted_exprs);
-              for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
-                    it = sorted_exprs.begin(); it != sorted_exprs.end(); it++)
-              {
-                const FieldMask &copy_mask = it->set_mask; 
-                IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
-                  *(it->elements.begin()) : 
-                  forest->union_index_spaces(it->elements);
-                if (redop_index < 0)
-                {
-                  RtEvent pre_ready = dit->first->find_copy_preconditions(
-                      false/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id,
-                      dst_index, *this, trace_info.recording, local_space);
-                  if (pre_ready.exists())
-                    preconditions_ready.insert(pre_ready);
-                }
-                else
-                  find_reduction_preconditions(dit->first, trace_info,copy_expr,
-                      copy_mask, op_id, redop_index, preconditions_ready);
-              }
-            }
-          }
-        }
-        if (!has_src_preconditions)
-        {
-          src_pre.clear();
-          for (InstanceFieldExprs::const_iterator sit = 
-                src_exprs.begin(); sit != src_exprs.end(); sit++)
-          {
-            if (sit->second.size() == 1)
-            {
-              // No need to do any kind of sorts here
-              IndexSpaceExpression *copy_expr = sit->second.begin()->first;
-              const FieldMask &copy_mask = sit->second.get_valid_mask();
-              RtEvent pre_ready = sit->first->find_copy_preconditions(
-                  true/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id, 
-                  src_index, *this, trace_info.recording, local_space);
-              if (pre_ready.exists())
-                preconditions_ready.insert(pre_ready);
-            }
-            else
-            {
-              // Sort into field sets and merge expressions
-              LegionList<FieldSet<IndexSpaceExpression*> > sorted_exprs;
-              sit->second.compute_field_sets(FieldMask(), sorted_exprs);
-              for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
-                    it = sorted_exprs.begin(); it != sorted_exprs.end(); it++)
-              {
-                const FieldMask &copy_mask = it->set_mask; 
-                IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
-                  *(it->elements.begin()) : 
-                  forest->union_index_spaces(it->elements);
-                RtEvent pre_ready = sit->first->find_copy_preconditions(
-                    true/*reading*/, 0/*redop*/, copy_mask, copy_expr, op_id,
-                    src_index, *this, trace_info.recording, local_space);
-                if (pre_ready.exists())
-                  preconditions_ready.insert(pre_ready);
-              }
-            }
-          }
-        }
-        // If necessary wait until all we have all the preconditions
-        if (!preconditions_ready.empty())
-        {
-          const RtEvent wait_on = Runtime::merge_events(preconditions_ready);
-          if (wait_on.exists())
-            return wait_on;
-        }
-      }
+      std::vector<ApEvent> *target_events = NULL;
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::const_iterator
             uit = updates.begin(); uit != updates.end(); uit++)
       {
-        const EventFieldMap &dst_preconditions = dst_pre[uit->first];
+        ApEvent dst_precondition = precondition;
+        // In the case where we're not managing destination events
+        // then we need to incorporate any event postconditions from
+        // previous passes as part of the preconditions for this pass
+        if (!manage_dst_events)
+        {
+#ifdef DEBUG_LEGION
+          assert(dst_events != NULL);
+#endif
+          // This only happens in the case of across copies
+          std::map<InstanceView*,std::vector<ApEvent> >::iterator finder =
+            dst_events->find(uit->first);
+#ifdef DEBUG_LEGION
+          assert(finder != dst_events->end());
+#endif
+          if (!finder->second.empty())
+          {
+            // Update our precondition to incude the copies from 
+            // any previous passes that we performed
+            finder->second.push_back(precondition);
+            dst_precondition =
+              Runtime::merge_events(&trace_info, finder->second);
+            // Clear this for the next iteration
+            // It's not obvious why this safe, but it is
+            // We are guaranteed to issue at least one fill/copy that
+            // will depend on this and therefore either test that it
+            // has triggered or record itself back in the set of events
+            // which gives us a transitive precondition
+            finder->second.clear();
+          }
+          target_events = &finder->second;
+        }
         // Group by fields first
         LegionList<FieldSet<Update*> > field_groups;
         uit->second.compute_field_sets(FieldMask(), field_groups);
@@ -5953,7 +5679,7 @@ namespace Legion {
         {
           const FieldMask &dst_mask = fit->set_mask;
           // Now that we have the src mask for these operations group 
-          // them into fills and copies and then do their event analysis
+          // them into fills and copies
           std::vector<FillUpdate*> fills;
           std::map<InstanceView* /*src*/,std::vector<CopyUpdate*> > copies;
           for (std::set<Update*>::const_iterator it = fit->elements.begin();
@@ -5961,78 +5687,31 @@ namespace Legion {
             (*it)->sort_updates(copies, fills);
           // Issue the copies and fills
           if (!fills.empty())
-          {
-            std::set<ApEvent> preconditions;
-            if (all_precondition.exists())
-              preconditions.insert(all_precondition);
-            for (EventFieldMap::const_iterator it = 
-                 dst_preconditions.begin(); it != dst_preconditions.end(); it++)
-            {
-              if (dst_mask * it->second)
-                continue;
-              preconditions.insert(it->first);
-            }
-            CopyAcrossHelper *across_helper = fills[0]->across_helper; 
-            const FieldMask src_mask = (across_helper == NULL) ? dst_mask :
-              across_helper->convert_dst_to_src(dst_mask);
-            if (!preconditions.empty())
-            {
-              const ApEvent fill_precondition = 
-                Runtime::merge_events(&trace_info, preconditions);
-              issue_fills(uit->first, fills, fill_precondition, 
-                          src_mask, trace_info, has_dst_preconditions);
-            }
-            else
-              issue_fills(uit->first, fills, ApEvent::NO_AP_EVENT, 
-                          src_mask, trace_info, has_dst_preconditions);
-          }
+            issue_fills(uit->first, fills, recorded_events, dst_precondition,
+                dst_mask, trace_info, manage_dst_events, target_events);
           if (!copies.empty())
-          {
-            std::set<ApEvent> preconditions;
-            if (all_precondition.exists())
-              preconditions.insert(all_precondition);
-            // Destination preconditions first
-            for (EventFieldMap::const_iterator it =
-                 dst_preconditions.begin(); it != dst_preconditions.end(); it++)
-            {
-              if (dst_mask * it->second)
-                continue;
-              preconditions.insert(it->first);
-            }
-            // Be careful that we get the destination fields right in the
-            // case that this is an across copy
-            CopyAcrossHelper *across_helper = 
-              copies.begin()->second[0]->across_helper;
-            const FieldMask src_mask = (across_helper == NULL) ? dst_mask :
-              across_helper->convert_dst_to_src(dst_mask);
-            if (!preconditions.empty())
-            {
-              const ApEvent copy_precondition = 
-                Runtime::merge_events(&trace_info, preconditions);
-              issue_copies(uit->first, copies, copy_precondition, 
-                           src_mask, trace_info, has_dst_preconditions);
-            }
-            else
-              issue_copies(uit->first, copies, ApEvent::NO_AP_EVENT, 
-                           src_mask, trace_info, has_dst_preconditions);
-          }
+            issue_copies(uit->first, copies, recorded_events, dst_precondition,
+                dst_mask, trace_info, manage_dst_events, target_events);
         }
       }
-      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_fills(InstanceView *target,
                                          const std::vector<FillUpdate*> &fills,
-                                         ApEvent precondition, 
+                                         std::set<RtEvent> &recorded_events,
+                                         const ApEvent precondition, 
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
-                                         const bool has_dst_preconditions)
+                                         const bool manage_dst_events,
+                                         std::vector<ApEvent> *dst_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!fills.empty());
       assert(!!fill_mask); 
+      // Should only have across helper on across copies
+      assert((fills[0]->across_helper == NULL) || !manage_dst_events);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
       PhysicalManager *manager = target->get_manager();
@@ -6040,72 +5719,46 @@ namespace Legion {
       {
         FillUpdate *update = fills[0];
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         // Should cover all the fields
-        assert(!(fill_mask - update->src_mask));
+        if (fills[0]->across_helper != NULL)
+        {
+          const FieldMask src_mask =
+            fills[0]->across_helper->convert_dst_to_src(fill_mask);
+          assert(!(src_mask - update->src_mask));
+        }
+        else
+        {
+          assert(!(fill_mask - update->src_mask));
+        }
+#endif
 #endif
         IndexSpaceExpression *fill_expr = update->expr;
         FillView *fill_view = update->source;
-        // Check to see if we need to do any work for tracing
-        if (trace_info.recording)
-        {
-          if (tracing_src_fills == NULL)
-            tracing_src_fills = new FieldMaskSet<FillView>();
-          else
-            tracing_src_fills->clear();
-          // Record the source view
-          tracing_src_fills->insert(fill_view, fill_mask);
-          if (tracing_dsts == NULL)
-            tracing_dsts = new FieldMaskSet<InstanceView>();
-          else
-            tracing_dsts->clear();
-          // Record the destination view, convert field mask if necessary 
-          if (update->across_helper != NULL)
-          {
-            const FieldMask dst_mask = 
-              update->across_helper->convert_src_to_dst(fill_mask);
-            tracing_dsts->insert(target, dst_mask);
-          }
-          else
-            tracing_dsts->insert(target, fill_mask);
-        }
-        const ApEvent result = manager->fill_from(fill_view, precondition,
-                                                  predicate_guard, fill_expr,
+        const ApEvent result = manager->fill_from(fill_view, target, 
+                                                  precondition, predicate_guard,
+                                                  fill_expr, op_id, dst_index,
                                                   fill_mask, trace_info, 
-                                                  tracing_src_fills, 
-                                                  tracing_dsts, effects, 
-                                                  fills[0]->across_helper);
-        // Record the fill result in the destination 
+                                                  recorded_events, effects,
+                                                  fills[0]->across_helper,
+                                                  manage_dst_events);
         if (result.exists())
         {
-          const RtEvent collect_event = trace_info.get_collect_event();
-          if (update->across_helper != NULL)
-          {
-            const FieldMask dst_mask = 
-                update->across_helper->convert_src_to_dst(fill_mask);
-            target->add_copy_user(false/*reading*/, 0, result, collect_event,
-                                  dst_mask, fill_expr, op_id, dst_index,
-                                  effects, trace_info.recording, local_space);
-            // Record this for the next iteration if necessary
-            if (has_dst_preconditions)
-              record_precondition(target, false/*reading*/, result, dst_mask);
-          }
-          else
-          {
-            target->add_copy_user(false/*reading*/, 0, result, collect_event,
-                                  fill_mask, fill_expr, op_id,dst_index,
-                                  effects, trace_info.recording, local_space);
-            // Record this for the next iteration if necessary
-            if (has_dst_preconditions)
-              record_precondition(target, false/*reading*/, result, fill_mask);
-          }
           if (track_events)
             events.insert(result);
+          if (dst_events != NULL)
+            dst_events->push_back(result);
         }
       }
       else
       {
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
+        FieldMask src_mask;
+        if (fills[0]->across_helper != NULL)
+          src_mask = fills[0]->across_helper->convert_dst_to_src(fill_mask);
+        else
+          src_mask = fill_mask;
         // These should all have had the same across helper
         for (unsigned idx = 1; idx < fills.size(); idx++)
           assert(fills[idx]->across_helper == fills[0]->across_helper);
@@ -6117,57 +5770,32 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           // Should cover all the fields
-          assert(!(fill_mask - (*it)->src_mask));
+          assert(!(src_mask - (*it)->src_mask));
           // Should also have the same across helper as the first one
           assert(fills[0]->across_helper == (*it)->across_helper);
 #endif
           exprs[(*it)->source].insert((*it)->expr);
-        }
-        const FieldMask dst_mask = 
-          (fills[0]->across_helper == NULL) ? fill_mask : 
-           fills[0]->across_helper->convert_src_to_dst(fill_mask);
-        // See if we have any work to do for tracing
-        if (trace_info.recording)
-        {
-          // Destination is the same for all the fills
-          if (tracing_dsts == NULL)
-            tracing_dsts = new FieldMaskSet<InstanceView>();
-          else
-            tracing_dsts->clear();
-          tracing_dsts->insert(target, dst_mask);
         }
         for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
               const_iterator it = exprs.begin(); it != exprs.end(); it++)
         {
           IndexSpaceExpression *fill_expr = (it->second.size() == 1) ?
             *(it->second.begin()) : forest->union_index_spaces(it->second);
-          if (trace_info.recording)
-          {
-            if (tracing_src_fills == NULL)
-              tracing_src_fills = new FieldMaskSet<FillView>();
-            else
-              tracing_src_fills->clear();
-            // Record the source view
-            tracing_src_fills->insert(it->first, fill_mask);
-          }
           // See if we have any work to do for tracing
-          const ApEvent result = manager->fill_from(it->first, precondition,
+          const ApEvent result = manager->fill_from(it->first, target,
+                                                    precondition,
                                                     predicate_guard, fill_expr,
+                                                    op_id, dst_index, 
                                                     fill_mask, trace_info,
-                                                    tracing_src_fills,
-                                                    tracing_dsts, effects,
-                                                    fills[0]->across_helper);
-          const RtEvent collect_event = trace_info.get_collect_event();
+                                                    recorded_events, effects, 
+                                                    fills[0]->across_helper,
+                                                    manage_dst_events);
           if (result.exists())
           {
-            target->add_copy_user(false/*reading*/, 0, result, collect_event,
-                                  dst_mask, fill_expr, op_id, dst_index,
-                                  effects, trace_info.recording, local_space);
             if (track_events)
               events.insert(result);
-            // Record this for the next iteration if necessary
-            if (has_dst_preconditions)
-              record_precondition(target, false/*reading*/, result, dst_mask);
+            if (dst_events != NULL)
+              dst_events->push_back(result);
           }
         }
       }
@@ -6176,14 +5804,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_copies(InstanceView *target, 
                const std::map<InstanceView*,std::vector<CopyUpdate*> > &copies,
-               const ApEvent dst_precondition, const FieldMask &copy_mask,
+               std::set<RtEvent> &recorded_events,
+               const ApEvent precondition, const FieldMask &copy_mask,
                const PhysicalTraceInfo &trace_info,
-               const bool has_dst_preconditions)
+               const bool manage_dst_events, std::vector<ApEvent> *dst_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!copies.empty());
       assert(!!copy_mask);
+      assert((src_index == dst_index) || !manage_dst_events);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
       PhysicalManager *target_manager = target->get_manager();
@@ -6192,169 +5822,94 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(!cit->second.empty());
+        // Should only have across helpers for across copies
+        assert((cit->second[0]->across_helper == NULL) || !manage_dst_events);
 #endif
         if (cit->second.size() == 1)
         {
           // Easy case of a single update copy
           CopyUpdate *update = cit->second[0];
 #ifdef DEBUG_LEGION
-          // Should cover all the fields
-          assert(!(copy_mask - update->src_mask));
+#ifndef NDEBUG
+          if (cit->second[0]->across_helper != NULL)
+          {
+            const FieldMask src_mask =
+              cit->second[0]->across_helper->convert_dst_to_src(copy_mask);
+            assert(!(src_mask - update->src_mask));
+          }
+          else
+          {
+            // Should cover all the fields
+            assert(!(copy_mask - update->src_mask));
+          }
+#endif
 #endif
           InstanceView *source = update->source;
           IndexSpaceExpression *copy_expr = update->expr;
-          // See if we have any work to do for tracing
-          if (trace_info.recording)
-          {
-            if (tracing_srcs == NULL)
-              tracing_srcs = new FieldMaskSet<InstanceView>();
-            else
-              tracing_srcs->clear();
-            tracing_srcs->insert(source, copy_mask);
-            if (tracing_dsts == NULL)
-              tracing_dsts = new FieldMaskSet<InstanceView>();
-            else
-              tracing_dsts->clear();
-            // Handle the across case properly here
-            if (update->across_helper != NULL)
-            {
-              const FieldMask dst_mask = 
-                update->across_helper->convert_src_to_dst(copy_mask);
-              tracing_dsts->insert(target, dst_mask);
-            }
-            else
-              tracing_dsts->insert(target, copy_mask);
-          }
-          // Incorporate the source preconditions
-          std::set<ApEvent> preconditions;
-          update->compute_source_preconditions(forest, copy_mask,
-                                               src_pre, preconditions);
-          ApEvent copy_precondition;
-          if (!preconditions.empty())
-          {
-            if (dst_precondition.exists())
-              preconditions.insert(dst_precondition);
-            copy_precondition = 
-              Runtime::merge_events(&trace_info, preconditions);
-          }
-          else
-            copy_precondition = dst_precondition;
-          const ApEvent result = target_manager->copy_from(
-                                    source->get_manager(), copy_precondition,
-                                    predicate_guard, update->redop,
-                                    copy_expr, copy_mask, trace_info,
-                                    tracing_srcs, tracing_dsts,
-                                    effects, cit->second[0]->across_helper);
+          const ApEvent result = target_manager->copy_from(source, target,
+                                    source->get_manager(), precondition,
+                                    predicate_guard, update->redop, copy_expr,
+                                    op_id, manage_dst_events ? dst_index
+                                      : src_index, copy_mask, trace_info,
+                                    recorded_events, effects,
+                                    cit->second[0]->across_helper,
+                                    manage_dst_events);
           if (result.exists())
           {
-            const RtEvent collect_event = trace_info.get_collect_event();
-            source->add_copy_user(true/*reading*/, 0, result, collect_event,
-                                  copy_mask, copy_expr, op_id,src_index,
-                                  effects, trace_info.recording, local_space);
-            if (update->across_helper != NULL)
-            {
-              const FieldMask dst_mask = 
-                update->across_helper->convert_src_to_dst(copy_mask);
-              target->add_copy_user(false/*reading*/, update->redop, result, 
-                        collect_event, dst_mask, copy_expr, op_id, dst_index,
-                        effects, trace_info.recording, local_space);
-              // Record this for the next iteration if necessary
-              if (has_dst_preconditions)
-                record_precondition(target, false/*reading*/, result, dst_mask);
-            }
-            else
-            {
-              target->add_copy_user(false/*reading*/, update->redop, result, 
-                  collect_event, copy_mask, copy_expr, op_id,dst_index,
-                  effects, trace_info.recording, local_space);
-              // Record this for the next iteration if necessary
-              if (has_dst_preconditions)
-                record_precondition(target, false/*reading*/, result,copy_mask);
-            }
             if (track_events)
               events.insert(result);
+            if (dst_events != NULL)
+              dst_events->push_back(result);
           }
         }
         else
         {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          FieldMask src_mask;
+          if (cit->second[0]->across_helper != NULL)
+            src_mask = 
+              cit->second[0]->across_helper->convert_dst_to_src(copy_mask);
+          else
+            src_mask = copy_mask;
+#endif
+#endif
           // Have to group by source instances in order to merge together
           // different index space expressions for the same copy
-          std::map<InstanceView*,FusedCopy> fused_copies;
+          std::map<InstanceView*,std::set<IndexSpaceExpression*> > fused_exprs;
           const ReductionOpID redop = cit->second[0]->redop;
           for (std::vector<CopyUpdate*>::const_iterator it = 
                 cit->second.begin(); it != cit->second.end(); it++)
           {
 #ifdef DEBUG_LEGION
             // Should cover all the fields
-            assert(!(copy_mask - (*it)->src_mask));
+            assert(!(src_mask - (*it)->src_mask));
             // Should have the same redop
             assert(redop == (*it)->redop);
             // Should also have the same across helper as the first one
             assert(cit->second[0]->across_helper == (*it)->across_helper);
 #endif
-            FusedCopy &fused = fused_copies[(*it)->source];
-            fused.expressions.insert((*it)->expr);
-            (*it)->compute_source_preconditions(forest, copy_mask,
-                                    src_pre, fused.preconditions);
+            fused_exprs[(*it)->source].insert((*it)->expr);
           }
-          const FieldMask dst_mask = 
-            (cit->second[0]->across_helper == NULL) ? copy_mask : 
-             cit->second[0]->across_helper->convert_src_to_dst(copy_mask);
-          // If we're tracing we can get the destination now
-          if (trace_info.recording)
+          for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
+               iterator it = fused_exprs.begin(); it != fused_exprs.end(); it++)
           {
-            if (tracing_dsts == NULL)
-              tracing_dsts = new FieldMaskSet<InstanceView>();
-            else
-              tracing_dsts->clear();
-            tracing_dsts->insert(target, dst_mask);
-          }
-          for (std::map<InstanceView*,FusedCopy>::iterator it =
-                fused_copies.begin(); it != fused_copies.end(); it++)
-          {
-            IndexSpaceExpression *copy_expr =
-              (it->second.expressions.size() == 1) ?
-                *(it->second.expressions.begin()) :
-                forest->union_index_spaces(it->second.expressions);
-            // If we're tracing then get the source information
-            if (trace_info.recording)
-            {
-              if (tracing_srcs == NULL)
-                tracing_srcs = new FieldMaskSet<InstanceView>();
-              else
-                tracing_srcs->clear();
-              tracing_srcs->insert(it->first, copy_mask);
-            }
-            ApEvent copy_precondition;
-            if (!it->second.preconditions.empty())
-            {
-              if (dst_precondition.exists())
-                it->second.preconditions.insert(dst_precondition);
-              copy_precondition =
-                Runtime::merge_events(&trace_info, it->second.preconditions);
-            }
-            else
-              copy_precondition = dst_precondition;
-            const ApEvent result = target_manager->copy_from(
-                                    it->first->get_manager(), copy_precondition,
-                                    predicate_guard, redop, copy_expr,
-                                    copy_mask, trace_info, 
-                                    tracing_srcs, tracing_dsts,
-                                    effects, cit->second[0]->across_helper);
-            const RtEvent collect_event = trace_info.get_collect_event();
+            IndexSpaceExpression *copy_expr = (it->second.size() == 1) ?
+                *(it->second.begin()) : forest->union_index_spaces(it->second);
+            const ApEvent result = target_manager->copy_from(it->first, target,
+                                    it->first->get_manager(), precondition,
+                                    predicate_guard, redop, copy_expr, op_id,
+                                    manage_dst_events ? dst_index : 
+                                      src_index, copy_mask, trace_info,
+                                    recorded_events, effects,
+                                    cit->second[0]->across_helper,
+                                    manage_dst_events);
             if (result.exists())
             {
-              it->first->add_copy_user(true/*reading*/, 0, result,collect_event,
-                                  copy_mask, copy_expr, op_id,src_index,
-                                  effects, trace_info.recording, local_space);
-              target->add_copy_user(false/*reading*/,redop,result,collect_event,
-                                  dst_mask, copy_expr, op_id, dst_index,
-                                  effects, trace_info.recording, local_space);
               if (track_events)
                 events.insert(result);
-              // Record this for the next iteration if necessary
-              if (has_dst_preconditions)
-                record_precondition(target, false/*reading*/, result, dst_mask);
+              if (dst_events != NULL)
+                dst_events->push_back(result);
             }
           }
         }
@@ -6367,9 +5922,10 @@ namespace Legion {
     {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
       cfargs->aggregator->issue_updates(*cfargs, cfargs->pre,
-          cfargs->has_src, cfargs->has_dst, false/*needs deferral*/, 
-          cfargs->pass, cfargs->need_pass_preconditions);
+          cfargs->manage_dst_events);
       cfargs->remove_recorder_reference();
+      if (cfargs->dst_events != NULL)
+        delete cfargs->dst_events;
     } 
 
     /////////////////////////////////////////////////////////////
@@ -7867,16 +7423,13 @@ namespace Legion {
       }
       if (!input_aggregators.empty())
       {
-        const bool needs_deferral = !already_deferred || 
-          (input_aggregators.size() > 1);
 #ifndef NON_AGGRESSIVE_AGGREGATORS
         const bool is_local = (original_source == runtime->address_space);
 #endif
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
-          it->second->issue_updates(trace_info, precondition,
-              false/*has src*/, false/*has dst*/, needs_deferral);
+          it->second->issue_updates(trace_info, precondition);
 #ifdef NON_AGGRESSIVE_AGGREGATORS
           if (!it->second->effects_applied.has_triggered())
             guard_events.insert(it->second->effects_applied);
@@ -8957,64 +8510,23 @@ namespace Legion {
         else
           Runtime::trigger_event(aggregator_guard);
         // Record the event field preconditions for each view
-        // Use the destination expr since we know we we're only actually
-        // issuing copies for that particular expression
-        if (local_exprs.size() > 1)
+        std::map<InstanceView*,std::vector<ApEvent> > dst_events;
+        for (unsigned idx = 0; idx < target_instances.size(); idx++)
         {
-          LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
-          local_exprs.compute_field_sets(FieldMask(), field_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator
-                it = field_sets.begin(); it != field_sets.end(); it++)
-          {
-            IndexSpaceExpression *expr = (it->elements.size() == 1) ? 
-              *(it->elements.begin()) :
-              runtime->forest->union_index_spaces(it->elements);
-            if (expr->is_empty())
-              continue;
-            for (unsigned idx = 0; idx < target_instances.size(); idx++)
-            {
-              const InstanceRef &ref = target_instances[idx];
-              const ApEvent event = ref.get_ready_event();
-              if (!event.exists())
-                continue;
-              const FieldMask &mask = ref.get_valid_fields();
-              // Convert these to destination fields if necessary
-              const FieldMask overlap = mask & (perfect ? it->set_mask :
-                  across_helpers[idx]->convert_src_to_dst(it->set_mask));
-              if (!overlap)
-                continue;
-              InstanceView *view = target_views[idx];
-              across_aggregator->record_precondition(view, false/*reading*/,
-                                                     event, overlap);
-            }
-          }
+          const InstanceRef &ref = target_instances[idx];
+          InstanceView *view = target_views[idx];
+          // Always instantiate the entry in the map
+          std::vector<ApEvent> &events = dst_events[view];
+          const ApEvent event = ref.get_ready_event();
+          if (!event.exists())
+            continue;
+          events.push_back(event);
         }
-        else
-        {
-          FieldMaskSet<IndexSpaceExpression>::const_iterator first = 
-            local_exprs.begin();
-          if (!first->first->is_empty())
-          {
-            for (unsigned idx = 0; idx < target_instances.size(); idx++)
-            {
-              const InstanceRef &ref = target_instances[idx];
-              const ApEvent event = ref.get_ready_event();
-              if (!event.exists())
-                continue;
-              const FieldMask &mask = ref.get_valid_fields();
-              // Convert these to destination fields if necessary
-              const FieldMask overlap = mask & (perfect ? first->second : 
-                  across_helpers[idx]->convert_src_to_dst(first->second));
-              if (!overlap)
-                continue;
-              InstanceView *view = target_views[idx];
-              across_aggregator->record_precondition(view, false/*reading*/,
-                                                     event, overlap);
-            }
-          }
-        }
-        across_aggregator->issue_updates(trace_info, precondition,
-            false/*has src preconditions*/, true/*has dst preconditions*/);
+        // This is a copy-across aggregator so the destination events
+        // are being handled by the copy operation that mapped the
+        // target instance for us
+        across_aggregator->issue_updates(trace_info, precondition, 
+                          false/*manage dst events*/, &dst_events);
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (!across_aggregator->effects_applied.has_triggered())
           return across_aggregator->effects_applied;

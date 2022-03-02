@@ -992,7 +992,6 @@ namespace Legion {
                                   bool update_validity,
                                   std::set<RtEvent> &applied);
       virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr, 
-                           const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization);

@@ -176,6 +176,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain ShimMapper::Task::get_slice_domain(void) const
+    //--------------------------------------------------------------------------
+    {
+      // This method didn't exist back then anyway
+      assert(false);
+      return Domain::NO_DOMAIN;
+    }
+
+    //--------------------------------------------------------------------------
     bool ShimMapper::Task::has_trace(void) const
     //--------------------------------------------------------------------------
     {

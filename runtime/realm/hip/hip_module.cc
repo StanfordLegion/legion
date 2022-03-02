@@ -2894,9 +2894,11 @@ namespace Realm {
 	  continue;
 
       	// enable peer access (this part is different from CUDA since runtime API has no CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED)
-      	{
-          printf("id %d\n", (*it)->device_id);
+        //  (don't try if it's the same physical device underneath)
+      	if(info != (*it)->info) {
       	  AutoGPUContext agc(this);
+
+          printf("id %d\n", (*it)->device_id);
           CHECK_HIP( hipDeviceEnablePeerAccess((*it)->device_id, 0) );
       	}
       	log_gpu.info() << "peer access enabled from GPU " << p << " to FB " << (*it)->fbmem->me;
@@ -3212,6 +3214,7 @@ namespace Realm {
           .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
       	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
       	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
+          .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
           .add_option_int("-ll:streams", m->cfg_task_streams)
           .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
           .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
@@ -3372,7 +3375,10 @@ namespace Realm {
             			       << " to device " << (*it2)->index;
             		(*it1)->peers.insert((*it2)->device);
       	      }
-      	    }
+      	    } else {
+              // two contexts on the same device can always "peer to peer"
+              (*it1)->peers.insert((*it2)->device);
+            }
       }
 
       // give the gpu info we assembled to the module
@@ -3398,6 +3404,45 @@ namespace Realm {
           shared_worker->add_to_manager(&(runtime->bgwork));
       }
 
+      // decode specific device id list if given
+      std::vector<unsigned> fixed_indices;
+      if(!cfg_gpu_idxs.empty()) {
+        const char *p = cfg_gpu_idxs.c_str();
+        while(true) {
+          if(!isdigit(*p)) {
+            log_gpu.fatal() << "invalid number in hip device list: '" << p << "'";
+            abort();
+          }
+          unsigned v = 0;
+          do {
+            v = (v * 10) + (*p++ - '0');
+          } while(isdigit(*p));
+          if(v >= gpu_info.size()) {
+            log_gpu.fatal() << "requested hip device id out of range: " << v << " >= " << gpu_info.size();
+            abort();
+          }
+          fixed_indices.push_back(v);
+          if(!*p) break;
+          if(*p == ',') {
+            p++;  // skip comma and parse another integer
+          } else {
+            log_gpu.fatal() << "invalid separator in hip device list: '" << p << "'";
+            abort();
+          }
+        }
+        // if num_gpus was specified, they should match
+        if(cfg_num_gpus > 0) {
+          if(cfg_num_gpus != fixed_indices.size()) {
+            log_gpu.fatal() << "mismatch between '-ll:gpu' and '-ll:gpu_ids'";
+            abort();
+          }
+        } else
+          cfg_num_gpus = fixed_indices.size();
+        // also disable skip count and skip busy options
+        cfg_skip_gpu_count = 0;
+        cfg_skip_busy_gpus = false;
+      }
+
       // just use the GPUs in order right now
       gpus.resize(cfg_num_gpus);
       unsigned gpu_count = 0;
@@ -3405,6 +3450,8 @@ namespace Realm {
       for(size_t i = cfg_skip_gpu_count;
           (i < gpu_info.size()) && (gpu_count < cfg_num_gpus);
           i++) {
+        int idx = (fixed_indices.empty() ? i : fixed_indices[i]);
+
         // try to create a context and possibly check available memory - in order
       	//  to be compatible with an application's use of the cuda runtime, we
       	//  need this to be the device's "primary context"
@@ -3420,17 +3467,17 @@ namespace Realm {
         // hipCtx_t context;
         //         hipError_t res = hipDevicePrimaryCtxRetain(&context,
         //                                                    gpu_info[i]->device);
-        hipError_t res = hipSetDevice(gpu_info[i]->device);
+        hipError_t res = hipSetDevice(gpu_info[idx]->device);
         CHECK_HIP( hipSetDeviceFlags(hipDeviceMapHost | hipDeviceScheduleBlockingSync) );  
-        printf("set device %d\n", gpu_info[i]->device);	    	
+        printf("set device %d\n", gpu_info[idx]->device);	    	
         // a busy GPU might return INVALID_DEVICE or OUT_OF_MEMORY here
       	if((res == hipErrorInvalidDevice) ||
       	   (res == hipErrorOutOfMemory)) {
       	  if(cfg_skip_busy_gpus) {
-      	    log_gpu.info() << "GPU " << gpu_info[i]->device << " appears to be busy (res=" << res << ") - skipping";
+      	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " appears to be busy (res=" << res << ") - skipping";
       	    continue;
       	  } else {
-      	    log_gpu.fatal() << "GPU " << gpu_info[i]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
+      	    log_gpu.fatal() << "GPU " << gpu_info[idx]->device << " appears to be in use - use CUDA_VISIBLE_DEVICES, -cuda:skipgpus, or -cuda:skipbusy to select other GPUs";
       	    abort();
       	  }
       	}
@@ -3441,7 +3488,7 @@ namespace Realm {
       	  size_t total_mem, avail_mem;
       	  CHECK_HIP( hipMemGetInfo(&avail_mem, &total_mem) );
       	  if(avail_mem < cfg_min_avail_mem) {
-      	    log_gpu.info() << "GPU " << gpu_info[i]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
+      	    log_gpu.info() << "GPU " << gpu_info[idx]->device << " does not have enough available memory (" << avail_mem << " < " << cfg_min_avail_mem << ") - skipping";
       	    //CHECK_HIP( hipDevicePrimaryCtxRelease(gpu_info[i]->device) );
       	    continue;
       	  }
@@ -3461,7 +3508,7 @@ namespace Realm {
             worker->add_to_manager(&(runtime->bgwork));
 	}
 
-	GPU *g = new GPU(this, gpu_info[i], worker, i);
+	GPU *g = new GPU(this, gpu_info[idx], worker, idx);
 
 	if(!cfg_use_shared_worker)
 	  dedicated_workers[g] = worker;

@@ -2683,6 +2683,7 @@ namespace Legion {
     public:
       virtual int get_depth(void) const;
       virtual UniqueID get_unique_id(void) const;
+      virtual Domain get_slice_domain(void) const;
       virtual size_t get_context_index(void) const; 
       virtual void set_context_index(size_t index);
       virtual bool has_parent_task(void) const;

@@ -1878,23 +1878,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndividualManager::fill_from(FillView *fill_view,
+    ApEvent IndividualManager::fill_from(FillView *fill_view, 
+                                         InstanceView *dst_view,
                                          ApEvent precondition,
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
+                                         const UniqueID op_id,
+                                         const unsigned index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                         std::set<RtEvent> &effects_applied,
-                                         CopyAcrossHelper *across_helper)
+                                         std::set<RtEvent> &recorded_events,
+                                         std::set<RtEvent> &applied_events,
+                                         CopyAcrossHelper *across_helper,
+                                         const bool manage_dst_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(dst_view->manager == this);
+      assert((across_helper == NULL) || !manage_dst_events);
+#endif
+      // Compute the precondition first
+      if (manage_dst_events)
+      {
+        ApEvent dst_precondition = dst_view->find_copy_preconditions(
+            false/*reading*/, 0/*redop*/, fill_mask, fill_expression,
+            op_id, index, applied_events, trace_info);
+        if (dst_precondition.exists())
+        {
+          if (dst_precondition.exists())
+            precondition =
+              Runtime::merge_events(&trace_info,precondition,dst_precondition);
+          else
+            precondition = dst_precondition;
+        }
+      }
       std::vector<CopySrcDstField> dst_fields;
-      if (across_helper == NULL)
-        compute_copy_offsets(fill_mask, dst_fields); 
+      if (across_helper != NULL)
+      {
+        const FieldMask src_mask = across_helper->convert_dst_to_src(fill_mask);
+        across_helper->compute_across_offsets(src_mask, dst_fields);
+      }
       else
-        across_helper->compute_across_offsets(fill_mask, dst_fields);
+        compute_copy_offsets(fill_mask, dst_fields); 
       const ApEvent result = fill_expression->issue_fill(trace_info, dst_fields, 
                                                  fill_view->value->value,
                                                  fill_view->value->value_size,
@@ -1904,32 +1929,81 @@ namespace Legion {
                                                  tree_id,
 #endif
                                                  precondition, predicate_guard);
+      // Save the result
+      if (manage_dst_events && result.exists())
+      {
+        const RtEvent collect_event = trace_info.get_collect_event();
+        dst_view->add_copy_user(false/*reading*/, 0/*redop*/, result, 
+            collect_event, fill_mask, fill_expression, op_id, index,
+            recorded_events, trace_info.recording, runtime->address_space);
+      }
       if (trace_info.recording)
-        trace_info.record_fill_views(result, fill_expression, *tracing_srcs, 
-                                     *tracing_dsts,effects_applied,(redop > 0));
+      {
+        const FieldMaskSet<InstanceView> dst_views(dst_view, fill_mask);
+        trace_info.record_fill_views(result, fill_expression, dst_views,
+                                     applied_events, (redop > 0));
+      }
       return result;
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndividualManager::copy_from(PhysicalManager *source_manager,
+    ApEvent IndividualManager::copy_from(InstanceView *src_view,
+                                         InstanceView *dst_view,
+                                         PhysicalManager *source_manager,
                                          ApEvent precondition,
                                          PredEvent predicate_guard, 
                                          ReductionOpID reduction_op_id,
                                          IndexSpaceExpression *copy_expression,
+                                         const UniqueID op_id,
+                                         const unsigned index,
                                          const FieldMask &copy_mask,
                                          const PhysicalTraceInfo &trace_info,
-                                 const FieldMaskSet<InstanceView> *tracing_srcs,
-                                 const FieldMaskSet<InstanceView> *tracing_dsts,
-                                         std::set<RtEvent> &effects_applied,
-                                         CopyAcrossHelper *across_helper)
+                                         std::set<RtEvent> &recorded_events,
+                                         std::set<RtEvent> &applied_events,
+                                         CopyAcrossHelper *across_helper,
+                                         const bool manage_dst_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(dst_view->manager == this);
+      assert(src_view->manager == source_manager);
+      assert((across_helper == NULL) || !manage_dst_events);
+#endif
+      // Compute the preconditions first
+      if (manage_dst_events)
+      {
+        const ApEvent dst_pre = dst_view->find_copy_preconditions(
+          false/*reading*/, reduction_op_id, copy_mask, copy_expression,
+          op_id, index, applied_events, trace_info);  
+        if (dst_pre.exists())
+        {
+          if (precondition.exists())
+            precondition =
+              Runtime::merge_events(&trace_info, precondition, dst_pre);
+          else
+            precondition = dst_pre;
+        }
+      }
+      const FieldMask *src_mask = (across_helper == NULL) ? &copy_mask :
+        new FieldMask(across_helper->convert_dst_to_src(copy_mask));
+      const ApEvent src_pre = src_view->find_copy_preconditions(
+          true/*reading*/, 0/*redop*/, *src_mask, copy_expression,
+          op_id, index, applied_events, trace_info);
+      if (src_pre.exists())
+      {
+        if (precondition.exists())
+          precondition =
+            Runtime::merge_events(&trace_info, precondition, src_pre);
+        else
+          precondition = src_pre;
+      }
+      // Compute the field offsets
       std::vector<CopySrcDstField> dst_fields, src_fields;
       if (across_helper == NULL)
         compute_copy_offsets(copy_mask, dst_fields);
       else
-        across_helper->compute_across_offsets(copy_mask, dst_fields);
-      source_manager->compute_copy_offsets(copy_mask, src_fields);
+        across_helper->compute_across_offsets(*src_mask, dst_fields);
+      source_manager->compute_copy_offsets(*src_mask, src_fields);
 #ifdef LEGION_GPU_REDUCTIONS
 #ifndef LEGION_SPY
       // Realm is really bad at applying reductions to GPU instances right
@@ -1952,9 +2026,26 @@ namespace Legion {
               dst_fields, src_fields, memory_manager->get_local_gpu(), 
               finder->second, this, source_manager, precondition, 
               predicate_guard, reduction_op_id, false/*fold*/);
+          if (result.exists())
+          {
+            const RtEvent collect_event = trace_info.get_collect_event();
+            src_view->add_copy_user(true/*reading*/, 0/*redop*/, result,
+                collect_event, *src_mask, copy_expression, op_id, index,
+                recorded_events, trace_info.recording, runtime->address_space);
+            if (manage_dst_events)
+              dst_view->add_copy_user(false/*reading*/, reduction_op_id, result,
+                 collect_event, copy_mask, copy_expression, op_id, index,
+                 recorded_events, trace_info.recording, runtime->address_space);
+          }
           if (trace_info.recording)
-            trace_info.record_copy_views(result, copy_expression, *tracing_srcs,
-                                         *tracing_dsts, effects_applied);
+          {
+            const FieldMaskSet<InstanceView> src_views(src_view, *src_mask);
+            const FieldMaskSet<InstanceView> dst_views(dst_view, copy_mask);
+            trace_info.record_copy_views(result, copy_expression, src_views,
+                                         dst_views, applied_events);
+          }
+          if (across_helper != NULL)
+            delete src_mask;
           return result;
         }
       }
@@ -1967,9 +2058,26 @@ namespace Legion {
 #endif
                                          precondition, predicate_guard,
                                          reduction_op_id, false/*fold*/); 
+      if (result.exists())
+      {
+        const RtEvent collect_event = trace_info.get_collect_event();
+        src_view->add_copy_user(true/*reading*/, 0/*redop*/, result,
+            collect_event, *src_mask, copy_expression, op_id, index,
+            recorded_events, trace_info.recording, runtime->address_space);
+        if (manage_dst_events)
+          dst_view->add_copy_user(false/*reading*/, reduction_op_id, result,
+              collect_event, copy_mask, copy_expression, op_id, index,
+              recorded_events, trace_info.recording, runtime->address_space);
+      }
       if (trace_info.recording)
-        trace_info.record_copy_views(result, copy_expression, *tracing_srcs, 
-                                     *tracing_dsts, effects_applied);
+      {
+        const FieldMaskSet<InstanceView> src_views(src_view, *src_mask);
+        const FieldMaskSet<InstanceView> dst_views(dst_view, copy_mask);
+        trace_info.record_copy_views(result, copy_expression, src_views,
+                                     dst_views, applied_events);
+      }
+      if (across_helper != NULL)
+        delete src_mask;
       return result;
     }
 
@@ -1978,6 +2086,9 @@ namespace Legion {
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
+      // Make sure the instance is ready before we compute the offsets
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
       assert(instance.exists());
@@ -2019,6 +2130,9 @@ namespace Legion {
                                      const std::vector<unsigned> &dst_indexes)
     //--------------------------------------------------------------------------
     {
+      // Make sure the instance is ready before we compute the offsets
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
 #ifdef DEBUG_LEGION
       assert(src_indexes.size() == dst_indexes.size());
 #endif
@@ -3866,15 +3980,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CollectiveManager::fill_from(FillView *fill_view,
-                                ApEvent precondition, PredEvent predicate_guard,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &fill_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper)
+    ApEvent CollectiveManager::fill_from(FillView *fill_view, 
+                                         InstanceView *dst_view,
+                                         ApEvent precondition,
+                                         PredEvent predicate_guard,
+                                         IndexSpaceExpression *fill_expression,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &fill_mask,
+                                         const PhysicalTraceInfo &trace_info,
+                                         std::set<RtEvent> &recorded_events,
+                                         std::set<RtEvent> &applied_events,
+                                         CopyAcrossHelper *across_helper,
+                                         const bool manage_dst_events)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -3883,16 +4001,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CollectiveManager::copy_from(PhysicalManager *manager, 
-                                ApEvent precondition,
-                                PredEvent predicate_guard, ReductionOpID redop,
-                                IndexSpaceExpression *expression,
-                                const FieldMask &copy_mask,
-                                const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper)
+    ApEvent CollectiveManager::copy_from(InstanceView *src_view,
+                                         InstanceView *dst_view,
+                                         PhysicalManager *source_manager,
+                                         ApEvent precondition,
+                                         PredEvent predicate_guard, 
+                                         ReductionOpID reduction_op_id,
+                                         IndexSpaceExpression *copy_expression,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &copy_mask,
+                                         const PhysicalTraceInfo &trace_info,
+                                         std::set<RtEvent> &recorded_events,
+                                         std::set<RtEvent> &applied_events,
+                                         CopyAcrossHelper *across_helper,
+                                         const bool manage_dst_events)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
