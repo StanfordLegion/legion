@@ -5547,6 +5547,11 @@ namespace Legion {
             dst_precondition =
               Runtime::merge_events(&trace_info, finder->second);
             // Clear this for the next iteration
+            // It's not obvious why this safe, but it is
+            // We are guaranteed to issue at least one fill/copy that
+            // will depend on this and therefore either test that it
+            // has triggered or record itself back in the set of events
+            // which gives us a transitive precondition
             finder->second.clear();
           }
           target_events = &finder->second;
@@ -8349,11 +8354,13 @@ namespace Legion {
         for (unsigned idx = 0; idx < target_instances.size(); idx++)
         {
           const InstanceRef &ref = target_instances[idx];
+          InstanceView *view = target_views[idx];
+          // Always instantiate the entry in the map
+          std::vector<ApEvent> &events = dst_events[view];
           const ApEvent event = ref.get_ready_event();
           if (!event.exists())
             continue;
-          InstanceView *view = target_views[idx];
-          dst_events[view].push_back(event);
+          events.push_back(event);
         }
         // This is a copy-across aggregator so the destination events
         // are being handled by the copy operation that mapped the
