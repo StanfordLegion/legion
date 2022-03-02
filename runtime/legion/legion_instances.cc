@@ -1704,15 +1704,6 @@ namespace Legion {
       }
       else
         compute_copy_offsets(fill_mask, dst_fields); 
-      // Make sure the instance is ready before we issue the copy
-      if (instance_ready.exists() && !instance_ready.has_triggered())
-      {
-        // Always safe to promote runtime events to application events
-        const ApEvent promoted(instance_ready);
-        // There's no need to record this in the trace, once we know the
-        // instance is ready for the first copy it will be ready forever
-        precondition = Runtime::merge_events(NULL, precondition, promoted);
-      }
       const ApEvent result = fill_expression->issue_fill(trace_info, dst_fields, 
                                                  fill_view->value->value,
                                                  fill_view->value->value_size,
@@ -1797,14 +1788,6 @@ namespace Legion {
       else
         across_helper->compute_across_offsets(*src_mask, dst_fields);
       source_manager->compute_copy_offsets(*src_mask, src_fields);
-      // Make sure the instance is ready before we issue the copy
-      if (instance_ready.exists() && !instance_ready.has_triggered())
-      {
-        // Always safe to promote runtime events to application events
-        const ApEvent promoted(instance_ready);
-        precondition =
-          Runtime::merge_events(&trace_info, precondition, promoted);
-      }
 #ifdef LEGION_GPU_REDUCTIONS
 #ifndef LEGION_SPY
       // Realm is really bad at applying reductions to GPU instances right
@@ -1887,6 +1870,9 @@ namespace Legion {
                                            std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
+      // Make sure the instance is ready before we compute the offsets
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
       assert(instance.exists());
