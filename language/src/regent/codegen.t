@@ -2678,8 +2678,12 @@ local function expr_call_setup_task_args(
   end
 
   task_args_setup:insert(quote
-    var [buffer] = c.malloc([size])
-    std.assert([size] == 0 or [buffer] ~= nil, "malloc failed in setup task args")
+    -- Note: it's important to use calloc here because otherwise some
+    -- of the padding in the argument buffer may be garbage. In most
+    -- cases, this is a non-issue, but it can create spurious errors
+    -- with Legion's DCR safety check.
+    var [buffer] = c.calloc(1, [size])
+    std.assert([size] == 0 or [buffer] ~= nil, "calloc failed in setup task args")
     [task_args].args = [buffer]
     [task_args].arglen = [size]
   end)
