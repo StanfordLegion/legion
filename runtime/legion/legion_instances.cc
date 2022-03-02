@@ -1892,6 +1892,9 @@ namespace Legion {
                                      const std::vector<unsigned> &dst_indexes)
     //--------------------------------------------------------------------------
     {
+      // Make sure the instance is ready before we compute the offsets
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
 #ifdef DEBUG_LEGION
       assert(src_indexes.size() == dst_indexes.size());
 #endif
