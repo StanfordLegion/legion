@@ -5445,13 +5445,23 @@ namespace Legion {
             Runtime::merge_events(recorded_events));
       else
         Runtime::trigger_event(guard_postcondition);
-#endif
+      // Make sure the guard postcondition is chained on the deletion
+      if (!effects.empty())
+      {
+        effects.insert(guard_postcondition);
+        Runtime::trigger_event(effects_applied,
+            Runtime::merge_events(effects));
+      }
+      else
+        Runtime::trigger_event(effects_applied, guard_postcondition);
+#else
       // We can also trigger our effects event once the effects are applied
       if (!effects.empty())
         Runtime::trigger_event(effects_applied,
             Runtime::merge_events(effects));
       else
         Runtime::trigger_event(effects_applied);
+#endif
     } 
 
     //--------------------------------------------------------------------------
