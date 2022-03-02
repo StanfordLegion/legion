@@ -208,7 +208,6 @@ namespace Legion {
                            ReductionOpID redop, bool reduction_fold) = 0;
 #endif
       virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
-                           const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization) = 0;
@@ -349,7 +348,6 @@ namespace Legion {
                            ReductionOpID redop, bool reduction_fold);
 #endif
       virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
-                           const FieldMaskSet<FillView> &tracing_srcs,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
                            const bool reduction_initialization);
@@ -589,13 +587,12 @@ namespace Legion {
 #endif
       inline void record_fill_views(ApEvent lhs,
                                     IndexSpaceExpression *expr,
-                                    const FieldMaskSet<FillView> &srcs,
                                     const FieldMaskSet<InstanceView> &dsts,
                                     std::set<RtEvent> &applied,
                                     const bool reduction_initialization) const
         {
           sanity_check();
-          rec->record_fill_views(lhs, expr, srcs, dsts, applied,
+          rec->record_fill_views(lhs, expr, dsts, applied,
                                  reduction_initialization);
         }
       inline void record_issue_indirect(ApEvent &result,
@@ -1288,26 +1285,26 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_COPY_FILL_AGGREGATION_TASK_ID;
       public:
         CopyFillAggregation(CopyFillAggregator *a, const PhysicalTraceInfo &i,
-                      ApEvent p, const bool src, const bool dst, UniqueID uid,
-                      unsigned ps, const bool need_pass_pre)
+                            ApEvent p, const bool manage_dst, UniqueID uid,
+                            std::map<InstanceView*,std::vector<ApEvent> > *dsts)
           : LgTaskArgs<CopyFillAggregation>(uid), PhysicalTraceInfo(i),
-            aggregator(a), pre(p), pass(ps), has_src(src), 
-            has_dst(dst), need_pass_preconditions(need_pass_pre) 
+            dst_events((dsts == NULL) ? NULL : 
+                new std::map<InstanceView*,std::vector<ApEvent> >()),
+            aggregator(a), pre(p), manage_dst_events(manage_dst)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
           // an extra reference here that we will remove when we're handled.
-          { if (rec != NULL) rec->add_recorder_reference(); }
+          { if (rec != NULL) rec->add_recorder_reference(); 
+            if (dsts != NULL) dst_events->swap(*dsts); }
       public:
         inline void remove_recorder_reference(void) const
           { if ((rec != NULL) && rec->remove_recorder_reference()) delete rec; }
       public:
+        std::map<InstanceView*,std::vector<ApEvent> > *const dst_events;
         CopyFillAggregator *const aggregator;
         const ApEvent pre;
-        const unsigned pass;
-        const bool has_src;
-        const bool has_dst;
-        const bool need_pass_preconditions;
+        const bool manage_dst_events;
       }; 
     public:
       typedef LegionMap<InstanceView*,
@@ -1323,10 +1320,6 @@ namespace Legion {
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;
-        virtual void compute_source_preconditions(
-                       RegionTreeForest *forest, const FieldMask &src_mask,
-                       const std::map<InstanceView*,EventFieldMap> &src_pre,
-                       std::set<ApEvent> &preconditions) const = 0;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills) = 0;
@@ -1352,10 +1345,6 @@ namespace Legion {
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
-        virtual void compute_source_preconditions(
-                       RegionTreeForest *forest, const FieldMask &src_mask,
-                       const std::map<InstanceView*,EventFieldMap> &src_pre,
-                       std::set<ApEvent> &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills);
@@ -1379,10 +1368,6 @@ namespace Legion {
       public:
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
-        virtual void compute_source_preconditions(
-                       RegionTreeForest *forest, const FieldMask &src_mask,
-                       const std::map<InstanceView*,EventFieldMap> &src_pre,
-                       std::set<ApEvent> &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<FillUpdate*> &fills);
@@ -1390,10 +1375,6 @@ namespace Legion {
         FillView *const source;
       };
       typedef LegionMap<ApEvent,FieldMaskSet<Update> > EventFieldUpdates;
-      struct FusedCopy {
-        std::set<IndexSpaceExpression*> expressions;
-        std::set<ApEvent> preconditions;
-      };
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
                          CopyFillGuard *previous, bool track_events,
@@ -1451,19 +1432,15 @@ namespace Legion {
                              EquivalenceSet *tracing_eq,
                              std::set<RtEvent> &applied,
                              CopyAcrossHelper *across_helper = NULL);
-      // Record preconditions coming back from analysis on views
-      void record_preconditions(InstanceView *view, bool reading,
-                                EventFieldMap &preconditions);
-      void record_precondition(InstanceView *view, bool reading,
-                               ApEvent event, const FieldMask &mask);
       void issue_updates(const PhysicalTraceInfo &trace_info, 
                          ApEvent precondition,
-                         // Next two flags are used for across-copies
-                         // to indicate when we already know preconditions
-                         const bool has_src_preconditions = false,
-                         const bool has_dst_preconditions = false,
-                         const bool need_deferral = false, unsigned pass = 0, 
-                         bool need_pass_preconditions = true);
+                         // Next args are used for across-copies
+                         // to indicate that the precondition already
+                         // describes the precondition for the 
+                         // destination instance
+                         const bool manage_dst_events = true,
+                         std::map<InstanceView*,
+                                  std::vector<ApEvent> > *dst_events = NULL);
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
@@ -1472,30 +1449,30 @@ namespace Legion {
             LogicalView *src, LogicalView *dst, const FieldMask &mask,
             IndexSpaceExpression *expr, ReductionOpID redop,
             std::set<RtEvent> &applied_events) const;
-      RtEvent perform_updates(const LegionMap<InstanceView*,
+      void perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> > &updates,
                            const PhysicalTraceInfo &trace_info,
-                           const ApEvent all_precondition, int redop_index,
-                           const bool has_src_preconditions,
-                           const bool has_dst_preconditions,
-                           const bool needs_preconditions);
-      void find_reduction_preconditions(InstanceView *dst_view, 
-                           const PhysicalTraceInfo &trace_info,
-                           IndexSpaceExpression *copy_expr,
-                           const FieldMask &copy_mask, 
-                           UniqueID op_id, unsigned redop_index, 
-                           std::set<RtEvent> &preconditions_ready);
+                           const ApEvent all_precondition, 
+                           std::set<RtEvent> &recorded_events, 
+                           const int redop_index,
+                           const bool manage_dst_events,
+                           std::map<InstanceView*,
+                                    std::vector<ApEvent> > *dst_events);
       void issue_fills(InstanceView *target,
                        const std::vector<FillUpdate*> &fills,
-                       ApEvent precondition, const FieldMask &fill_mask,
+                       std::set<RtEvent> &recorded_events,
+                       const ApEvent precondition, const FieldMask &fill_mask,
                        const PhysicalTraceInfo &trace_info,
-                       const bool has_dst_preconditions);
+                       const bool manage_dst_events,
+                       std::vector<ApEvent> *dst_events);
       void issue_copies(InstanceView *target, 
                         const std::map<InstanceView*,
                                        std::vector<CopyUpdate*> > &copies,
+                        std::set<RtEvent> &recorded_events,
                         const ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info,
-                        const bool has_dst_preconditions);
+                        const bool manage_dst_events,
+                        std::vector<ApEvent> *dst_events);
     public:
       inline void clear_update_fields(void) 
         { update_fields.clear(); } 
@@ -1524,9 +1501,6 @@ namespace Legion {
       std::map<std::pair<InstanceView*,unsigned/*dst fidx*/>,
                std::vector<ReductionOpID> > reduction_epochs;
       std::set<LogicalView*> all_views; // used for reference counting
-    protected:
-      mutable LocalLock pre_lock; 
-      std::map<InstanceView*,LegionMap<ApEvent,FieldMask> > dst_pre, src_pre;
     protected:
       // Runtime mapping effects that we create
       std::set<RtEvent> effects; 
@@ -1561,11 +1535,6 @@ namespace Legion {
       };
       // Cached calls to the mapper for selecting sources
       std::map<InstanceView*,LegionVector<SourceQuery> > mapper_queries;
-    protected:
-      // Help for tracing 
-      FieldMaskSet<FillView> *tracing_src_fills;
-      FieldMaskSet<InstanceView> *tracing_srcs;
-      FieldMaskSet<InstanceView> *tracing_dsts;
     };
 
     /**

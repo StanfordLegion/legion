@@ -6278,7 +6278,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_fill_views(ApEvent lhs,
                                  IndexSpaceExpression *expr,
-                                 const FieldMaskSet<FillView> &tracing_srcs,
                                  const FieldMaskSet<InstanceView> &tracing_dsts,
                                  std::set<RtEvent> &applied_events,
                                  const bool reduction_initialization)

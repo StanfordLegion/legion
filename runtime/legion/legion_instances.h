@@ -267,26 +267,29 @@ namespace Legion {
       void log_instance_creation(UniqueID creator_id, Processor proc,
                      const std::vector<LogicalRegion> &regions) const; 
     public:
-      virtual ApEvent fill_from(FillView *fill_view,
+      virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events) = 0;
+      virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
+                                PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL) = 0;
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields) = 0;
+                             std::vector<CopySrcDstField> &fields) = 0;
     public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 
@@ -503,26 +506,29 @@ namespace Legion {
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
     public:
-      virtual ApEvent fill_from(FillView *fill_view,
+      virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
-      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events);
+      virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
+                                PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
+                             std::vector<CopySrcDstField> &fields);
     public:
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
@@ -706,26 +712,29 @@ namespace Legion {
                                       GCPriority priority);
       void collective_detach(std::set<RtEvent> &detach_events);
     public:
-      virtual ApEvent fill_from(FillView *fill_view,
+      virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<FillView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
-      virtual ApEvent copy_from(PhysicalManager *manager, ApEvent precondition,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events);
+      virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
+                                PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const FieldMaskSet<InstanceView> *tracing_srcs,
-                                const FieldMaskSet<InstanceView> *tracing_dsts,
-                                std::set<RtEvent> &effects_applied,
-                                CopyAcrossHelper *across_helper = NULL);
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
+                             std::vector<CopySrcDstField> &fields);
 #ifdef LEGION_GPU_REDUCTIONS
     public:
       virtual bool is_gpu_visible(PhysicalManager *other) const;
