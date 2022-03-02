@@ -3110,8 +3110,6 @@ namespace Legion {
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
       void send_view_find_copy_preconditions_request(AddressSpaceID target,
                                                      Serializer &rez);
-      void send_view_find_copy_preconditions_response(AddressSpaceID target,
-                                                      Serializer &rez);
       void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
 #ifdef ENABLE_VIEW_REPLICATION
       void send_view_replication_request(AddressSpaceID target,Serializer &rez);
@@ -3424,8 +3422,6 @@ namespace Legion {
       void handle_view_register_user(Deserializer &derez,AddressSpaceID source);
       void handle_view_copy_pre_request(Deserializer &derez,
                                         AddressSpaceID source);
-      void handle_view_copy_pre_response(Deserializer &derez,
-                                         AddressSpaceID source);
       void handle_view_add_copy_user(Deserializer &derez,AddressSpaceID source);
 #ifdef ENABLE_VIEW_REPLICATION
       void handle_view_replication_request(Deserializer &derez,
@@ -5468,8 +5464,6 @@ namespace Legion {
           return UPDATE_VIRTUAL_CHANNEL;
         case SEND_VIEW_FIND_COPY_PRE_REQUEST:
           return UPDATE_VIRTUAL_CHANNEL;
-        case SEND_VIEW_FIND_COPY_PRE_RESPONSE:
-          break;
         case SEND_VIEW_ADD_COPY_USER:
           return UPDATE_VIRTUAL_CHANNEL;
         case SEND_VIEW_REPLICATION_REQUEST:

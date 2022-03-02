@@ -359,7 +359,6 @@ namespace Legion {
       LG_DEFER_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID,
-      LG_DEFER_FIND_COPY_PRE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
@@ -485,7 +484,6 @@ namespace Legion {
         "Defer Task Launch",                                      \
         "Handle Mapping Misspeculation",                          \
         "Defer Trigger Task Complete",                            \
-        "Defer Find Copy Preconditions",                          \
         "Defer Materialized View Registration",                   \
         "Defer Reduction View Registration",                      \
         "Defer Phi View Reference",                               \
@@ -810,7 +808,6 @@ namespace Legion {
       SEND_VIEW_REQUEST,
       SEND_VIEW_REGISTER_USER,
       SEND_VIEW_FIND_COPY_PRE_REQUEST,
-      SEND_VIEW_FIND_COPY_PRE_RESPONSE,
       SEND_VIEW_ADD_COPY_USER,
       SEND_VIEW_REPLICATION_REQUEST,
       SEND_VIEW_REPLICATION_RESPONSE,
@@ -1025,7 +1022,6 @@ namespace Legion {
         "Send View Request",                                          \
         "Send View Register User",                                    \
         "Send View Find Copy Preconditions Request",                  \
-        "Send View Find Copy Preconditions Response",                 \
         "Send View Add Copy User",                                    \
         "Send View Replication Request",                              \
         "Send View Replication Response",                             \

@@ -12422,12 +12422,6 @@ namespace Legion {
               runtime->handle_view_copy_pre_request(derez,remote_address_space);
               break;
             }
-          case SEND_VIEW_FIND_COPY_PRE_RESPONSE:
-            {
-              runtime->handle_view_copy_pre_response(derez,
-                                                    remote_address_space);
-              break;
-            }
           case SEND_VIEW_ADD_COPY_USER:
             {
               runtime->handle_view_add_copy_user(derez, remote_address_space);
@@ -22120,15 +22114,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_find_copy_preconditions_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_VIEW_FIND_COPY_PRE_RESPONSE>(
-                                        rez, true/*flush*/, true/*response*/);
-    }
-    
-    //--------------------------------------------------------------------------
     void Runtime::send_view_add_copy_user(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24269,14 +24254,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceView::handle_view_find_copy_pre_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_copy_pre_response(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_find_copy_pre_response(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -31480,11 +31457,6 @@ namespace Legion {
         case LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID:
           {
             SingleTask::handle_deferred_task_complete(args);
-            break;
-          }
-        case LG_DEFER_FIND_COPY_PRE_TASK_ID:
-          {
-            InstanceView::handle_view_find_copy_pre_request(args, runtime);
             break;
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
