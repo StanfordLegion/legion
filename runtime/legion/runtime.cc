@@ -15126,6 +15126,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IdentityProjectionFunctor::invert(LogicalRegion region,
+                         LogicalRegion upper_bound, const Domain &launch_domain,
+                         std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // This is a special case for the ordered mapping of point tasks in 
+      // the case where we used to try to premap regions for an index task
+      // launch where all the points mapped the same region with read-write
+      // Just enumerate the points in order for the domain
+      ordered_points.reserve(launch_domain.get_volume());
+      for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        ordered_points.push_back(itr.p);
+    }
+
+    //--------------------------------------------------------------------------
+    void IdentityProjectionFunctor::invert(LogicalRegion region,
+                      LogicalPartition upper_bound, const Domain &launch_domain,
+                      std::vector<DomainPoint> &ordered_points)
+    //--------------------------------------------------------------------------
+    {
+      // This should never get called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     bool IdentityProjectionFunctor::is_functional(void) const
     //--------------------------------------------------------------------------
     {
@@ -15250,7 +15275,14 @@ namespace Legion {
       assert(req.handle_type != LEGION_SINGULAR_PROJECTION);
 #endif
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
-      const bool find_dependences = is_invertible && IS_WRITE(req);
+      // We used to support the case of the identity projection function
+      // on logical regions special with the premap case, but it is really
+      // just another case of having dependences between points on a region
+      // requirement so we'll detect that case that specially and handle
+      // it here inside the runtime since we control the implementation of
+      // the identity projection function
+      const bool find_dependences = (is_invertible && IS_WRITE(req)) ||
+        ((projection_id == 0) && (req.handle_type == LEGION_REGION_PROJECTION));
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);

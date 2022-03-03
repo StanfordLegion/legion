@@ -87,7 +87,6 @@ namespace Legion {
         TaskPriority priority;
         unsigned next_tunable;
       public:
-        std::map<unsigned,RequirementMapping*> premappings;
         std::vector<RequirementMapping*> mappings;
         std::map<unsigned,RequirementMapping*> postmappings;
         std::vector<TunableMapping*> tunables;

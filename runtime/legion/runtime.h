@@ -2144,6 +2144,12 @@ namespace Legion {
       virtual LogicalRegion project(LogicalPartition upper_bound,
                                     const DomainPoint &point,
                                     const Domain &launch_domain);
+      virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
+      virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+                          const Domain &launch_domain,
+                          std::vector<DomainPoint> &ordered_points);
       virtual bool is_functional(void) const;
       virtual bool is_exclusive(void) const;
       virtual unsigned get_depth(void) const;

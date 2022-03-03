@@ -758,7 +758,7 @@ namespace Legion {
       {
         // Check to see if we still need to participate in the premap_task call
         if (must_epoch == NULL)
-          early_map_task();
+          premap_task();
 #ifdef LEGION_SPY
         // Still have to do this for legion spy
         LegionSpy::log_operation_events(unique_op_id, 
