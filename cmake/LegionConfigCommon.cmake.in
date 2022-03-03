@@ -102,6 +102,12 @@ if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_ZLIB)
   find_package(ZLIB REQUIRED)
 endif()
 
+# OpenMP is an internal dependency, only needed so that users can key off of it
+set(Legion_USE_OpenMP @Legion_USE_OpenMP@)
+
+# Python is an internal dependency, only needed so that users can key off of it
+set(Legion_USE_Python @Legion_USE_Python@)
+
 # bring in Kokkos if needed
 set(Legion_USE_Kokkos @Legion_USE_Kokkos@)
 if(Legion_USE_Kokkos)
