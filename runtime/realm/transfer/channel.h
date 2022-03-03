@@ -181,12 +181,13 @@ namespace Realm {
       ReductionOpID id;
       bool is_fold;
       bool in_place;
+      bool is_exclusive;
 
       // default constructor == no reduction requested
-      XferDesRedopInfo() : id(0), is_fold(false), in_place(false) {}
+      XferDesRedopInfo() : id(0), is_fold(false), in_place(false), is_exclusive(false) {}
 
-      XferDesRedopInfo(ReductionOpID _id, bool _is_fold, bool _in_place)
-      : id(_id), is_fold(_is_fold), in_place(_in_place) {}
+      XferDesRedopInfo(ReductionOpID _id, bool _is_fold, bool _in_place, bool _is_exclusive)
+      : id(_id), is_fold(_is_fold), in_place(_in_place), is_exclusive(_is_exclusive) {}
     };
 
     class AddressList {
