@@ -396,6 +396,8 @@ namespace Legion {
       struct PremapTaskInput {
         LEGION_DEPRECATED("Premapping regions is no longer supported")
         std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
+        PremapTaskInput(void);
+        ~PremapTaskInput(void);
       };
       struct PremapTaskOutput {
         Processor                                          new_target_proc;
@@ -408,6 +410,8 @@ namespace Legion {
         ProfilingRequest                                   copy_prof_requests;
         LEGION_DEPRECATED("Premapping regions is no longer supported")
         TaskPriority                                       profiling_priority;
+        PremapTaskOutput(void);
+        ~PremapTaskOutput(void);
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
