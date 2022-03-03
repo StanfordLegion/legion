@@ -1118,9 +1118,9 @@ namespace Realm {
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
 
       // select reduction kernel now - translate to CUfunction if possible
-      void *host_proxy = (redop_info.is_fold ?
-                            redop->cuda_fold_nonexcl_fn :
-                            redop->cuda_apply_nonexcl_fn);
+      void *host_proxy = (redop_info.is_fold ? 
+          (redop_info.is_exclusive ? redop->cuda_fold_excl_fn : redop->cuda_fold_nonexcl_fn) :
+          (redop_info.is_exclusive ? redop->cuda_apply_excl_fn : redop->cuda_apply_nonexcl_fn));
 #ifdef REALM_USE_CUDART_HIJACK
       // we have the host->device mapping table for functions
       kernel = gpu->lookup_function(host_proxy);

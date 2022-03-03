@@ -54,7 +54,7 @@ namespace Realm {
 			       size_t _size, size_t _subfield_offset = 0);
     CopySrcDstField &set_indirect(int _indirect_index, FieldID _field_id,
 				  size_t _size, size_t _subfield_offset = 0);
-    CopySrcDstField &set_redop(ReductionOpID _redop_id, bool _is_fold);
+    CopySrcDstField &set_redop(ReductionOpID _redop_id, bool _is_fold, bool exclusive = false);
     CopySrcDstField &set_serdez(CustomSerdezID _serdez_id);
     CopySrcDstField &set_fill(const void *_data, size_t _size);
     template <typename T>
@@ -66,6 +66,7 @@ namespace Realm {
     size_t size;
     ReductionOpID redop_id;
     bool red_fold;
+    bool red_exclusive;
     CustomSerdezID serdez_id;
     size_t subfield_offset;
     int indirect_index;

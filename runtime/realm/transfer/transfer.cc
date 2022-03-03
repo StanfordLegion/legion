@@ -3765,7 +3765,8 @@ namespace Realm {
           if(j == (pathlen - 1))
             xdn.redop = XferDesRedopInfo(dsts[i].redop_id,
                                          dsts[i].red_fold,
-                                         true /*in_place*/);
+                                         true /*in_place*/,
+                                         dsts[i].red_exclusive);
           xdn.inputs.resize(1);
           xdn.inputs[0] = ((j == 0) ?
                              TransferGraph::XDTemplate::mk_inst(srcs[i].inst,

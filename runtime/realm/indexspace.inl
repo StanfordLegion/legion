@@ -87,6 +87,7 @@ namespace Realm {
     , size(0)
     , redop_id(0)
     , red_fold(false)
+    , red_exclusive(false)
     , serdez_id(0)
     , subfield_offset(0)
     , indirect_index(-1)
@@ -100,6 +101,7 @@ namespace Realm {
     , size(copy_from.size)
     , redop_id(copy_from.redop_id)
     , red_fold(copy_from.red_fold)
+    , red_exclusive(copy_from.red_exclusive)
     , serdez_id(copy_from.serdez_id)
     , subfield_offset(copy_from.subfield_offset)
     , indirect_index(copy_from.indirect_index)
@@ -131,6 +133,7 @@ namespace Realm {
     size = copy_from.size;
     redop_id = copy_from.redop_id;
     red_fold = copy_from.red_fold;
+    red_exclusive = copy_from.red_exclusive;
     serdez_id = copy_from.serdez_id;
     subfield_offset = copy_from.subfield_offset;
     indirect_index = copy_from.indirect_index;
@@ -184,10 +187,13 @@ namespace Realm {
     return *this;
   }
 
-  inline CopySrcDstField &CopySrcDstField::set_redop(ReductionOpID _redop_id, bool _is_fold)
+  inline CopySrcDstField &CopySrcDstField::set_redop(ReductionOpID _redop_id,
+                                                     bool _is_fold,
+                                                     bool _is_excl)
   {
     redop_id = _redop_id;
     red_fold = _is_fold;
+    red_exclusive = _is_excl;
     return *this;
   }
 
