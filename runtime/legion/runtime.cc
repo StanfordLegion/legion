@@ -15281,8 +15281,8 @@ namespace Legion {
       // requirement so we'll detect that case that specially and handle
       // it here inside the runtime since we control the implementation of
       // the identity projection function
-      const bool find_dependences = (is_invertible && IS_WRITE(req)) ||
-        ((projection_id == 0) && (req.handle_type == LEGION_REGION_PROJECTION));
+      const bool find_dependences = IS_WRITE(req) && (is_invertible ||
+       ((projection_id == 0) && (req.handle_type == LEGION_REGION_PROJECTION)));
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
