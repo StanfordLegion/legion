@@ -677,9 +677,10 @@ namespace Legion {
       virtual void register_must_epoch(void) = 0;
     public:
       // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point) = 0;
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point,
+                                                  unsigned index) = 0;
       virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 RtEvent point_mapped) = 0;
+                                unsigned index, RtEvent point_mapped) = 0;
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,
@@ -718,7 +719,7 @@ namespace Legion {
       void *predicate_false_result;
       size_t predicate_false_size;
     protected:
-      std::map<DomainPoint,RtEvent> intra_space_dependences;
+      std::map<std::pair<DomainPoint,unsigned>,RtEvent> intra_space_dependences;
     };
 
     /**
@@ -1016,9 +1017,10 @@ namespace Legion {
       virtual void register_must_epoch(void);
     public:
       // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point,
+                                                  unsigned index);
       virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 RtEvent point_mapped);
+                                     unsigned index, RtEvent point_mapped);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -1068,7 +1070,8 @@ namespace Legion {
       std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
-      std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
+      std::map<std::pair<DomainPoint,unsigned>,RtUserEvent> 
+                                                pending_intra_space_dependences;
     protected:
       // Profiling information
       struct IndexProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
@@ -1203,9 +1206,10 @@ namespace Legion {
       virtual void complete_replay(ApEvent instance_ready_event);
     public:
       // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point,
+                                                  unsigned index);
       virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 RtEvent point_mapped);
+                                     unsigned index, RtEvent point_mapped);
     public:
       // For collective instance creation
       virtual CollectiveManager* find_or_create_collective_instance(
