@@ -1594,6 +1594,7 @@ namespace Realm {
         //  static copy of the cuda runtime that's in use and foiling the
         //  hijack
         if(cudart_hijack_active) {
+	  printf("hijack\n");
           gpu_proc->gpu->module->cfg_task_context_sync = 0;
           if (!already_issued_hijack_enabled_warning) {
             already_issued_hijack_enabled_warning = true;
@@ -1607,7 +1608,7 @@ namespace Realm {
             log_gpu.warning() << "HIP hijack code not active"
                               << " - device synchronizations required after every GPU task!";
           }
-          gpu_proc->gpu->module->cfg_task_context_sync = 1;
+          //gpu_proc->gpu->module->cfg_task_context_sync = 1;
         }
 #else
         // without hijack or legacy sync requested, ctxsync is needed
