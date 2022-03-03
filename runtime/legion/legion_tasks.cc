@@ -2581,7 +2581,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_MAP_TASK_CALL);
-      // Do the traversals for all the non-early mapped regions and find
+      // Do the traversals for all the regions and find
       // their valid instances, then fill in the mapper input structure
       valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
@@ -5313,10 +5313,6 @@ namespace Legion {
       else
       {
         // Not remote
-        // If we're doing a must epoch launch then we don't
-        // need to early map any regions because any interfering
-        // regions that would be handled by this will be handled
-        // by the map_must_epoch call
         if (must_epoch == NULL)
           premap_task();
         if (is_origin_mapped())
@@ -8575,7 +8571,6 @@ namespace Legion {
       compute_parent_indexes(); 
       // Count how many total points we need for this index space task
       total_points = index_domain.get_volume();
-      // Annotate any regions which are going to need to be early mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         RegionRequirement &req = regions[idx];
