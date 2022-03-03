@@ -10047,6 +10047,7 @@ namespace Legion {
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       IndexTask *task;
       derez.deserialize(task);
       DomainPoint point;
@@ -10062,6 +10063,7 @@ namespace Legion {
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       IndexTask *task;
       derez.deserialize(task);
       DomainPoint point, next;
@@ -11718,9 +11720,12 @@ namespace Legion {
           const RtUserEvent temp_event = Runtime::create_rt_user_event();
           // Send the message to the owner to go find it
           Serializer rez;
-          rez.serialize(index_owner);
-          rez.serialize(point);
-          rez.serialize(temp_event);
+          {
+            RezCheck z(rez);
+            rez.serialize(index_owner);
+            rez.serialize(point);
+            rez.serialize(temp_event);
+          }
           runtime->send_slice_find_intra_space_dependence(orig_proc, rez);
           // Save this is for ourselves
           intra_space_dependences[point] = temp_event;
