@@ -7424,7 +7424,7 @@ namespace Legion {
             else
             {
 #ifdef LEGION_USE_CUDA
-#define CHECK_CUDA(cmd) do { \
+#define CHECK_CUDART(cmd) do { \
   CUresult ret = (cmd); \
   if (ret != CUDA_SUCCESS) { \
     const char *name, *str; \
@@ -7433,12 +7433,12 @@ namespace Legion {
     fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } \
-}
+} while (false)
               if (memory.kind() == Memory::GPU_FB_MEM)
-                CHECK_CUDA( cuMemFree((CUdeviceptr)ptr) );
+                CHECK_CUDART( cuMemFree((CUdeviceptr)ptr) );
               else
-                CHECK_CUDA( cuMemFreeHost((void*)ptr) );
-#undef CHECK_CUDA
+                CHECK_CUDART( cuMemFreeHost((void*)ptr) );
+#undef CHECK_CUDART
 #endif
 #ifdef LEGION_USE_HIP
 #define CHECK_HIP(cmd) do { \
@@ -7450,7 +7450,7 @@ namespace Legion {
     fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } \
-}
+} while (false)
               if (memory.kind() == Memory::GPU_FB_MEM)
                 CHECK_HIP( hipFree((void*)ptr) );
               else
