@@ -11046,15 +11046,15 @@ namespace Legion {
     fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } \
-}
+} while (false)
         case Memory::GPU_FB_MEM:
           {
-            cuMemFree((CUdeviceptr)ptr);
+            CHECK_CUDA( cuMemFree((CUdeviceptr)ptr) );
             break;
           }
         case Memory::Z_COPY_MEM:
           {
-            cuMemFreeHost((void*)ptr);
+            CHECK_CUDA( cuMemFreeHost((void*)ptr) );
             break;
           }
 #undef CHECK_CUDA
@@ -11069,7 +11069,7 @@ namespace Legion {
     fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
     abort(); \
   } \
-}
+} while (false)
         case Memory::GPU_FB_MEM:
           {
             CHECK_HIP( hipFree((void*)ptr) );
