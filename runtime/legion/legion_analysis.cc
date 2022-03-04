@@ -1932,6 +1932,7 @@ namespace Legion {
               Serializer rez;
               {
                 RezCheck z2(rez);
+                rez.serialize(REMOTE_TRACE_ACQUIRE_RELEASE);
                 rez.serialize(event_ptr);
                 rez.serialize(lhs);
                 rez.serialize(done);
@@ -1965,6 +1966,7 @@ namespace Legion {
         case REMOTE_TRACE_ISSUE_INDIRECT:
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
+        case REMOTE_TRACE_ACQUIRE_RELEASE:
 #ifdef LEGION_GPU_REDUCTIONS
         case REMOTE_TRACE_GPU_REDUCTION:
 #endif
