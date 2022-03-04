@@ -1835,13 +1835,27 @@ namespace Legion {
       }
 #endif
 #endif 
+      std::vector<Reservation> reservations;
+      // If we're doing a reduction operation then set the reduction
+      // information on the source-dst fields
+      if (reduction_op_id > 0)
+      {
+        // Get the reservations
+        reservations.resize(copy_mask.pop_count());
+        dst_view->find_field_reservations(copy_mask, reservations); 
+        // Set the redop on the destination fields
+        // Note that we can mark these as exclusive copies since
+        // we are protecting them with the reservations
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          dst_fields[idx].set_redop(reduction_op_id, false/*fold*/, 
+                                    true/*exclusive*/);
+      }
       const ApEvent result = copy_expression->issue_copy(trace_info, 
-                                         dst_fields, src_fields,
+                                         dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                                          source_manager->tree_id, tree_id,
 #endif
-                                         precondition, predicate_guard,
-                                         reduction_op_id, false/*fold*/); 
+                                         precondition, predicate_guard);
       if (result.exists())
       {
         const RtEvent collect_event = trace_info.get_collect_event();
