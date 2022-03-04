@@ -1856,7 +1856,7 @@ namespace Legion {
                            public LegionHeapify<UpdateAnalysis> {
     public:
       UpdateAnalysis(Runtime *rt, Operation *op, unsigned index,
-                     const RegionRequirement &req,
+                     const DomainPoint &point, const RegionRequirement &req,
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
                      std::vector<InstanceView*> &source_views,
@@ -1866,7 +1866,7 @@ namespace Legion {
                      const bool check_initialized, const bool record_valid,
                      const bool skip_output, const bool first_local = false);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
-                     Operation *op, unsigned index,
+                     Operation *op, unsigned index, const DomainPoint &point,
                      const RegionUsage &usage, RegionNode *node, 
                      InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
@@ -1906,10 +1906,9 @@ namespace Legion {
       static void handle_remote_updates(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
     public:
-      // TODO: make this const again after we update the runtime to 
-      // support collective views so that we don't need to modify 
-      // this field in ReplMapOp::trigger_mapping
-      /*const*/ RegionUsage usage;
+      const RegionUsage usage;
+      // Collective instance point
+      const DomainPoint point;
       RegionNode *const node;
       const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;

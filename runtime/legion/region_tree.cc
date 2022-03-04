@@ -2077,10 +2077,11 @@ namespace Legion {
         const DomainPoint local_point = op->get_collective_instance_point();
         const bool first_local = collective->is_first_local_point(local_point);
         CollectiveMapping *collective_mapping = collective->collective_mapping;
-        analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
-                                      targets, target_views, source_views, 
-                                      trace_info, collective_mapping, 
-                                      precondition,term_event,check_initialized,
+        analysis = new UpdateAnalysis(runtime, op, index, local_point, req,
+                                      region_node, targets, target_views,
+                                      source_views, trace_info, 
+                                      collective_mapping, precondition,
+                                      term_event, check_initialized,
                                       record_valid, skip_output, first_local);
         analysis->add_reference();
         // For collective instances, we need to make sure that we are on the
@@ -2148,7 +2149,8 @@ namespace Legion {
         // and things that are not simultaneous (simultaneous can appear 
         // uninitialized since it might be reading, but then use internal
         // synchronization to wait for something running concurrently to write)
-        analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
+        const DomainPoint empty;
+        analysis = new UpdateAnalysis(runtime, op, index, empty,req,region_node,
                                       targets, target_views, source_views, 
                                       trace_info, NULL/*collective mapping*/,
                                       precondition,term_event,check_initialized,
@@ -2251,7 +2253,7 @@ namespace Legion {
         {
           const FieldMask &inst_mask = targets[idx].get_valid_fields();
           analysis->target_views[idx]->find_atomic_reservations(inst_mask, 
-                                analysis->op, analysis->index, exclusive);
+                analysis->op, analysis->index, analysis->point, exclusive);
         }
       }
       // Perform any output copies (e.g. for restriction) that need to be done

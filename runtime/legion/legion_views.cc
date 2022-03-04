@@ -97,20 +97,6 @@ namespace Legion {
     { 
       if (manager->remove_nested_resource_ref(did))
         delete manager;
-      if (!atomic_reservations.empty())
-      {
-        // If this is the owner view, delete any atomic reservations
-        if (is_owner())
-        {
-          for (std::map<FieldID,Reservation>::iterator it = 
-                atomic_reservations.begin(); it != 
-                atomic_reservations.end(); it++)
-          {
-            it->second.destroy_reservation();
-          }
-        }
-        atomic_reservations.clear();
-      }
     }
 
 #ifdef ENABLE_VIEW_REPLICATION
@@ -145,167 +131,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceView::find_atomic_reservations(const FieldMask &mask,
-                                 Operation *op, const unsigned index, bool excl)
+       Operation *op, unsigned index, const DomainPoint &point, bool excl)
     //--------------------------------------------------------------------------
     {
-      std::vector<Reservation> reservations(mask.pop_count());
-      find_field_reservations(mask, reservations);
+      std::vector<Reservation> reservations;
+      find_field_reservations(mask, point, reservations); 
       for (unsigned idx = 0; idx < reservations.size(); idx++)
         op->update_atomic_locks(index, reservations[idx], excl);
     } 
 
     //--------------------------------------------------------------------------
     void InstanceView::find_field_reservations(const FieldMask &mask,
-                                         std::vector<Reservation> &reservations)
+               const DomainPoint &point, std::vector<Reservation> &reservations)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(mask.pop_count() == reservations.size());
-#endif
-      unsigned offset = 0;
-      if (is_owner())
-      {
-        AutoLock v_lock(view_lock);
-        for (int idx = mask.find_first_set(); idx >= 0;
-              idx = mask.find_next_set(idx+1))
-        {
-          std::map<unsigned,Reservation>::const_iterator finder = 
-            atomic_reservations.find(idx);
-          if (finder == atomic_reservations.end())
-          {
-            // Make a new reservation and add it to the set
-            Reservation handle = Reservation::create_reservation();
-            atomic_reservations[idx] = handle;
-            reservations[offset++] = handle;
-          }
-          else
-            reservations[offset++] = finder->second;
-        }
-      }
-      else
-      {
-        // Figure out which fields we need requests for and send them
-        FieldMask needed_fields;
-        {
-          AutoLock v_lock(view_lock, 1, false);
-          for (int idx = mask.find_first_set(); idx >= 0;
-                idx = mask.find_next_set(idx+1))
-          {
-            std::map<unsigned,Reservation>::const_iterator finder = 
-              atomic_reservations.find(idx);
-            if (finder == atomic_reservations.end())
-              needed_fields.set_bit(idx);
-            else
-              reservations[offset++] = finder->second;
-          }
-        }
-        if (!!needed_fields)
-        {
-          RtUserEvent wait_on = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(needed_fields);
-            rez.serialize(wait_on);
-          }
-          runtime->send_atomic_reservation_request(owner_space, rez);
-          wait_on.wait();
-          // Now retake the lock and get the remaining reservations
-          AutoLock v_lock(view_lock, 1, false);
-          for (int idx = needed_fields.find_first_set(); idx >= 0;
-                idx = needed_fields.find_next_set(idx+1))
-          {
-            std::map<unsigned,Reservation>::const_iterator finder =
-              atomic_reservations.find(idx);
-#ifdef DEBUG_LEGION
-            assert(finder != atomic_reservations.end());
-#endif
-            reservations[offset++] = finder->second;
-          }
-        }
-      }
-#ifdef DEBUG_LEGION
-      assert(offset == reservations.size());
-#endif
-      // Sort them before returning
+      RtEvent ready = manager->find_field_reservations(mask, this->did,
+          point, &reservations, runtime->address_space,
+          RtUserEvent::NO_RT_USER_EVENT);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      // Sort them into order if necessary
       if (reservations.size() > 1)
         std::sort(reservations.begin(), reservations.end());
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_send_atomic_reservation_request(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      FieldMask needed_fields;
-      derez.deserialize(needed_fields);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      InstanceView *target = dynamic_cast<InstanceView*>(dc);
-      assert(target != NULL);
-#else
-      InstanceView *target = static_cast<InstanceView*>(dc);
-#endif
-      std::vector<Reservation> reservations(needed_fields.pop_count());
-      target->find_field_reservations(needed_fields, reservations);
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(did);
-        rez.serialize(needed_fields);
-        for (unsigned idx = 0; idx < reservations.size(); idx++)
-          rez.serialize(reservations[idx]);
-        rez.serialize(to_trigger);
-      }
-      runtime->send_atomic_reservation_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceView::update_field_reservations(const FieldMask &mask,
-                                   const std::vector<Reservation> &reservations)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(mask.pop_count() == reservations.size());
-#endif
-      unsigned offset = 0;
-      AutoLock v_lock(view_lock);
-      for (int idx = mask.find_first_set(); idx >= 0;
-            idx = mask.find_next_set(idx+1))
-        atomic_reservations[idx] = reservations[offset++];
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_send_atomic_reservation_response(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      FieldMask mask;
-      derez.deserialize(mask);
-      std::vector<Reservation> reservations(mask.pop_count());
-      for (unsigned idx = 0; idx < reservations.size(); idx++)
-        derez.deserialize(reservations[idx]);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      InstanceView *target = dynamic_cast<InstanceView*>(dc);
-      assert(target != NULL);
-#else
-      InstanceView *target = static_cast<InstanceView*>(dc);
-#endif
-      target->update_field_reservations(mask, reservations);
-      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------

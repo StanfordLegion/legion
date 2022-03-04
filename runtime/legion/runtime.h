@@ -3445,8 +3445,7 @@ namespace Legion {
       void handle_did_remote_unregister(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
-      void handle_send_atomic_reservation_request(Deserializer &derez,
-                                                  AddressSpaceID source);
+      void handle_send_atomic_reservation_request(Deserializer &derez);
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);

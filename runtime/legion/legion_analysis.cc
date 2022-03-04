@@ -7196,8 +7196,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     UpdateAnalysis::UpdateAnalysis(Runtime *rt, Operation *o, unsigned idx,
-                     const RegionRequirement &req, RegionNode *rn, 
-                     const InstanceSet &target_insts,
+                     const DomainPoint &p, const RegionRequirement &req,
+                     RegionNode *rn, const InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      std::vector<InstanceView*> &source_vws,
                      const PhysicalTraceInfo &t_info,
@@ -7207,7 +7207,7 @@ namespace Legion {
                      const bool skip, const bool first_local)
       : PhysicalAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
           false/*immutable*/, mapping, IS_WRITE(req), first_local),
-        usage(req), node(rn), target_instances(target_insts), 
+        usage(req), point(p), node(rn), target_instances(target_insts), 
         target_views(target_vws), source_views(source_vws), trace_info(t_info),
         precondition(pre), term_event(term),
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
@@ -7219,8 +7219,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     UpdateAnalysis::UpdateAnalysis(Runtime *rt, AddressSpaceID src, 
                      AddressSpaceID prev, Operation *o, unsigned idx, 
-                     const RegionUsage &use, RegionNode *rn, 
-                     InstanceSet &target_insts,
+                     const DomainPoint &p, const RegionUsage &use,
+                     RegionNode *rn, InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      std::vector<InstanceView*> &source_vws,
                      const PhysicalTraceInfo &info, CollectiveMapping *mapping,
@@ -7229,7 +7229,7 @@ namespace Legion {
                      const bool record, const bool skip, const bool first_local)
       : PhysicalAnalysis(rt, src, prev, o, idx, rn->row_source, true/*on heap*/,
           false/*immutable*/, mapping, IS_WRITE(use), first_local),
-        usage(use), node(rn), target_instances(target_insts), 
+        usage(use), point(p), node(rn), target_instances(target_insts), 
         target_views(target_vws), source_views(source_vws), trace_info(info), 
         precondition(pre), term_event(term),
         check_initialized(check), record_valid(record), skip_output(skip), 
@@ -7240,12 +7240,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     UpdateAnalysis::UpdateAnalysis(const UpdateAnalysis &rhs)
-      : PhysicalAnalysis(rhs), usage(rhs.usage), node(rhs.node), 
-        target_instances(rhs.target_instances), target_views(rhs.target_views),
-        source_views(rhs.source_views), trace_info(rhs.trace_info), 
-        precondition(rhs.precondition), term_event(rhs.term_event), 
-        check_initialized(rhs.check_initialized),record_valid(rhs.record_valid),
-        skip_output(rhs.skip_output)
+      : PhysicalAnalysis(rhs), usage(rhs.usage), point(rhs.point), 
+        node(rhs.node), target_instances(rhs.target_instances), 
+        target_views(rhs.target_views), source_views(rhs.source_views),
+        trace_info(rhs.trace_info), precondition(rhs.precondition),
+        term_event(rhs.term_event), check_initialized(rhs.check_initialized),
+        record_valid(rhs.record_valid), skip_output(rhs.skip_output)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7356,6 +7356,7 @@ namespace Legion {
           }
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
+          rez.serialize(point);
           rez.serialize(node->handle);
           rez.serialize(usage);
           rez.serialize<size_t>(target_instances.size());
@@ -7537,6 +7538,8 @@ namespace Legion {
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
+      DomainPoint point;
+      derez.deserialize(point);
       LogicalRegion handle;
       derez.deserialize(handle);
       RegionUsage usage;
@@ -7607,9 +7610,10 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(handle);
       // This takes ownership of the remote operation
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
-          previous, op, index, usage, node, targets, target_views, source_views,
-          trace_info, collective_mapping, remote_user_registered, precondition,
-          term_event, check_initialized, record_valid, skip_output,first_local);
+          previous, op, index, point, usage, node, targets, target_views,
+          source_views, trace_info, collective_mapping, remote_user_registered,
+          precondition, term_event, check_initialized, record_valid, 
+          skip_output, first_local);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready

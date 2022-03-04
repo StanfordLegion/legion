@@ -195,15 +195,11 @@ namespace Legion {
                    std::vector<CopySrcDstField> &src_fields) = 0;
     public:
       void find_atomic_reservations(const FieldMask &mask, Operation *op, 
-                                    const unsigned index, bool exclusive);
+                                    const unsigned index,
+                                    const DomainPoint &point, bool exclusive);
       void find_field_reservations(const FieldMask &mask,
+                                   const DomainPoint &point,
                                    std::vector<Reservation> &results);
-      static void handle_send_atomic_reservation_request(Runtime *runtime,
-                                  Deserializer &derez, AddressSpaceID source);
-      void update_field_reservations(const FieldMask &mask,
-                                  const std::vector<Reservation> &reservations);
-      static void handle_send_atomic_reservation_response(Runtime *runtime,
-                                                          Deserializer &derez);
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -228,11 +224,6 @@ namespace Legion {
       // If you ever make this non-const then be sure to update the
       // code in register_collective_user
       const AddressSpaceID logical_owner;
-    private:
-      // Keep track of the locks used for managing atomic coherence
-      // on individual fields of this materialized view. Only the
-      // top-level view for an instance needs to track this.
-      std::map<unsigned,Reservation> atomic_reservations;
     };
 
     /**

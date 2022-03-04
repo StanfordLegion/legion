@@ -1241,6 +1241,7 @@ namespace Legion {
       // context UID since there might be several shards on this node
       if (key.first > 0)
         key.second = 0;
+      std::vector<Reservation> to_delete;
       {
         AutoLock inst(inst_lock);
         std::set<InnerContext*>::iterator finder = 
@@ -1259,10 +1260,16 @@ namespace Legion {
         assert(view_finder->second.second > 0);
 #endif
         if (--view_finder->second.second == 0)
+        {
+          reclaim_field_reservations(view_finder->second.first->did, to_delete);
           context_views.erase(view_finder);
+        }
       }
       if (own_ctx->remove_reference())
         delete context;
+      for (std::vector<Reservation>::iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+        it->destroy_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -1561,6 +1568,68 @@ namespace Legion {
         delete rargs->mapping;
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_atomic_reservation_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      PhysicalManager *manager = 
+        runtime->find_or_request_instance_manager(did, ready);
+      FieldMask mask;
+      derez.deserialize(mask);
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      DomainPoint point;
+      derez.deserialize(point);
+      std::vector<Reservation> *target;
+      derez.deserialize(target);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      manager->find_field_reservations(mask, view_did, point, target, 
+                                       source, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_atomic_reservation_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      PhysicalManager *manager = 
+        runtime->find_or_request_instance_manager(did, ready);
+      FieldMask mask;
+      derez.deserialize(mask);
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      DomainPoint point;
+      derez.deserialize(point);
+      std::vector<Reservation> *target;
+      derez.deserialize(target);
+      size_t num_reservations;
+      derez.deserialize(num_reservations);
+      target->resize(num_reservations);
+      for (unsigned idx = 0; idx < num_reservations; idx++)
+        derez.deserialize((*target)[idx]);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      manager->update_field_reservations(mask, view_did, point, *target);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      Runtime::trigger_event(to_trigger);
+    }
+
 #ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_create_shadow_request(
@@ -1731,6 +1800,15 @@ namespace Legion {
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner() && !shadow_instance)
         memory_manager->unregister_remote_instance(this);
+      if (is_owner())
+      {
+        for (std::map<DistributedID,std::map<unsigned,Reservation> >::iterator 
+              it1 = view_reservations.begin();
+              it1 != view_reservations.end(); it1++)
+          for (std::map<unsigned,Reservation>::iterator it2 =
+                it1->second.begin(); it2 != it1->second.end(); it2++)
+            it2->second.destroy_reservation();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2057,8 +2135,8 @@ namespace Legion {
       if (reduction_op_id > 0)
       {
         // Get the reservations
-        reservations.resize(copy_mask.pop_count());
-        dst_view->find_field_reservations(copy_mask, reservations); 
+        const DomainPoint nopoint;
+        dst_view->find_field_reservations(copy_mask, nopoint, reservations);
         // Set the redop on the destination fields
         // Note that we can mark these as exclusive copies since
         // we are protecting them with the reservations
@@ -2113,6 +2191,141 @@ namespace Legion {
                                    unique_event,
 #endif
                                    fields);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndividualManager::find_field_reservations(const FieldMask &mask,
+                               DistributedID view_did, const DomainPoint &point,
+                               std::vector<Reservation> *reservations,
+                               AddressSpaceID source, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Reservation> results;
+      if (is_owner())
+      {
+        results.reserve(mask.pop_count());
+        // We're the owner so we can make all the fields
+        AutoLock i_lock(inst_lock);
+        std::map<unsigned,Reservation> &atomic_reservations =
+          view_reservations[view_did];
+        for (int idx = mask.find_first_set(); idx >= 0;
+              idx = mask.find_next_set(idx+1))
+        {
+          std::map<unsigned,Reservation>::const_iterator finder =
+            atomic_reservations.find(idx);
+          if (finder == atomic_reservations.end())
+          {
+            // Make a new reservation and add it to the set
+            Reservation handle = Reservation::create_reservation();
+            atomic_reservations[idx] = handle;
+            results.push_back(handle);
+          }
+          else
+            results.push_back(finder->second);
+        }
+      }
+      else
+      {
+        // See if we can find them all locally
+        {
+          AutoLock i_lock(inst_lock, 1, false/*exclusive*/);
+          const std::map<unsigned,Reservation> &atomic_reservations =
+            view_reservations[view_did];
+          for (int idx = mask.find_first_set(); idx >= 0;
+                idx = mask.find_next_set(idx+1))
+          {
+            std::map<unsigned,Reservation>::const_iterator finder =
+              atomic_reservations.find(idx);
+            if (finder != atomic_reservations.end())
+              results.push_back(finder->second);
+            else
+              break;
+          }
+        }
+        if (results.size() < mask.pop_count())
+        {
+          // Couldn't find them all so send the request to the owner
+          if (!to_trigger.exists())
+            to_trigger = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(mask);
+            rez.serialize(view_did);
+            rez.serialize(point);
+            rez.serialize(reservations);
+            rez.serialize(source);
+            rez.serialize(to_trigger);
+          }
+          runtime->send_atomic_reservation_request(owner_space, rez);
+          return to_trigger;
+        }
+      }
+      if (source != local_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_trigger.exists());
+#endif
+        // Send the result back to the source
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(mask);
+          rez.serialize(view_did);
+          rez.serialize(point);
+          rez.serialize(reservations);
+          rez.serialize<size_t>(results.size());
+          for (std::vector<Reservation>::const_iterator it =
+                results.begin(); it != results.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_atomic_reservation_response(source, rez);
+      }
+      else
+      {
+        reservations->swap(results);
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+      }
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualManager::update_field_reservations(const FieldMask &mask,
+                               DistributedID view_did, const DomainPoint &point,
+                               const std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+#endif
+      AutoLock i_lock(inst_lock);
+      std::map<unsigned,Reservation> &atomic_reservations =
+          view_reservations[view_did];
+      unsigned offset = 0;
+      for (int idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
+        atomic_reservations[idx] = reservations[offset++];
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualManager::reclaim_field_reservations(DistributedID view_did,
+                                            std::vector<Reservation> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+        return;
+      std::map<DistributedID,std::map<unsigned,Reservation> >::iterator
+        finder = view_reservations.find(view_did);
+      if (finder == view_reservations.end())
+        return;
+      for (std::map<unsigned,Reservation>::const_iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
+        to_delete.push_back(it->second);
+      view_reservations.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -2503,12 +2716,13 @@ namespace Legion {
       // while we are doing the deletion. We know that there
       // will be no more additions because we are being deleted
       std::set<InnerContext*> copy_active_contexts;
+      std::map<DistributedID,std::map<unsigned,Reservation> > copy_view_atomics;
       {
         AutoLock inst(inst_lock);
         if (active_contexts.empty())
           return;
-        copy_active_contexts = active_contexts;
-        active_contexts.clear();
+        copy_active_contexts.swap(active_contexts);
+        copy_view_atomics.swap(view_reservations);
 #ifdef DEBUG_LEGION
         assert(pending_views.empty());
 #endif
@@ -2520,6 +2734,16 @@ namespace Legion {
         (*it)->notify_instance_deletion(const_cast<IndividualManager*>(this));
         if ((*it)->remove_reference())
           delete (*it);
+      }
+      // Clean up any reservations that we own associated with this instance
+      if (is_owner())
+      {
+        for (std::map<DistributedID,std::map<unsigned,Reservation> >::iterator 
+              it1 = copy_view_atomics.begin();
+              it1 != copy_view_atomics.end(); it1++)
+          for (std::map<unsigned,Reservation>::iterator it2 =
+                it1->second.begin(); it2 != it1->second.end(); it2++)
+            it2->second.destroy_reservation();
       }
     }
 
@@ -2928,6 +3152,18 @@ namespace Legion {
         delete point_space;
       if (is_owner())
         collective_barrier.destroy_barrier();
+      for (std::map<std::pair<DistributedID,DomainPoint>,
+                    std::map<unsigned,Reservation> >::iterator it1 =
+            view_reservations.begin(); it1 != view_reservations.end(); it1++)
+      {
+        // Skip any non-local points
+        if (std::find(instance_points.begin(), instance_points.end(), 
+                      it1->first.second) == instance_points.end())
+          continue;
+        for (std::map<unsigned,Reservation>::iterator it2 =
+              it1->second.begin(); it2 != it1->second.end(); it2++)
+          it2->second.destroy_reservation();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3937,12 +4173,14 @@ namespace Legion {
       // while we are doing the deletion. We know that there
       // will be no more additions because we are being deleted
       std::set<InnerContext*> copy_active_contexts;
+      std::map<std::pair<DistributedID,DomainPoint>,
+                std::map<unsigned,Reservation> > copy_view_atomics;
       {
         AutoLock inst(inst_lock);
         if (active_contexts.empty())
           return;
-        copy_active_contexts = active_contexts;
-        active_contexts.clear();
+        copy_active_contexts.swap(active_contexts);
+        copy_view_atomics.swap(view_reservations);
 #ifdef DEBUG_LEGION
         assert(pending_views.empty());
 #endif
@@ -3954,6 +4192,19 @@ namespace Legion {
         (*it)->notify_instance_deletion(this);
         if ((*it)->remove_reference())
           delete (*it);
+      }
+      // Clean up any reservations that we own associated with this instance
+      for (std::map<std::pair<DistributedID,DomainPoint>,
+                    std::map<unsigned,Reservation> >::iterator it1 =
+            copy_view_atomics.begin(); it1 != copy_view_atomics.end(); it1++)
+      {
+        // Skip any non-local points
+        if (std::find(instance_points.begin(), instance_points.end(), 
+                      it1->first.second) == instance_points.end())
+          continue;
+        for (std::map<unsigned,Reservation>::iterator it2 =
+              it1->second.begin(); it2 != it1->second.end(); it2++)
+          it2->second.destroy_reservation();
       }
     }
 
@@ -4625,6 +4876,161 @@ namespace Legion {
       else
         Runtime::trigger_event(finder->second.applied, applied);
       rendezvous_users.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveManager::find_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                std::vector<Reservation> *reservations,
+                                AddressSpaceID source, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(point.get_dim() > 0);
+      assert((point_space == NULL) || point_space->contains_point(point));
+#endif
+      std::vector<Reservation> results;
+      // Check to see if it is a local point or not
+      const bool is_local = 
+        (std::find(instance_points.begin(), instance_points.end(), point) !=
+         instance_points.end());
+      const std::pair<DistributedID,DomainPoint> key(view_did, point);
+      if (is_local)
+      {
+        results.reserve(mask.pop_count());
+        // We're the owner so we can make all the fields
+        AutoLock i_lock(inst_lock);
+        std::map<unsigned,Reservation> &atomic_reservations =
+          view_reservations[key];
+        for (int idx = mask.find_first_set(); idx >= 0;
+              idx = mask.find_next_set(idx+1))
+        {
+          std::map<unsigned,Reservation>::const_iterator finder =
+            atomic_reservations.find(idx);
+          if (finder == atomic_reservations.end())
+          {
+            // Make a new reservation and add it to the set
+            Reservation handle = Reservation::create_reservation();
+            atomic_reservations[idx] = handle;
+            results.push_back(handle);
+          }
+          else
+            results.push_back(finder->second);
+        }
+      }
+      else
+      {
+        // See if we can find them all locally
+        {
+          AutoLock i_lock(inst_lock, 1, false/*exclusive*/);
+          const std::map<unsigned,Reservation> &atomic_reservations =
+            view_reservations[key];
+          for (int idx = mask.find_first_set(); idx >= 0;
+                idx = mask.find_next_set(idx+1))
+          {
+            std::map<unsigned,Reservation>::const_iterator finder =
+              atomic_reservations.find(idx);
+            if (finder != atomic_reservations.end())
+              results.push_back(finder->second);
+            else
+              break;
+          }
+        }
+        if (results.size() < mask.pop_count())
+        {
+          // Couldn't find them all so send the request to the node
+          // that should own the instance
+          if (!to_trigger.exists())
+            to_trigger = Runtime::create_rt_user_event();
+          const PhysicalInstance inst = get_instance(point);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(mask);
+            rez.serialize(view_did);
+            rez.serialize(point);
+            rez.serialize(reservations);
+            rez.serialize(source);
+            rez.serialize(to_trigger);
+          }
+          runtime->send_atomic_reservation_request(inst.address_space(), rez);
+          return to_trigger;
+        }
+      }
+      if (source != local_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_trigger.exists());
+#endif
+        // Send the result back to the source
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(mask);
+          rez.serialize(view_did);
+          rez.serialize(point);
+          rez.serialize(reservations);
+          rez.serialize<size_t>(results.size());
+          for (std::vector<Reservation>::const_iterator it =
+                results.begin(); it != results.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_atomic_reservation_response(source, rez);
+      }
+      else
+      {
+        reservations->swap(results);
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+      }
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::update_field_reservations(const FieldMask &mask,
+                               DistributedID view_did, const DomainPoint &point,
+                               const std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(point.get_dim() > 0);
+      assert((point_space == NULL) || point_space->contains_point(point));
+      // This should be a local point
+      assert(std::find(instance_points.begin(), instance_points.end(), point) !=
+              instance_points.end());
+#endif
+      const std::pair<DistributedID,DomainPoint> key(view_did, point);
+      AutoLock i_lock(inst_lock);
+      std::map<unsigned,Reservation> &atomic_reservations =
+          view_reservations[key];
+      unsigned offset = 0;
+      for (int idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
+        atomic_reservations[idx] = reservations[offset++];
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::reclaim_field_reservations(DistributedID view_did,
+                                            std::vector<Reservation> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<DomainPoint>::const_iterator it =
+            instance_points.begin(); it != instance_points.end(); it++)
+      {
+        const std::pair<DistributedID,DomainPoint> key(view_did, *it);
+        std::map<std::pair<DistributedID,DomainPoint>,
+                  std::map<unsigned,Reservation> >::iterator finder =
+                    view_reservations.find(key);
+        if (finder == view_reservations.end())
+          continue;
+        for (std::map<unsigned,Reservation>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+          to_delete.push_back(it->second);
+        view_reservations.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------

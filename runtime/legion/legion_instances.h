@@ -359,6 +359,17 @@ namespace Legion {
                                 const AddressSpaceID source,
                                 bool symbolic) = 0;
     public:
+      virtual RtEvent find_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                std::vector<Reservation> *reservations,
+                                AddressSpaceID source,
+                                RtUserEvent to_trigger) = 0;
+      virtual void update_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                const std::vector<Reservation> &rsrvs) = 0;
+      virtual void reclaim_field_reservations(DistributedID view_did,
+                                std::vector<Reservation> &to_delete) = 0;
+    public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
@@ -422,6 +433,11 @@ namespace Legion {
                                           AddressSpaceID source);
       static void handle_top_view_response(Deserializer &derez);
       static void handle_top_view_creation(const void *args, Runtime *runtime);
+    public:
+      static void handle_atomic_reservation_request(Runtime *runtime,
+                                                    Deserializer &derez);
+      static void handle_atomic_reservation_response(Runtime *runtime,
+                                                     Deserializer &derez);
     public:
       size_t instance_footprint;
       const ReductionOp *reduction_op;
@@ -614,6 +630,17 @@ namespace Legion {
                                 const AddressSpaceID source,
                                 bool symbolic);
     public:
+      virtual RtEvent find_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                std::vector<Reservation> *reservations,
+                                AddressSpaceID source,
+                                RtUserEvent to_trigger);
+      virtual void update_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                const std::vector<Reservation> &rsrvs);
+      virtual void reclaim_field_reservations(DistributedID view_did,
+                                std::vector<Reservation> &to_delete);
+    public:
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
@@ -680,6 +707,8 @@ namespace Legion {
       // to this manager. Valid only when the kind is UNBOUND
       // initially, otherwise NO_AP_EVENT.
       const ApEvent producer_event;
+    protected:
+      std::map<DistributedID,std::map<unsigned,Reservation> > view_reservations;
     };
 
     /**
@@ -879,6 +908,17 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 const AddressSpaceID source,
                                 bool symbolic);
+    public:
+      virtual RtEvent find_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                std::vector<Reservation> *reservations,
+                                AddressSpaceID source,
+                                RtUserEvent to_trigger);
+      virtual void update_field_reservations(const FieldMask &mask,
+                                DistributedID view_did,const DomainPoint &point,
+                                const std::vector<Reservation> &rsrvs);
+      virtual void reclaim_field_reservations(DistributedID view_did,
+                                std::vector<Reservation> &to_delete);
     protected:
       void finalize_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
@@ -949,6 +989,9 @@ namespace Legion {
         unsigned remaining_remote_arrivals;
       };
       std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
+    protected:
+      std::map<std::pair<DistributedID,DomainPoint>,
+                std::map<unsigned,Reservation> > view_reservations;
     protected:
       ApBarrier collective_barrier;
       RtEvent detached;

@@ -12327,8 +12327,7 @@ namespace Legion {
             }
           case SEND_ATOMIC_RESERVATION_REQUEST:
             {
-              runtime->handle_send_atomic_reservation_request(derez,
-                                                      remote_address_space);
+              runtime->handle_send_atomic_reservation_request(derez);
               break;
             }
           case SEND_ATOMIC_RESERVATION_RESPONSE:
@@ -24134,18 +24133,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_atomic_reservation_request(Deserializer &derez,
-                                                         AddressSpaceID source)
+    void Runtime::handle_send_atomic_reservation_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_send_atomic_reservation_request(this, derez, source);
+      PhysicalManager::handle_atomic_reservation_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_send_atomic_reservation_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_send_atomic_reservation_response(this, derez);
+      PhysicalManager::handle_atomic_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
