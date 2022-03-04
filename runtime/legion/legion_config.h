@@ -1471,7 +1471,7 @@ typedef enum legion_region_flags_t {
   LEGION_VERIFIED_FLAG       = 0x00000001,
   LEGION_NO_ACCESS_FLAG      = 0x00000002, // Deprecated, user SpecializedConstraint
   LEGION_RESTRICTED_FLAG     = 0x00000004,
-  LEGION_MUST_PREMAP_FLAG    = 0x00000008,
+  LEGION_MUST_PREMAP_FLAG    = 0x00000008, // Deprecated, no longer used
   // For non-trivial projection functions: 
   // tell the runtime the write is complete,
   // will be ignored for non-index space launches

@@ -348,6 +348,44 @@ namespace Legion {
     {
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskInput::PremapTaskInput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskInput::~PremapTaskInput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskOutput::PremapTaskOutput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::PremapTaskOutput::~PremapTaskOutput(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
     /////////////////////////////////////////////////////////////
     // MapperRuntime
     /////////////////////////////////////////////////////////////

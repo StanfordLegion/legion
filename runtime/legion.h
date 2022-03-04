@@ -1060,8 +1060,9 @@ namespace Legion {
         { return (flags & LEGION_NO_ACCESS_FLAG); }
       inline bool is_restricted(void) const 
         { return (flags & LEGION_RESTRICTED_FLAG); }
+      LEGION_DEPRECATED("Premapping regions is no longer supported.") 
       inline bool must_premap(void) const
-        { return (flags & LEGION_MUST_PREMAP_FLAG); }
+        { return false; }
     public:
       const void* get_projection_args(size_t *size) const;
       void set_projection_args(const void *args, size_t size, bool own = false);

@@ -3494,14 +3494,25 @@ namespace Realm {
 
                 void *out_ptr = reinterpret_cast<void *>(out_base + out_offset);
                 const void *in_ptr = reinterpret_cast<const void *>(in_base + in_offset);
-                if(redop_info.is_fold)
-                  (redop->cpu_fold_nonexcl_fn)(out_ptr, ostride,
+                if(redop_info.is_fold) {
+                  if(redop_info.is_exclusive)
+                    (redop->cpu_fold_excl_fn)(out_ptr, ostride,
+                                              in_ptr, istride,
+                                              elems, redop->userdata);
+                  else
+                    (redop->cpu_fold_nonexcl_fn)(out_ptr, ostride,
+                                                 in_ptr, istride,
+                                                 elems, redop->userdata);
+                } else {
+                  if (redop_info.is_exclusive)
+                    (redop->cpu_apply_excl_fn)(out_ptr, ostride,
                                                in_ptr, istride,
                                                elems, redop->userdata);
-                else
-                  (redop->cpu_apply_nonexcl_fn)(out_ptr, ostride,
-                                                in_ptr, istride,
-                                                elems, redop->userdata);
+                  else
+                    (redop->cpu_apply_nonexcl_fn)(out_ptr, ostride,
+                                                  in_ptr, istride,
+                                                  elems, redop->userdata);
+                }
 
                 in_alc.advance(in_dim-1,
                                elems * ((in_dim == 1) ? in_elem_size : 1));

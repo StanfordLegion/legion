@@ -1174,7 +1174,6 @@ namespace Legion {
       TASK_PRIVILEGE_CHECK_CALL,
       CLONE_TASK_CALL,
       COMPUTE_POINT_REQUIREMENTS_CALL,
-      EARLY_MAP_REGIONS_CALL,
       INTRA_TASK_ALIASING_CALL,
       ACTIVATE_SINGLE_CALL,
       DEACTIVATE_SINGLE_CALL,
@@ -1230,7 +1229,7 @@ namespace Legion {
       INDEX_ACTIVATE_CALL,
       INDEX_DEACTIVATE_CALL,
       INDEX_COMPUTE_FAT_PATH_CALL,
-      INDEX_EARLY_MAP_TASK_CALL,
+      INDEX_PREMAP_TASK_CALL,
       INDEX_DISTRIBUTE_CALL,
       INDEX_PERFORM_MAPPING_CALL,
       INDEX_COMPLETE_CALL,
@@ -1323,7 +1322,6 @@ namespace Legion {
       "Task Privilege Check",                                         \
       "Clone Base Task",                                              \
       "Compute Point Requirements",                                   \
-      "Early Map Regions",                                            \
       "Intra-Task Aliasing",                                          \
       "Activate Single",                                              \
       "Deactivate Single",                                            \
@@ -1379,7 +1377,7 @@ namespace Legion {
       "Index Activate",                                               \
       "Index Deactivate",                                             \
       "Index Compute Fat Path",                                       \
-      "Index Early Map Task",                                         \
+      "Index PreMap Task",                                            \
       "Index Distribute",                                             \
       "Index Perform Mapping",                                        \
       "Index Complete",                                               \

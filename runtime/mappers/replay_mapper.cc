@@ -232,13 +232,6 @@ namespace Legion {
                                          PremapTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
-      TaskMappingInfo *mapping = find_task_mapping(ctx, task, task.index_point);
-      output.new_target_proc = mapping->target_proc;
-      for (std::map<unsigned,RequirementMapping*>::const_iterator it = 
-            mapping->premappings.begin(); it != 
-            mapping->premappings.end(); it++)
-        it->second->map_requirement(runtime, ctx,task.regions[it->first].parent,
-                                    output.premapped_instances[it->first]);
     }
 
     //--------------------------------------------------------------------------
@@ -1047,14 +1040,6 @@ namespace Legion {
       ignore_result(fread(&info->target_proc, sizeof(info->target_proc), 1, f));
       ignore_result(fread(&info->priority, sizeof(info->priority), 1, f));
       ignore_result(fread(&info->variant, sizeof(info->variant), 1, f));
-      unsigned num_premappings;
-      ignore_result(fread(&num_premappings, sizeof(num_premappings), 1, f));
-      for (unsigned idx = 0; idx < num_premappings; idx++)
-      {
-        unsigned index;
-        ignore_result(fread(&index, sizeof(index), 1, f));
-        info->premappings[index] = unpack_requirement(f);
-      }
       unsigned num_mappings;
       ignore_result(fread(&num_mappings, sizeof(num_mappings), 1, f));
       info->mappings.resize(num_mappings);
