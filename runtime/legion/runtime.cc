@@ -2748,7 +2748,7 @@ namespace Legion {
         Realm::CopySrcDstField src, dst;
         src.set_field(source->get_instance(), 0/*field id*/, 1);
         dst.set_field(get_instance(), 0/*field id*/, 1);
-        dst.set_redop(redop_id, true/*fold*/);
+        dst.set_redop(redop_id, true/*fold*/, exclusive);
         std::vector<Realm::CopySrcDstField> srcs(1, src);
         std::vector<Realm::CopySrcDstField> dsts(1, dst);
         Realm::ProfilingRequestSet requests;

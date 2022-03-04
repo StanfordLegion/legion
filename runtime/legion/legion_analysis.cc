@@ -676,14 +676,13 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+                                 const std::vector<Reservation>& reservations,
 #ifdef LEGION_SPY
                                              RegionTreeID src_tree_id,
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition, 
-                                             PredEvent pred_guard,
-                                             ReductionOpID redop,
-                                             bool reduction_fold)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -711,25 +710,27 @@ namespace Legion {
             pack_src_dst_field(rez, src_fields[idx]);
             pack_src_dst_field(rez, dst_fields[idx]);
           }
+          rez.serialize<size_t>(reservations.size());
+          for (unsigned idx = 0; idx < reservations.size(); idx++)
+            rez.serialize(reservations[idx]);
 #ifdef LEGION_SPY
           rez.serialize(src_tree_id);
           rez.serialize(dst_tree_id);
 #endif
           rez.serialize(precondition);
           rez.serialize(pred_guard);
-          rez.serialize(redop);
-          rez.serialize<bool>(reduction_fold); 
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
         done.wait();
       }
       else
-        remote_tpl->record_issue_copy(memo, lhs, expr, src_fields, dst_fields,
+        remote_tpl->record_issue_copy(memo, lhs, expr, src_fields,
+                              dst_fields, reservations,
 #ifdef LEGION_SPY
                               src_tree_id, dst_tree_id,
 #endif
-                              precondition, pred_guard, redop, reduction_fold);
+                              precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -1427,6 +1428,11 @@ namespace Legion {
               unpack_src_dst_field(derez, src_fields[idx]);
               unpack_src_dst_field(derez, dst_fields[idx]);
             }
+            size_t num_reservations;
+            derez.deserialize(num_reservations);
+            std::vector<Reservation> reservations(num_reservations);
+            for (unsigned idx = 0; idx < num_reservations; idx++)
+              derez.deserialize(reservations[idx]);
 #ifdef LEGION_SPY
             RegionTreeID src_tree_id, dst_tree_id;
             derez.deserialize(src_tree_id);
@@ -1436,20 +1442,15 @@ namespace Legion {
             derez.deserialize(precondition);
             PredEvent pred_guard;
             derez.deserialize(pred_guard);
-            ReductionOpID redop;
-            derez.deserialize(redop);
-            bool reduction_fold;
-            derez.deserialize<bool>(reduction_fold);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
             tpl->record_issue_copy(memo, lhs, expr,
-                                   src_fields, dst_fields,
+                                   src_fields, dst_fields, reservations,
 #ifdef LEGION_SPY
                                    src_tree_id, dst_tree_id,
 #endif
-                                   precondition, pred_guard,
-                                   redop, reduction_fold);
+                                   precondition, pred_guard);
             if (lhs != lhs_copy)
             {
               Serializer rez;

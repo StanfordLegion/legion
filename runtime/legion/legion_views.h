@@ -777,10 +777,6 @@ namespace Legion {
                                       IndexSpaceExpression *user_expr,
                                       UniqueID op_id,
                                       std::set<ApEvent> &preconditions) const;
-      void find_reducing_preconditions(const FieldMask &user_mask,
-                                       IndexSpaceExpression *user_expr,
-                                       UniqueID op_id,
-                                       std::set<ApEvent> &wait_on) const;
       bool add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,

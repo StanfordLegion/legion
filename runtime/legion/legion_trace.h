@@ -939,11 +939,11 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<Reservation>& reservations,
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition, PredEvent pred_guard,
-                             ReductionOpID redop, bool reduction_fold);
+                             ApEvent precondition, PredEvent pred_guard);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -1280,11 +1280,11 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<Reservation>& reservations,
 #ifdef LEGION_SPY
                              RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                             ApEvent precondition, PredEvent guard_event,
-                             ReductionOpID redop, bool reduction_fold);
+                             ApEvent precondition, PredEvent guard_event);
       virtual void record_issue_indirect(Memoizable *memo, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -1674,11 +1674,11 @@ namespace Legion {
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
+                const std::vector<Reservation>& reservations,
 #ifdef LEGION_SPY
                 RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                unsigned precondition_idx,
-                ReductionOpID redop, bool reduction_fold);
+                unsigned precondition_idx);
       virtual ~IssueCopy(void);
       virtual void execute(std::vector<ApEvent> &events,
                            std::map<unsigned,ApUserEvent> &user_events,
@@ -1696,13 +1696,12 @@ namespace Legion {
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
+      std::vector<Reservation> reservations;
 #ifdef LEGION_SPY
       RegionTreeID src_tree_id;
       RegionTreeID dst_tree_id;
 #endif
       unsigned precondition_idx;
-      ReductionOpID redop;
-      bool reduction_fold;
     };
 
     /**

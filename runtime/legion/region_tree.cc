@@ -2240,7 +2240,11 @@ namespace Legion {
       else if (analysis->user_registered.exists())
         Runtime::trigger_event(analysis->user_registered);
       // Find any atomic locks we need to take for these instances
-      if (IS_ATOMIC(analysis->usage))
+      // Note that for now we also treat exclusive-reductions as
+      // needing to be atomic since we don't have a semantics for
+      // what exclusive reductions mean today
+      if (IS_ATOMIC(analysis->usage) ||
+          (IS_REDUCE(analysis->usage) && IS_EXCLUSIVE(analysis->usage)))
       {
         const bool exclusive = HAS_WRITE(analysis->usage);
         for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -2626,6 +2630,15 @@ namespace Legion {
           assert(found);
 #endif
         }
+        // Set up the reduction fields here if we're doing a reduction
+        if (dst_req.redop > 0)
+        {
+          // Note we can mark these as exclusive since we technically
+          // mapped the region read-write to perform the reduction
+          for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+            dst_fields[idx].set_redop(dst_req.redop, false/*fold*/,
+                                      true/*exclusive*/);
+        }
         if (precondition.exists())
           copy_preconditions.insert(precondition);
         // Now we can issue the copy operation
@@ -2638,6 +2651,7 @@ namespace Legion {
         // of the two index spaces for source and destination, In the
         // normal write case we know we have to be writing everything
         IndexSpaceExpression *src_expr = src_node->row_source;
+        const std::vector<Reservation> no_reservations;
         if ((dst_req.redop > 0) && (dst_expr->expr_id != src_expr->expr_id))
         {
           IndexSpaceExpression *intersect = 
@@ -2653,27 +2667,25 @@ namespace Legion {
             for (unsigned idx = 0; idx < dst_targets.size(); idx++)
               tracing_dsts.insert(target_views[idx],
                   dst_targets[idx].get_valid_fields());
-            const ApEvent result = intersect->issue_copy(trace_info, 
-                                         dst_fields, src_fields,
+            const ApEvent result = intersect->issue_copy(trace_info, dst_fields,
+                                         src_fields, no_reservations,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
 #endif
-                                         full_precondition, guard,
-                                         dst_req.redop, false/*fold*/); 
+                                         full_precondition, guard);
             trace_info.record_copy_views(result, intersect, tracing_srcs, 
                                          tracing_dsts, map_applied_events);
             return result;
           }
           else
-            return intersect->issue_copy(trace_info,
-                                         dst_fields, src_fields,
+            return intersect->issue_copy(trace_info, dst_fields,
+                                         src_fields, no_reservations,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
 #endif
-                                         full_precondition, guard,
-                                         dst_req.redop, false/*fold*/); 
+                                         full_precondition, guard);
         }
         else
         {
@@ -2686,26 +2698,25 @@ namespace Legion {
             for (unsigned idx = 0; idx < dst_targets.size(); idx++)
               tracing_dsts.insert(target_views[idx],
                   dst_targets[idx].get_valid_fields());
-            const ApEvent result = dst_expr->issue_copy(trace_info, 
-                                        dst_fields, src_fields,
+            const ApEvent result = dst_expr->issue_copy(trace_info, dst_fields,
+                                        src_fields, no_reservations,
 #ifdef LEGION_SPY
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
 #endif
-                                        full_precondition, guard,
-                                        dst_req.redop, false/*fold*/);
+                                        full_precondition, guard);
             trace_info.record_copy_views(result, dst_expr, tracing_srcs, 
                                          tracing_dsts, map_applied_events);
             return result;
           }
           else
             return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+                                        no_reservations,
 #ifdef LEGION_SPY
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
 #endif
-                                        full_precondition, guard,
-                                        dst_req.redop, false/*fold*/);
+                                        full_precondition, guard);
         }
       }
       FieldMask src_mask, dst_mask; 

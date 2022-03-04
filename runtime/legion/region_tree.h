@@ -1279,12 +1279,12 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold) = 0;
+                           ApEvent precondition, PredEvent pred_guard) = 0;
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -1381,12 +1381,12 @@ namespace Legion {
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
                                const std::vector<CopySrcDstField> &src_fields,
+                               const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                                RegionTreeID src_tree_id,
                                RegionTreeID dst_tree_id,
 #endif
-                               ApEvent precondition, PredEvent pred_guard,
-                               ReductionOpID redop, bool reduction_fold);
+                               ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline void construct_indirections_internal(
                                const std::vector<unsigned> &field_indexes,
@@ -1663,12 +1663,12 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,
@@ -2724,12 +2724,12 @@ namespace Legion {
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
+                           const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id,
                            RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold);
+                           ApEvent precondition, PredEvent pred_guard);
       virtual void construct_indirections(
                            const std::vector<unsigned> &field_indexes,
                            const FieldID indirect_field,

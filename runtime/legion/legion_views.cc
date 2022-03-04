@@ -4373,15 +4373,20 @@ namespace Legion {
         ApEvent start_use_event = manager->get_use_event(term_event);
         if (start_use_event.exists())
           wait_on_events.insert(start_use_event);
+        // At the moment we treat exclusive reductions the same as
+        // atomic reductions, this might change in the future
+        const RegionUsage reduce_usage(usage.privilege,
+            (usage.prop == LEGION_EXCLUSIVE) ? LEGION_ATOMIC : usage.prop,
+            usage.redop);
         {
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reducing_preconditions(usage, user_mask, user_expr,
+          find_reducing_preconditions(reduce_usage, user_mask, user_expr,
                                       op_id, wait_on_events);
         }
         // Add our local user
-        const bool issue_collect = add_user(usage, user_expr, user_mask, 
-                                      term_event, collect_event, 
-                                      op_id, index, false/*copy*/, 
+        const bool issue_collect = add_user(reduce_usage, user_expr,
+                                      user_mask, term_event, collect_event,
+                                      op_id, index, false/*copy*/,
                                       applied_events, trace_info.recording);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
@@ -4446,8 +4451,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(redop == manager->redop);
 #endif
+          // With bulk reduction copies we're always doing atomic reductions
+          const RegionUsage usage(LEGION_REDUCE, LEGION_ATOMIC, redop);
           AutoLock v_lock(view_lock,1,false/*exclusive*/);
-          find_reducing_preconditions(copy_mask, copy_expr,op_id,preconditions);
+          find_reducing_preconditions(usage, copy_mask, copy_expr,
+                                      op_id, preconditions);
         }
         else
         {
@@ -4473,6 +4481,10 @@ namespace Legion {
                                       const AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // At most one of these should be true 
+      assert(!(reading && (redop > 0)));
+#endif
       if (!is_logical_owner())
       {
         RtUserEvent applied_event = Runtime::create_rt_user_event();
@@ -4500,10 +4512,8 @@ namespace Legion {
       }
       else
       {
-        // Reduction copy users behave like simultaneous
         const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
-            LEGION_REDUCE : LEGION_READ_WRITE, (redop > 0) ?
-            LEGION_SIMULTANEOUS : LEGION_EXCLUSIVE, redop);
+            LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
         const bool issue_collect = add_user(usage, copy_expr, copy_mask,
             term_event, collect_event, op_id, index, true/*copy*/,
             applied_events, trace_recording);
@@ -4558,14 +4568,20 @@ namespace Legion {
         for (EventUsers::const_iterator it = uit->second.begin();
               it != uit->second.end(); it++)
         {
+#ifdef DEBUG_LEGION
+          assert(it->first->usage.redop == usage.redop);
+#endif
           const FieldMask overlap = event_mask & it->second;
           if (!overlap)
             continue;
           // If they are both simultaneous then we can skip
           if (IS_SIMULT(usage) && IS_SIMULT(it->first->usage))
             continue;
-          // If they are both atomic then we can skip
-          if (IS_ATOMIC(usage) && IS_ATOMIC(it->first->usage))
+          // Atomic and exclusive are the same for the purposes of reductions
+          // at the moment since we'll end up using the reservations to 
+          // protect the use of the instance anyway
+          if ((IS_EXCLUSIVE(usage) || IS_ATOMIC(usage)) && 
+              (IS_EXCLUSIVE(it->first->usage) || IS_ATOMIC(it->first->usage)))
             continue;
           // Otherwise we need to check for dependences
           IndexSpaceExpression *expr_overlap = 
@@ -4704,64 +4720,6 @@ namespace Legion {
         }
         else
           uit++;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
-                                         IndexSpaceExpression *user_expr,
-                                         UniqueID op_id,
-                                         std::set<ApEvent> &preconditions) const
-    //--------------------------------------------------------------------------
-    {
-      // lock must be held by caller
-      // we know that fills are always done between readers and reducers so
-      // we just need to check the initialization users for reader deps
-      for (EventFieldUsers::const_iterator uit = initialization_users.begin();
-            uit != initialization_users.end(); uit++)
-      {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
-        if (!event_mask)
-          continue;
-        for (EventUsers::const_iterator it = uit->second.begin();
-              it != uit->second.end(); it++)
-        {
-          const FieldMask overlap = event_mask & it->second;
-          if (!overlap)
-            continue;
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
-          if (expr_overlap->is_empty())
-            continue;
-          preconditions.insert(uit->first);
-          break;
-        }
-      }
-      // reduction copies into reduction instances operate atomically so 
-      // we just need to check for dependences on other exclusive and atomic
-      for (EventFieldUsers::const_iterator uit = reduction_users.begin();
-            uit != reduction_users.end(); uit++)
-      {
-        const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
-        if (!event_mask)
-          continue;
-        for (EventUsers::const_iterator it = uit->second.begin();
-              it != uit->second.end(); it++)
-        {
-          const FieldMask overlap = event_mask & it->second;
-          if (!overlap)
-            continue;
-          // We can run in parallel with simultaneous users
-          if (IS_SIMULT(it->first->usage))
-            continue;
-          // Otherwise we need to check for dependences
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
-          if (expr_overlap->is_empty())
-            continue;
-          preconditions.insert(uit->first);
-          break;
-        }
       }
     }
 
