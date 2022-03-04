@@ -145,13 +145,40 @@ namespace Legion {
                                  Operation *op, const unsigned index, bool excl)
     //--------------------------------------------------------------------------
     {
-      // If we are the owner we can do this here
+      std::vector<Reservation> reservations(mask.pop_count());
+      find_field_reservations(mask, reservations);
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
+        op->update_atomic_locks(index, reservations[idx], excl);
+    } 
+
+    //--------------------------------------------------------------------------
+    void InstanceView::find_field_reservations(const FieldMask &mask,
+                                         std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mask.pop_count() == reservations.size());
+#endif
+      unsigned offset = 0;
       if (is_owner())
       {
-        std::vector<Reservation> reservations(mask.pop_count());
-        find_field_reservations(mask, reservations);
-        for (unsigned idx = 0; idx < reservations.size(); idx++)
-          op->update_atomic_locks(index, reservations[idx], excl);
+        unsigned offset = 0;
+        AutoLock v_lock(view_lock);
+        for (int idx = mask.find_first_set(); idx >= 0;
+              idx = mask.find_next_set(idx+1))
+        {
+          std::map<unsigned,Reservation>::const_iterator finder = 
+            atomic_reservations.find(idx);
+          if (finder == atomic_reservations.end())
+          {
+            // Make a new reservation and add it to the set
+            Reservation handle = Reservation::create_reservation();
+            atomic_reservations[idx] = handle;
+            reservations[offset++] = handle;
+          }
+          else
+            reservations[offset++] = finder->second;
+        }
       }
       else
       {
@@ -167,7 +194,7 @@ namespace Legion {
             if (finder == atomic_reservations.end())
               needed_fields.set_bit(idx);
             else
-              op->update_atomic_locks(index, finder->second, excl);
+              reservations[offset++] = finder->second;
           }
         }
         if (!!needed_fields)
@@ -192,38 +219,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(finder != atomic_reservations.end());
 #endif
-            op->update_atomic_locks(index, finder->second, excl);
+            reservations[offset++] = finder->second;
           }
         }
       }
-    } 
-
-    //--------------------------------------------------------------------------
-    void InstanceView::find_field_reservations(const FieldMask &mask,
-                                              std::vector<Reservation> &results)
-    //--------------------------------------------------------------------------
-    {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(mask.pop_count() == results.size());
+      assert(offset == reservations.size());
 #endif
-      unsigned offset = 0;
-      AutoLock v_lock(view_lock);
-      for (int idx = mask.find_first_set(); idx >= 0;
-            idx = mask.find_next_set(idx+1))
-      {
-        std::map<unsigned,Reservation>::const_iterator finder = 
-          atomic_reservations.find(idx);
-        if (finder == atomic_reservations.end())
-        {
-          // Make a new reservation and add it to the set
-          Reservation handle = Reservation::create_reservation();
-          atomic_reservations[idx] = handle;
-          results[offset++] = handle;
-        }
-        else
-          results[offset++] = finder->second;
-      }
+      // Sort them before returning
+      if (reservations.size() > 1)
+        std::sort(reservations.begin(), reservations.end());
     }
 
     //--------------------------------------------------------------------------
