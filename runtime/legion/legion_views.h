@@ -224,13 +224,12 @@ namespace Legion {
     public:
       void find_atomic_reservations(const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
-      void find_field_reservations(const std::vector<FieldID> &needed_fields,
+      void find_field_reservations(const FieldMask &mask,
                                    std::vector<Reservation> &results);
       static void handle_send_atomic_reservation_request(Runtime *runtime,
                                   Deserializer &derez, AddressSpaceID source);
-      void update_field_reservations(
-                            const std::vector<FieldID> &fields,
-                            const std::vector<Reservation> &reservations);
+      void update_field_reservations(const FieldMask &mask,
+                                  const std::vector<Reservation> &reservations);
       static void handle_send_atomic_reservation_response(Runtime *runtime,
                                                           Deserializer &derez);
     public:
@@ -263,7 +262,7 @@ namespace Legion {
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
       // top-level view for an instance needs to track this.
-      std::map<FieldID,Reservation> atomic_reservations;
+      std::map<unsigned,Reservation> atomic_reservations;
     };
 
     /**

@@ -145,56 +145,50 @@ namespace Legion {
                                  Operation *op, const unsigned index, bool excl)
     //--------------------------------------------------------------------------
     {
-      // Compute the field set
-      std::vector<FieldID> atomic_fields;
-      manager->field_space_node->get_field_set(mask, op->get_context(), 
-                                               atomic_fields);
       // If we are the owner we can do this here
       if (is_owner())
       {
-        std::vector<Reservation> reservations(atomic_fields.size());
-        find_field_reservations(atomic_fields, reservations);
+        std::vector<Reservation> reservations(mask.pop_count());
+        find_field_reservations(mask, reservations);
         for (unsigned idx = 0; idx < reservations.size(); idx++)
           op->update_atomic_locks(index, reservations[idx], excl);
       }
       else
       {
         // Figure out which fields we need requests for and send them
-        std::vector<FieldID> needed_fields;
+        FieldMask needed_fields;
         {
           AutoLock v_lock(view_lock, 1, false);
-          for (std::vector<FieldID>::const_iterator it = 
-                atomic_fields.begin(); it != atomic_fields.end(); it++)
+          for (int idx = mask.find_first_set(); idx >= 0;
+                idx = mask.find_next_set(idx+1))
           {
-            std::map<FieldID,Reservation>::const_iterator finder = 
-              atomic_reservations.find(*it);
+            std::map<unsigned,Reservation>::const_iterator finder = 
+              atomic_reservations.find(idx);
             if (finder == atomic_reservations.end())
-              needed_fields.push_back(*it);
+              needed_fields.set_bit(idx);
             else
               op->update_atomic_locks(index, finder->second, excl);
           }
         }
-        if (!needed_fields.empty())
+        if (!!needed_fields)
         {
           RtUserEvent wait_on = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize<size_t>(needed_fields.size());
-            for (unsigned idx = 0; idx < needed_fields.size(); idx++)
-              rez.serialize(needed_fields[idx]);
+            rez.serialize(needed_fields);
             rez.serialize(wait_on);
           }
           runtime->send_atomic_reservation_request(owner_space, rez);
           wait_on.wait();
           // Now retake the lock and get the remaining reservations
           AutoLock v_lock(view_lock, 1, false);
-          for (std::vector<FieldID>::const_iterator it = 
-                needed_fields.begin(); it != needed_fields.end(); it++)
+          for (int idx = needed_fields.find_first_set(); idx >= 0;
+                idx = needed_fields.find_next_set(idx+1))
           {
-            std::map<FieldID,Reservation>::const_iterator finder =
-              atomic_reservations.find(*it);
+            std::map<unsigned,Reservation>::const_iterator finder =
+              atomic_reservations.find(idx);
 #ifdef DEBUG_LEGION
             assert(finder != atomic_reservations.end());
 #endif
@@ -205,29 +199,30 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InstanceView::find_field_reservations(
-                                      const std::vector<FieldID> &needed_fields, 
-                                      std::vector<Reservation> &results)
+    void InstanceView::find_field_reservations(const FieldMask &mask,
+                                              std::vector<Reservation> &results)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(needed_fields.size() == results.size());
+      assert(mask.pop_count() == results.size());
 #endif
+      unsigned offset = 0;
       AutoLock v_lock(view_lock);
-      for (unsigned idx = 0; idx < needed_fields.size(); idx++)
+      for (unsigned idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
       {
-        std::map<FieldID,Reservation>::const_iterator finder = 
-          atomic_reservations.find(needed_fields[idx]);
+        std::map<unsigned,Reservation>::const_iterator finder = 
+          atomic_reservations.find(idx);
         if (finder == atomic_reservations.end())
         {
           // Make a new reservation and add it to the set
           Reservation handle = Reservation::create_reservation();
-          atomic_reservations[needed_fields[idx]] = handle;
-          results[idx] = handle;
+          atomic_reservations[idx] = handle;
+          results[offset++] = handle;
         }
         else
-          results[idx] = finder->second;
+          results[offset++] = finder->second;
       }
     }
 
@@ -239,11 +234,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      size_t num_fields;
-      derez.deserialize(num_fields);
-      std::vector<FieldID> fields(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-        derez.deserialize(fields[idx]);
+      FieldMask needed_fields;
+      derez.deserialize(needed_fields);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
@@ -253,36 +245,34 @@ namespace Legion {
 #else
       InstanceView *target = static_cast<InstanceView*>(dc);
 #endif
-      std::vector<Reservation> reservations(num_fields);
-      target->find_field_reservations(fields, reservations);
+      std::vector<Reservation> reservations(needed_fields.pop_count());
+      target->find_field_reservations(needed_fields, reservations);
       Serializer rez;
       {
         RezCheck z2(rez);
         rez.serialize(did);
-        rez.serialize(num_fields);
-        for (unsigned idx = 0; idx < num_fields; idx++)
-        {
-          rez.serialize(fields[idx]);
+        rez.serialize(needed_fields);
+        for (unsigned idx = 0; idx < reservations.size(); idx++)
           rez.serialize(reservations[idx]);
-        }
         rez.serialize(to_trigger);
       }
       runtime->send_atomic_reservation_response(source, rez);
     }
 
     //--------------------------------------------------------------------------
-    void InstanceView::update_field_reservations(
-                                  const std::vector<FieldID> &fields, 
-                                  const std::vector<Reservation> &reservations)
+    void InstanceView::update_field_reservations(const FieldMask &mask,
+                                   const std::vector<Reservation> &reservations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
-      assert(fields.size() == reservations.size());
+      assert(mask.pop_count() == reservations.size());
 #endif
+      unsigned offset = 0;
       AutoLock v_lock(view_lock);
-      for (unsigned idx = 0; idx < fields.size(); idx++)
-        atomic_reservations[fields[idx]] = reservations[idx];
+      for (unsigned idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
+        atomic_reservations[idx] = reservations[offset++];
     }
 
     //--------------------------------------------------------------------------
@@ -293,15 +283,11 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      size_t num_fields;
-      derez.deserialize(num_fields);
-      std::vector<FieldID> fields(num_fields);
-      std::vector<Reservation> reservations(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-      {
-        derez.deserialize(fields[idx]);
+      FieldMask mask;
+      derez.deserialize(mask);
+      std::vector<Reservation> reservations(mask.pop_count());
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
         derez.deserialize(reservations[idx]);
-      }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
@@ -311,7 +297,7 @@ namespace Legion {
 #else
       InstanceView *target = static_cast<InstanceView*>(dc);
 #endif
-      target->update_field_reservations(fields, reservations);
+      target->update_field_reservations(mask, reservations);
       Runtime::trigger_event(to_trigger);
     }
 
