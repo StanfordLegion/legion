@@ -162,7 +162,6 @@ namespace Legion {
       unsigned offset = 0;
       if (is_owner())
       {
-        unsigned offset = 0;
         AutoLock v_lock(view_lock);
         for (int idx = mask.find_first_set(); idx >= 0;
               idx = mask.find_next_set(idx+1))
