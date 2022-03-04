@@ -375,33 +375,14 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Premap Task 
+       *  Premap Task (should really be called map_index_task) 
        * ----------------------------------------------------------------------
        * This mapper call is only invoked for index space task launches. It
        * will invoked if at least one of the following two conditions occur:
        * 1. The task is performing a reduction of its point task futures down
        *    to a single future value as an output, in which case the mapper
        *    needs to select one or more locations for the futures to go.
-       * 2. The task a region requirement that needs to be mapped once and
-       *    have the same mapping be used by all the point tasks, such as
-       *    with a READ-WRITE SIMULTANEOUS on a single region.
-       * In the case of (2), the mapper is told the indicies of which 
-       * region requirements need to be premapped in the 'must_premap' set.
-       * All other regions can be optionally mapped. The mapper is given
-       * a vector containing sets of valid PhysicalInstances (if any) for
-       * each region requirement.
-       *
-       * The mapper performs the premapping by filling in premapping at
-       * least all the required premapped regions and indicates all premapped
-       * region indicies in 'premapped_region'. For each region requirement
-       * the mapper can specify a ranking of PhysicalInstances to re-use
-       * in 'chosen_ranking'. This can optionally be left empty. The mapper
-       * can also specify constraints on the creation of a physical instance
-       * in 'layout_constraints'. Finally, the mapper can force the creation
-       * of a new instance if an write-after-read dependences are detected
-       * on existing physical instances by enabling the WAR optimization.
-       * All vector data structures are size appropriately for the number of
-       * region requirements in the task.
+       * 2. (No longer applies) 
        *
        * In the case of (1), the mapper can optionally choose to fill in 
        * the 'reduction_futures' vector with one or more memories in which 
@@ -413,15 +394,24 @@ namespace Legion {
        * local system memory.
        */
       struct PremapTaskInput {
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
         std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
+        PremapTaskInput(void);
+        ~PremapTaskInput(void);
       };
       struct PremapTaskOutput {
         Processor                                          new_target_proc;
-        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
-        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_sources;
-        ProfilingRequest                                   copy_prof_requests;
-        TaskPriority                                       profiling_priority;
         std::vector<Memory>                                reduction_futures;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
+        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
+        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_sources;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
+        ProfilingRequest                                   copy_prof_requests;
+        LEGION_DEPRECATED("Premapping regions is no longer supported")
+        TaskPriority                                       profiling_priority;
+        PremapTaskOutput(void);
+        ~PremapTaskOutput(void);
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,

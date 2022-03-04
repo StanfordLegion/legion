@@ -259,7 +259,6 @@ namespace Legion {
     public:
       void perform_privilege_checks(void);
     public:
-      void find_early_mapped_region(unsigned idx, InstanceSet &ref);
       void clone_task_op_from(TaskOp *rhs, Processor p,
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
@@ -297,8 +296,6 @@ namespace Legion {
       virtual void trigger_task_commit(void) = 0;
     protected:
       TaskRequirements                          logical_regions;
-      // Early mapped regions
-      std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
       // A map of any locks that we need to take for this task
       std::map<Reservation,bool/*exclusive*/>   atomic_locks;
       // Set of acquired instances for this task
@@ -654,7 +651,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void) = 0;
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
-      virtual void early_map_task(void) = 0;
+      virtual void premap_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL) = 0;
@@ -1118,7 +1115,7 @@ namespace Legion {
     public:
       virtual void trigger_ready(void);
       virtual void resolve_false(bool speculated, bool launched);
-      virtual void early_map_task(void);
+      virtual void premap_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
@@ -1166,9 +1163,6 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
-    public:
-      void early_map_regions(std::set<RtEvent> &applied_conditions,
-                             const std::vector<unsigned> &must_premap);
       void record_origin_mapped_slice(SliceTask *local_slice);
     protected:
       // Virtual so can be overridden by ReplIndexTask
@@ -1288,7 +1282,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
     public:
       virtual void resolve_false(bool speculated, bool launched);
-      virtual void early_map_task(void);
+      virtual void premap_task(void);
       virtual bool distribute_task(void);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
