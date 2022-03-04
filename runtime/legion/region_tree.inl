@@ -271,7 +271,7 @@ namespace Legion {
         }
 #ifdef LEGION_SPY
         result = Runtime::ignorefaults(space.copy(realm_src_fields, 
-                            realm_dst_fields, requests, pred_pred));
+                            realm_dst_fields, requests, pred_pre));
 #else
         result = Runtime::ignorefaults(space.copy(src_fields, dst_fields, 
                                                   requests, pred_pre));
