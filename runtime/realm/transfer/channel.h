@@ -217,10 +217,10 @@ namespace Realm {
 
       void set_addrlist(AddressList *_addrlist);
 
-      int get_dim();
-      uintptr_t get_offset();
-      uintptr_t get_stride(int dim);
-      size_t remaining(int dim);
+      int get_dim() const;
+      uintptr_t get_offset() const;
+      uintptr_t get_stride(int dim) const;
+      size_t remaining(int dim) const;
       void advance(int dim, size_t amount);
 
       void skip_bytes(size_t bytes);
@@ -235,6 +235,8 @@ namespace Realm {
       int partial_dim;
       size_t pos[MAX_DIM];
     };
+
+    std::ostream& operator<<(std::ostream& os, const AddressListCursor& alc);
 
     // a control port is used to steer inputs/outputs of transfer descriptors -
     //   the information is encoded into 32b packets which may be read/written

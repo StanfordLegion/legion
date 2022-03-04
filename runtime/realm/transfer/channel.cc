@@ -748,7 +748,7 @@ namespace Realm {
     addrlist = _addrlist;
   }
 
-  int AddressListCursor::get_dim()
+  int AddressListCursor::get_dim() const
   {
     assert(addrlist);
     // with partial progress, we restrict ourselves to just the rest of that dim
@@ -761,7 +761,7 @@ namespace Realm {
     }
   }
 
-  uintptr_t AddressListCursor::get_offset()
+  uintptr_t AddressListCursor::get_offset() const
   {
     const size_t *entry = addrlist->read_entry();
     int act_dim = (entry[0] & 15);
@@ -779,7 +779,7 @@ namespace Realm {
     return ofs;
   }
 
-  uintptr_t AddressListCursor::get_stride(int dim)
+  uintptr_t AddressListCursor::get_stride(int dim) const
   {
     const size_t *entry = addrlist->read_entry();
     int act_dim = (entry[0] & 15);
@@ -787,7 +787,7 @@ namespace Realm {
     return entry[2 * dim + 1];
   }
 
-  size_t AddressListCursor::remaining(int dim)
+  size_t AddressListCursor::remaining(int dim) const
   {
     const size_t *entry = addrlist->read_entry();
     int act_dim = (entry[0] & 15);
@@ -892,6 +892,17 @@ namespace Realm {
 	}
       }
     }
+  }
+
+  std::ostream& operator<<(std::ostream& os, const AddressListCursor& alc)
+  {
+    os << alc.remaining(0);
+    for(int i = 1; i < alc.get_dim(); i++)
+      os << 'x' << alc.remaining(i);
+    os << ',' << alc.get_offset();
+    for(int i = 1; i < alc.get_dim(); i++)
+      os << '+' << alc.get_stride(i);
+    return os;
   }
 
 
