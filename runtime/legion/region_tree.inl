@@ -320,7 +320,8 @@ namespace Legion {
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
                                   src_fields[idx].inst_event,
                                   dst_fields[idx].field_id,
-                                  dst_fields[idx].inst_event, redop);
+                                  dst_fields[idx].inst_event,
+                                  dst_fields[idx].redop_id);
 #endif
       return result;
     }
