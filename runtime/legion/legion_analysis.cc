@@ -5810,7 +5810,7 @@ namespace Legion {
     {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
       cfargs->aggregator->issue_updates(*cfargs, cfargs->pre,
-          cfargs->manage_dst_events);
+          cfargs->manage_dst_events, cfargs->dst_events);
       cfargs->remove_recorder_reference();
       if (cfargs->dst_events != NULL)
         delete cfargs->dst_events;
