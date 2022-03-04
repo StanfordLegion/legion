@@ -6098,14 +6098,13 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+                                 const std::vector<Reservation> &reservations,
 #ifdef LEGION_SPY
                                              RegionTreeID src_tree_id,
                                              RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition,
-                                             PredEvent pred_guard,
-                                             ReductionOpID redop,
-                                             bool reduction_fold)
+                                             PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6127,11 +6126,11 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       insert_instruction(new IssueCopy(
             *this, lhs_, expr, find_trace_local_id(memo),
-            src_fields, dst_fields,
+            src_fields, dst_fields, reservations,
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            rhs_, redop, reduction_fold)); 
+            rhs_)); 
     }
 
     //--------------------------------------------------------------------------
@@ -7232,12 +7231,12 @@ namespace Legion {
                                  ApEvent &lhs, IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+                                 const std::vector<Reservation>& reservations,
 #ifdef LEGION_SPY
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -7252,12 +7251,12 @@ namespace Legion {
         }
       }
       // Then do the base call
-      PhysicalTemplate::record_issue_copy(memo, lhs, expr,src_fields,dst_fields,
+      PhysicalTemplate::record_issue_copy(memo, lhs, expr, src_fields,
+                                          dst_fields, reservations,
 #ifdef LEGION_SPY
                                           src_tree_id, dst_tree_id,
 #endif
-                                          precondition, pred_guard, 
-                                          redop, reduction_fold);
+                                          precondition, pred_guard); 
     }
 
     //--------------------------------------------------------------------------
@@ -9154,15 +9153,17 @@ namespace Legion {
                          const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
+                         const std::vector<Reservation>& rs,
 #ifdef LEGION_SPY
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
-                         unsigned pi, ReductionOpID ro, bool rf)
+                         unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+        reservations(rs),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
-        precondition_idx(pi), redop(ro), reduction_fold(rf)
+        precondition_idx(pi)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9198,12 +9199,12 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), -1U, false);
-      events[lhs] = expr->issue_copy(trace_info, dst_fields, src_fields,
+      events[lhs] = expr->issue_copy(trace_info, dst_fields, 
+                                     src_fields, reservations,
 #ifdef LEGION_SPY
                                      src_tree_id, dst_tree_id,
 #endif
-                                     precondition, PredEvent::NO_PRED_EVENT,
-                                     redop, reduction_fold);
+                                     precondition, PredEvent::NO_PRED_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -9234,8 +9235,6 @@ namespace Legion {
         if (idx != dst_fields.size() - 1) ss << ",";
       }
       ss << "}, events[" << precondition_idx << "]";
-
-      if (redop != 0) ss << ", " << redop;
       ss << ")";
 
       return ss.str();
