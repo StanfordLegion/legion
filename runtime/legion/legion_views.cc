@@ -270,7 +270,7 @@ namespace Legion {
 #endif
       unsigned offset = 0;
       AutoLock v_lock(view_lock);
-      for (unsigned idx = mask.find_first_set(); idx >= 0;
+      for (int idx = mask.find_first_set(); idx >= 0;
             idx = mask.find_next_set(idx+1))
         atomic_reservations[idx] = reservations[offset++];
     }
