@@ -7430,7 +7430,7 @@ namespace Legion {
     const char *name, *str; \
     cuGetErrorName(ret, &name); \
     cuGetErrorString(ret, &str); \
-    fprintf(stderr, "CU: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", #cmd, ret, name, str); \
     abort(); \
   } \
 } while (false)
@@ -7447,7 +7447,7 @@ namespace Legion {
     const char *name, *str; \
     hipGetErrorName(ret, &name); \
     hipGetErrorString(ret, &str); \
-    fprintf(stderr, "HIP: %s = %d (%s): %s\n", cmd, ret, name, str); \
+    fprintf(stderr, "HIP: %s = %d (%s): %s\n", #cmd, ret, name, str); \
     abort(); \
   } \
 } while (false)
