@@ -56,6 +56,9 @@ if(Legion_USE_CUDA)
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
+
+  list(APPEND REALM_TESTS cuda_arrays)
+  set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)
 endif()
 
 if(Legion_USE_HIP)
@@ -107,6 +110,7 @@ set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
 set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
+set(TESTARGS_cuda_arrays       -ll:gpu 1)
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
