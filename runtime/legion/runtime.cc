@@ -12385,6 +12385,24 @@ namespace Legion {
               runtime->handle_collective_instance_message(derez);
               break;
             }
+          case SEND_COLLECTIVE_DISTRIBUTE_FILL:
+            {
+              runtime->handle_collective_distribute_fill(derez,
+                                                         remote_address_space);
+              break;
+            }
+          case SEND_COLLECTIVE_DISTRIBUTE_REDUCTION:
+            {
+              runtime->handle_collective_distribute_reduction(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_COLLECTIVE_DISTRIBUTE_BROADCAST:
+            {
+              runtime->handle_collective_distribute_broadcast(derez,
+                                                          remote_address_space);
+              break;
+            }
 #ifdef LEGION_GPU_REDUCTIONS
           case SEND_CREATE_SHADOW_REQUEST:
             {
@@ -22233,6 +22251,33 @@ namespace Legion {
                                                           true/*flush*/); 
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_fill(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_DISTRIBUTE_FILL>(rez,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_reduction(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_DISTRIBUTE_REDUCTION>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_broadcast(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_DISTRIBUTE_BROADCAST>(rez, true/*flush*/);
+    }
+
 #ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
     void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
@@ -24207,6 +24252,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_collective_message(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_fill(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_fill(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_reduction(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_reduction(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_broadcast(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_broadcast(this, source, derez);
     }
 
 #ifdef LEGION_GPU_REDUCTIONS

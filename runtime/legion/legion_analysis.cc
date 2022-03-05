@@ -5715,6 +5715,7 @@ namespace Legion {
       assert(!!fill_mask); 
       // Should only have across helper on across copies
       assert((fills[0]->across_helper == NULL) || !manage_dst_events);
+      assert((dst_events == NULL) || track_events);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
       PhysicalManager *manager = target->get_manager();
@@ -5744,7 +5745,8 @@ namespace Legion {
                                                   fill_mask, trace_info, 
                                                   recorded_events, effects,
                                                   fills[0]->across_helper,
-                                                  manage_dst_events);
+                                                  manage_dst_events,
+                                                  track_events);
         if (result.exists())
         {
           if (track_events)
@@ -5792,7 +5794,8 @@ namespace Legion {
                                                     fill_mask, trace_info,
                                                     recorded_events, effects, 
                                                     fills[0]->across_helper,
-                                                    manage_dst_events);
+                                                    manage_dst_events,
+                                                    track_events);
           if (result.exists())
           {
             if (track_events)
@@ -5817,6 +5820,7 @@ namespace Legion {
       assert(!copies.empty());
       assert(!!copy_mask);
       assert((src_index == dst_index) || !manage_dst_events);
+      assert((dst_events == NULL) || track_events);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
       PhysicalManager *target_manager = target->get_manager();
@@ -5856,7 +5860,7 @@ namespace Legion {
                                       : src_index, copy_mask, trace_info,
                                     recorded_events, effects,
                                     cit->second[0]->across_helper,
-                                    manage_dst_events);
+                                    manage_dst_events, track_events);
           if (result.exists())
           {
             if (track_events)
@@ -5906,7 +5910,7 @@ namespace Legion {
                                       src_index, copy_mask, trace_info,
                                     recorded_events, effects,
                                     cit->second[0]->across_helper,
-                                    manage_dst_events);
+                                    manage_dst_events, track_events);
             if (result.exists())
             {
               if (track_events)

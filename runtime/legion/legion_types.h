@@ -800,6 +800,9 @@ namespace Legion {
       SEND_MANAGER_UPDATE,
       SEND_COLLECTIVE_MANAGER,
       SEND_COLLECTIVE_MESSAGE,
+      SEND_COLLECTIVE_DISTRIBUTE_FILL,
+      SEND_COLLECTIVE_DISTRIBUTE_REDUCTION,
+      SEND_COLLECTIVE_DISTRIBUTE_BROADCAST,
       SEND_CREATE_SHADOW_REQUEST,
       SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -1016,6 +1019,9 @@ namespace Legion {
         "Send Manager Update",                                        \
         "Send Collective Instance Manager",                           \
         "Send Collective Instance Message",                           \
+        "Send Collective Distribute Fill",                            \
+        "Send Collective Distribute Reduction",                       \
+        "Send Collective Distribute Broadcast",                       \
         "Send Create Shadow Reduction Instance Request",              \
         "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \

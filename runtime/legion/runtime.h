@@ -3145,6 +3145,12 @@ namespace Legion {
                                             Serializer &rez);
       void send_collective_instance_message(AddressSpaceID target, 
                                             Serializer &rez);
+      void send_collective_distribute_fill(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_collective_distribute_reduction(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_collective_distribute_broadcast(AddressSpaceID target,
+                                                Serializer &rez);
 #ifdef LEGION_GPU_REDUCTIONS
       void send_create_shadow_reduction_request(AddressSpaceID target, 
                                                 Serializer &rez);
@@ -3460,6 +3466,12 @@ namespace Legion {
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_collective_instance_message(Deserializer &derez);
+      void handle_collective_distribute_fill(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_collective_distribute_reduction(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_collective_distribute_broadcast(Deserializer &derez,
+                                                  AddressSpaceID source);
 #ifdef LEGION_GPU_REDUCTIONS
       void handle_create_shadow_reduction_request(Deserializer &derez,
                                                   AddressSpaceID source);
@@ -5517,6 +5529,12 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_MESSAGE:
           return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_DISTRIBUTE_FILL:
+          break;
+        case SEND_COLLECTIVE_DISTRIBUTE_REDUCTION:
+          break;
+        case SEND_COLLECTIVE_DISTRIBUTE_BROADCAST:
+          break;
         case SEND_CREATE_SHADOW_REQUEST:
           break;
         case SEND_CREATE_SHADOW_RESPONSE:

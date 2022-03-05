@@ -2044,13 +2044,7 @@ namespace Legion {
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Perform the registration
-      std::vector<InstanceView*> target_views;
-      context->convert_target_views(targets, target_views, 
-                                    analysis->collective_mapping);
-      std::vector<InstanceView*> source_views;
-      if (!sources.empty())
-        context->convert_source_views(sources, source_views,
-                                      analysis->collective_mapping);
+      
 #ifdef DEBUG_LEGION
       assert(analysis == NULL);
       // Should be recording or must be read-only
@@ -2077,6 +2071,12 @@ namespace Legion {
         const DomainPoint local_point = op->get_collective_instance_point();
         const bool first_local = collective->is_first_local_point(local_point);
         CollectiveMapping *collective_mapping = collective->collective_mapping;
+        std::vector<InstanceView*> target_views, source_views;
+        context->convert_target_views(targets, target_views, 
+                                      collective_mapping);
+        if (!sources.empty())
+          context->convert_source_views(sources, source_views,
+                                        collective_mapping);
         analysis = new UpdateAnalysis(runtime, op, index, local_point, req,
                                       region_node, targets, target_views,
                                       source_views, trace_info, 
@@ -2149,6 +2149,10 @@ namespace Legion {
         // and things that are not simultaneous (simultaneous can appear 
         // uninitialized since it might be reading, but then use internal
         // synchronization to wait for something running concurrently to write)
+        std::vector<InstanceView*> target_views, source_views;
+        context->convert_target_views(targets, target_views); 
+        if (!sources.empty())
+          context->convert_source_views(sources, source_views);
         const DomainPoint empty;
         analysis = new UpdateAnalysis(runtime, op, index, empty,req,region_node,
                                       targets, target_views, source_views, 

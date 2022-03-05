@@ -330,7 +330,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events) = 0;
+                                const bool manage_dst_events,
+                                const bool need_valid_return) = 0;
       virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
                                 PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
@@ -341,7 +342,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events) = 0;
+                                const bool manage_dst_events,
+                                const bool need_valid_return) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields) = 0;
       virtual ApEvent register_collective_user(InstanceView *view, 
@@ -601,7 +603,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool need_valid_return);
       virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
                                 PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
@@ -612,7 +615,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool need_valid_return);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
       virtual ApEvent register_collective_user(InstanceView *view, 
@@ -880,7 +884,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool need_valid_return);
       virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
                                 PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
@@ -891,7 +896,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool need_valid_return);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
       virtual ApEvent register_collective_user(InstanceView *view, 
@@ -919,8 +925,45 @@ namespace Legion {
                                 const std::vector<Reservation> &rsrvs);
       virtual void reclaim_field_reservations(DistributedID view_did,
                                 std::vector<Reservation> &to_delete);
+    public:
+      AddressSpaceID select_source_space(AddressSpaceID destination) const;
+      void perform_collective_fill(FillView *fill_view, InstanceView *dst_view,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                const UniqueID op_id, const unsigned index,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent result, AddressSpaceID origin);
+      void perform_collective_reduction(InstanceView *src_view,
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent result, AddressSpaceID origin);
+      void perform_collective_broadcast(InstanceView *dst_view,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent copy_done, ApUserEvent all_done,
+                                AddressSpaceID origin);
     protected:
-      void finalize_collective_user(InstanceView *view, 
+      void finalize_collective_user(InstanceView *view,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
                                 IndexSpaceNode *expr,
@@ -954,6 +997,12 @@ namespace Legion {
       static void handle_defer_rendezvous(const void *args);
       static void handle_collective_message(Deserializer &derez,
                                             Runtime *runtime);
+      static void handle_distribute_fill(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_reduction(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_broadcast(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, IndexSpaceNode *point_space,
           size_t points, CollectiveMapping *collective_mapping,
