@@ -199,6 +199,7 @@ namespace Realm {
 	  struct {
 	    unsigned fill_start;
 	    unsigned fill_size;
+            size_t fill_total;
 	  } fill;
 	};
       };
@@ -208,7 +209,8 @@ namespace Realm {
 			    RegionInstance _inst,
 			    unsigned _fld_start, unsigned _fld_count);
       static IO mk_edge(unsigned _edge);
-      static IO mk_fill(unsigned _fill_start, unsigned _fill_size);
+      static IO mk_fill(unsigned _fill_start, unsigned _fill_size,
+                        size_t _fill_total);
 
       std::vector<IO> inputs;  // TODO: short vectors
       std::vector<IO> outputs;

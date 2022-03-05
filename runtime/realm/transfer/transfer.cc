@@ -2034,7 +2034,8 @@ namespace Realm {
 				 const std::vector<XferDesPortInfo>& outputs_info,
 				 int priority,
 				 XferDesRedopInfo redop_info,
-				 const void *fill_data, size_t fill_size);
+				 const void *fill_data, size_t fill_size,
+                                 size_t fill_total);
 
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N,T> > areg;
 
@@ -2106,7 +2107,9 @@ namespace Realm {
 							const std::vector<XferDesPortInfo>& outputs_info,
 							int priority,
 							XferDesRedopInfo redop_info,
-							const void *fill_data, size_t fill_size)
+							const void *fill_data,
+                                                        size_t fill_size,
+                                                        size_t fill_total)
   {
     assert(redop_info.id == 0);
     assert(fill_size == 0);
@@ -3893,25 +3896,29 @@ namespace Realm {
 
 	size_t pathlen = path_info.xd_channels.size();
 	size_t xd_idx = graph.xd_nodes.size();
-	//size_t ib_idx = graph.ib_edges.size();
-
-	graph.xd_nodes.resize(xd_idx + pathlen);
-	if(pathlen > 1) {
-	  log_new_dma.fatal() << "FATAL: multi-hop fill path found for " << dst_mem << " (serdez=" << serdez_id << ")";
-	  assert(0);
-	}
-	// just one node for now
-	{
+        size_t ib_idx = graph.ib_edges.size();
+        size_t ib_alloc_size = 0;
+        graph.xd_nodes.resize(xd_idx + pathlen);
+        if(pathlen > 1) {
+          graph.ib_edges.resize(ib_idx + pathlen - 1);
+          ib_alloc_size = compute_ib_size(combined_field_size,
+                                          domain_size,
+                                          serdez_id);
+        }
+        for(size_t j = 0; j < pathlen; j++) {
 	  TransferGraph::XDTemplate& xdn = graph.xd_nodes[xd_idx++];
 	      
 	  //xdn.kind = path_info.xd_kinds[j];
-	  xdn.factory = path_info.xd_channels[0]->get_factory();
+	  xdn.factory = path_info.xd_channels[j]->get_factory();
 	  xdn.gather_control_input = -1;
 	  xdn.scatter_control_input = -1;
-	  xdn.target_node = path_info.xd_channels[0]->node;
+	  xdn.target_node = path_info.xd_channels[j]->node;
 	  xdn.inputs.resize(1);
-	  xdn.inputs[0] = TransferGraph::XDTemplate::mk_fill(fill_ofs,
-							     combined_field_size);
+          xdn.inputs[0] = ((j == 0) ?
+                             TransferGraph::XDTemplate::mk_fill(fill_ofs,
+                                                                combined_field_size,
+                                                                domain_size * combined_field_size) :
+                             TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
 	  // FIXME: handle multiple fields
 	  memcpy(static_cast<char *>(fill_data)+fill_ofs,
 		 ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
@@ -3921,8 +3928,15 @@ namespace Realm {
 	  fill_ofs += srcs[i].size;
 
 	  xdn.outputs.resize(1);
-	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-							      fld_start, 1);
+          xdn.outputs[0] = ((j == (pathlen - 1)) ?
+                              TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
+                                                                 fld_start, 1) :
+                              TransferGraph::XDTemplate::mk_edge(ib_idx));
+          if(j < (pathlen - 1)) {
+            TransferGraph::IBInfo& ibe = graph.ib_edges[ib_idx++];
+            ibe.memory = path_info.path[j + 1];
+            ibe.size = ib_alloc_size;
+          }
 	}
 
         prof_usage.source = Memory::NO_MEMORY;
@@ -4569,6 +4583,7 @@ namespace Realm {
 
       const void *fill_data = 0;
       size_t fill_size = 0;
+      size_t fill_total = 0;
 
       std::vector<XferDesPortInfo> inputs_info(xdn.inputs.size());
       for(size_t j = 0; j < xdn.inputs.size(); j++) {
@@ -4654,6 +4669,7 @@ namespace Realm {
 	    inputs_info.clear();
 	    fill_data = static_cast<const char *>(desc.fill_data) + xdn.inputs[j].fill.fill_start;
 	    fill_size = xdn.inputs[j].fill.fill_size;
+            fill_total = xdn.inputs[j].fill.fill_total;
 	    break;
 	  }
 	default:
@@ -4833,7 +4849,7 @@ namespace Realm {
 				  outputs_info,
 				  priority,
                                   xdn.redop,
-				  fill_data, fill_size);
+				  fill_data, fill_size, fill_total);
       xd_factory->release();
     }
 

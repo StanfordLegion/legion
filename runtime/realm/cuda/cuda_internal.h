@@ -917,7 +917,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
 
@@ -935,7 +936,8 @@ namespace Realm {
 		     const std::vector<XferDesPortInfo>& inputs_info,
 		     const std::vector<XferDesPortInfo>& outputs_info,
 		     int _priority,
-		     const void *_fill_data, size_t _fill_size);
+		     const void *_fill_data, size_t _fill_size,
+                     size_t _fill_total);
 
       long get_requests(Request** requests, long nr);
 
@@ -959,7 +961,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
 
@@ -1027,7 +1030,8 @@ namespace Realm {
 				       const std::vector<XferDesPortInfo>& outputs_info,
 				       int priority,
 				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size);
+				       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
 
       long submit(Request** requests, long nr);
 

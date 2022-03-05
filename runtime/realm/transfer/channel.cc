@@ -1313,47 +1313,49 @@ namespace Realm {
 
     // pull control information if we need it
     if(input_control.remaining_count == 0) {
-      XferPort& icp = input_ports[input_control.control_port_idx];
-      size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
-						4 * sizeof(unsigned));
-      size_t old_lbt = icp.local_bytes_total;
+      if(input_control.control_port_idx >= 0) {
+        XferPort& icp = input_ports[input_control.control_port_idx];
+        size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
+                                                  4 * sizeof(unsigned));
+        size_t old_lbt = icp.local_bytes_total;
 
-      // may take a few chunks of data to get a control packet
-      while(true) {
-        if(avail < sizeof(unsigned))
-          return 0;  // no data right now
+        // may take a few chunks of data to get a control packet
+        while(true) {
+          if(avail < sizeof(unsigned))
+            return 0;  // no data right now
 
-        TransferIterator::AddressInfo c_info;
-        size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
-                                    false /*!tentative*/);
-        assert(amt == sizeof(unsigned));
-        const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
-        assert(srcptr != 0);
-        unsigned cword;
-        memcpy(&cword, srcptr, sizeof(unsigned));
+          TransferIterator::AddressInfo c_info;
+          size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
+                                      false /*!tentative*/);
+          assert(amt == sizeof(unsigned));
+          const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
+          assert(srcptr != 0);
+          unsigned cword;
+          memcpy(&cword, srcptr, sizeof(unsigned));
 
-        icp.local_bytes_total += sizeof(unsigned);
-        avail -= sizeof(unsigned);
+          icp.local_bytes_total += sizeof(unsigned);
+          avail -= sizeof(unsigned);
 
-        if(input_control.decoder.decode(cword,
-                                        input_control.remaining_count,
-                                        input_control.current_io_port,
-                                        input_control.eos_received))
-          break;
-      }
+          if(input_control.decoder.decode(cword,
+                                          input_control.remaining_count,
+                                          input_control.current_io_port,
+                                          input_control.eos_received))
+            break;
+        }
 
-      // can't get here unless we read something, so ack it
-      if(rseqcache != 0)
-	rseqcache->add_span(input_control.control_port_idx,
+        // can't get here unless we read something, so ack it
+        if(rseqcache != 0)
+          rseqcache->add_span(input_control.control_port_idx,
+                              old_lbt, icp.local_bytes_total - old_lbt);
+        else
+          update_bytes_read(input_control.control_port_idx,
                             old_lbt, icp.local_bytes_total - old_lbt);
-      else
-	update_bytes_read(input_control.control_port_idx,
-                          old_lbt, icp.local_bytes_total - old_lbt);
 
-      log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
-		    << " port=" << input_control.current_io_port
-		    << " count=" << input_control.remaining_count
-		    << " done=" << input_control.eos_received;
+        log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
+                      << " port=" << input_control.current_io_port
+                      << " count=" << input_control.remaining_count
+                      << " done=" << input_control.eos_received;
+      }
       // if count is still zero, we're done
       if(input_control.remaining_count == 0) {
 	assert(input_control.eos_received);
@@ -1363,49 +1365,51 @@ namespace Realm {
     }
 
     if(output_control.remaining_count == 0) {
-      // this looks wrong, but the port that controls the output is
-      //  an input port! vvv
-      XferPort& ocp = input_ports[output_control.control_port_idx];
-      size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
-						4 * sizeof(unsigned));
-      size_t old_lbt = ocp.local_bytes_total;
+      if(output_control.control_port_idx >= 0) {
+        // this looks wrong, but the port that controls the output is
+        //  an input port! vvv
+        XferPort& ocp = input_ports[output_control.control_port_idx];
+        size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
+                                                  4 * sizeof(unsigned));
+        size_t old_lbt = ocp.local_bytes_total;
 
-      // may take a few chunks of data to get a control packet
-      while(true) {
-        if(avail < sizeof(unsigned))
-          return 0;  // no data right now
+        // may take a few chunks of data to get a control packet
+        while(true) {
+          if(avail < sizeof(unsigned))
+            return 0;  // no data right now
 
-        TransferIterator::AddressInfo c_info;
-        size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0,
-                                    false /*!tentative*/);
-        assert(amt == sizeof(unsigned));
-        const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
-        assert(srcptr != 0);
-        unsigned cword;
-        memcpy(&cword, srcptr, sizeof(unsigned));
+          TransferIterator::AddressInfo c_info;
+          size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0,
+                                      false /*!tentative*/);
+          assert(amt == sizeof(unsigned));
+          const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
+          assert(srcptr != 0);
+          unsigned cword;
+          memcpy(&cword, srcptr, sizeof(unsigned));
 
-        ocp.local_bytes_total += sizeof(unsigned);
-        avail -= sizeof(unsigned);
+          ocp.local_bytes_total += sizeof(unsigned);
+          avail -= sizeof(unsigned);
 
-        if(output_control.decoder.decode(cword,
-                                         output_control.remaining_count,
-                                         output_control.current_io_port,
-                                         output_control.eos_received))
-          break;
-      }
+          if(output_control.decoder.decode(cword,
+                                           output_control.remaining_count,
+                                           output_control.current_io_port,
+                                           output_control.eos_received))
+            break;
+        }
 
-      // can't get here unless we read something, so ack it
-      if(rseqcache != 0)
-	rseqcache->add_span(output_control.control_port_idx,
+        // can't get here unless we read something, so ack it
+        if(rseqcache != 0)
+          rseqcache->add_span(output_control.control_port_idx,
+                              old_lbt, ocp.local_bytes_total - old_lbt);
+        else
+          update_bytes_read(output_control.control_port_idx,
                             old_lbt, ocp.local_bytes_total - old_lbt);
-      else
-	update_bytes_read(output_control.control_port_idx,
-                          old_lbt, ocp.local_bytes_total - old_lbt);
 
-      log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
-		    << " port=" << output_control.current_io_port
-		    << " count=" << output_control.remaining_count
-		    << " done=" << output_control.eos_received;
+        log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
+                      << " port=" << output_control.current_io_port
+                      << " count=" << output_control.remaining_count
+                      << " done=" << output_control.eos_received;
+      }
       // if count is still zero, we're done
       if(output_control.remaining_count == 0) {
 	assert(output_control.eos_received);
@@ -3225,16 +3229,20 @@ namespace Realm {
 				 const std::vector<XferDesPortInfo>& inputs_info,
 				 const std::vector<XferDesPortInfo>& outputs_info,
 				 int _priority,
-				 const void *_fill_data, size_t _fill_size)
+				 const void *_fill_data, size_t _fill_size,
+                                 size_t _fill_total)
 	: XferDes(_dma_op, _channel, _launch_node, _guid,
 		  inputs_info, outputs_info,
 		  _priority, _fill_data, _fill_size)
       {
 	kind = XFER_MEM_FILL;
 
-	// no direct input data for us
+	// no direct input data for us, but we know how much data to produce
+        //  (in case the output is an intermediate buffer)
 	assert(input_control.control_port_idx == -1);
 	input_control.current_io_port = -1;
+        input_control.remaining_count = _fill_total;
+        input_control.eos_received = true;
       }
 
       long MemfillXferDes::get_requests(Request** requests, long nr)
@@ -4852,7 +4860,8 @@ namespace Realm {
 					     int priority,
 					     XferDesRedopInfo redop_info,
 					     const void *fill_data,
-					     size_t fill_size)
+					     size_t fill_size,
+                                             size_t fill_total)
   {
     if(target_node == Network::my_node_id) {
       // local creation
@@ -4861,7 +4870,7 @@ namespace Realm {
       XferDes *xd = c->create_xfer_des(dma_op, launch_node, guid,
 				       inputs_info, outputs_info,
 				       priority, redop_info,
-				       fill_data, fill_size);
+				       fill_data, fill_size, fill_total);
 
       c->enqueue_ready_xd(xd);
     } else {
@@ -4871,7 +4880,8 @@ namespace Realm {
 	bool ok = ((bcs << inputs_info) &&
 		   (bcs << outputs_info) &&
 		   (bcs << priority) &&
-		   (bcs << redop_info));
+		   (bcs << redop_info) &&
+                   (bcs << fill_total));
 	if(ok && (fill_size > 0))
 	  ok = bcs.append_bytes(fill_data, fill_size);
 	assert(ok);
@@ -4887,7 +4897,8 @@ namespace Realm {
 	bool ok = ((amsg << inputs_info) &&
 		   (amsg << outputs_info) &&
 		   (amsg << priority) &&
-		   (amsg << redop_info));
+		   (amsg << redop_info) &&
+                   (amsg << fill_total));
 	if(ok && (fill_size > 0))
 	  amsg.add_payload(fill_data, fill_size);
 	assert(ok);
@@ -4923,13 +4934,15 @@ namespace Realm {
     std::vector<XferDesPortInfo> inputs_info, outputs_info;
     int priority = 0;
     XferDesRedopInfo redop_info;
+    size_t fill_total = 0;
 
     Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
 
     bool ok = ((fbd >> inputs_info) &&
 	       (fbd >> outputs_info) &&
 	       (fbd >> priority) &&
-	       (fbd >> redop_info));
+	       (fbd >> redop_info) &&
+               (fbd >> fill_total));
     assert(ok);
     const void *fill_data;
     size_t fill_size;
@@ -4949,7 +4962,7 @@ namespace Realm {
 				     outputs_info,
 				     priority,
 				     redop_info,
-				     fill_data, fill_size);
+				     fill_data, fill_size, fill_total);
 
     c->enqueue_ready_xd(xd);
   }
@@ -5171,7 +5184,9 @@ namespace Realm {
 					      const std::vector<XferDesPortInfo>& outputs_info,
 					      int priority,
 					      XferDesRedopInfo redop_info,
-					      const void *fill_data, size_t fill_size)
+					      const void *fill_data,
+                                              size_t fill_size,
+                                              size_t fill_total)
       {
         assert(redop_info.id == 0);
 	assert(fill_size == 0);
@@ -5681,14 +5696,16 @@ namespace Realm {
 					   const std::vector<XferDesPortInfo>& outputs_info,
 					   int priority,
 					   XferDesRedopInfo redop_info,
-					   const void *fill_data, size_t fill_size)
+					   const void *fill_data,
+                                           size_t fill_size,
+                                           size_t fill_total)
   {
     assert(redop_info.id == 0); // TODO: add support
     assert(fill_size > 0);
     return new MemfillXferDes(dma_op, this, launch_node, guid,
 			      inputs_info, outputs_info,
 			      priority,
-			      fill_data, fill_size);
+			      fill_data, fill_size, fill_total);
   }
 
   long MemfillChannel::submit(Request** requests, long nr)
@@ -5754,7 +5771,9 @@ namespace Realm {
                                              const std::vector<XferDesPortInfo>& outputs_info,
                                              int priority,
                                              XferDesRedopInfo redop_info,
-                                             const void *fill_data, size_t fill_size)
+                                             const void *fill_data,
+                                             size_t fill_size,
+                                             size_t fill_total)
   {
     assert(redop_info.id != 0); // redop is required
     assert(fill_size == 0);
@@ -5812,7 +5831,9 @@ namespace Realm {
 					      const std::vector<XferDesPortInfo>& outputs_info,
 					      int priority,
 					      XferDesRedopInfo redop_info,
-					      const void *fill_data, size_t fill_size)
+					      const void *fill_data,
+                                              size_t fill_size,
+                                              size_t fill_total)
       {
 	assert(redop_info.id == 0);
 	assert(fill_size == 0);
@@ -5880,7 +5901,9 @@ namespace Realm {
 						   const std::vector<XferDesPortInfo>& outputs_info,
 						   int priority,
 						   XferDesRedopInfo redop_info,
-						   const void *fill_data, size_t fill_size)
+						   const void *fill_data,
+                                                   size_t fill_size,
+                                                   size_t fill_total)
       {
 	assert(redop_info.id == 0);
 	assert(fill_size == 0);
