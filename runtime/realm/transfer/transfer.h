@@ -93,6 +93,7 @@ namespace Realm {
       //  strict ordering rules
       virtual int set_rect(const RegionInstanceImpl *inst,
                            const InstanceLayoutPieceBase *piece,
+                           size_t field_size, size_t field_offset,
                            int ndims,
                            const int64_t lo[/*ndims*/],
                            const int64_t hi[/*ndims*/],
@@ -109,7 +110,8 @@ namespace Realm {
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
 
-    virtual bool get_addresses(AddressList &addrlist) = 0;
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine) = 0;
   };
 
   class TransferDomain {

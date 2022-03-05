@@ -1425,9 +1425,25 @@ namespace Realm {
   size_t XferDes::get_addresses(size_t min_xfer_size,
 				ReadSequenceCache *rseqcache)
   {
+    const InstanceLayoutPieceBase *in_nonaffine;
+    const InstanceLayoutPieceBase *out_nonaffine;
+    size_t ret = get_addresses(min_xfer_size, rseqcache,
+                               in_nonaffine, out_nonaffine);
+    assert(!in_nonaffine && !out_nonaffine);
+    return ret;
+  }
+
+  size_t XferDes::get_addresses(size_t min_xfer_size,
+				ReadSequenceCache *rseqcache,
+                                const InstanceLayoutPieceBase *&in_nonaffine,
+                                const InstanceLayoutPieceBase *&out_nonaffine)
+  {
     size_t control_count = update_control_info(rseqcache);
-    if(control_count == 0)
+    if(control_count == 0) {
+      in_nonaffine = 0;
+      out_nonaffine = 0;
       return 0;
+    }
     if(control_count < min_xfer_size)
       min_xfer_size = control_count;
     size_t max_bytes = control_count;
@@ -1439,13 +1455,21 @@ namespace Realm {
       // do we need more addresses?
       size_t read_bytes_avail = in_port->addrlist.bytes_pending();
       if(read_bytes_avail < min_xfer_size) {
-	if(in_port->iter->get_addresses(in_port->addrlist)) {
-	  // adjust min size to flush as requested
-	  min_xfer_size = std::min(min_xfer_size,
-				   in_port->addrlist.bytes_pending());
-	}
+        bool flush = in_port->iter->get_addresses(in_port->addrlist,
+                                                  in_nonaffine);
 	read_bytes_avail = in_port->addrlist.bytes_pending();
-      }
+        if(flush) {
+          if(read_bytes_avail > 0) {
+            // ignore a nonaffine piece as we still have some affine bytes
+            in_nonaffine = 0;
+          }
+
+	  // adjust min size to flush as requested (unless we're non-affine)
+          if(!in_nonaffine)
+            min_xfer_size = std::min(min_xfer_size, read_bytes_avail);
+	}
+      } else
+        in_nonaffine = 0;
 
       // if we're not the first in the chain, respect flow control too
       if(in_port->peer_guid != XFERDES_NO_GUID) {
@@ -1469,7 +1493,10 @@ namespace Realm {
       if((read_bytes_avail > 0) && (read_bytes_avail < min_xfer_size))
 	min_xfer_size = read_bytes_avail;
 
-      max_bytes = std::min(max_bytes, read_bytes_avail);
+      if(!in_nonaffine)
+        max_bytes = std::min(max_bytes, read_bytes_avail);
+    } else {
+      in_nonaffine = 0;
     }
 
     // get addresses for the output, if it exists
@@ -1479,13 +1506,21 @@ namespace Realm {
       // do we need more addresses?
       size_t write_bytes_avail = out_port->addrlist.bytes_pending();
       if(write_bytes_avail < min_xfer_size) {
-	if(out_port->iter->get_addresses(out_port->addrlist)) {
-	  // adjust min size to flush as requested
-	  min_xfer_size = std::min(min_xfer_size,
-				   out_port->addrlist.bytes_pending());
-	}
+	bool flush = out_port->iter->get_addresses(out_port->addrlist,
+                                                   out_nonaffine);
 	write_bytes_avail = out_port->addrlist.bytes_pending();
-      }
+        if(flush) {
+          if(write_bytes_avail > 0) {
+            // ignore a nonaffine piece as we still have some affine bytes
+            out_nonaffine = 0;
+          }
+
+	  // adjust min size to flush as requested (unless we're non-affine)
+          if(!out_nonaffine)
+            min_xfer_size = std::min(min_xfer_size, write_bytes_avail);
+	}
+      } else
+        out_nonaffine = 0;
 
       // if we're not the last in the chain, respect flow control too
       if(out_port->peer_guid != XFERDES_NO_GUID) {
@@ -1499,7 +1534,10 @@ namespace Realm {
           min_xfer_size = std::max<size_t>(1, (out_port->ib_size >> 1));
       }
 
-      max_bytes = std::min(max_bytes, write_bytes_avail);
+      if(!out_nonaffine)
+        max_bytes = std::min(max_bytes, write_bytes_avail);
+    } else {
+      out_nonaffine = 0;
     }
 
     if(min_xfer_size == 0) {
@@ -1511,7 +1549,7 @@ namespace Realm {
     }
 
     // if we don't have a big enough chunk, wait for more to show up
-    if(max_bytes < min_xfer_size)
+    if((max_bytes < min_xfer_size) && !in_nonaffine && !out_nonaffine)
       return 0;
 
     return max_bytes;

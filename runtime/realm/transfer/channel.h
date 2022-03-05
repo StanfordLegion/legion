@@ -517,6 +517,9 @@ namespace Realm {
       // as a side effect, the input/output control information is updated - the
       //  actual input/output ports involved in the next transfer are stored there
       size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache);
+      size_t get_addresses(size_t min_xfer_size, ReadSequenceCache *rseqcache,
+                           const InstanceLayoutPieceBase *&in_nonaffine,
+                           const InstanceLayoutPieceBase *&out_nonaffine);
 
       // after a call to 'get_addresses', this call updates the various data
       //  structures to record that transfers for 'total_{read,write}_bytes' bytes

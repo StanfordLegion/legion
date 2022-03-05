@@ -99,6 +99,7 @@ namespace Realm {
     public:
       virtual int set_rect(const RegionInstanceImpl *inst,
                            const InstanceLayoutPieceBase *piece,
+                           size_t field_size, size_t field_offset,
                            int ndims,
                            const int64_t lo[/*ndims*/],
                            const int64_t hi[/*ndims*/],

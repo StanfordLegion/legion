@@ -82,7 +82,8 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
-    virtual bool get_addresses(AddressList &addrlist);
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine);
 
   protected:
     virtual bool get_next_rect(Rect<N,T>& r, FieldID& fid,
@@ -449,8 +450,9 @@ namespace Realm {
     }
 
     // offer the rectangle - it can be reduced by pruning dimensions
-    int ndims = info.set_rect(inst_impl, layout_piece, N,
-                              target_lo, target_hi, dim_order);
+    int ndims = info.set_rect(inst_impl, layout_piece,
+                              cur_field_size, cur_field_offset,
+                              N, target_lo, target_hi, dim_order);
 
     // if pruning did occur, update target_subrect and cur_bytes to match
     if(ndims < N) {
@@ -512,11 +514,14 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist)
+  bool TransferIteratorBase<N,T>::get_addresses(AddressList &addrlist,
+                                                const InstanceLayoutPieceBase *&nonaffine)
   {
 #ifdef DEBUG_REALM
     assert(!tentative_valid);
 #endif
+
+    nonaffine = 0;
 
     while(!done()) {
       if(!have_rect)
@@ -540,6 +545,12 @@ namespace Realm {
         if(REALM_UNLIKELY(layout_piece == 0)) {
           log_dma.fatal() << "no piece found for " << cur_point << " in instance " << inst_impl->me << " (list: " << piece_list << ")";
           abort();
+        }
+        if(layout_piece->layout_type != PieceLayoutTypes::AffineLayoutType) {
+          // can't handle this piece here - let the caller know what the
+          //  non-affine piece is and maybe it can handle it
+          nonaffine = layout_piece;
+          return true;
         }
 	field_rel_offset = it->second.rel_offset + cur_field_offset;
       }
@@ -601,6 +612,7 @@ namespace Realm {
       assert(layout_piece->bounds.contains(target_subrect));
 #endif
 
+      // TODO: remove now-redundant condition here
       if(layout_piece->layout_type == PieceLayoutTypes::AffineLayoutType) {
 	const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
 
