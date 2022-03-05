@@ -211,7 +211,7 @@ namespace Realm {
       info->fd = fd;
       info->offset = res->offset;
 
-      inst->metadata.mem_specific = info;
+      inst->metadata.add_mem_specific(info);
 
       AllocationResult result = ALLOC_INSTANT_SUCCESS;
       size_t inst_offset = 0;
@@ -229,11 +229,9 @@ namespace Realm {
       if(poisoned)
 	return;
 
-      OpenFileInfo *info = reinterpret_cast<OpenFileInfo *>(inst->metadata.mem_specific);
+      OpenFileInfo *info = inst->metadata.find_mem_specific<OpenFileInfo>();
       assert(info != 0);
       close(info->fd);
-      delete info;
-      inst->metadata.mem_specific = 0;
 
       inst->notify_deallocation();
     }

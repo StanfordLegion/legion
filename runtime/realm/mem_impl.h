@@ -164,6 +164,14 @@ namespace Realm {
     InstanceList local_instances;
   };
 
+  class MemSpecificInfo {
+  public:
+    MemSpecificInfo();
+    virtual ~MemSpecificInfo() {}
+
+    MemSpecificInfo *next;
+  };
+
   class PendingIBRequests {
   public:
     PendingIBRequests(NodeID _sender, uintptr_t _req_op,
@@ -362,7 +370,8 @@ namespace Realm {
 					     TimeLimit work_until);
 
       // the 'mem_specific' data for a file instance contains OpenFileInfo
-      struct OpenFileInfo {
+      class OpenFileInfo : public MemSpecificInfo {
+      public:
 	int fd;
 	size_t offset;
       };
