@@ -1506,7 +1506,11 @@ end
 -- #################
 
 local function need_dynamic_serialization(value_type)
-  return std.is_list(value_type) or std.is_string(value_type)
+  return std.is_list(value_type) or (
+    -- Supports the extensible serialization interface.
+    rawget(value_type, "__compute_serialized_size") and
+    rawget(value_type, "__serialize") and
+    rawget(value_type, "__deserialize"))
 end
 
 local function compute_serialized_size_inner(value_type, value)
@@ -1526,8 +1530,8 @@ local function compute_serialized_size_inner(value_type, value)
       end
     end
     return actions, result
-  elseif std.is_string(value_type) then
-    return quote end, `(c.strlen([rawstring](value)) + 1)
+  elseif rawget(value_type, "__compute_serialized_size") then
+    return value_type:__compute_serialized_size(value_type, value)
   else
     return quote end, 0
   end
@@ -1585,12 +1589,8 @@ local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
         [ser_actions]
       end
     end
-  elseif std.is_string(value_type) then
-    actions = quote
-      [actions]
-      c.strcpy([rawstring](@[data_ptr]), [rawstring]([value]))
-      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([value])) + 1
-    end
+  elseif rawget(value_type, "__serialize") then
+    return value_type:__serialize(value_type, value, fixed_ptr, data_ptr)
   end
 
   return actions
@@ -1653,12 +1653,8 @@ local function deserialize_inner(value_type, fixed_ptr, data_ptr)
         ([&element_type]([result].__data))[i] = [deser_value]
       end
     end
-  elseif std.is_string(value_type) then
-    actions = quote
-      [actions]
-      [result] = c.strdup([rawstring](@[data_ptr]))
-      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([result])) + 1
-    end
+  elseif rawget(value_type, "__deserialize") then
+    return value_type:__deserialize(value_type, fixed_ptr, data_ptr)
   end
 
   return actions, result
@@ -3557,6 +3553,27 @@ do
     end
     assert(false)
   end
+
+  function st:__compute_serialized_size(value_type, value)
+    return quote end, `(c.strlen([rawstring](value)) + 1)
+  end
+
+  function st:__serialize(value_type, value, fixed_ptr, data_ptr)
+    return quote
+      c.strcpy([rawstring](@[data_ptr]), [rawstring]([value]))
+      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([value])) + 1
+    end
+  end
+
+  function st:__deserialize(value_type, fixed_ptr, data_ptr)
+    local result = terralib.newsymbol(value_type, "result")
+    local actions = quote
+      var [result] = c.strdup([rawstring](@[data_ptr]))
+      @[data_ptr] = @[data_ptr] + c.strlen([rawstring]([result])) + 1
+    end
+    return actions, result
+  end
+
   std.string = st
 end
 
