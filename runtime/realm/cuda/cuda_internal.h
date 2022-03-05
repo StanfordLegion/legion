@@ -781,6 +781,12 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      // GPUFBMemory supports ExternalCudaMemoryResource and
+      //  ExternalCudaArrayResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
     public:
       GPU *gpu;
       CUdeviceptr base;
@@ -808,6 +814,12 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
+
+      // GPUDynamicFBMemory supports ExternalCudaMemoryResource and
+      //  ExternalCudaArrayResource
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t& inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
 
     public:
       GPU *gpu;
@@ -879,6 +891,30 @@ namespace Realm {
       size_t read_offset, read_size;
       int write_port_idx;
       size_t write_offset, write_size;
+    };
+
+    class MemSpecificCudaArray : public MemSpecificInfo {
+    public:
+      MemSpecificCudaArray(CUarray _array);
+      virtual ~MemSpecificCudaArray();
+
+      CUarray array;
+    };
+
+    class AddressInfoCudaArray : public TransferIterator::AddressInfoCustom {
+    public:
+      virtual int set_rect(const RegionInstanceImpl *inst,
+                           const InstanceLayoutPieceBase *piece,
+                           size_t field_size, size_t field_offset,
+                           int ndims,
+                           const int64_t lo[/*ndims*/],
+                           const int64_t hi[/*ndims*/],
+                           const int order[/*ndims*/]);
+
+      CUarray array;
+      int dim;
+      size_t pos[3];
+      size_t width_in_bytes, height, depth;
     };
 
     class GPUChannel;
