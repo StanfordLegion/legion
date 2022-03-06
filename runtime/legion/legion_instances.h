@@ -936,6 +936,33 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent result, AddressSpaceID origin);
+      ApEvent perform_collective_point(InstanceView *src_view,
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const Memory location,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events);
+      void perform_collective_pointwise(CollectiveManager *source,
+                                InstanceView *src_view,
+                                InstanceView *dst_view,
+                                ApEvent precondition,
+                                PredEvent predicate_guard, 
+                                ReductionOpID reduction_op_id,
+                                IndexSpaceExpression *copy_expression,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent all_done, AddressSpaceID origin);
       void perform_collective_reduction(InstanceView *src_view,
                                 const std::vector<CopySrcDstField> &dst_fields,
                                 const std::vector<Reservation> &reservations,
@@ -998,6 +1025,10 @@ namespace Legion {
       static void handle_collective_message(Deserializer &derez,
                                             Runtime *runtime);
       static void handle_distribute_fill(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_point(Runtime *runtime,
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_pointwise(Runtime *runtime,
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_reduction(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);

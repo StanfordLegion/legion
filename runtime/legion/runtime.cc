@@ -12391,6 +12391,18 @@ namespace Legion {
                                                          remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_DISTRIBUTE_POINT:
+            {
+              runtime->handle_collective_distribute_point(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_COLLECTIVE_DISTRIBUTE_POINTWISE:
+            {
+              runtime->handle_collective_distribute_pointwise(derez,
+                                                          remote_address_space);
+              break;
+            }
           case SEND_COLLECTIVE_DISTRIBUTE_REDUCTION:
             {
               runtime->handle_collective_distribute_reduction(derez,
@@ -22261,6 +22273,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_point(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_DISTRIBUTE_POINT>(
+                                                          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_pointwise(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_DISTRIBUTE_POINTWISE>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_distribute_reduction(AddressSpaceID target,
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24260,6 +24290,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_distribute_fill(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_point(Deserializer &derez,
+                                                     AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_point(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_pointwise(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_pointwise(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

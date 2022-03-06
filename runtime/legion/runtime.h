@@ -3147,6 +3147,10 @@ namespace Legion {
                                             Serializer &rez);
       void send_collective_distribute_fill(AddressSpaceID target,
                                            Serializer &rez);
+      void send_collective_distribute_point(AddressSpaceID target,
+                                            Serializer &rez);
+      void send_collective_distribute_pointwise(AddressSpaceID target,
+                                                Serializer &rez);
       void send_collective_distribute_reduction(AddressSpaceID target,
                                                 Serializer &rez);
       void send_collective_distribute_broadcast(AddressSpaceID target,
@@ -3468,6 +3472,10 @@ namespace Legion {
       void handle_collective_instance_message(Deserializer &derez);
       void handle_collective_distribute_fill(Deserializer &derez,
                                              AddressSpaceID source);
+      void handle_collective_distribute_point(Deserializer &derez,
+                                              AddressSpaceID source);
+      void handle_collective_distribute_pointwise(Deserializer &derez,
+                                                  AddressSpaceID source);
       void handle_collective_distribute_reduction(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_collective_distribute_broadcast(Deserializer &derez,
@@ -5530,6 +5538,10 @@ namespace Legion {
         case SEND_COLLECTIVE_MESSAGE:
           return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_DISTRIBUTE_FILL:
+          break;
+        case SEND_COLLECTIVE_DISTRIBUTE_POINT:
+          break;
+        case SEND_COLLECTIVE_DISTRIBUTE_POINTWISE:
           break;
         case SEND_COLLECTIVE_DISTRIBUTE_REDUCTION:
           break;

@@ -801,6 +801,8 @@ namespace Legion {
       SEND_COLLECTIVE_MANAGER,
       SEND_COLLECTIVE_MESSAGE,
       SEND_COLLECTIVE_DISTRIBUTE_FILL,
+      SEND_COLLECTIVE_DISTRIBUTE_POINT,
+      SEND_COLLECTIVE_DISTRIBUTE_POINTWISE,
       SEND_COLLECTIVE_DISTRIBUTE_REDUCTION,
       SEND_COLLECTIVE_DISTRIBUTE_BROADCAST,
       SEND_CREATE_SHADOW_REQUEST,
@@ -1020,6 +1022,8 @@ namespace Legion {
         "Send Collective Instance Manager",                           \
         "Send Collective Instance Message",                           \
         "Send Collective Distribute Fill",                            \
+        "Send Collective Distribute Point",                           \
+        "Send Collective Distribute Pointwise",                       \
         "Send Collective Distribute Reduction",                       \
         "Send Collective Distribute Broadcast",                       \
         "Send Create Shadow Reduction Instance Request",              \
