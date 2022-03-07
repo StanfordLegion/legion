@@ -44,7 +44,7 @@ local dynamic_array = terralib.memoize(
 
     function st:__serialize(value_type, value, fixed_ptr, data_ptr)
       return quote
-        terralib.attrstore(&(([&st](fixed_ptr)).size), value.size, { align = 1 })
+        [regentlib.serialize_simple(value_type, value, fixed_ptr, data_ptr)]
         regentlib.c.memcpy(@data_ptr, value.data, value.size * elt_size)
         @data_ptr = @data_ptr + value.size * elt_size
       end
@@ -53,8 +53,7 @@ local dynamic_array = terralib.memoize(
     function st:__deserialize(value_type, fixed_ptr, data_ptr)
       local result = terralib.newsymbol(value_type, "result")
       local actions = quote
-        var [result] = [st.create](
-            terralib.attrload(&(([&st](fixed_ptr)).size), { align = 1 }))
+        var [result] = [regentlib.deserialize_simple(value_type, fixed_ptr, data_ptr)]
         regentlib.c.memcpy(result.data, @data_ptr, result.size * elt_size)
         @data_ptr = @data_ptr + result.size * elt_size
       end
