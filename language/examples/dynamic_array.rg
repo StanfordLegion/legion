@@ -39,14 +39,38 @@ local dynamic_array = terralib.memoize(
     end
 
     function st:__compute_serialized_size(value_type, value)
-      return quote end, `(value.size * elt_size)
+      local result = terralib.newsymbol(regentlib.c.size_t, "result")
+      local element = terralib.newsymbol(&elt_type)
+
+      local size_actions, size_value = regentlib.compute_serialized_size_inner(
+        elt_type, `(@element))
+      local actions = quote
+        var [result] = 0
+        for i = 0, value.size do
+          var [element] = value.data + i
+          [size_actions]
+          result = result + terralib.sizeof(elt_type) + size_value
+        end
+      end
+      return actions, result
     end
 
     function st:__serialize(value_type, value, fixed_ptr, data_ptr)
+      local actions = regentlib.serialize_simple(value_type, value, fixed_ptr, data_ptr)
+
+      local element = terralib.newsymbol(elt_type)
+      local element_ptr = terralib.newsymbol(&elt_type)
+
+      local ser_actions = regentlib.serialize_inner(
+        elt_type, element, element_ptr, data_ptr)
       return quote
-        [regentlib.serialize_simple(value_type, value, fixed_ptr, data_ptr)]
-        regentlib.c.memcpy(@data_ptr, value.data, value.size * elt_size)
-        @data_ptr = @data_ptr + value.size * elt_size
+        [actions]
+        for i = 0, value.size do
+          var [element] = value.data[i]
+          var [element_ptr] = [&elt_type](@data_ptr)
+          @data_ptr = @data_ptr + terralib.sizeof(elt_type)
+          [ser_actions]
+        end
       end
     end
 
@@ -54,8 +78,23 @@ local dynamic_array = terralib.memoize(
       local result = terralib.newsymbol(value_type, "result")
       local actions = quote
         var [result] = [regentlib.deserialize_simple(value_type, fixed_ptr, data_ptr)]
-        regentlib.c.memcpy(result.data, @data_ptr, result.size * elt_size)
-        @data_ptr = @data_ptr + result.size * elt_size
+      end
+
+      local element_ptr = terralib.newsymbol(&elt_type)
+
+      local deser_actions, deser_value = regentlib.deserialize_inner(
+        elt_type, element_ptr, data_ptr)
+      actions = quote
+        [actions]
+        result.data = [&elt_type](regentlib.c.malloc(
+          terralib.sizeof(elt_type) * result.size))
+        regentlib.assert(result.data ~= nil, "malloc failed in deserialize")
+        for i = 0, result.size do
+          var [element_ptr] = [&elt_type](@data_ptr)
+          @data_ptr = @data_ptr + terralib.sizeof(elt_type)
+          [deser_actions]
+          result.data[i] = deser_value
+        end
       end
       return actions, result
     end
@@ -64,11 +103,20 @@ local dynamic_array = terralib.memoize(
   end)
 
 local da_int = dynamic_array(int)
+local da_string = dynamic_array(regentlib.string)
 
 task pushed(arr : da_int, x : int)
   var result = [da_int.create](arr.size + 1)
   regentlib.c.memcpy(result.data, arr.data, arr.size * [terralib.sizeof(int)])
   result.data[arr.size] = x
+  return result
+end
+
+task sum_length(arr : da_string)
+  var result = 0
+  for i = 0, arr.size do
+    result += regentlib.c.strlen(arr.data[i])
+  end
   return result
 end
 
@@ -85,5 +133,12 @@ task main()
   regentlib.assert(second.size == 6, "test failed")
   regentlib.assert(second.data[4] == 4, "test failed")
   regentlib.assert(second.data[5] == 123, "test failed")
+
+  var third = [da_string.create](3)
+  third.data[0] = "asdf"
+  third.data[1] = "1"
+  third.data[2] = "abc"
+
+  regentlib.assert(sum_length(third) == 8, "test failed")
 end
 regentlib.start(main)
