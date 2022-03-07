@@ -954,7 +954,6 @@ namespace Legion {
                                 InstanceView *dst_view,
                                 ApEvent precondition,
                                 PredEvent predicate_guard, 
-                                ReductionOpID reduction_op_id,
                                 IndexSpaceExpression *copy_expression,
                                 const UniqueID op_id,
                                 const unsigned index,
@@ -988,6 +987,43 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent copy_done, ApUserEvent all_done,
+                                AddressSpaceID origin);
+      void perform_collective_reducecast(CollectiveManager *source,
+                                InstanceView *src_view, InstanceView *dst_view,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent all_done,
+                                AddressSpaceID target);
+      void perform_collective_allreduce(InstanceView *src_view,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events);
+      // Degenerate case
+      ApEvent perform_hammer_reduction(InstanceView *src_view,
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
                                 AddressSpaceID origin);
     protected:
       void finalize_collective_user(InstanceView *view,
@@ -1033,6 +1069,10 @@ namespace Legion {
       static void handle_distribute_reduction(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_broadcast(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_reducecast(Runtime *runtime,
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_hammer_reduction(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, IndexSpaceNode *point_space,

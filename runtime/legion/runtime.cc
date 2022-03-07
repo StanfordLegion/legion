@@ -12415,6 +12415,18 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_DISTRIBUTE_REDUCECAST:
+            {
+              runtime->handle_collective_distribute_reducecast(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_COLLECTIVE_HAMMER_REDUCTION:
+            {
+              runtime->handle_collective_hammer_reduction(derez,
+                                                          remote_address_space);
+              break;
+            }
 #ifdef LEGION_GPU_REDUCTIONS
           case SEND_CREATE_SHADOW_REQUEST:
             {
@@ -22308,6 +22320,24 @@ namespace Legion {
         SEND_COLLECTIVE_DISTRIBUTE_BROADCAST>(rez, true/*flush*/);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_reducecast(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_DISTRIBUTE_REDUCECAST>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_hammer_reduction(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_HAMMER_REDUCTION>(
+                                                          rez, true/*flush*/);
+    }
+
 #ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
     void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
@@ -24322,6 +24352,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_distribute_broadcast(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_reducecast(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_reducecast(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_hammer_reduction(Deserializer &derez,
+                                                     AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_hammer_reduction(this, source, derez);
     }
 
 #ifdef LEGION_GPU_REDUCTIONS

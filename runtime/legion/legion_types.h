@@ -805,6 +805,8 @@ namespace Legion {
       SEND_COLLECTIVE_DISTRIBUTE_POINTWISE,
       SEND_COLLECTIVE_DISTRIBUTE_REDUCTION,
       SEND_COLLECTIVE_DISTRIBUTE_BROADCAST,
+      SEND_COLLECTIVE_DISTRIBUTE_REDUCECAST,
+      SEND_COLLECTIVE_HAMMER_REDUCTION,
       SEND_CREATE_SHADOW_REQUEST,
       SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -1026,6 +1028,8 @@ namespace Legion {
         "Send Collective Distribute Pointwise",                       \
         "Send Collective Distribute Reduction",                       \
         "Send Collective Distribute Broadcast",                       \
+        "Send Collective Distribute Reducecast",                      \
+        "Send Collective Hammer Reduction",                           \
         "Send Create Shadow Reduction Instance Request",              \
         "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \
