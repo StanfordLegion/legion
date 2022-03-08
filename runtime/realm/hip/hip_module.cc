@@ -1594,7 +1594,6 @@ namespace Realm {
         //  static copy of the cuda runtime that's in use and foiling the
         //  hijack
         if(cudart_hijack_active) {
-	  printf("hijack\n");
           gpu_proc->gpu->module->cfg_task_context_sync = 0;
           if (!already_issued_hijack_enabled_warning) {
             already_issued_hijack_enabled_warning = true;
