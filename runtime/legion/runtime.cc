@@ -1944,10 +1944,11 @@ namespace Legion {
                       "a single physical instance.", context->get_task_name(),
                       context->get_unique_id())
       made_accessor = true;
+      const InstanceSet &instances = references;
 #if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          result = references[0].get_accessor();
+          result = instances[0].get_accessor();
       result.set_region_untyped(this);
 #ifdef LEGION_PRIVILEGE_CHECKS
       result.set_privileges_untyped(
@@ -1955,7 +1956,7 @@ namespace Legion {
 #endif
       return result;
 #else // privilege or bounds checks
-      return references[0].get_accessor();
+      return instances[0].get_accessor();
 #endif
     }
 
@@ -2014,10 +2015,11 @@ namespace Legion {
             "Requested field accessor for field %d without privileges!", fid)
 #endif
       made_accessor = true;
+      const InstanceSet &instances = references;
 #if defined(LEGION_PRIVILEGE_CHECKS) || defined(LEGION_BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          result = references.get_field_accessor(fid);
+          result = instances.get_field_accessor(fid);
       result.set_region_untyped(this);
 #ifdef LEGION_PRIVILEGE_CHECKS
       result.set_privileges_untyped(
@@ -2025,7 +2027,7 @@ namespace Legion {
 #endif
       return result;
 #else // privilege or bounds checks
-      return references.get_field_accessor(fid);
+      return instances.get_field_accessor(fid);
 #endif
     } 
 
@@ -2132,8 +2134,9 @@ namespace Legion {
         if (context != NULL)
           context->end_task_wait();
       }
-      for (unsigned idx = 0; idx < references.size(); idx++)
-        memories.insert(references[idx].get_memory());
+      const InstanceSet &instances = references;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+        memories.insert(instances[idx].get_memory());
     }
 
     //--------------------------------------------------------------------------
@@ -2212,9 +2215,10 @@ namespace Legion {
         if (context != NULL)
           context->end_task_wait();
       }
-      for (unsigned idx = 0; idx < references.size(); idx++)
+      const InstanceSet &instances = references;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
       {
-        const InstanceRef &ref = references[idx];
+        const InstanceRef &ref = instances[idx];
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_physical_manager();
@@ -2373,9 +2377,10 @@ namespace Legion {
       wait_until_valid(silence_warnings, warning_string,
                        runtime->runtime_warnings, "Accessor Construction");
       made_accessor = true;
-      for (unsigned idx = 0; idx < references.size(); idx++)
+      const InstanceSet &instances = references;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
       {
-        const InstanceRef &ref = references[idx];
+        const InstanceRef &ref = instances[idx];
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_physical_manager();
