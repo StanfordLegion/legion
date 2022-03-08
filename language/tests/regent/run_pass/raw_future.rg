@@ -13,11 +13,20 @@
 -- limitations under the License.
 
 import "regent"
-task f(x : int) return x + 1 end
+
+local format = require("std/format")
+
+task f(x : int)
+  return x + 1
+end
+
 task main()
-	var y : int = 123
-	var z = regentlib.c.legion_future_from_untyped_pointer(__runtime(), &y, [terralib.sizeof(int)])
-	var w = __future(int, z)
-	regentlib.assert(f(w) == 124, "test failed")
+  var y : int = 123
+  var z = regentlib.c.legion_future_from_untyped_pointer(__runtime(), &y, [terralib.sizeof(int)])
+  var w = __future(int, z)
+  regentlib.assert(f(w) == 124, "test failed")
+
+  var a = __future(int64, regentlib.c.legion_issue_timing_op_microseconds(__runtime(), __context()))
+  format.println("current time is {}", a/1.0e6)
 end
 regentlib.start(main)

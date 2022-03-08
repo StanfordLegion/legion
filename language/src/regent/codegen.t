@@ -4026,7 +4026,7 @@ function codegen.expr_raw_future(cx, node)
 
   local future_value = values.value(
     node,
-    expr.once_only(quote end,
+    expr.once_only(value.actions,
       `([future_type] {__result = [value.value]} ),
       future_type),
     future_type)
