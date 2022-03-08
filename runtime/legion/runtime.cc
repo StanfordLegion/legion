@@ -7447,11 +7447,11 @@ namespace Legion {
 #endif
 #ifdef LEGION_USE_HIP
 #define CHECK_HIP(cmd) do { \
-  CUresult ret = (cmd); \
+  hipError_t ret = (cmd); \
   if (ret != hipSuccess) { \
     const char *name, *str; \
-    hipGetErrorName(ret, &name); \
-    hipGetErrorString(ret, &str); \
+    name = hipGetErrorName(ret); \
+    str = hipGetErrorString(ret); \
     fprintf(stderr, "HIP: %s = %d (%s): %s\n", #cmd, ret, name, str); \
     abort(); \
   } \
