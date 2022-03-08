@@ -409,6 +409,7 @@ namespace Realm {
       // these can be the source of a RemoteWrite, but it's non-ideal
     case Memory::SYSTEM_MEM:
     case Memory::Z_COPY_MEM:
+    case Memory::FPGA_MEM:
       {
 	send_ok = true;
 	recv_ok = true;

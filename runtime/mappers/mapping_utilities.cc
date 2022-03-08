@@ -1063,6 +1063,7 @@ namespace Legion {
           case Processor::PROC_SET: return "PROC_SET";
           case Processor::OMP_PROC: return "OMP_PROC";
           case Processor::PY_PROC: return "PY_PROC";
+          case Processor::FPGA_PROC: return "FPGA_PROC";
           default: assert(false); return "";
         }
       }
@@ -1084,6 +1085,7 @@ namespace Legion {
           case Memory::LEVEL3_CACHE: return "LEVEL3_CACHE";
           case Memory::LEVEL2_CACHE: return "LEVEL2_CACHE";
           case Memory::LEVEL1_CACHE: return "LEVEL1_CACHE";
+          case Memory::FPGA_MEM: return "FPGA_MEM";
           default: assert(false); return "";
         }
       }

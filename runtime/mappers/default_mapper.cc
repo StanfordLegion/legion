@@ -59,13 +59,15 @@ namespace Legion {
                       own ? name : strdup(name)),
         next_local_gpu(0), next_local_cpu(0), next_local_io(0),
         next_local_procset(0), next_local_omp(0), next_local_py(0),
+        next_local_fpga(0),
         next_global_gpu(Processor::NO_PROC),
         next_global_cpu(Processor::NO_PROC), next_global_io(Processor::NO_PROC),
         next_global_procset(Processor::NO_PROC),
         next_global_omp(Processor::NO_PROC), next_global_py(Processor::NO_PROC),
+        next_global_fpga(Processor::NO_PROC),
         global_gpu_query(NULL), global_cpu_query(NULL), global_io_query(NULL),
         global_procset_query(NULL), global_omp_query(NULL),
-        global_py_query(NULL),
+        global_py_query(NULL), global_fpga_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
@@ -155,6 +157,11 @@ namespace Legion {
                 local_omps.push_back(*it);
                 break;
               }
+            case Processor::FPGA_PROC:
+              {
+                local_fpgas.push_back(*it);
+                break;
+              }
             default: // ignore anything else
               break;
           }
@@ -213,6 +220,15 @@ namespace Legion {
                 remote_omps.resize(node+1, Processor::NO_PROC);
               if (!remote_omps[node].exists())
                 remote_omps[node] = *it;
+              break;
+            }
+          case Processor::FPGA_PROC:
+            {
+              // See if we already have a target FPGA processor for this node
+              if (node >= remote_fpgas.size())
+                remote_fpgas.resize(node+1, Processor::NO_PROC);
+              if (!remote_fpgas[node].exists())
+                remote_fpgas[node] = *it;
               break;
             }
           default: // ignore anything else
@@ -282,6 +298,19 @@ namespace Legion {
           }
         }
         if (total_nodes == 0) total_nodes = remote_pys.size();
+      } 
+      if (!local_fpgas.empty()) {
+        for (unsigned idx = 0; idx < remote_fpgas.size(); idx++) {
+          if (idx == node_id) continue;  // ignore our own node
+          if (!remote_fpgas[idx].exists()) {
+            log_mapper.error("Default mapper has FPGA procs on node %d, but "
+                             "could not detect FPGA procs on node %d. The "
+                             "current default mapper implementation assumes "
+                             "symmetric heterogeneity.", node_id, idx);
+            assert(false);
+          }
+        }
+        if (total_nodes == 0) total_nodes = remote_fpgas.size();
       }
       // Initialize our random number generator
       const size_t short_bits = 8*sizeof(unsigned short);
@@ -403,6 +432,8 @@ namespace Legion {
             return default_get_next_local_omp();
           case Processor::PY_PROC:
             return default_get_next_local_py();
+          case Processor::FPGA_PROC:
+            return default_get_next_local_fpga();
           default: // make warnings go away
             break;
         }
@@ -432,6 +463,8 @@ namespace Legion {
                 return default_get_next_local_omp();
               case Processor::PY_PROC:
                 return default_get_next_local_py();
+              case Processor::FPGA_PROC:
+                return default_get_next_local_fpga();
               default: // make warnings go away
                 break;
             }
@@ -457,6 +490,8 @@ namespace Legion {
                   return default_get_next_global_omp();
                 case Processor::PY_PROC:
                   return default_get_next_global_py();
+                case Processor::FPGA_PROC:
+                  return default_get_next_global_fpga();
                 default: // make warnings go away
                   break;
               }
@@ -479,6 +514,8 @@ namespace Legion {
                 return default_get_next_local_omp();
               case Processor::PY_PROC:
                 return default_get_next_local_py();
+              case Processor::FPGA_PROC:
+                return default_get_next_local_fpga();
               default: // make warnings go away
                 break;
             }
@@ -692,6 +729,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_fpga(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_fpgas[next_local_fpga++];
+      if (next_local_fpga == local_fpgas.size())
+        next_local_fpga = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_fpga(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_fpga();
+      if (!next_global_fpga.exists())
+      {
+        global_fpga_query = new Machine::ProcessorQuery(machine);
+        global_fpga_query->only_kind(Processor::FPGA_PROC);
+        next_global_fpga = global_fpga_query->first();
+      }
+      Processor result = next_global_fpga;
+      next_global_fpga = global_fpga_query->next(result);
+      if (!next_global_fpga.exists())
+      {
+        delete global_fpga_query;
+        global_fpga_query = NULL;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     DefaultMapper::VariantInfo DefaultMapper::default_find_preferred_variant(
                                      const Task &task, MapperContext ctx,
                                      bool needs_tight_bound, bool cache_result,
@@ -796,6 +865,13 @@ namespace Legion {
                 {
                   kindString += "OMP_PROC ";
                   if (local_omps.empty())
+                    continue;
+                  break;
+                }
+              case Processor::FPGA_PROC:
+                {
+                  kindString += "FPGA_PROC ";
+                  if (local_fpgas.empty())
                     continue;
                   break;
                 }
@@ -922,8 +998,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Default mapper is ignorant about task IDs so just do whatever:
-      // 1) GPU > OMP > procset > cpu > IO > Python  (default)
-      // 2) OMP > procset > cpu > IO > Python > GPU  (with PREFER_CPU_VARIANT)
+      // 1) GPU > OMP > procset > cpu > IO > Python > FPGA (default)
+      // 2) OMP > procset > cpu > IO > Python > GPU > FPGA (with PREFER_CPU_VARIANT)
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
       bool prefer_cpu = ((task.tag & PREFER_CPU_VARIANT) != 0);
@@ -936,6 +1012,7 @@ namespace Legion {
       if (local_pys.size() > 0) ranking.push_back(Processor::PY_PROC);
       if ((local_gpus.size() > 0) && prefer_cpu)
        ranking.push_back(Processor::TOC_PROC);
+      if (local_fpgas.size() > 0) ranking.push_back(Processor::FPGA_PROC);
     }
 
     //--------------------------------------------------------------------------
@@ -1095,6 +1172,23 @@ namespace Legion {
                 }
                 break;
               }
+            case Processor::FPGA_PROC:
+              {
+                if (task.index_domain.get_volume() > local_fpgas.size())
+                {
+                  if (!global_memory.exists())
+                  {
+                    log_mapper.error("Default mapper failure. No memory found "
+                        "for FPGA task %s (ID %lld) which is visible "
+                        "for all point in the index space.",
+                        task.get_task_name(), task.get_unique_id());
+                    assert(false);
+                  }
+                  else
+                    target_memory = global_memory;
+                }
+                break;
+              }
             default:
               assert(false); // unrecognized processor kind
           }
@@ -1137,6 +1231,7 @@ namespace Legion {
           case Processor::PROC_SET:
           case Processor::OMP_PROC:
           case Processor::PY_PROC:
+          case Processor::FPGA_PROC:  //TODO: use system mem for FPGA
             {
               visible_memories.only_kind(Memory::SYSTEM_MEM);
               if (visible_memories.count() == 0)
@@ -1282,6 +1377,12 @@ namespace Legion {
           {
             default_slice_task(task, local_omps, remote_omps,
                                input, output, omp_slices_cache);
+            break;
+          }
+        case Processor::FPGA_PROC:
+          {
+            default_slice_task(task, local_fpgas, remote_fpgas,
+                               input, output, fpga_slices_cache);
             break;
           }
         default:
@@ -1745,6 +1846,16 @@ namespace Legion {
                     local_omps.end()
                 );
               }
+              break;
+            }
+          case Processor::FPGA_PROC:
+            {
+              // TODO:
+              if (!task.must_epoch_task)
+                target_procs.insert(target_procs.end(),
+                    local_fpgas.begin(), local_fpgas.end());
+              else
+                target_procs.push_back(task.target_proc);
               break;
             }
           default:
@@ -3168,6 +3279,11 @@ namespace Legion {
             *result = local_pys.size();
             break;
           }
+        case DEFAULT_TUNABLE_LOCAL_FPGAS:
+          {
+            *result = local_fpgas.size();
+            break;
+          }
         case DEFAULT_TUNABLE_GLOBAL_GPUS:
           {
             // TODO: deal with machine asymmetry here
@@ -3196,6 +3312,12 @@ namespace Legion {
           {
             // TODO: deal with machine asymmetry here
             *result = (local_pys.size() * total_nodes);
+            break;
+          }
+        case DEFAULT_TUNABLE_GLOBAL_FPGAS:
+          {
+            // TODO: deal with machine asymmetry here
+            *result = (local_fpgas.size() * total_nodes);
             break;
           }
         default:
@@ -3518,6 +3640,15 @@ namespace Legion {
             case Processor::PY_PROC:
               {
                 if (local_pys.empty())
+                {
+                  ++it;
+                  continue;
+                }
+                break;
+              }
+            case Processor::FPGA_PROC:
+              {
+                if (local_fpgas.empty())
                 {
                   ++it;
                   continue;
