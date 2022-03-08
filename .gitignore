@@ -5,6 +5,7 @@
 *.a
 *.d
 *.so
+*.dylib
 *.o
 *.gz
 *.gcno

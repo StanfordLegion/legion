@@ -9799,18 +9799,28 @@ function codegen.stat_return(cx, node)
       return
     end
   else
-    -- Force unaligned access because malloc does not provide
-    -- blocks aligned for all purposes (e.g. SSE vectors).
-    local result_type_alignment = 1 -- data.min(terralib.sizeof(result_type), 8)
+    local buffer = terralib.newsymbol(&opaque, "buffer")
+    local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
 
+    local size_actions, size_value = std.compute_serialized_size(
+      result_type, result)
+    if not size_actions then
+      size_actions = quote end
+      size_value = 0
+    end
+    local ser_actions = std.serialize(
+      result_type, result, buffer, `(&[data_ptr]))
     return quote
       [actions]
-      var buffer_size = terralib.sizeof([result_type])
-      var buffer = c.malloc(buffer_size)
-      std.assert(buffer_size == 0 or buffer ~= nil, "malloc failed in return")
-      terralib.attrstore(
-        [&result_type](buffer), result,
-        { align = [result_type_alignment] })
+      [size_actions]
+      var buffer_size = terralib.sizeof(result_type) + [size_value]
+      var [buffer] = c.malloc(buffer_size)
+      std.assert(buffer_size == 0 or [buffer] ~= nil, "malloc failed in return")
+      var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(result_type)
+      [ser_actions]
+      std.assert(
+        [data_ptr] - [&uint8]([buffer]) == buffer_size,
+        "mismatch in data serialized in return")
       @[cx.result] = std.serialized_value {
         value = buffer,
         size = buffer_size,
