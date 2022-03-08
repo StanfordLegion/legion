@@ -1521,16 +1521,15 @@ function std.compute_serialized_size_inner(value_type, value)
   then
     local result = terralib.newsymbol(c.size_t, "result")
     local element_type = value_type.type
-    local element = terralib.newsymbol(&element_type)
+    local i = terralib.newsymbol(int64)
 
     local size_actions, size_value = std.compute_serialized_size_inner(
-      element_type, `(@element))
+      element_type, `([value][i]))
     local actions = quote
       var [result] = 0
-      for i = 0, [value_type.N] do
-        var [element] = &([value][i])
+      for [i] = 0, [value_type.N] do
         [size_actions]
-        [result] = [result] + terralib.sizeof(element_type) + [size_value]
+        [result] = [result] + [size_value]
       end
     end
     return actions, result
@@ -1579,8 +1578,6 @@ function std.serialize_simple(value_type, value, fixed_ptr, data_ptr)
 end
 
 function std.serialize_inner(value_type, value, fixed_ptr, data_ptr)
-  local actions = std.serialize_simple(value_type, value, fixed_ptr, data_ptr)
-
   -- Only dynamically serialize arrays whose elements need custom serialization.
   if value_type:isarray() and
     need_dynamic_serialization(value_type.type)
@@ -1591,17 +1588,17 @@ function std.serialize_inner(value_type, value, fixed_ptr, data_ptr)
 
     local ser_actions = std.serialize_inner(
       element_type, element, element_ptr, data_ptr)
-    actions = quote
-      [actions]
+    return quote
       for i = 0, [value_type.N] do
         var [element] = [value][i]
-        var [element_ptr] = [&element_type](@[data_ptr])
-        @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
+        var [element_ptr] = [&element_type]([fixed_ptr]) + i
         [ser_actions]
       end
     end
   elseif rawget(value_type, "__serialize") then
     return value_type:__serialize(value_type, value, fixed_ptr, data_ptr)
+  else
+    return std.serialize_simple(value_type, value, fixed_ptr, data_ptr)
   end
 
   return actions
@@ -1642,9 +1639,6 @@ end
 
 function std.deserialize_inner(value_type, fixed_ptr, data_ptr)
   local result = terralib.newsymbol(value_type, "result")
-  local actions = quote
-    var [result] = [std.deserialize_simple(value_type, fixed_ptr, data_ptr)]
-  end
 
   -- Only dynamically serialize arrays whose elements need custom serialization.
   if value_type:isarray() and
@@ -1655,20 +1649,23 @@ function std.deserialize_inner(value_type, fixed_ptr, data_ptr)
 
     local deser_actions, deser_value = std.deserialize_inner(
       element_type, element_ptr, data_ptr)
-    actions = quote
-      [actions]
+    local actions = quote
+      var [result]
       for i = 0, [value_type.N] do
-        var [element_ptr] = [&element_type](@[data_ptr])
-        @[data_ptr] = @[data_ptr] + terralib.sizeof(element_type)
+        var [element_ptr] = [&element_type]([fixed_ptr]) + i
         [deser_actions]
         [result][i] = [deser_value]
       end
     end
+    return actions, result
   elseif rawget(value_type, "__deserialize") then
     return value_type:__deserialize(value_type, fixed_ptr, data_ptr)
+  else
+    local actions = quote
+      var [result] = [std.deserialize_simple(value_type, fixed_ptr, data_ptr)]
+    end
+    return actions, result
   end
-
-  return actions, result
 end
 
 local deserialize_helper = terralib.memoize(function(value_type)
