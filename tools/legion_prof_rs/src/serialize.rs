@@ -352,7 +352,15 @@ fn parse_meta_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, message) = parse_bool(input)?;
     let (input, ordered_vc) = parse_bool(input)?;
     let (input, name) = parse_string(input)?;
-    Ok((input, Record::MetaDesc { kind, message, ordered_vc, name }))
+    Ok((
+        input,
+        Record::MetaDesc {
+            kind,
+            message,
+            ordered_vc,
+            name,
+        },
+    ))
 }
 fn parse_op_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, kind) = le_u32(input)?;
