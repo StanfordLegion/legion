@@ -124,6 +124,8 @@ namespace Legion {
 #else
         { return unique_sorted_spaces.get_index(idx); }
 #endif
+      inline unsigned find_index(const AddressSpaceID space) const
+        { return unique_sorted_spaces.find_index(space); }
       inline size_t size(void) const { return total_spaces; }
       inline AddressSpaceID get_origin(void) const 
 #ifdef DEBUG_LEGION
@@ -145,10 +147,7 @@ namespace Legion {
         { return unique_sorted_spaces.contains(space); }
       bool contains(const CollectiveMapping &rhs) const;
       CollectiveMapping* clone_with(AddressSpace space) const;
-    public:
       void pack(Serializer &rez) const;
-      inline unsigned find_index(const AddressSpaceID space) const
-        { return unique_sorted_spaces.find_index(space); }
     protected:
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
@@ -751,7 +750,7 @@ namespace Legion {
             IndexSpaceExpression *lx, const PendingRemoteExpression &pending,
             FieldSpace h, RegionTreeID tid, LayoutConstraintID l, ApBarrier use,
             ReductionOpID redop, const void *piece_list,size_t piece_list_size,
-            const AddressSpaceID source);
+            const AddressSpaceID source, bool multi_instance);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -769,6 +768,7 @@ namespace Legion {
         const void *const piece_list;
         const size_t piece_list_size;
         const AddressSpaceID source;
+        const bool multi_instance;
       };
       struct DeferCollectiveRendezvousArgs :
         public LgTaskArgs<DeferCollectiveRendezvousArgs> {
@@ -809,7 +809,8 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApBarrier unique_barrier, bool external_instance);
+                        ApBarrier unique_barrier, bool external_instance,
+                        bool multi_instance);
       CollectiveManager(const CollectiveManager &rhs);
       virtual ~CollectiveManager(void);
     public:
@@ -961,7 +962,9 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
-                                ApUserEvent all_done, AddressSpaceID origin);
+                                ApUserEvent all_done, ApBarrier all_bar,
+                                ShardID owner_shard, AddressSpaceID origin,
+                                const uint64_t allreduce_tag);
       void perform_collective_reduction(InstanceView *src_view,
                                 const std::vector<CopySrcDstField> &dst_fields,
                                 const std::vector<Reservation> &reservations,
@@ -987,6 +990,7 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent copy_done, ApUserEvent all_done,
+                                ApBarrier all_bar, ShardID owner_shard,
                                 AddressSpaceID origin);
       void perform_collective_reducecast(CollectiveManager *source,
                                 InstanceView *src_view, InstanceView *dst_view,
@@ -1010,7 +1014,8 @@ namespace Legion {
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
-                                std::set<RtEvent> &applied_events);
+                                std::set<RtEvent> &applied_events,
+                                const uint64_t allreduce_tag);
       // Degenerate case
       ApEvent perform_hammer_reduction(InstanceView *src_view,
                                 const std::vector<CopySrcDstField> &dst_fields,
@@ -1026,6 +1031,13 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 AddressSpaceID origin);
     protected:
+      void process_distribute_allreduce(const uint64_t allreduce_tag,
+                                const int src_rank, const int stage,
+                                std::vector<CopySrcDstField> &src_fields,
+                                const ApEvent src_precondition,
+                                ApUserEvent src_postcondition,
+                                ApBarrier src_barrier, ShardID bar_shard,
+                                RtUserEvent applied_event);
       void finalize_collective_user(InstanceView *view,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -1072,6 +1084,8 @@ namespace Legion {
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_reducecast(Runtime *runtime,
                                     AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_allreduce(Runtime *runtime,
+                                    AddressSpaceID source, Deserializer &derez);
       static void handle_hammer_reduction(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
@@ -1081,7 +1095,7 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size, 
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
           LayoutConstraints *constraints, ApBarrier use_barrier,
-          ReductionOpID redop);
+          ReductionOpID redop, bool multi_instance);
     public:
       const size_t total_points;
       // This can be NULL if the point set is implicit
@@ -1110,13 +1124,39 @@ namespace Legion {
       };
       std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
     protected:
+      struct AllReduceCopy {
+        std::vector<CopySrcDstField> src_fields;
+        ApEvent src_precondition;
+        ApUserEvent src_postcondition;
+        ApBarrier barrier_postcondition;
+        ShardID barrier_shard;
+      };
+      std::map<std::pair<uint64_t,int>,AllReduceCopy> all_reduce_copies;
+      struct AllReduceStage {
+        IndexSpaceExpression *copy_expression;
+        std::vector<CopySrcDstField> dst_fields;
+        std::vector<Reservation> reservations;
+        PhysicalTraceInfo *trace_info;
+        ApEvent dst_precondition;
+        PredEvent predicate_guard;
+        std::vector<ApUserEvent> remaining_postconditions;
+      };
+      std::map<std::pair<uint64_t,int>,AllReduceStage> remaining_stages;
+    protected:
       std::map<std::pair<DistributedID,DomainPoint>,
                 std::map<unsigned,Reservation> > view_reservations;
     protected:
       ApBarrier collective_barrier;
+      std::atomic<uint64_t> unique_allreduce_tag;
       RtEvent detached;
       unsigned finalize_messages;
       bool deleted_or_detached;
+    public:
+      // A boolean flag that says whether this collective instance
+      // has multiple instances on every node. This is primarily
+      // useful for reduction instances where we want to pick an
+      // algorithm for performing an in-place all-reduce
+      const bool multi_instance;
     };
 
     /**
@@ -1166,17 +1206,18 @@ namespace Legion {
     public:
       PendingCollectiveManager(DistributedID did, size_t total_points,
                                IndexSpace point_space, ApBarrier ready_barrier,
-                               CollectiveMapping *mapping);
-      PendingCollectiveManager(const PendingCollectiveManager &rhs);
+                               CollectiveMapping *mapping, bool multi_instance);
+      PendingCollectiveManager(const PendingCollectiveManager &rhs) = delete;
       ~PendingCollectiveManager(void);
-    public:
-      PendingCollectiveManager& operator=(const PendingCollectiveManager &rhs);
+      PendingCollectiveManager& operator=(
+          const PendingCollectiveManager&) = delete;
     public:
       const DistributedID did;
       const size_t total_points;
       const IndexSpace point_space;
       const ApBarrier ready_barrier;
       CollectiveMapping *const collective_mapping;
+      const bool multi_instance;
     public:
       void pack(Serializer &rez) const;
       static PendingCollectiveManager* unpack(Deserializer &derez);

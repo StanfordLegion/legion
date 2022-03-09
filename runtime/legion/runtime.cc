@@ -12426,6 +12426,12 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE:
+            {
+              runtime->handle_collective_distribute_allreduce(derez,
+                                                          remote_address_space);
+              break;
+            }
           case SEND_COLLECTIVE_HAMMER_REDUCTION:
             {
               runtime->handle_collective_hammer_reduction(derez,
@@ -22335,6 +22341,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_distribute_allreduce(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_hammer_reduction(AddressSpaceID target,
                                                    Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24365,6 +24380,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_distribute_reducecast(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_distribute_allreduce(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_distribute_allreduce(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

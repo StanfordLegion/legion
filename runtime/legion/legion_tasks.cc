@@ -12038,10 +12038,13 @@ namespace Legion {
                   pit->second.regions.end(); it++)
               rez.serialize(*it);
             rez.serialize<size_t>(pit->second.memory_spaces.size());
-            for (std::set<AddressSpaceID>::const_iterator it =
+            for (std::map<AddressSpaceID,unsigned>::const_iterator it =
                   pit->second.memory_spaces.begin(); it !=
                   pit->second.memory_spaces.end(); it++)
-              rez.serialize(*it);
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
             rez.serialize(pit->second.total_points);
           }
           rez.serialize<size_t>(points.size());
@@ -12263,12 +12266,12 @@ namespace Legion {
                 derez.deserialize(regions[idx2]);
               size_t num_spaces;
               derez.deserialize(num_spaces);
-              std::set<AddressSpaceID> memory_spaces;
+              std::map<AddressSpaceID,unsigned> memory_spaces;
               for (unsigned idx2 = 0; idx2 < num_spaces; idx2++)
               {
                 AddressSpaceID space;
                 derez.deserialize(space);
-                memory_spaces.insert(space);
+                derez.deserialize(memory_spaces[space]);
               }
               size_t total_points;
               derez.deserialize(total_points);

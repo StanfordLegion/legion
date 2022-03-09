@@ -2361,7 +2361,7 @@ namespace Legion {
             collective_finder = finder->second.collectives.insert(
               std::pair<size_t,PendingCollective>(collective_tag,
                 PendingCollective(constraints, regions, 1/*point*/))).first;
-          collective_finder->second.memory_spaces.insert(memory_space);
+          collective_finder->second.memory_spaces[memory_space] = 1;
           ready_event = done;
         }
         else
@@ -2373,7 +2373,12 @@ namespace Legion {
           if (collective_finder != finder->second.collectives.end())
           {
             collective_finder->second.total_points++; // record our point
-            collective_finder->second.memory_spaces.insert(memory_space);
+            std::map<AddressSpaceID,unsigned>::iterator memory_finder =
+              collective_finder->second.memory_spaces.find(memory_space);
+            if (memory_finder != collective_finder->second.memory_spaces.end())
+              memory_finder->second++;
+            else
+              collective_finder->second.memory_spaces[memory_space] = 1;
             if (!this->runtime->unsafe_mapper)
             {
               // Check to see if the constraints and regions are equivalent
@@ -2415,7 +2420,7 @@ namespace Legion {
             collective_finder = finder->second.collectives.insert(
                 std::pair<size_t,PendingCollective>(collective_tag,
                   PendingCollective(constraints, regions, 1/*point*/))).first;
-            collective_finder->second.memory_spaces.insert(memory_space);
+            collective_finder->second.memory_spaces[memory_space] = 1;
           }
         }
 #ifdef DEBUG_LEGION
@@ -2524,9 +2529,18 @@ namespace Legion {
             {
               collective_finder->second.total_points += 
                 pit->second.total_points;
-              collective_finder->second.memory_spaces.insert(
-                  pit->second.memory_spaces.begin(),
-                  pit->second.memory_spaces.end());
+              for (std::map<AddressSpaceID,unsigned>::const_iterator mit =
+                    pit->second.memory_spaces.begin(); mit !=
+                    pit->second.memory_spaces.end(); mit++)
+              {
+                std::map<AddressSpaceID,unsigned>::iterator memory_finder =
+                  collective_finder->second.memory_spaces.find(mit->first);
+                if (memory_finder != 
+                    collective_finder->second.memory_spaces.end())
+                  memory_finder->second += mit->second;
+                else
+                  collective_finder->second.memory_spaces.insert(*mit);
+              }
               if (!this->runtime->unsafe_mapper)
               {
                 // Check to see if the constraints and regions are equivalent
@@ -3375,14 +3389,23 @@ namespace Legion {
           }
           const ApBarrier instance_barrier(
               Realm::Barrier::create_barrier(it->second.total_points));
-          const std::vector<AddressSpaceID> unique_spaces(
-              it->second.memory_spaces.begin(), it->second.memory_spaces.end());
+          bool multi_instance = true;
+          std::vector<AddressSpaceID> unique_spaces;
+          unique_spaces.reserve(it->second.memory_spaces.size());
+          for (std::map<AddressSpaceID,unsigned>::const_iterator mit =
+                it->second.memory_spaces.begin(); mit != 
+                it->second.memory_spaces.end(); mit++)
+          {
+            unique_spaces.push_back(mit->first);
+            if (mit->second == 1)
+              multi_instance = false;
+          }
           // the PendingCollectiveManager takes ownership of this allocation
           CollectiveMapping *collective_manager = new CollectiveMapping(
             unique_spaces, this->runtime->legion_collective_radix);
           managers[it->first] = new PendingCollectiveManager(did,
               it->second.total_points, point_space, instance_barrier,
-              collective_manager);
+              collective_manager, multi_instance);
         }
       }
       return_create_pending_collective_managers(mapper_call, index, managers,

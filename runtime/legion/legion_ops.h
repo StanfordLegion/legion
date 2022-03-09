@@ -822,7 +822,7 @@ namespace Legion {
       public:
         const LayoutConstraintSet &constraints;
         std::vector<LogicalRegion> regions;
-        std::set<AddressSpaceID> memory_spaces;
+        std::map<AddressSpaceID,unsigned> memory_spaces;
         size_t total_points;
         PendingCollectiveManager *collective;
       };
