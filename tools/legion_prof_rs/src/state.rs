@@ -2078,7 +2078,7 @@ impl State {
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(&variant_id).unwrap();
-                if !variant.message || !variant.ordered_vc {
+                if !variant.message || variant.ordered_vc {
                     continue;
                 }
                 total_messages += meta_tasks.len();
