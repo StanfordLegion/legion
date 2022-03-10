@@ -3024,7 +3024,7 @@ namespace Realm {
       hipDeviceptr_t ptr;
       size_t size;
       CHECK_HIP( hipModuleGetGlobal(&ptr, &size, module, var->device_name) );
-      device_variables[var->host_var] = static_cast<char*>(ptr);
+      device_variables[var->host_var] = reinterpret_cast<char*>(ptr);
     }
     
     void GPU::register_function(const RegisteredFunction *func)
