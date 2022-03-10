@@ -2384,7 +2384,7 @@ namespace Realm {
     GPUZCMemory::GPUZCMemory(Memory _me,
                              char *_gpu_base, void *_cpu_base, size_t _size,
                              MemoryKind _kind, Memory::Kind _lowlevel_kind)
-      : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
+      : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
       // advertise ourselves as a host or managed memory, as appropriate
@@ -2573,7 +2573,7 @@ namespace Realm {
       // assume the event is one of ours and put it back in the pool
       hipEvent_t e = event;
       if(e)
-	gpu->event_pool.return_event(e, true/*external*/);
+        gpu->event_pool.return_event(e, true/*external*/);
     }
 
     void GPUProcessor::event_record(hipEvent_t event, hipStream_t stream)
@@ -2912,18 +2912,18 @@ namespace Realm {
 
       // peer access
       for(std::vector<GPU *>::iterator it = module->gpus.begin();
-	  it != module->gpus.end();
-	  it++) {
-	// ignore ourselves
-	if(*it == this) continue;
+          it != module->gpus.end();
+          it++) {
+        // ignore ourselves
+        if(*it == this) continue;
 
-	// ignore gpus that we don't expect to be able to peer with
-	if(info->peers.count((*it)->info->device) == 0)
-	  continue;
+        // ignore gpus that we don't expect to be able to peer with
+        if(info->peers.count((*it)->info->device) == 0)
+          continue;
 
-	// ignore gpus with no fb
-	if(!((*it)->fbmem))
-	  continue;
+        // ignore gpus with no fb
+        if(!((*it)->fbmem))
+          continue;
 
       	// enable peer access (this part is different from CUDA since runtime API has no CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED)
         //  (don't try if it's the same physical device underneath)
@@ -3027,10 +3027,10 @@ namespace Realm {
       }
 
       if(fatbin->data != 0) {
-	// binary data to be loaded with cuModuleLoad(Ex)
-	hipModule_t module = load_hip_module(fatbin->data);
-	device_modules[fatbin] = module;
-	return;
+        // binary data to be loaded with cuModuleLoad(Ex)
+        hipModule_t module = load_hip_module(fatbin->data);
+        device_modules[fatbin] = module;
+        return;
       }
 
       assert(0);
@@ -3544,26 +3544,26 @@ namespace Realm {
       	  }
       	}
         
-	// either create a worker for this GPU or use the shared one
-	GPUWorker *worker;
-	if(cfg_use_shared_worker) {
-	  worker = shared_worker;
-	} else {
-	  worker = new GPUWorker;
+        // either create a worker for this GPU or use the shared one
+        GPUWorker *worker;
+        if(cfg_use_shared_worker) {
+          worker = shared_worker;
+        } else {
+          worker = new GPUWorker;
 
-	  if(cfg_use_worker_threads)
-	    worker->start_background_thread(runtime->core_reservation_set(),
-					    1 << 20); // hardcoded worker stack size
-          else
-            worker->add_to_manager(&(runtime->bgwork));
-	}
+          if(cfg_use_worker_threads)
+            worker->start_background_thread(runtime->core_reservation_set(),
+                    1 << 20); // hardcoded worker stack size
+                else
+                  worker->add_to_manager(&(runtime->bgwork));
+        }
 
-	GPU *g = new GPU(this, gpu_info[idx], worker, idx);
+        GPU *g = new GPU(this, gpu_info[idx], worker, idx);
 
-	if(!cfg_use_shared_worker)
-	  dedicated_workers[g] = worker;
+        if(!cfg_use_shared_worker)
+          dedicated_workers[g] = worker;
 
-	gpus[gpu_count++] = g;
+        gpus[gpu_count++] = g;
       }
       
       // did we actually get the requested number of GPUs?
@@ -3581,63 +3581,63 @@ namespace Realm {
 
       // each GPU needs its FB memory
       if(cfg_fb_mem_size > 0)
-	for(std::vector<GPU *>::iterator it = gpus.begin();
-	    it != gpus.end();
-	    it++)
-	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
+        for(std::vector<GPU *>::iterator it = gpus.begin();
+            it != gpus.end();
+            it++)
+          (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size > 0) && !gpus.empty()) {
-	char *zcmem_gpu_base;
-	// borrow GPU 0's context for the allocation call
-	{
-	  AutoGPUContext agc(gpus[0]);
+        char *zcmem_gpu_base;
+        // borrow GPU 0's context for the allocation call
+        {
+          AutoGPUContext agc(gpus[0]);
 
-	  hipError_t ret = hipHostMalloc(&zcmem_cpu_base, 
-					cfg_zc_mem_size,
-					hipHostMallocPortable | hipHostMallocMapped);
-	  if(ret != hipSuccess) {
-	    if(ret == hipErrorMemoryAllocation) {
-	      log_gpu.fatal() << "insufficient device-mappable host memory: "
-			      << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
-	    } else {
-	      const char *errstring = "error message not available";
-#if HIP_VERBOSE_ERROR_MSG == 1
+          hipError_t ret = hipHostMalloc(&zcmem_cpu_base, 
+                cfg_zc_mem_size,
+                hipHostMallocPortable | hipHostMallocMapped);
+          if(ret != hipSuccess) {
+            if(ret == hipErrorMemoryAllocation) {
+              log_gpu.fatal() << "insufficient device-mappable host memory: "
+                  << cfg_zc_mem_size << " bytes needed (from -ll:zsize)";
+            } else {
+              const char *errstring = "error message not available";
+      #if HIP_VERBOSE_ERROR_MSG == 1
               errstring = hipGetErrorName(ret);
-#endif
-	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
-			      << " (" << errstring << ")";
-	    }
-	    abort();
-	  }
-	  CHECK_HIP( hipHostGetDevicePointer((void **)&zcmem_gpu_base,
-					      zcmem_cpu_base,
-					      0) );
-	  // right now there are asssumptions in several places that unified addressing keeps
-	  //  the CPU and GPU addresses the same
-	  assert(zcmem_cpu_base == (void *)zcmem_gpu_base);
-	}
+      #endif
+              log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
+                  << " (" << errstring << ")";
+            }
+            abort();
+          }
+          CHECK_HIP( hipHostGetDevicePointer((void **)&zcmem_gpu_base,
+                      zcmem_cpu_base,
+                      0) );
+          // right now there are asssumptions in several places that unified addressing keeps
+          //  the CPU and GPU addresses the same
+          assert(zcmem_cpu_base == (void *)zcmem_gpu_base);
+        }
 
-	Memory m = runtime->next_local_memory_id();
-	zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-                          cfg_zc_mem_size,
-                          MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
-	runtime->add_memory(zcmem);
+        Memory m = runtime->next_local_memory_id();
+        zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
+                                cfg_zc_mem_size,
+                                MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
+        runtime->add_memory(zcmem);
 
-	// add the ZC memory as a pinned memory to all GPUs
-	for(unsigned i = 0; i < gpus.size(); i++) {
-	  char *gpuptr;
-	  hipError_t ret;
-	  {
-	    AutoGPUContext agc(gpus[i]);
-	    ret = hipHostGetDevicePointer((void **)&gpuptr, zcmem_cpu_base, 0);
-	  }
-	  if((ret == hipSuccess) && (gpuptr == zcmem_gpu_base)) {
-	    gpus[i]->pinned_sysmems.insert(zcmem->me);
-	  } else {
-	    log_gpu.warning() << "GPU #" << i << " has an unexpected mapping for ZC memory!";
-	  }
-	}
+        // add the ZC memory as a pinned memory to all GPUs
+        for(unsigned i = 0; i < gpus.size(); i++) {
+          char *gpuptr;
+          hipError_t ret;
+          {
+            AutoGPUContext agc(gpus[i]);
+            ret = hipHostGetDevicePointer((void **)&gpuptr, zcmem_cpu_base, 0);
+          }
+          if((ret == hipSuccess) && (gpuptr == zcmem_gpu_base)) {
+            gpus[i]->pinned_sysmems.insert(zcmem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i << " has an unexpected mapping for ZC memory!";
+          }
+        }
       }
 
       // allocate intermediate buffers in ZC memory for DMA engine
@@ -4028,19 +4028,19 @@ namespace Realm {
 
       // and now tell it about all the previous-registered stuff
       for(std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-	  it != g.fat_binaries.end();
-	  it++)
-	gpu->register_fat_binary(*it);
+          it != g.fat_binaries.end();
+          it++)
+        gpu->register_fat_binary(*it);
 
       for(std::vector<RegisteredVariable *>::iterator it = g.variables.begin();
-	  it != g.variables.end();
-	  it++)
-	gpu->register_variable(*it);
+          it != g.variables.end();
+          it++)
+        gpu->register_variable(*it);
 
       for(std::vector<RegisteredFunction *>::iterator it = g.functions.begin();
-	  it != g.functions.end();
-	  it++)
-	gpu->register_function(*it);
+          it != g.functions.end();
+          it++)
+        gpu->register_function(*it);
     }
 
     /*static*/ void GlobalRegistrations::remove_gpu_context(GPU *gpu)
@@ -4064,9 +4064,9 @@ namespace Realm {
       g.fat_binaries.push_back(fatbin);
 
       for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_fat_binary(fatbin);
+          it != g.active_gpus.end();
+          it++)
+        (*it)->register_fat_binary(fatbin);
     }
 
     /*static*/ void GlobalRegistrations::unregister_fat_binary(FatBin *fatbin)
@@ -4078,10 +4078,10 @@ namespace Realm {
       // remove the fatbin from the list - don't bother telling gpus
       std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
       while(it != g.fat_binaries.end())
-	if(*it == fatbin)
-	  it = g.fat_binaries.erase(it);
-	else
-	  it++;
+        if(*it == fatbin)
+          it = g.fat_binaries.erase(it);
+        else
+          it++;
     }
 
     // called by __cudaRegisterVar
@@ -4095,9 +4095,9 @@ namespace Realm {
       g.variables.push_back(var);
 
       for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_variable(var);
+          it != g.active_gpus.end();
+          it++)
+        (*it)->register_variable(var);
     }
 
     // called by __cudaRegisterFunction
@@ -4111,9 +4111,9 @@ namespace Realm {
       g.functions.push_back(func);
 
       for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_function(func);
+          it != g.active_gpus.end();
+          it++)
+        (*it)->register_function(func);
     }
 #endif
 
