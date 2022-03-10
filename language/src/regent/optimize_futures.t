@@ -39,6 +39,7 @@ end
 
 function context:new_stat_scope()
   local cx = {
+    task_is_leaf = self.task_is_leaf,
     local_symbols = self.local_symbols,
     var_flows = self.var_flows,
     var_futures = self.var_futures,
@@ -54,6 +55,7 @@ function context:new_local_scope(cond)
   conds:insertall(self.conds)
   conds:insert(cond)
   local cx = {
+    task_is_leaf = self.task_is_leaf,
     local_symbols = self.local_symbols:copy(),
     var_flows = self.var_flows,
     var_futures = self.var_futures,
@@ -64,8 +66,10 @@ function context:new_local_scope(cond)
   return setmetatable(cx, context)
 end
 
-function context:new_task_scope()
+function context:new_task_scope(task_is_leaf)
+  assert(task_is_leaf ~= nil)
   local cx = {
+    task_is_leaf = task_is_leaf,
     local_symbols = data.newmap(),
     var_flows = {},
     var_futures = {},
@@ -180,7 +184,11 @@ function analyze_var_flow.expr_binary(cx, node)
 end
 
 function analyze_var_flow.expr_raw_future(cx, noe)
-  return flow_future()
+  if cx.task_is_leaf then
+    return flow_empty()
+  else
+    return flow_future()
+  end
 end
 
 function analyze_var_flow.expr(cx, node)
@@ -739,10 +747,17 @@ end
 
 function optimize_futures.expr_raw_future(cx, node)
   local value = concretize(cx, optimize_futures.expr(cx, node.value))
-  return node {
+  local result = node {
     value = node.value,
     expr_type = std.future(node.expr_type),
   }
+  if cx.task_is_leaf then
+    -- If we're in a leaf task, immediate concretize the result so
+    -- that it doesn't propagate, because escaping future values may
+    -- cause unexpected task launches (e.g., on arithmetic).
+    result = concretize(cx, result)
+  end
+  return result
 end
 
 function optimize_futures.expr_raw_physical(cx, node)
@@ -2026,7 +2041,7 @@ end
 function optimize_futures.top_task(cx, node)
   if not node.body then return node end
 
-  local cx = cx:new_task_scope()
+  local cx = cx:new_task_scope(node.config_options.leaf)
   analyze_var_flow.block(cx, node.body)
   compute_var_futures(cx)
   compute_var_symbols(cx)
