@@ -161,6 +161,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.ListFromElement]            = normalize_access.pass_through_expr,
   [ast.typed.expr.RegionRoot]                 = normalize_access.pass_through_expr,
   [ast.typed.expr.Projection]                 = normalize_access.pass_through_expr,
+  [ast.typed.expr.FutureGetResult]            = normalize_access.pass_through_expr,
 
   -- Normal expressions
   [ast.typed.expr.ID]                         = normalize_access.pass_through_expr,
@@ -208,7 +209,6 @@ local normalize_access_expr_table = {
   [ast.typed.expr.WithScratchFields]          = unreachable,
   [ast.typed.expr.Condition]                  = unreachable,
   [ast.typed.expr.Future]                     = unreachable,
-  [ast.typed.expr.FutureGetResult]            = unreachable,
   [ast.typed.expr.ParallelizerConstraint]     = unreachable,
   [ast.typed.expr.ImportIspace]               = unreachable,
   [ast.typed.expr.ImportRegion]               = unreachable,

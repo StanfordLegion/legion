@@ -45,28 +45,33 @@ local function generate_get_time(unit_name, unit_short, unit_type)
   local get_time_op = c["legion_issue_timing_op_" .. unit_name]
   local get_time = c["legion_get_current_time_in_" .. unit_short]
 
-  local terra get_current_time()
+  local terra get_time_future()
     -- We use the implicit context here to avoid tripping Regent's
     -- leaf optimization, which is ok because in a leaf task we will
     -- not issue an actual timing op but will use the direct method to
     -- retrieve time.
     var runtime = c.legion_runtime_get_runtime()
     var ctx = c.legion_runtime_get_context()
+    var f : c.legion_future_t
     if c.legion_runtime_total_shards(runtime, ctx) > 1 then
-      var f = get_time_op(runtime, ctx)
-      regentlib.assert(
-        c.legion_future_get_untyped_size(f) == terralib.sizeof(unit_type),
-        ["unexpected future size in get_current_time_in_" .. unit_name])
-      c.legion_context_destroy(ctx)
-      return @([&unit_type](c.legion_future_get_untyped_pointer(f)))
+      f = get_time_op(runtime, ctx)
     else
-      c.legion_context_destroy(ctx)
-      return get_time()
+      var t : unit_type = get_time()
+      f = c.legion_future_from_untyped_pointer(
+        runtime, &t, terralib.sizeof(unit_type))
     end
+    c.legion_context_destroy(ctx)
+    return f
   end
-  get_current_time.replicable = true
+  get_time_future.replicable = true
 
-  return get_current_time
+  local __demand(__inline) task get_time_task()
+    var f = get_time_future()
+    return __future(unit_type, f)
+  end
+  get_time_task:set_name("get_current_time_in_" .. tostring(unit_name))
+
+  return get_time_task
 end
 
 timing.get_current_time_in_microseconds = generate_get_time(
