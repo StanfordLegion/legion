@@ -1080,7 +1080,9 @@ namespace Realm {
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
 
-      if(!pinned_sysmems.empty()) {
+      // treat managed mem like pinned sysmem on the assumption that most data
+      //  is usually in system memory
+      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
 
@@ -1096,6 +1098,17 @@ namespace Realm {
           mma.m2 = *it;
           mma.bandwidth = 20; // "medium"
           mma.latency = 200;  // "bad"
+          r->add_mem_mem_affinity(mma);
+        }
+
+        for(std::set<Memory>::const_iterator it = managed_mems.begin();
+            it != managed_mems.end();
+            ++it) {
+          Machine::MemoryMemoryAffinity mma;
+          mma.m1 = fbmem->me;
+          mma.m2 = *it;
+          mma.bandwidth = 20; // "medium"
+          mma.latency = 300;  // "worse" (pessimistically assume faults)
           r->add_mem_mem_affinity(mma);
         }
       } else {
@@ -1127,7 +1140,7 @@ namespace Realm {
           mma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
           mma.latency = 400;  // ~twice the latency as zcmem
           r->add_mem_mem_affinity(mma);
-        }     
+        }
       }
     }
 
@@ -2785,14 +2798,14 @@ namespace Realm {
       // only create p2p streams for devices we can talk to
       peer_to_peer_streams.resize(module->gpu_info.size(), 0);
       for(std::vector<GPUInfo *>::const_iterator it = module->gpu_info.begin();
-	  it != module->gpu_info.end();
-	  ++it)
-	if(info->peers.count((*it)->device) != 0)
-	  peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
+          it != module->gpu_info.end();
+          ++it)
+        if(info->peers.count((*it)->device) != 0)
+          peer_to_peer_streams[(*it)->index] = new GPUStream(this, worker);
 
       task_streams.resize(module->cfg_task_streams);
       for(unsigned i = 0; i < module->cfg_task_streams; i++)
-	task_streams[i] = new GPUStream(this, worker);
+        task_streams[i] = new GPUStream(this, worker);
 
       pop_context();
 
@@ -2869,13 +2882,32 @@ namespace Realm {
       	runtime->add_proc_mem_affinity(pma);
       }
 
-      if(module->zcmem) {
-      	Machine::ProcessorMemoryAffinity pma;
-      	pma.p = p;
-      	pma.m = module->zcmem->me;
-      	pma.bandwidth = 20; // "medium"
-      	pma.latency = 200;  // "bad"
-      	runtime->add_proc_mem_affinity(pma);
+      for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
+          it != pinned_sysmems.end();
+          ++it) {
+        // no processor affinity to IB memories
+        if(!ID(*it).is_memory()) continue;
+
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = *it;
+        pma.bandwidth = 20; // "medium"
+        pma.latency = 200;  // "bad"
+        runtime->add_proc_mem_affinity(pma);
+      }
+
+      for(std::set<Memory>::const_iterator it = managed_mems.begin();
+          it != managed_mems.end();
+          ++it) {
+        // no processor affinity to IB memories
+        if(!ID(*it).is_memory()) continue;
+
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = *it;
+        pma.bandwidth = 20; // "medium"
+        pma.latency = 300;  // "worse" (pessimistically assume faults)
+        runtime->add_proc_mem_affinity(pma);
       }
 
       // peer access
@@ -3025,6 +3057,21 @@ namespace Realm {
       size_t size;
       CHECK_HIP( hipModuleGetGlobal(&ptr, &size, module, var->device_name) );
       device_variables[var->host_var] = reinterpret_cast<char*>(ptr);
+
+      // if this is a managed variable, the "host_var" is actually a pointer
+      //  we need to fill in, so do that now
+      if(var->managed) {
+        hipDeviceptr_t *indirect = const_cast<hipDeviceptr_t *>(static_cast<const hipDeviceptr_t *>(var->host_var));
+        if(*indirect) {
+          // it's already set - make sure we're consistent (we're probably not)
+          if(*indirect != ptr) {
+            log_gpu.fatal() << "__managed__ variables are not supported when using multiple devices with HIP hijack enabled";
+            abort();
+          }
+        } else {
+          *indirect = ptr;
+        }
+      }
     }
     
     void GPU::register_function(const RegisteredFunction *func)
@@ -3157,6 +3204,7 @@ namespace Realm {
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
       , cfg_fb_ib_size(128 << 20)
+      , cfg_uvm_mem_size(0)
       , cfg_num_gpus(0)
       , cfg_task_streams(12)
       , cfg_d2d_streams(4)
@@ -3176,6 +3224,7 @@ namespace Realm {
       , cfg_use_hip_ipc(false)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
+      , uvm_base(0), uvmmem(0)
       , hipipc_condvar(hipipc_mutex)
       , hipipc_responses_needed(0)
       , hipipc_releases_needed(0)
@@ -3213,6 +3262,7 @@ namespace Realm {
       	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
           .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
       	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+          .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
       	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
           .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
           .add_option_int("-ll:streams", m->cfg_task_streams)
@@ -3553,7 +3603,7 @@ namespace Realm {
 	    } else {
 	      const char *errstring = "error message not available";
 #if HIP_VERBOSE_ERROR_MSG == 1
-	      errstring = hipGetErrorName(ret);
+              errstring = hipGetErrorName(ret);
 #endif
 	      log_gpu.fatal() << "unexpected error from cuMemHostAlloc: result=" << ret
 			      << " (" << errstring << ")";
@@ -3623,6 +3673,56 @@ namespace Realm {
           } else {
             log_gpu.warning() << "GPU #" << i << "has an unexpected mapping for"
             << " intermediate buffers in ZC memory!";
+          }
+        }
+      }
+
+      // a single unified (managed) memory for everybody
+      if((cfg_uvm_mem_size > 0) && !gpus.empty()) {
+	      char* uvm_gpu_base;
+        // borrow GPU 0's context for the allocation call
+        {
+          AutoGPUContext agc(gpus[0]);
+
+          hipError_t ret = hipMallocManaged((void**)&uvm_gpu_base, 
+                                            cfg_uvm_mem_size,
+                                            hipMemAttachGlobal);
+          if(ret != hipSuccess) {
+            if(ret == hipErrorOutOfMemory) {
+              log_gpu.fatal() << "unable to allocate managed memory: "
+                  << cfg_uvm_mem_size << " bytes needed (from -ll:msize)";
+            } else {
+              const char *errstring = hipGetErrorString(ret);
+              log_gpu.fatal() << "unexpected error from cuMemAllocManaged: result=" << ret
+                  << " (" << errstring << ")";
+            }
+            abort();
+          }
+        }
+
+        uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
+        Memory m = runtime->next_local_memory_id();
+        uvmmem = new GPUZCMemory(m, uvm_gpu_base, uvm_base,
+                                 cfg_uvm_mem_size,
+                                 MemoryImpl::MKIND_MANAGED,
+                                 Memory::Kind::GPU_MANAGED_MEM);
+        runtime->add_memory(uvmmem);
+
+        // add the managed memory to any GPU capable of coherent access
+        for(unsigned i = 0; i < gpus.size(); i++) {
+                int concurrent_access;
+          {
+            AutoGPUContext agc(gpus[i]);
+            hipError_t err = hipDeviceGetAttribute(&concurrent_access,
+                                                   hipDeviceAttributeConcurrentManagedAccess,
+                                                   gpus[i]->info->device);
+            assert(err == hipSuccess);
+          }
+
+          if(concurrent_access) {
+            gpus[i]->managed_mems.insert(uvmmem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i << " is not capable of concurrent access to managed memory!";
           }
         }
       }
@@ -3839,6 +3939,12 @@ namespace Realm {
         CHECK_HIP( hipHostFree(zcib_cpu_base) );
       }
 
+      if(uvm_base) {
+      	assert(!gpus.empty());
+      	AutoGPUContext agc(gpus[0]);
+      	CHECK_HIP( hipFree(uvm_base) );
+      }
+
       // also unregister any host memory at this time
       if(!registered_host_ptrs.empty()) {
         AutoGPUContext agc(gpus[0]);
@@ -3879,9 +3985,11 @@ namespace Realm {
 
     RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
 					   const char *_device_name, bool _external,
-					   int _size, bool _constant, bool _global)
+					   int _size, bool _constant, bool _global,
+             bool _managed)
       : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
-	external(_external), size(_size), constant(_constant), global(_global)
+        external(_external), size(_size), constant(_constant), global(_global),
+        managed(_managed)
     {}
 
 

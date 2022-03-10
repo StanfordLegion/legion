@@ -19,7 +19,7 @@
 
 #include <hip/hip_runtime.h>
 #ifdef __HIP_PLATFORM_NVCC__
-#define hipDeviceScheduleBlockingSync CU_CTX_SCHED_BLOCKING_SYNC 
+#define hipDeviceScheduleBlockingSync CU_CTX_SCHED_BLOCKING_SYNC
 #endif
 
 #include "realm/realm_config.h"
@@ -609,6 +609,9 @@ namespace Realm {
 
       // which system memories have been registered and can be used for cuMemcpyAsync
       std::set<Memory> pinned_sysmems;
+
+      // managed memories we can concurrently access
+      std::set<Memory> managed_mems;
 
       // which other FBs we have peer access to
       std::set<Memory> peer_fbs;

@@ -81,6 +81,7 @@ namespace Realm {
     public:
       size_t cfg_zc_mem_size, cfg_zc_ib_size;
       size_t cfg_fb_mem_size, cfg_fb_ib_size;
+      size_t cfg_uvm_mem_size;
       unsigned cfg_num_gpus;
       std::string cfg_gpu_idxs;
       unsigned cfg_task_streams, cfg_d2d_streams;
@@ -104,6 +105,8 @@ namespace Realm {
       std::vector<GPU *> gpus;
       void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
+      void *uvm_base; // guaranteed to be same for CPU and GPU
+      GPUZCMemory *uvmmem;
       std::vector<void *> registered_host_ptrs;
 
       Mutex hipipc_mutex;
