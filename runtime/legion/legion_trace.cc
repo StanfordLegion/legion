@@ -2230,7 +2230,7 @@ namespace Legion {
       : forest(f), region(r), owner_did(own_did)
     //--------------------------------------------------------------------------
     {
-      region->add_base_resource_ref(TRACE_REF);
+      region->add_nested_resource_ref(owner_did);
     }
 
     //--------------------------------------------------------------------------
@@ -2240,7 +2240,7 @@ namespace Legion {
       : forest(f), region(r), owner_did(own_did)
     //--------------------------------------------------------------------------
     {
-      region->add_base_resource_ref(TRACE_REF);
+      region->add_nested_resource_ref(owner_did);
       conditions.swap(source.conditions);
       if (owner_did > 0)
       {
@@ -2251,7 +2251,7 @@ namespace Legion {
           vit->first->add_nested_valid_ref(owner_did, &mutator);
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 vit->second.begin(); it != vit->second.end(); ++it)
-            it->first->add_base_expression_reference(TRACE_REF, &mutator);
+            it->first->add_nested_expression_reference(owner_did, &mutator);
         }
       }
     }
@@ -2267,13 +2267,13 @@ namespace Legion {
         {
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 vit->second.begin(); it != vit->second.end(); it++)
-            if (it->first->remove_base_expression_reference(TRACE_REF))
+            if (it->first->remove_nested_expression_reference(owner_did))
               delete it->first;
           if (vit->first->remove_nested_valid_ref(owner_did))
             delete vit->first;
         }
       }
-      if (region->remove_base_resource_ref(TRACE_REF))
+      if (region->remove_nested_resource_ref(owner_did))
         delete region;
       conditions.clear();
     }
@@ -2309,7 +2309,7 @@ namespace Legion {
             // Handle the difference fields first before we mutate set_overlap
             FieldMask diff = mask - set_overlap;
             if (finder->second.insert(expr, mask) && (owner_did > 0))
-                expr->add_base_expression_reference(TRACE_REF, &mutator);
+                expr->add_nested_expression_reference(owner_did, &mutator);
           }
           FieldMaskSet<IndexSpaceExpression> to_add;
           std::vector<IndexSpaceExpression*> to_delete;
@@ -2351,7 +2351,7 @@ namespace Legion {
                 to_add.begin(); it != to_add.end(); it++)
             if (finder->second.insert(it->first, it->second) && 
                 (owner_did > 0))
-              it->first->add_base_expression_reference(TRACE_REF, &mutator);
+              it->first->add_nested_expression_reference(owner_did, &mutator);
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
@@ -2359,19 +2359,19 @@ namespace Legion {
               continue;
             finder->second.erase(*it);
             if ((owner_did > 0) &&
-                (*it)->remove_base_expression_reference(TRACE_REF))
+                (*it)->remove_nested_expression_reference(owner_did))
               delete (*it);
           }
         }
         else if (finder->second.insert(expr, mask) && (owner_did > 0))
-          expr->add_base_expression_reference(TRACE_REF, &mutator);
+          expr->add_nested_expression_reference(owner_did, &mutator);
       }
       else
       {
         if (owner_did > 0)
         {
           view->add_nested_valid_ref(owner_did, &mutator);
-          expr->add_base_expression_reference(TRACE_REF, &mutator);
+          expr->add_nested_expression_reference(owner_did, &mutator);
         }
         conditions[view].insert(expr, mask);
       }
@@ -2416,7 +2416,7 @@ namespace Legion {
                 else
                   finder->second += 1;
               }
-              else if (it->first->remove_base_expression_reference(TRACE_REF))
+              else if (it->first->remove_nested_expression_reference(owner_did))
                 delete it->first;
             }
             if (view_refs_to_remove != NULL)
@@ -2459,7 +2459,7 @@ namespace Legion {
                 else
                   finder->second += 1;
               }
-              else if ((*it)->remove_base_expression_reference(TRACE_REF))
+              else if ((*it)->remove_nested_expression_reference(owner_did))
                 delete (*it);
             }
           }
@@ -2523,7 +2523,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               to_add.begin(); it != to_add.end(); it++)
           if (finder->second.insert(it->first, it->second) && (owner_did > 0))
-            it->first->add_base_expression_reference(TRACE_REF);
+            it->first->add_nested_expression_reference(owner_did);
         for (std::vector<IndexSpaceExpression*>::const_iterator it =
               to_delete.begin(); it != to_delete.end(); it++)
         {
@@ -2541,7 +2541,7 @@ namespace Legion {
               else
                 finder->second += 1;
             }
-            else if ((*it)->remove_base_expression_reference(TRACE_REF))
+            else if ((*it)->remove_nested_expression_reference(owner_did))
               delete (*it);
           }
         }
