@@ -1031,13 +1031,50 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 AddressSpaceID origin);
     protected:
+      void perform_single_allreduce(const uint64_t allreduce_tag,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_preconditions,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+              const std::vector<std::vector<Reservation> > &reservations,
+                                std::vector<ApEvent> &local_init_events,
+                                std::vector<ApEvent> &local_final_events);
+      unsigned perform_multi_allreduce(const uint64_t allreduce_tag,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_preconditions,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+              const std::vector<std::vector<Reservation> > &reservations,
+                                std::vector<ApEvent> &local_init_events,
+                                std::vector<ApEvent> &local_final_events);
+      void send_allreduce_stage(const uint64_t allreduce_tag, const int stage,
+                                const int local_rank, ApEvent src_precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const PhysicalTraceInfo &trace_info,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                const AddressSpaceID *targets, size_t total,
+                                std::vector<ApEvent> &src_events);
+      void receive_allreduce_stage(const uint64_t allreduce_tag,const int stage,
+                                ApEvent dst_precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &applied_events,
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                const int *expected_ranks, size_t total_ranks,
+                                std::vector<ApEvent> &dst_events);
       void process_distribute_allreduce(const uint64_t allreduce_tag,
                                 const int src_rank, const int stage,
                                 std::vector<CopySrcDstField> &src_fields,
                                 const ApEvent src_precondition,
                                 ApUserEvent src_postcondition,
-                                ApBarrier src_barrier, ShardID bar_shard,
-                                RtUserEvent applied_event);
+                                ApBarrier src_barrier, ShardID bar_shard);
       void finalize_collective_user(InstanceView *view,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -1140,6 +1177,8 @@ namespace Legion {
         ApEvent dst_precondition;
         PredEvent predicate_guard;
         std::vector<ApUserEvent> remaining_postconditions;
+        std::set<RtEvent> applied_events;
+        RtUserEvent applied_event;
       };
       std::map<std::pair<uint64_t,int>,AllReduceStage> remaining_stages;
     protected:
