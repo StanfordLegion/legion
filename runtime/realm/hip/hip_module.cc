@@ -2371,7 +2371,7 @@ namespace Realm {
     GPUZCMemory::GPUZCMemory(Memory _me,
                              char *_gpu_base, void *_cpu_base, size_t _size,
                              MemoryKind _kind, Memory::Kind _lowlevel_kind)
-      : LocalManagedMemory(_me, _size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM, 0)
+      : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
       , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
     {
       // advertise ourselves as a host or managed memory, as appropriate
