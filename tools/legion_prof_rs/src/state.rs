@@ -135,6 +135,9 @@ impl Timestamp {
     pub const fn from_us(microseconds: u64) -> Timestamp {
         Timestamp(microseconds * 1000)
     }
+    pub fn to_us(&self) -> f64 {
+        self.0 as f64 / 1000.0
+    }
 }
 
 impl fmt::Display for Timestamp {
@@ -1206,15 +1209,19 @@ pub struct VariantID(pub u32);
 #[derive(Debug)]
 pub struct Variant {
     variant_id: VariantID,
+    message: bool,
+    ordered_vc: bool,
     pub name: String,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
 }
 
 impl Variant {
-    fn new(variant_id: VariantID, name: &String) -> Self {
+    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &String) -> Self {
         Variant {
             variant_id,
+            message,
+            ordered_vc,
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -2061,6 +2068,60 @@ impl State {
         self.last_time = stop - start;
     }
 
+    pub fn check_message_latencies(&self, threshold: f64 /* us */, warn_percentage: f64) {
+        assert!(threshold >= 0.0);
+        assert!(warn_percentage >= 0.0 && warn_percentage < 100.0);
+
+        let mut total_messages = 0;
+        let mut bad_messages = 0;
+        let mut longest_latency = Timestamp::from_us(0);
+        for proc in self.procs.values() {
+            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
+                let variant = self.meta_variants.get(&variant_id).unwrap();
+                if !variant.message || variant.ordered_vc {
+                    continue;
+                }
+                total_messages += meta_tasks.len();
+                for meta_task in meta_tasks {
+                    let latency =
+                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
+                    if threshold <= latency.to_us() {
+                        bad_messages += 1;
+                    }
+                    longest_latency = max(longest_latency, latency);
+                }
+            }
+        }
+        if total_messages == 0 {
+            return;
+        }
+        let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
+        if warn_percentage <= percentage {
+            for _ in 0..5 {
+                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            }
+            println!(
+                "WARNING: A significant number of long latency messages \
+                    were detected during this run meaning that the network \
+                    was likely congested and could be causing a significant \
+                    performance degredation. We detected {} messages that took \
+                    longer than {:.2}us to run, representing {:.2}% of {} total \
+                    messages. The longest latency message required {:.2}us to \
+                    execute. Please report this case to the Legion developers \
+                    along with an accompanying Legion Prof profile so we can \
+                    better understand why the network is so congested.",
+                bad_messages,
+                threshold,
+                percentage,
+                total_messages,
+                longest_latency.to_us()
+            );
+            for _ in 0..5 {
+                println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            }
+        }
+    }
+
     pub fn sort_time_range(&mut self) {
         self.procs
             .par_iter_mut()
@@ -2121,11 +2182,16 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*kind)
                 .or_insert_with(|| RuntimeCallKind::new(*kind, name));
         }
-        Record::MetaDesc { kind, message, ordered_vc, name } => {
+        Record::MetaDesc {
+            kind,
+            message,
+            ordered_vc,
+            name,
+        } => {
             state
                 .meta_variants
                 .entry(*kind)
-                .or_insert_with(|| Variant::new(*kind, name));
+                .or_insert_with(|| Variant::new(*kind, *message, *ordered_vc, name));
         }
         Record::OpDesc { kind, name } => {
             let kind = OpKindID(*kind);
@@ -2320,7 +2386,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             state
                 .variants
                 .entry((*task_id, *variant_id))
-                .or_insert_with(|| Variant::new(*variant_id, name))
+                .or_insert_with(|| Variant::new(*variant_id, false, false, name))
                 .set_task(*task_id);
         }
         Record::OperationInstance { op_id, kind } => {

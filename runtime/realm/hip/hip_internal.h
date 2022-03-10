@@ -69,8 +69,8 @@ namespace Realm {
       int index;  // index used by HIP runtime
       hipDevice_t device;
 
-#ifdef REALM_USE_HIP_HIJACK
       static const size_t MAX_NAME_LEN = 64;
+#ifndef REALM_USE_HIP_HIJACK
       char name[MAX_NAME_LEN];
 
       int major, minor;
