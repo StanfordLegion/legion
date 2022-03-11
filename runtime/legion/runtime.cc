@@ -12534,17 +12534,24 @@ namespace Legion {
       // Initialize our virtual manager and our mappers
       initialize_virtual_manager();
       // Finally perform the registration callback methods
-      const std::vector<RegistrationCallbackFnptr> &registration_callbacks
+      std::vector<RegistrationCallback> &registration_callbacks
         = get_pending_registration_callbacks();
       if (!registration_callbacks.empty())
       {
         log_run.info("Invoking registration callback functions...");
-        for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
+        for (std::vector<RegistrationCallback>::const_iterator it = 
               registration_callbacks.begin(); it !=
               registration_callbacks.end(); it++)
-          perform_registration_callback(*it, 
+        {
+          perform_registration_callback(it->has_args ? 
+              (void*)it->callback.withargs : (void*)it->callback.withoutargs,
+              it->buffer.get_ptr(), it->buffer.get_size(), it->has_args,
               false/*global*/, true/*preregistered*/);
+          if (it->buffer.get_size() > 0)
+            free(it->buffer.get_ptr());
+        }
         log_run.info("Finished execution of registration callbacks");
+        registration_callbacks.clear();
       }
     }
 
@@ -12553,7 +12560,9 @@ namespace Legion {
     void Runtime::send_registration_callback(AddressSpaceID target,
                                          Realm::DSOReferenceImplementation *dso,
                                          RtEvent global_done_event,
-                                         std::set<RtEvent> &applied_events)
+                                         std::set<RtEvent> &applied_events,
+                                         const void *buffer, size_t buffer_size,
+                                         bool withargs)
     //--------------------------------------------------------------------------
     {
       const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -12566,6 +12575,10 @@ namespace Legion {
         rez.serialize(dso->dso_name.c_str(), dso_size);
         rez.serialize(sym_size);
         rez.serialize(dso->symbol_name.c_str(), sym_size);
+        rez.serialize(buffer_size);
+        if (buffer_size > 0)
+          rez.serialize(buffer, buffer_size);
+        rez.serialize<bool>(withargs);
         rez.serialize(global_done_event);
         rez.serialize(done_event);
       }
@@ -12576,8 +12589,9 @@ namespace Legion {
 #endif // LEGION_USE_LIBDL
 
     //--------------------------------------------------------------------------
-    RtEvent Runtime::perform_registration_callback(
-            RegistrationCallbackFnptr callback, bool global, bool preregistered)
+    RtEvent Runtime::perform_registration_callback(void *callback,
+                                 const void *buffer, size_t buffer_size,
+                                 bool withargs, bool global, bool preregistered)
     //--------------------------------------------------------------------------
     { 
       if (inside_registration_callback)
@@ -12665,7 +12679,7 @@ namespace Legion {
         }
         else
         {
-          std::map<RegistrationCallbackFnptr,RtEvent>::const_iterator
+          std::map<void*,RtEvent>::const_iterator
             local_finder = local_callbacks_done.find(callback);
           if (local_finder == local_callbacks_done.end())
           {
@@ -12684,7 +12698,20 @@ namespace Legion {
           inside_registration_callback = GLOBAL_REGISTRATION_CALLBACK;
         else
           inside_registration_callback = LOCAL_REGISTRATION_CALLBACK;
-        (*callback)(machine, external, local_procs);
+        if (withargs)
+        {
+          RegistrationWithArgsCallbackFnptr callbackwithargs =
+            (RegistrationWithArgsCallbackFnptr)callback;
+          RegistrationCallbackArgs args{ machine, external, 
+            local_procs, UntypedBuffer(buffer, buffer_size) };
+          (*callbackwithargs)(args);
+        }
+        else
+        {
+          RegistrationCallbackFnptr callbackwithoutargs =
+            (RegistrationCallbackFnptr)callback;
+          (*callbackwithoutargs)(machine, external, local_procs);
+        }
         inside_registration_callback = NO_REGISTRATION_CALLBACK;
         Runtime::trigger_event(local_perform);
         if (!global)
@@ -12717,7 +12744,8 @@ namespace Legion {
         {
           if (space == address_space)
             continue;
-          send_registration_callback(space, dso, global_perform, preconditions);
+          send_registration_callback(space, dso, global_perform, preconditions,
+                                     buffer, buffer_size, withargs);
         }
         if (!preconditions.empty())
           Runtime::trigger_event(global_perform,
@@ -12729,7 +12757,8 @@ namespace Legion {
       {
         std::set<RtEvent> preconditions;
         implicit_context->perform_global_registration_callbacks(
-            dso, local_done, global_perform, preconditions);
+            dso, buffer, buffer_size, withargs, local_done, 
+            global_perform, preconditions);
         if (!preconditions.empty())
           Runtime::trigger_event(global_perform,
               Runtime::merge_events(preconditions));
@@ -17574,6 +17603,13 @@ namespace Legion {
       derez.deserialize(sym_size);
       const std::string sym_name((const char*)derez.get_current_pointer());
       derez.advance_pointer(sym_size);
+      size_t buffer_size;
+      derez.deserialize(buffer_size);
+      const void *buffer = derez.get_current_pointer();
+      if (buffer_size > 0)
+        derez.advance_pointer(buffer_size);
+      bool withargs;
+      derez.deserialize<bool>(withargs);
       RtEvent global_done_event;
       derez.deserialize(global_done_event);
       RtUserEvent done_event;
@@ -17616,8 +17652,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      RegistrationCallbackFnptr callback = 
-        impl->get_impl<RegistrationCallbackFnptr>();
+      void* callback = impl->get_impl<void*>();
       RtEvent precondition;
       // Now take the lock and see if we need to perform anything
       {
@@ -17636,7 +17671,7 @@ namespace Legion {
           if (finder->second.empty())
             pending_remote_callbacks.erase(finder);
           // Now see if anyone else has done the local registration
-          std::map<RegistrationCallbackFnptr,RtEvent>::const_iterator
+          std::map<void*,RtEvent>::const_iterator
             finder = local_callbacks_done.find(callback);
           if (finder != local_callbacks_done.end())
           {
@@ -17660,7 +17695,20 @@ namespace Legion {
         if (!precondition.exists())
         {
           inside_registration_callback = GLOBAL_REGISTRATION_CALLBACK;
-          (*callback)(machine, external, local_procs);
+          if (withargs)
+          {
+            RegistrationWithArgsCallbackFnptr callbackwithargs =
+              (RegistrationWithArgsCallbackFnptr)callback;
+            RegistrationCallbackArgs args{ machine, external, 
+              local_procs, UntypedBuffer(buffer, buffer_size) };
+            (*callbackwithargs)(args);
+          }
+          else
+          {
+            RegistrationCallbackFnptr callbackwithoutargs =
+              (RegistrationCallbackFnptr)callback;
+            (*callbackwithoutargs)(machine, external, local_procs);
+          }
           inside_registration_callback = NO_REGISTRATION_CALLBACK;
         }
         Runtime::trigger_event(done_event, precondition);
@@ -23760,9 +23808,41 @@ namespace Legion {
     {
       if (!runtime_started)
       {
-        std::vector<RegistrationCallbackFnptr> &registration_callbacks = 
+        std::vector<RegistrationCallback> &registration_callbacks = 
           get_pending_registration_callbacks();
-        registration_callbacks.push_back(callback);
+        registration_callbacks.resize(registration_callbacks.size() + 1);
+        RegistrationCallback &reg = registration_callbacks.back();
+        reg.callback.withoutargs = callback;
+        reg.has_args = false;
+      }
+      else
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
+                      "Illegal call to 'add_registration_callback' after "
+                      "the runtime has been started! Please use "
+                      "'perform_registration_callback' for registration "
+                      "calls to be done after the runtime has started.")
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::add_registration_callback(
+        RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime_started)
+      {
+        std::vector<RegistrationCallback> &registration_callbacks = 
+          get_pending_registration_callbacks();
+        registration_callbacks.resize(registration_callbacks.size() + 1);
+        RegistrationCallback &reg = registration_callbacks.back();
+        reg.callback.withargs = callback;
+        reg.has_args = true;
+        const size_t size = buffer.get_size();
+        if (size > 0)
+        {
+          void *copy = malloc(size);
+          memcpy(copy, buffer.get_ptr(), size);
+          reg.buffer = UntypedBuffer(copy, size);
+        }
       }
       else
         REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
@@ -23788,8 +23868,8 @@ namespace Legion {
             REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES,
                 "Dynamic registration callbacks cannot be registered after "
                 "the runtime has been started with multiple runtime instances.") 
-        const RtEvent done_event = 
-          the_runtime->perform_registration_callback(callback, global);
+        const RtEvent done_event = the_runtime->perform_registration_callback(
+            (void*)callback,NULL/*buffer*/,0/*size*/,false/*withargs*/,global);
         if (done_event.exists() && !done_event.has_triggered())
         {
           // If we have a context then record that no operations are 
@@ -23804,6 +23884,41 @@ namespace Legion {
       }
       else // can safely ignore global as this call must be done everywhere
         add_registration_callback(callback);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::perform_dynamic_registration_callback(
+                                     RegistrationWithArgsCallbackFnptr callback,
+                                     const UntypedBuffer &buffer, bool global)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime_started)
+      {
+        // Wait for the runtime to be started everywhere
+        if (!runtime_started_event.has_triggered())
+          // If we're here this has to be an external thread
+          runtime_started_event.external_wait();
+        if (the_runtime->separate_runtime_instances)
+            REPORT_LEGION_FATAL(LEGION_FATAL_SEPARATE_RUNTIME_INSTANCES,
+                "Dynamic registration callbacks cannot be registered after "
+                "the runtime has been started with multiple runtime instances.") 
+        const RtEvent done_event = the_runtime->perform_registration_callback(
+            (void*)callback, buffer.get_ptr(), buffer.get_size(), 
+            true/*withargs*/, global);
+        if (done_event.exists() && !done_event.has_triggered())
+        {
+          // If we have a context then record that no operations are 
+          // allowed to be executed until after this registration is done
+          if (implicit_context != NULL)
+            implicit_context->handle_registration_callback_effects(done_event);
+          else if (Processor::get_executing_processor().exists())
+            done_event.wait();
+          else
+            done_event.external_wait();
+        }
+      }
+      else // can safely ignore global as this call must be done everywhere
+        add_registration_callback(callback, buffer);
     }
 #endif
 
@@ -24045,11 +24160,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ std::vector<RegistrationCallbackFnptr>&
+    /*static*/ std::vector<Runtime::RegistrationCallback>&
                                Runtime::get_pending_registration_callbacks(void)
     //--------------------------------------------------------------------------
     {
-      static std::vector<RegistrationCallbackFnptr> pending_callbacks;
+      static std::vector<RegistrationCallback> pending_callbacks;
       return pending_callbacks;
     }
 
