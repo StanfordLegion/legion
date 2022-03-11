@@ -1086,6 +1086,10 @@ namespace Legion {
                                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // We should only have a collective mapping if we're a collective instance
+      assert((mapping != NULL) == is_collective_manager());
+#endif
       ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
       // If we're a replicate context then we want to ignore the specific
       // context UID since there might be several shards on this node
@@ -1181,8 +1185,10 @@ namespace Legion {
         AddressSpaceID target = mapping->get_parent(owner_space, local_space);
         runtime->send_create_top_view_request(target, rez); 
         ready.wait();
-        result = construct_top_view(owner_space, view_did.load(), 
-                            own_ctx->get_context_uid(), mapping);
+        // For collective instances each node of the instance serves as its
+        // own logical owner view
+        result = construct_top_view(runtime->address_space, view_did.load(),
+                                    own_ctx->get_context_uid(), mapping);
       }
       else
       {

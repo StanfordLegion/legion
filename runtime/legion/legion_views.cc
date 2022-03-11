@@ -2367,6 +2367,10 @@ namespace Legion {
             applied_events, collective_mapping, trace_info, source, symbolic);
       if (!is_logical_owner())
       {
+#ifdef DEBUG_LEGION
+        // This should never happen with collective instances
+        assert(!manager->is_collective_manager());
+#endif
         ApUserEvent ready_event;
         // Check to see if this user came from somewhere that wasn't
         // the logical owner, if so we need to send the update back 
@@ -2566,6 +2570,10 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
+#ifdef DEBUG_LEGION
+        // This should never happen with collective instances
+        assert(!manager->is_collective_manager());
+#endif
         // Check to see if there are any replicated fields here which we
         // can handle locally so we don't have to send a message to the owner
         ApEvent result_event;
@@ -2740,6 +2748,10 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
+#ifdef DEBUG_LEGION
+        // This should never happen with collective instances
+        assert(!manager->is_collective_manager());
+#endif
         // Check to see if this update came from some place other than the
         // source in which case we need to send it back to the source
         if (source != logical_owner)
@@ -4184,6 +4196,10 @@ namespace Legion {
             applied_events, collective_mapping, trace_info, source, symbolic);
       if (!is_logical_owner())
       {
+#ifdef DEBUG_LEGION
+        // This should never happen with collective instances
+        assert(!manager->is_collective_manager());
+#endif
         // If we're not the logical owner send a message there 
         // to do the analysis and provide a user event to trigger
         // with the precondition
@@ -4261,6 +4277,10 @@ namespace Legion {
     {
       if (!is_logical_owner())
       {
+#ifdef DEBUG_LEGION
+        // This should never happen with collective instances
+        assert(!manager->is_collective_manager());
+#endif
         ApUserEvent ready_event = Runtime::create_ap_user_event(&trace_info);
         RtUserEvent applied = Runtime::create_rt_user_event();
         Serializer rez;
@@ -4334,6 +4354,10 @@ namespace Legion {
 #endif
       if (!is_logical_owner())
       {
+#ifdef DEBUG_LEGION
+        // This should never happen with collective instances
+        assert(!manager->is_collective_manager());
+#endif
         RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
