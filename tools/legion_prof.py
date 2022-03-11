@@ -1244,12 +1244,14 @@ class StatObject(object):
                 print()
 
 class Variant(StatObject):
-    __slots__ = ['variant_id', 'name', 'op', 'task_kind', 'color', 'message', 'ordered_vc']
+    __slots__ = ['variant_id', 'name', 'ops', 'task_kind', 'color', 'message', 'ordered_vc']
     def __init__(self, variant_id, name, message = False, ordered_vc= False):
         StatObject.__init__(self)
         self.variant_id = variant_id
         self.name = name
-        self.op = dict()
+        # For task variants this dictionary is from op_id -> Task
+        # For meta-task variants, this diction is from op_id -> list[MetaTask]
+        self.ops = dict()
         self.task_kind = None
         self.color = None
         self.message = message
@@ -2750,8 +2752,10 @@ class State(object):
         variant = self.find_meta_variant(lg_id)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
-        assert op_id in variant.op
-        variant.op[op_id].add_wait_interval(wait_start, wait_ready, wait_end)
+        assert op_id in variant.ops
+        # We know that meta wait infos are logged in order so we always add
+        # the wait intervals to the last element in the list
+        variant.ops[op_id][-1].add_wait_interval(wait_start, wait_ready, wait_end)
 
     def log_kind(self, task_id, name, overwrite):
         if task_id not in self.task_kinds:
@@ -2930,7 +2934,7 @@ class State(object):
             assert start is not None
             assert stop is not None
             task = Task(variant, task, create, ready, start, stop) 
-            variant.op[op_id] = task
+            variant.ops[op_id] = task
             self.operations[op_id] = task
             # update prof_uid map
             self.prof_uid_map[task.prof_uid] = task
@@ -3049,7 +3053,9 @@ class State(object):
 
     def create_meta(self, variant, op, create, ready, start, stop):
         meta = MetaTask(variant, op, create, ready, start, stop)
-        variant.op[op.op_id] = meta
+        if op.op_id not in variant.ops:
+            variant.ops[op.op_id] = list()
+        variant.ops[op.op_id].append(meta)
         # update prof_uid map
         self.prof_uid_map[meta.prof_uid] = meta
         return meta
@@ -3156,13 +3162,15 @@ class State(object):
                 continue
             if variant.ordered_vc:
                 continue
-            total_messages += len(variant.op)
-            for op in itervalues(variant.op):
-                latency = op.ready - op.create
-                if threshold <= latency:
-                    bad_messages += 1
-                if longest_latency < latency:
-                    longest_latency = latency
+            # Iterate over the lists of meta-tasks for each op_id
+            for ops in itervalues(variant.ops):
+                total_messages += len(ops)
+                for op in ops:
+                    latency = op.ready - op.create
+                    if threshold <= latency:
+                        bad_messages += 1
+                    if longest_latency < latency:
+                        longest_latency = latency
         if total_messages == 0:
             return
         percentage = 100.0 * bad_messages / total_messages
