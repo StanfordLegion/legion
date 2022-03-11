@@ -3761,7 +3761,8 @@ namespace Realm {
             it++) {
           // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
           if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||
-              ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY))
+              ((*it)->kind == MemoryImpl::MKIND_ZEROCOPY) ||
+              ((*it)->kind == MemoryImpl::MKIND_MANAGED))
             continue;
           
           // skip any memory that's over the max size limit for host
