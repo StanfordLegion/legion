@@ -7835,14 +7835,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-        const DeferTraceUpdateArgs &rhs, RtUserEvent d)
+        const DeferTraceUpdateArgs &rhs, RtUserEvent d, IndexSpaceExpression *e)
       : LgTaskArgs<DeferTraceUpdateArgs>(rhs.provenance), target(rhs.target),
-        kind(rhs.kind), done(rhs.done), view(rhs.view), expr(rhs.expr), 
+        kind(rhs.kind), done(rhs.done), view(rhs.view), expr(e), 
         pending(rhs.pending), buffer_size(rhs.buffer_size), buffer(rhs.buffer),
         deferral_event(d)
     //--------------------------------------------------------------------------
     {
-      // Expression reference rolls over
+      // Expression reference rolls over unless its new and we need a reference
+      if (rhs.expr != expr)
+        expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -7942,7 +7944,7 @@ namespace Legion {
         }
         else
         {
-          DeferTraceUpdateArgs args(*dargs, deferral);
+          DeferTraceUpdateArgs args(*dargs, deferral, user_expr);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
 #ifdef DEBUG_LEGION
