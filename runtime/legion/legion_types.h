@@ -169,6 +169,7 @@ namespace Legion {
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
+  struct RegistrationCallbackArgs;
   class ProjectionFunctor;
   class Task;
   class Copy;
@@ -1819,6 +1820,8 @@ namespace Legion {
   typedef ::legion_internal_color_t LegionColor;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
                 Runtime *rt, const std::set<Processor> &local_procs);
+  typedef void (*RegistrationWithArgsCallbackFnptr)(
+                const RegistrationCallbackArgs &args);
   typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
       const DomainPoint&, Runtime *rt);
   typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
