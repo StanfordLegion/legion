@@ -2625,10 +2625,12 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
       void send_registration_callback(AddressSpaceID space,
                                       Realm::DSOReferenceImplementation *impl,
-                                      RtEvent done, std::set<RtEvent> &applied);
+                                      RtEvent done, std::set<RtEvent> &applied,
+                                      const void *buffer, size_t buffer_size,
+                                      bool withargs);
 #endif
-      RtEvent perform_registration_callback(RegistrationCallbackFnptr callback, 
-                                       bool global, bool preregistered = false);
+      RtEvent perform_registration_callback(void *callback, const void *buffer,
+          size_t size, bool withargs, bool global, bool preregistered = false);
       void startup_runtime(void);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
@@ -4172,7 +4174,7 @@ namespace Legion {
       // to all the dynamic objects that we load
       Realm::DSOCodeTranslator callback_translator;
 #endif
-      std::map<RegistrationCallbackFnptr,RtEvent> local_callbacks_done;
+      std::map<void*,RtEvent> local_callbacks_done;
       std::map<std::pair<std::string,std::string>,RtEvent> 
                                                   global_callbacks_done;
       std::map<std::pair<std::string,std::string>,RtEvent>
@@ -4443,9 +4445,14 @@ namespace Legion {
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id,
                                                         bool has_lock = false);
       static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(
+       RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer);
 #ifdef LEGION_USE_LIBDL
       static void perform_dynamic_registration_callback(
                                RegistrationCallbackFnptr callback, bool global);
+      static void perform_dynamic_registration_callback(
+                               RegistrationWithArgsCallbackFnptr callback,
+                               const UntypedBuffer &buffer, bool global);
 #endif
       static ReductionOpTable& get_reduction_table(bool safe);
 #ifdef LEGION_GPU_REDUCTIONS
@@ -4477,7 +4484,15 @@ namespace Legion {
                                 get_pending_sharding_table(void);
       static std::vector<LegionHandshake>&
                                 get_pending_handshake_table(void);
-      static std::vector<RegistrationCallbackFnptr>&
+      struct RegistrationCallback {
+        union {
+          RegistrationCallbackFnptr withoutargs;
+          RegistrationWithArgsCallbackFnptr withargs;
+        } callback;
+        UntypedBuffer buffer;
+        bool has_args;
+      };
+      static std::vector<RegistrationCallback>&
                                 get_pending_registration_callbacks(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);

@@ -2649,7 +2649,8 @@ namespace Legion {
     public:
 #ifdef LEGION_USE_LIBDL
       void perform_global_registration_callbacks(
-                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     Realm::DSOReferenceImplementation *dso, const void *buffer,
+                     size_t buffer_size, bool withargs, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
 #endif
       bool perform_semantic_attach(void);
