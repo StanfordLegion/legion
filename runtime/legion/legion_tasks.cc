@@ -3078,7 +3078,27 @@ namespace Legion {
             {
               CollectiveManager *collective_manager = 
                 manager->as_collective_manager();
-              if (!collective_manager->contains_point(index_point))
+              if (IS_WRITE(regions[idx]))
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper selected a collective instance "
+                            "for region requirement %d of individual task %s "
+                            "(ID %lld). This region requirement has write "
+                            "privileges. Collective instances can only be "
+                            "mapped by region requirements with read-only "
+                            "or reduction privileges by tasks.", "map_task",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_id())
+              if (!is_index_space)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper selected a collective instance "
+                            "for region requirement %d of individual task %s "
+                            "(ID %lld). Individual tasks are not permitted to "
+                            "map collective instances.", "map_task",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_id())
+              else if (!collective_manager->contains_point(index_point))
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "
                             "mapper %s. Mapper selected a collective instance "

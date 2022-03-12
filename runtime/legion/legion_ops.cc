@@ -4840,6 +4840,23 @@ namespace Legion {
       {
         // Now we've got the valid instances so invoke the mapper
         record_valid = invoke_mapper(mapped_instances, source_instances);
+        if (!runtime->unsafe_mapper)
+        {
+          // Check to make sure that we don't have any collective instances
+          for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+          {
+            InstanceManager *manager = mapped_instances[idx].get_manager();
+            if (manager->is_collective_manager())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Invalid mapper output from invocation of 'map_inline' "
+                  "by mapper %s. Mapper selected a collective instance "
+                  "for mapping an inline mapping in a non-control-replicated "
+                  "parent task %s (UID %lld). All inline mappings in "
+                  "unreplicated tasks must be individual instances.",
+                  mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id())
+          }
+        }
         // First mapping so set the references now
         region.impl->set_references(mapped_instances);
       }
@@ -7988,7 +8005,17 @@ namespace Legion {
         {
           CollectiveManager *collective_manager = 
             manager->as_collective_manager();
-          if (!collective_manager->contains_point(index_point))
+          if (!is_index_space)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper selected a collective instance "
+                        "for %s region requirement at index %d but copy "
+                        "(ID %lld) launched in task %s (ID %lld) is an index "
+                        "copy operation.", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), ridx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+          else if (!collective_manager->contains_point(index_point))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper selected a collective instance "
@@ -7996,6 +8023,18 @@ namespace Legion {
                         "(ID %lld) launched in task %s (ID %lld) is not "
                         "contained within the point space for the collective "
                         "instace.", mapper->get_mapper_name(), 
+                        get_req_type_name<REQ_TYPE>(), ridx,
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+          if (REQ_TYPE == DST_REQ)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper selected a collective instance "
+                        "for %s region requirement at index %d of point copy "
+                        "(ID %lld) launched in task %s (ID %lld). Destination "
+                        "region requirements for copies are not permitted to "
+                        "be mapped to collective instances.",
+                        mapper->get_mapper_name(), 
                         get_req_type_name<REQ_TYPE>(), ridx,
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
