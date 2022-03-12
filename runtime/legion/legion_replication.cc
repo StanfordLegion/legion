@@ -1226,37 +1226,21 @@ namespace Legion {
             output_regions[idx].parent.get_index_space());
         if (options.global_indexing())
         {
-          // For globally indexed output regions, we need a prefix sum to get
-          // the right size for each subregion.
-          coord_t sum = 0;
-          typedef std::map<DomainPoint,size_t> SizeMap;
-#ifdef DEBUG_LEGION
-          assert(all_output_sizes.find(idx) != all_output_sizes.end());
-#endif
-          const SizeMap &output_sizes = all_output_sizes[idx];
-          const SizeMap &local_sizes = local_output_sizes[idx];
+          // For globally indexed output regions, we need to check
+          // the alignment between outputs from adjacent point tasks
+          // and compute the ranges of subregions via prefix sum.
           IndexPartNode *part = runtime->forest->get_node(
             output_regions[idx].partition.get_index_partition());
-          for (SizeMap::const_iterator it = output_sizes.begin();
-               it != output_sizes.end(); ++it)
-          {
-            const size_t size = it->second;
-            // Make sure we initialize nodes owned by this shard.
-            if (local_sizes.find(it->first) != local_sizes.end())
-            {
-              const LegionColor color =
-                part->color_space->linearize_color(it->first);
-              IndexSpaceNode *child = part->get_child(color);
-              forest->set_pending_space_domain(child->handle,
-                  Rect<1>(sum, sum + size - 1), runtime->address_space);
-            }
-            sum += size;
-          }
-          log_index.debug(
-              "[Task %s (UID: %lld)] setting [0, %lld) to index space %x",
-              get_task_name(), get_unique_op_id(), sum, parent->handle.get_id());
-          if (parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space,
-                                 shard_mapping))
+          Domain root_domain = compute_global_output_ranges(
+            parent, part, all_output_sizes[idx], local_output_sizes[idx]);
+
+          log_index.debug()
+            << "[Task " << get_task_name() << "(UID: " << get_unique_op_id()
+            << ")] setting " << root_domain << " to index space " << std::hex
+            << parent->handle.get_id();
+
+          if (parent->set_domain(
+                root_domain, runtime->address_space, shard_mapping))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
@@ -14657,7 +14641,7 @@ namespace Legion {
           DomainPoint point;
           derez.deserialize(point);
 #ifdef DEBUG_LEGION
-          size_t size;
+          DomainPoint size;
           derez.deserialize(size);
           assert(sizes.find(point) == sizes.end() ||
                  sizes.find(point)->second == size);

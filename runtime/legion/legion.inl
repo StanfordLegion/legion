@@ -18851,13 +18851,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    void OutputRegion::return_data(FieldID field_id,
-                                   DeferredBuffer<T,1> &buffer,
-                                   const size_t *num_elements /*= NULL*/)
+    template<typename T, int32_t DIM>
+    void OutputRegion::return_data(const DomainPoint &shape,
+                                   FieldID field_id,
+                                   DeferredBuffer<T,DIM> &buffer)
     //--------------------------------------------------------------------------
     {
-      return_data(field_id, buffer.instance, sizeof(T), num_elements);
+      return_data(shape, field_id, buffer.instance);
     }
 
     //--------------------------------------------------------------------------

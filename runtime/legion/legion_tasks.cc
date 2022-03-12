@@ -5673,10 +5673,6 @@ namespace Legion {
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
       futures = launcher.futures;
-      // If the task has any output requirements, we create fresh region names
-      // return them back to the user
-      if (outputs != NULL)
-        create_output_regions(*outputs);
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
@@ -5703,8 +5699,11 @@ namespace Legion {
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
+      // If the task has any output requirements, we create fresh region names
+      // return them back to the user
       if (outputs != NULL)
       {
+        create_output_regions(*outputs);
         if (launcher.predicate != Predicate::TRUE_PRED)
           REPORT_LEGION_ERROR(ERROR_OUTPUT_REGIONS_IN_PREDICATED_TASK,
               "Output requirements are disallowed for tasks launched with "
@@ -5825,9 +5824,21 @@ namespace Legion {
         if (!req.valid_requirement)
         {
           // Create a deferred index space
-          // For an individual task, the index space is always 1D.
-          IndexSpace index_space = parent_ctx->create_unbound_index_space(
-              Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+          IndexSpace index_space;
+          switch (req.dim)
+          {
+#define DIMFUNC(DIM)                                                       \
+            case DIM:                                                      \
+              {                                                            \
+                index_space = parent_ctx->create_unbound_index_space(      \
+                  Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+                break;                                                     \
+              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+          }
 
           // Create an output region
           LogicalRegion region = parent_ctx->create_logical_region(
@@ -8238,6 +8249,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain IndexTask::compute_global_output_ranges(IndexSpaceNode *parent,
+                                                   IndexPartNode *part,
+                                                   const SizeMap& output_sizes,
+                                                   const SizeMap& local_sizes)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = runtime->forest;
+
+      // First, we collect all the extents of local outputs.
+      // While doing this, we also check the alignment.
+#ifdef DEBUG_LEGION
+      assert(index_domain.dense());
+#endif
+      int32_t ndim = index_domain.dim;
+      DomainPoint launch_shape = index_domain.hi() - index_domain.lo() + 1;
+
+      // Initialize the vector of extents with -1
+      std::vector<std::vector<coord_t>> all_extents(ndim);
+      for (int32_t dim = 0; dim < ndim; ++dim)
+        all_extents[dim].resize(launch_shape[dim] + 1, -1);
+
+      // Check the alignment while populating the extent vector
+      for (SizeMap::const_iterator it = output_sizes.begin();
+           it != output_sizes.end(); ++it)
+      {
+        const DomainPoint &color = it->first;
+        const DomainPoint &extent = it->second;
+        for (int32_t dim = 0; dim < ndim; ++dim)
+        {
+          coord_t c = color[dim];
+          if (all_extents[dim][c] == -1)
+            all_extents[dim][c] = extent[dim];
+          else if (all_extents[dim][c] != extent[dim])
+          {
+            std::stringstream ss;
+            ss << "Point task " << color << " returned an output of extent "
+               << extent[dim] << " for dimension " << dim
+               << ", but an adjacent point task returned an output of extent "
+               << all_extents[dim][c] << ". "
+               << "Please make sure the outputs from point tasks are aligned.";
+            REPORT_LEGION_ERROR(
+                ERROR_UNALIGNED_OUTPUT_REGION, ss.str().c_str());
+          }
+        }
+      }
+
+      // Prefix sum the extents to get sub-ranges for each dimension
+      for (int32_t dim = 0; dim < ndim; ++dim) {
+        std::vector<coord_t> &extents = all_extents[dim];
+        coord_t sum = 0;
+        for (size_t idx = 0; idx < extents.size() - 1; ++idx)
+        {
+          coord_t ext = extents[idx];
+          extents[idx] = sum;
+          sum += ext;
+        }
+        extents.back() = sum;
+      }
+
+      // Initialize the subspaces using the compute sub-ranges
+      for (SizeMap::const_iterator it = output_sizes.begin();
+           it != output_sizes.end(); ++it)
+      {
+        const DomainPoint &color = it->first;
+
+        // If this subspace isn't local to us, we are not allowed to
+        // set its range.
+        if (local_sizes.find(color) == local_sizes.end()) continue;
+
+        IndexSpaceNode *child = part->get_child(
+          part->color_space->linearize_color(color));
+
+        DomainPoint lo; lo.dim = ndim;
+        DomainPoint hi; hi.dim = ndim;
+        for (int32_t dim = 0; dim < ndim; ++dim)
+        {
+          std::vector<coord_t> &extents = all_extents[dim];
+          coord_t c = color[dim];
+          lo[dim] = extents[c];
+          hi[dim] = extents[c + 1] - 1;
+        }
+        forest->set_pending_space_domain(
+          child->handle, Domain(lo, hi), runtime->address_space);
+      }
+
+      // Finally, compute the shape of the root index space and return it
+      DomainPoint lo; lo.dim = ndim;
+      DomainPoint hi; hi.dim = ndim;
+      for (int32_t dim = 0; dim < ndim; ++dim)
+        hi[dim] = all_extents[dim].back() - 1;
+
+      return Domain(lo, hi);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::finalize_output_regions(void)
     //--------------------------------------------------------------------------
     {
@@ -8252,25 +8358,21 @@ namespace Legion {
             output_regions[idx].parent.get_index_space());
         if (options.global_indexing())
         {
-          // For globally indexed output regions, we need a prefix sum to get
-          // the right size for each subregion.
-          coord_t sum = 0;
-          typedef std::map<DomainPoint,size_t> SizeMap;
-          const SizeMap &output_sizes = all_output_sizes[idx];
+          // For globally indexed output regions, we need to check
+          // the alignment between outputs from adjacent point tasks
+          // and compute the ranges of subregions via prefix sum.
+
           IndexPartNode *part = runtime->forest->get_node(
             output_regions[idx].partition.get_index_partition());
-          for (SizeMap::const_iterator it = output_sizes.begin();
-               it != output_sizes.end(); ++it)
-          {
-            const size_t size = it->second;
-            const LegionColor color =
-              part->color_space->linearize_color(it->first);
-            IndexSpaceNode *child = part->get_child(color);
-            forest->set_pending_space_domain(child->handle,
-                Rect<1>(sum, sum + size - 1), runtime->address_space);
-            sum += size;
-          }
-          if (parent->set_domain(Rect<1>(0, sum - 1), runtime->address_space))
+          Domain root_domain = compute_global_output_ranges(
+            parent, part, all_output_sizes[idx], all_output_sizes[idx]);
+
+          log_index.debug()
+            << "[Task " << get_task_name() << "(UID: " << get_unique_op_id()
+            << ")] setting " << root_domain << " to index space " << std::hex
+            << parent->handle.get_id();
+
+          if (parent->set_domain(root_domain, runtime->address_space))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
@@ -8650,17 +8752,19 @@ namespace Legion {
           TypeTag type_tag;
           if (req.global_indexing)
           {
-            // When global indexing is used for the output region,
-            // we require the launch domain to be 1-D in order to avoid
-            // ambiguity in ordering of the subregions.
-            if (launch_space.get_dim() > 1)
-              REPORT_LEGION_ERROR(ERROR_INVALID_GLOBAL_INDEXING,
-                "Any index task requesting global indexing on an output region "
-                "must be launched with a 1-D launch domain, but task %s "
-                "(UID: %lld) has a %d-D launch domain.",
-                get_task_name(), get_unique_op_id(), launch_space.get_dim());
-
-            type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
+            switch (launch_space.get_dim())
+            {
+#define DIMFUNC(DIM)                                                       \
+              case DIM:                                                    \
+                {                                                          \
+                  type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+                  break;                                                   \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+                default:
+                  assert(false);
+            }
           }
           else
           {
@@ -8669,14 +8773,14 @@ namespace Legion {
 
             // Before creating the index space, we make sure that
             // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
-            if (launch_space.get_dim() + 1 > LEGION_MAX_DIM)
+            if (launch_space.get_dim() + req.dim > LEGION_MAX_DIM)
               REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
                 "Dimensionality of output regions of task %s (UID: %lld) "
                 "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
                 "bigger LEGION_MAX_DIM value or reduce dimensionality of "
                 "the launch domain.", get_task_name(), get_unique_op_id());
 
-            switch (launch_space.get_dim() + 1)
+            switch (launch_space.get_dim() + req.dim)
             {
 #define DIMFUNC(DIM) \
               case DIM: \
@@ -9649,8 +9753,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_complete(unsigned points, RtEvent slice_done,
-               const std::map<unsigned,std::map<DomainPoint,size_t> > &to_merge,
-               void *metadata/*= NULL*/, size_t metasize/*= 0*/)
+                               const std::map<unsigned,SizeMap> &to_merge,
+                               void *metadata/*= NULL*/, size_t metasize/*= 0*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_COMPLETE_CALL);
@@ -9662,7 +9766,6 @@ namespace Legion {
         // Merge in any output sizes
         if (!to_merge.empty())
         {
-          typedef std::map<DomainPoint,size_t> SizeMap;
           for (std::map<unsigned,SizeMap>::const_iterator it = 
                 to_merge.begin(); it != to_merge.end(); ++it)
           {
@@ -9918,14 +10021,14 @@ namespace Legion {
           derez.advance_pointer(metasize);
         }
       }
-      std::map<unsigned,std::map<DomainPoint,size_t> > to_merge;
+      std::map<unsigned,SizeMap> to_merge;
       size_t map_size;
       derez.deserialize(map_size);
       for (size_t i = 0; i < map_size; ++i)
       {
         unsigned idx;
         derez.deserialize(idx);
-        std::map<DomainPoint,size_t> &output_sizes = to_merge[idx];
+        SizeMap &output_sizes = to_merge[idx];
         for (unsigned j = 0; j < points; ++j)
         {
           DomainPoint point;
@@ -11311,7 +11414,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(point.dim == 1);
       assert(output_regions.size() == outputs.size());
       assert(output_regions.size() == output_region_options.size());
 #endif
@@ -11320,11 +11422,11 @@ namespace Legion {
       {
         if (output_region_options[idx].valid_requirement())
           continue;
-        std::map<DomainPoint,size_t> &output_sizes= all_output_sizes[idx];
+        IndexTask::SizeMap &output_sizes= all_output_sizes[idx];
 #ifdef DEBUG_LEGION
         assert(output_sizes.find(point) == output_sizes.end());
 #endif
-        output_sizes[point] = outputs[idx].impl->size();
+        output_sizes[point] = outputs[idx].impl->get_shape();
       }
     }
 
@@ -11557,11 +11659,11 @@ namespace Legion {
       rez.serialize(all_output_sizes.size());
       if (!all_output_sizes.empty())
       {
-        for (std::map<unsigned,std::map<DomainPoint,size_t> >::iterator it =
+        for (std::map<unsigned,std::map<DomainPoint,DomainPoint> >::iterator it=
               all_output_sizes.begin(); it != all_output_sizes.end(); ++it)
         {
           rez.serialize(it->first);
-          for (std::map<DomainPoint,size_t>::iterator sit = 
+          for (std::map<DomainPoint,DomainPoint>::iterator sit = 
                 it->second.begin(); sit != it->second.end(); ++sit)
           {
             rez.serialize(sit->first);

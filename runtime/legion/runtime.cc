@@ -5221,7 +5221,7 @@ namespace Legion {
                                        Runtime *rt, const bool global,
                                        const bool valid)
       : Collectable(), runtime(rt), context(ctx),
-        req(r), instance_set(is), num_elements(-1LU), index(i), 
+        req(r), instance_set(is), shape(), index(i), 
         created_region(
           (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
         global_indexing(global)
@@ -5232,7 +5232,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
-        req(), instance_set(), num_elements(-1LU), index(-1U), 
+        req(), instance_set(), shape(), index(-1U), 
         created_region(false), global_indexing(false)
     //--------------------------------------------------------------------------
     {
@@ -5289,7 +5289,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(size_t new_num_elements,
+    void OutputRegionImpl::return_data(const DomainPoint &new_shape,
                                        FieldID field_id,
                                        uintptr_t ptr,
                                        size_t alignment,
@@ -5308,19 +5308,19 @@ namespace Legion {
           context->owner_task->get_unique_op_id());
       }
 
-      if (num_elements != -1LU && new_num_elements != num_elements)
+      if (shape.dim != 0 && new_shape != shape)
       {
-          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
-            "Output region %u of task %s (UID: %lld) has already been "
-            "initialized to have %zd elements, but the new output data "
-            "holds %zd elements. You must return the same number of "
-            "elements to all the fields in the same output region.",
-            index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id(),
-            num_elements, new_num_elements);
+        std::stringstream ss;
+        ss << "Output region " << index << " of task "
+           << context->owner_task->get_task_name() << " (UID: "
+           << context->owner_task->get_unique_op_id() << ") has already been "
+           << "initialized to shape " << shape << ", but the new output data "
+           << "has shape " << new_shape << ". You must return data having "
+           << "the same shape to all the fields in the same output region.";
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, ss.str().c_str());
       }
       else
-        num_elements = new_num_elements;
+        shape = new_shape;
 
       if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
       {
@@ -5335,12 +5335,15 @@ namespace Legion {
       ExternalInstanceInfo &info = returned_instances[field_id];
       info.eager_pool = eager_pool;
       // Sanitize the pointer when the size is 0
+      size_t num_elements = 1;
+      for (int32_t dim = 0; dim < shape.dim; ++dim)
+        num_elements *= shape[dim];
       info.ptr = num_elements != 0 ? ptr : 0;
       info.alignment = alignment;
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(size_t num_elements,
+    void OutputRegionImpl::return_data(const DomainPoint &shape,
                                        std::map<FieldID,void*> ptrs,
                                        std::map<FieldID,size_t> *_alignments)
     //--------------------------------------------------------------------------
@@ -5354,7 +5357,7 @@ namespace Legion {
       {
         std::map<FieldID,size_t>::iterator finder = alignments.find(it->first);
         size_t alignment = finder != alignments.end() ? finder->second : 0;
-        return_data(num_elements,
+        return_data(shape,
                     it->first,
                     reinterpret_cast<uintptr_t>(it->second),
                     alignment,
@@ -5363,24 +5366,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(FieldID field_id,
-                                       PhysicalInstance instance,
-                                       size_t field_size,
-                                       const size_t *pnum_elements)
+    void OutputRegionImpl::return_data(const DomainPoint &shape,
+                                       FieldID field_id,
+                                       PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *fspace_node = 
-        runtime->forest->get_node(req.region.get_field_space());
-      size_t alloc_size = fspace_node->get_field_size(field_id);
-
-      if (alloc_size != field_size)
-        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
-          "Field %u of output region %u of task %s (UID: %lld) has a type of "
-          "size %zd, but the returned deferred buffer is allocaited with a "
-          "type of size %zd.",
-          field_id, index, context->owner_task->get_task_name(),
-          context->owner_task->get_unique_op_id(), alloc_size, field_size);
-
       IndividualManager *manager = get_manager(field_id);
       if (instance.get_location() != manager->get_memory())
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
@@ -5396,16 +5386,26 @@ namespace Legion {
       // now escapes the context.
       uintptr_t ptr = context->escape_task_local_instance(instance);
 
-      // This is safe to do as we require the deferred buffer to be 1-D.
-      const Realm::InstanceLayout<1,coord_t> *layout =
-        static_cast<const Realm::InstanceLayout<1,coord_t>*>(
-            instance.get_layout());
+      size_t alignment = 0;
+      switch (shape.dim)
+      {
+#define DIMFUNC(DIM)                                                    \
+        case DIM:                                                     \
+          {                                                           \
+            const Realm::InstanceLayout<DIM,coord_t> *layout =        \
+              static_cast<const Realm::InstanceLayout<DIM,coord_t>*>( \
+                instance.get_layout());                               \
+            alignment = layout->alignment_reqd;                       \
+            break;                                                    \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
 
-      size_t num_elements = pnum_elements != NULL
-                          ? *pnum_elements
-                          : layout->space.bounds.volume();
+      return_data(shape, field_id, ptr, alignment, true);
 
-      return_data(num_elements, field_id, ptr, layout->alignment_reqd, true);
       // This instance was escaped so the context is no longer responsible
       // for destroying it when the task is done, we take that responsibility
       escaped_instances.push_back(instance);
@@ -5439,7 +5439,7 @@ namespace Legion {
           if (!global_indexing)
           {
             DomainPoint index_point = context->owner_task->index_point;
-            domain.dim = index_point.get_dim() + 1;
+            domain.dim = index_point.dim + shape.dim;
 #ifdef DEBUG_LEGION
             assert(domain.dim <= LEGION_MAX_DIM);
 #endif
@@ -5448,15 +5448,11 @@ namespace Legion {
               domain.rect_data[idx] = index_point[idx];
               domain.rect_data[idx + domain.dim] = index_point[idx];
             }
-            if (num_elements > 0)
+            for (int idx = 0; idx < shape.dim; ++idx)
             {
-              domain.rect_data[domain.dim-1] = 0;
-              domain.rect_data[2*domain.dim-1] = num_elements - 1;
-            }
-            else
-            {
-              domain.rect_data[domain.dim-1] = 1;
-              domain.rect_data[2*domain.dim-1] = 0;
+              int off = index_point.dim + idx;
+              domain.rect_data[off] = 0;
+              domain.rect_data[domain.dim + off] = shape[idx] - 1;
             }
 
             runtime->forest->set_pending_space_domain(
@@ -5475,8 +5471,8 @@ namespace Legion {
         }
         else
         {
-          domain =
-            num_elements > 0 ? Rect<1>(0, num_elements - 1) : Rect<1>(0, -1);
+          DomainPoint lo; lo.dim = shape.dim;
+          domain = Domain(lo, shape - 1);
           index_node->set_domain(domain, runtime->address_space);
         }
       }
@@ -5538,6 +5534,9 @@ namespace Legion {
         // If no alignment is given, set it to the field size
         if (alignment == 0)
           alignment = field_size;
+        size_t num_elements = 1;
+        for (int32_t dim = 0; dim < shape.dim; ++dim)
+          num_elements *= shape[dim];
         size_t bytes_used =
           field_size > 0
           ? (num_elements * field_size + alignment - 1) / alignment * alignment

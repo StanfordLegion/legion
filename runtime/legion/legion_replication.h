@@ -1107,7 +1107,7 @@ namespace Legion {
      */
     class OutputSizeExchange : public AllGatherCollective<false> {
     public:
-      typedef std::map<DomainPoint,size_t> SizeMap;
+      typedef std::map<DomainPoint,DomainPoint> SizeMap;
     public:
       OutputSizeExchange(ReplicateContext *ctx,
                          CollectiveIndexLocation loc,
@@ -1403,7 +1403,7 @@ namespace Legion {
       OutputSizeExchange *output_size_collective;
     protected:
       // Map of output sizes collected by this shard
-      std::map<unsigned,std::map<DomainPoint,size_t> > local_output_sizes;
+      std::map<unsigned,SizeMap> local_output_sizes;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
 #ifdef DEBUG_LEGION

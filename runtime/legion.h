@@ -1148,6 +1148,7 @@ namespace Legion {
       OutputRequirement(const RegionRequirement &req);
       OutputRequirement(FieldSpace field_space,
                         const std::set<FieldID> &fields,
+                        int dim = 1,
                         bool global_indexing = false);
     public:
       OutputRequirement(const OutputRequirement &rhs);
@@ -1158,6 +1159,7 @@ namespace Legion {
       bool operator==(const OutputRequirement &req) const;
       bool operator<(const OutputRequirement &req) const;
     public:
+      int dim;
       FieldSpace field_space; /**< field space for the output region */
       bool global_indexing; /**< global indexing is used when true */
       bool valid_requirement; /**< indicate requirement is valid */
@@ -3567,21 +3569,20 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
-      void return_data(size_t num_elements,
+      void return_data(const DomainPoint &shape,
                        FieldID field_id,
                        void *ptr,
                        size_t alignment = 0);
-      void return_data(size_t num_elements,
+      void return_data(const DomainPoint &shape,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments = NULL);
-      template<typename T>
-      void return_data(FieldID field_id,
-                       DeferredBuffer<T,1> &buffer,
-                       const size_t *num_elements = NULL);
-      void return_data(FieldID field_id,
-                       Realm::RegionInstance instance,
-                       size_t field_size,
-                       const size_t *num_elements);
+      template<typename T, int DIM>
+      void return_data(const DomainPoint &shape,
+                       FieldID field_id,
+                       DeferredBuffer<T,DIM> &buffer);
+      void return_data(const DomainPoint &shape,
+                       FieldID field_id,
+                       Realm::RegionInstance instance);
     };
 
     //==========================================================================

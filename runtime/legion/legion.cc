@@ -1322,7 +1322,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(bool valid)
-      : RegionRequirement(), field_space(FieldSpace::NO_SPACE),
+      : RegionRequirement(), dim(1), field_space(FieldSpace::NO_SPACE),
         global_indexing(false), valid_requirement(valid)
     //--------------------------------------------------------------------------
     {
@@ -1330,7 +1330,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(const RegionRequirement &req)
-      : RegionRequirement(req), global_indexing(false), valid_requirement(true)
+      : RegionRequirement(req), dim(1),
+        global_indexing(false), valid_requirement(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -1338,8 +1339,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(FieldSpace _field_space,
                                         const std::set<FieldID> &fields,
+                                        int _dim /*=1*/,
                                         bool _global_indexing /*=false*/)
-      : RegionRequirement(), field_space(_field_space),
+      : RegionRequirement(), dim(_dim), field_space(_field_space),
         global_indexing(_global_indexing), valid_requirement(false)
     //--------------------------------------------------------------------------
     {
@@ -1351,7 +1353,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRequirement::OutputRequirement(const OutputRequirement &other)
       : RegionRequirement(static_cast<const RegionRequirement&>(other)),
-        field_space(other.field_space), global_indexing(other.global_indexing),
+        dim(other.dim), field_space(other.field_space),
+        global_indexing(other.global_indexing),
         valid_requirement(other.valid_requirement)
     //--------------------------------------------------------------------------
     {
@@ -2997,7 +3000,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegion::return_data(size_t num_elements,
+    void OutputRegion::return_data(const DomainPoint &shape,
                                    FieldID field_id,
                                    void *ptr,
                                    size_t alignment /*= 0*/)
@@ -3007,11 +3010,11 @@ namespace Legion {
       assert(impl != NULL);
 #endif
       impl->return_data(
-          num_elements, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
+          shape, field_id, reinterpret_cast<uintptr_t>(ptr), alignment);
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegion::return_data(size_t num_elements,
+    void OutputRegion::return_data(const DomainPoint &shape,
                                    std::map<FieldID,void*> ptrs,
                                 std::map<FieldID,size_t> *alignments /*= NULL*/)
     //--------------------------------------------------------------------------
@@ -3019,20 +3022,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(num_elements, ptrs, alignments);
+      impl->return_data(shape, ptrs, alignments);
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegion::return_data(FieldID field_id,
-                                   Realm::RegionInstance instance,
-                                   size_t field_size,
-                                   const size_t *num_elements)
+    void OutputRegion::return_data(const DomainPoint &shape,
+                                   FieldID field_id,
+                                   Realm::RegionInstance instance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(field_id, instance, field_size, num_elements);
+      impl->return_data(shape, field_id, instance);
     }
 
     /////////////////////////////////////////////////////////////

@@ -2792,28 +2792,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_output_union(
-                              const std::map<DomainPoint,size_t> &output_sizes,
+                          const std::map<DomainPoint,DomainPoint> &output_sizes,
                               AddressSpaceID space, ShardMapping *shard_mapping)
     //-------------------------------------------------------------------------- 
     {
       std::vector<Realm::Rect<DIM,T> > output_rects;
       output_rects.reserve(output_sizes.size());
-      for (std::map<DomainPoint,size_t>::const_iterator it = 
+      for (std::map<DomainPoint,DomainPoint>::const_iterator it =
             output_sizes.begin(); it != output_sizes.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert((it->first.get_dim()+1) == DIM);
+        assert((it->first.get_dim()+it->second.dim) == DIM);
 #endif
-        if (it->second == 0)
-          continue;
+        int launch_ndim = DIM - it->second.dim;
         Point<DIM,T> lo, hi;
-        for (int idx = 0; idx < (DIM-1); idx++)
+        for (int idx = 0; idx < launch_ndim; idx++)
         {
           lo[idx] = it->first[idx];
           hi[idx] = it->first[idx];
         }
-        lo[DIM-1] = 0;
-        hi[DIM-1] = it->second - 1;
+        for (int idx = launch_ndim ; idx < DIM; idx++)
+        {
+          lo[idx] = 0;
+          hi[idx] = it->second[idx - launch_ndim] - 1;
+        }
         output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
       }
       const Realm::IndexSpace<DIM,T> output_space(output_rects);
