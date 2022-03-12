@@ -5317,7 +5317,7 @@ namespace Legion {
            << "initialized to shape " << shape << ", but the new output data "
            << "has shape " << new_shape << ". You must return data having "
            << "the same shape to all the fields in the same output region.";
-        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, ss.str().c_str());
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, "%s", ss.str().c_str());
       }
       else
         shape = new_shape;

@@ -8290,7 +8290,7 @@ namespace Legion {
                << all_extents[dim][c] << ". "
                << "Please make sure the outputs from point tasks are aligned.";
             REPORT_LEGION_ERROR(
-                ERROR_UNALIGNED_OUTPUT_REGION, ss.str().c_str());
+                ERROR_UNALIGNED_OUTPUT_REGION, "%s", ss.str().c_str());
           }
         }
       }
