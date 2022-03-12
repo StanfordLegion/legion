@@ -14,26 +14,27 @@
 
 import "regent"
 
--- This tests the leaf annotation.
+local format = require("std/format")
+local timing = require("std/timing")
 
 __demand(__leaf)
-task inc(r : region(int), y : int)
-where reads writes(r) do
-  for x in r do
-    @x += y
-  end
+task leaf_task()
+  var x = timing.get_current_time_in_microseconds()
+  format.println("in leaf task, current time is {}", x/1.0e6)
 end
 
--- Can also do this to an empty task. While the task is eligible for
--- both inner and leaf, the user's annotation wins.
-__demand(__leaf)
-task f()
+__demand(__inner)
+task inner_task()
+  var x = timing.get_current_time_in_microseconds()
+  format.println("in inner task, current time is {}", x/1.0e6)
 end
 
+__demand(__replicable)
 task main()
-  var r = region(ispace(ptr, 4), int)
-  fill(r, 0)
-  inc(r, 100)
-  f()
+  var x = timing.get_current_time_in_microseconds()
+  -- format.println("in replicable task, current time is {}", x/1.0e6)
+
+  leaf_task()
+  inner_task()
 end
 regentlib.start(main)

@@ -3727,6 +3727,7 @@ namespace Legion {
 	      task_groups[first].insert(task_groups[*it3].begin(),
 					task_groups[*it3].end());
 	      task_groups.erase(task_groups.begin() + *it3);
+              it3++;
 	    }
 	  }
 	}

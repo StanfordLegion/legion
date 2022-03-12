@@ -23,10 +23,17 @@ where reads writes(r) do
   end
 end
 
+-- Can also do this to an empty task. While the task is eligible for
+-- both inner and leaf, the user's annotation wins.
+__demand(__inner)
+task f()
+end
+
 __demand(__inner)
 task main()
   var r = region(ispace(ptr, 4), int)
   fill(r, 0)
   inc(r, 100)
+  f()
 end
 regentlib.start(main)

@@ -4197,6 +4197,17 @@ namespace Legion {
     };
 
     /**
+     * \struct RegistrationCallbackArgs
+     * A struct containing arguments for a registration callback
+     */
+    struct RegistrationCallbackArgs {
+      Machine machine;
+      Runtime *runtime;
+      std::set<Processor> local_procs;
+      UntypedBuffer buffer;
+    };
+
+    /**
      * \struct TaskConfigOptions
      * A class for describing the configuration options
      * for a task being registered with the runtime.  
@@ -9026,6 +9037,8 @@ namespace Legion {
        * @param callback function pointer to the callback function to be run
        */
       static void add_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(
+       RegistrationWithArgsCallbackFnptr callback, const UntypedBuffer &buffer);
 
       /**
        * This call allows applications to request a registration callback
@@ -9048,6 +9061,9 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
       static void perform_registration_callback(
                                RegistrationCallbackFnptr callback, bool global);
+      static void perform_registration_callback(
+                               RegistrationWithArgsCallbackFnptr callback,
+                               const UntypedBuffer &buffer, bool global);
 #endif
 
       /**

@@ -1222,7 +1222,7 @@ namespace Legion {
                              LogicalView *view, Deserializer &derez,
                              const PendingRemoteExpression &pending);
         DeferTraceUpdateArgs(const DeferTraceUpdateArgs &args,
-                             RtUserEvent deferral);
+                             RtUserEvent deferral,IndexSpaceExpression *expr);
       public:
         ShardedPhysicalTemplate *const target;
         const UpdateKind kind;

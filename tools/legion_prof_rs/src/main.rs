@@ -29,13 +29,25 @@ fn main() -> io::Result<()> {
             clap::Arg::with_name("start-trim")
                 .long("start-trim")
                 .takes_value(true)
-                .help("start time in micro-seconds to trim the profile"),
+                .help("start time in microseconds to trim the profile"),
         )
         .arg(
             clap::Arg::with_name("stop-trim")
                 .long("stop-trim")
                 .takes_value(true)
-                .help("stop time in micro-seconds to trim the profile"),
+                .help("stop time in microseconds to trim the profile"),
+        )
+        .arg(
+            clap::Arg::with_name("message-threshold")
+                .long("message-threshold")
+                .takes_value(true)
+                .help("threshold for warning about message latencies in microseconds"),
+        )
+        .arg(
+            clap::Arg::with_name("message-percentage")
+                .long("message-percentage")
+                .takes_value(true)
+                .help("perentage of messages that must be over the threshold to trigger a warning"),
         )
         .arg(
             clap::Arg::with_name("force")
@@ -68,6 +80,12 @@ fn main() -> io::Result<()> {
     let stop_trim = matches
         .value_of("stop-trim")
         .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
+    let message_threshold = matches
+        .value_of("message-threshold")
+        .map_or(1000.0, |x| x.parse::<f64>().unwrap());
+    let message_percentage = matches
+        .value_of("message-percentage")
+        .map_or(5.0, |x| x.parse::<f64>().unwrap());
 
     let mut state = State::default();
     let filenames: Vec<_> = filenames.collect();
@@ -86,6 +104,7 @@ fn main() -> io::Result<()> {
     state.trim_time_range(start_trim, stop_trim);
     println!("Sorting time ranges");
     state.sort_time_range();
+    state.check_message_latencies(message_threshold, message_percentage);
     if statistics {
         print_statistics(&state);
     } else if trace {

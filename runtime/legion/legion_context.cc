@@ -138,7 +138,8 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void TaskContext::perform_global_registration_callbacks(
-                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     Realm::DSOReferenceImplementation *dso, const void *buffer,
+                     size_t buffer_size, bool withargs, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -149,7 +150,7 @@ namespace Legion {
         if (space == runtime->address_space)
           continue;
         runtime->send_registration_callback(space, dso, global_done,
-                                            preconditions);
+                      preconditions, buffer, buffer_size, withargs);
       }
     }
 #endif
@@ -11307,7 +11308,8 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void ReplicateContext::perform_global_registration_callbacks(
-                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     Realm::DSOReferenceImplementation *dso, const void *buffer,
+                     size_t buffer_size, bool withargs, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -11317,13 +11319,16 @@ namespace Legion {
         Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,i > 0);
         hasher.hash(REPLICATE_PERFORM_REGISTRATION_CALLBACK, __func__);
         hasher.hash(dso->dso_name.c_str(), dso->dso_name.size(), "dso_name");
-        hasher.hash(dso->symbol_name.c_str(), dso->symbol_name.size(), 
+        hasher.hash(dso->symbol_name.c_str(), dso->symbol_name.size(),
                     "symbol_name");
+        hasher.hash(withargs, "withargs");
+        if (runtime->safe_control_replication > 1)
+          hasher.hash(buffer, buffer_size, "buffer");
         if (hasher.verify(__func__))
           break;
       }
-      shard_manager->perform_global_registration_callbacks(dso, local_done, 
-                                                global_done, preconditions);
+      shard_manager->perform_global_registration_callbacks(dso, buffer, 
+          buffer_size, withargs, local_done, global_done, preconditions);
     }
 #endif
 

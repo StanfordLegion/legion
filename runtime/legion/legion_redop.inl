@@ -222,8 +222,8 @@ namespace Legion {
   {
 #ifdef __HIPCC__
     union { unsigned int as_int; ushort2 as_short; } val;
-    val.as_short.x = hi;
-    val.as_short.y = lo;
+    val.as_short.x = lo;
+    val.as_short.y = hi;
     return val.as_int;
 #else
     unsigned int result;
@@ -238,7 +238,7 @@ namespace Legion {
 #ifdef __HIPCC__
     union { unsigned int as_int; ushort2 as_short; } val;
     val.as_int = value;
-    return val.as_short.y;
+    return val.as_short.x;
 #else
     unsigned short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
@@ -252,7 +252,7 @@ namespace Legion {
 #ifdef __HIPCC__
     union { unsigned int as_int; ushort2 as_short; } val;
     val.as_int = value;
-    return val.as_short.x;
+    return val.as_short.y;
 #else
     unsigned short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
@@ -265,8 +265,8 @@ namespace Legion {
   {
 #ifdef __HIPCC__
     union { unsigned int as_int; short2 as_short; } val;
-    val.as_short.x = hi;
-    val.as_short.y = lo;
+    val.as_short.x = lo;
+    val.as_short.y = hi;
     return val.as_int;
 #else
     unsigned int result;
@@ -281,7 +281,7 @@ namespace Legion {
 #ifdef __HIPCC__
     union { unsigned int as_int; short2 as_short; } val;
     val.as_int = value;
-    return val.as_short.y;
+    return val.as_short.x;
 #else
     short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
@@ -295,7 +295,7 @@ namespace Legion {
 #ifdef __HIPCC__
     union { unsigned int as_int; short2 as_short; } val;
     val.as_int = value;
-    return val.as_short.x;
+    return val.as_short.y;
 #else
     short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
