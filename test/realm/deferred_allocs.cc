@@ -510,6 +510,9 @@ void top_level_task(const void *args, size_t arglen,
     Memory m = *it;
     if(m.capacity() == 0) continue;
 
+    // GPU_DYNAMIC_MEM does not support deferred allocation
+    if(m.kind() == Memory::GPU_DYNAMIC_MEM) continue;
+
     // directed tests
     if(config.directed_tests) {
       directed_test_memory(config, m, p, "simple capacity limit",
