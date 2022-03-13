@@ -2227,8 +2227,12 @@ namespace Legion {
         // Our base default mapper will try to make instances of containing
         // all fields (in any order) laid out in SOA format to encourage
         // maximum re-use by any tasks which use subsets of the fields
-        constraints.add_constraint(SpecializedConstraint())
-          .add_constraint(MemoryConstraint(target_memory.kind()));
+        constraints.add_constraint(MemoryConstraint(target_memory.kind()));
+        if (constraints.specialized_constraint.kind == LEGION_NO_SPECIALIZE) {
+          // add our default specialized constraint only if there isn't one already
+          // for instance, one could ask for a compact sparse instance
+          constraints.add_constraint(SpecializedConstraint());
+        }
 
         if (constraints.field_constraint.field_set.size() == 0)
         {
