@@ -1093,7 +1093,9 @@ namespace Realm {
     __op__(cuMemcpy3DAsync); \
     __op__(cuMemcpyAsync); \
     __op__(cuMemcpyDtoDAsync); \
+    __op__(cuMemcpyDtoH); \
     __op__(cuMemcpyDtoHAsync); \
+    __op__(cuMemcpyHtoD); \
     __op__(cuMemcpyHtoDAsync); \
     __op__(cuMemFreeHost); \
     __op__(cuMemFree); \
