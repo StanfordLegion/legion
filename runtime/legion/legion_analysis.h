@@ -137,7 +137,7 @@ namespace Legion {
       virtual void add_recorder_reference(void) = 0;
       virtual bool remove_recorder_reference(void) = 0;
       virtual void pack_recorder(Serializer &rez, 
-          std::set<RtEvent> &applied, const AddressSpaceID target) = 0; 
+                                 std::set<RtEvent> &applied) = 0; 
       virtual RtEvent get_collect_event(void) const = 0;
     public:
       virtual void record_get_term_event(Memoizable *memo) = 0;
@@ -267,17 +267,18 @@ namespace Legion {
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
                           Memoizable *memo, PhysicalTemplate *tpl, 
-                          RtUserEvent applied_event, RtEvent collect_event);
-      RemoteTraceRecorder(const RemoteTraceRecorder &rhs);
+                          RtUserEvent applied_event, RtEvent collect_event,
+                          ReplicationID repl_id, size_t tpl_index);
+      RemoteTraceRecorder(const RemoteTraceRecorder &rhs) = delete;
       virtual ~RemoteTraceRecorder(void);
     public:
-      RemoteTraceRecorder& operator=(const RemoteTraceRecorder &rhs);
+      RemoteTraceRecorder& operator=(const RemoteTraceRecorder &rhs) = delete;
     public:
       virtual bool is_recording(void) const { return true; }
       virtual void add_recorder_reference(void);
       virtual bool remove_recorder_reference(void);
       virtual void pack_recorder(Serializer &rez, 
-          std::set<RtEvent> &applied, const AddressSpaceID target);
+                                 std::set<RtEvent> &applied);
       virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
       virtual void record_get_term_event(Memoizable *memo);
@@ -391,6 +392,8 @@ namespace Legion {
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
       const RtEvent collect_event;
+      const ReplicationID repl_id;
+      const size_t tpl_index;
     };
 
     /**
