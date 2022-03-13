@@ -25,6 +25,38 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class MemoryImpl
+  //
+
+  template <typename T>
+  T *MemoryImpl::find_module_specific()
+  {
+    ModuleSpecificInfo *info = module_specific;
+    while(info) {
+      T *downcast = dynamic_cast<T *>(info);
+      if(downcast)
+        return downcast;
+      info = info->next;
+    }
+    return 0;
+  }
+
+  template <typename T>
+  const T *MemoryImpl::find_module_specific() const
+  {
+    const ModuleSpecificInfo *info = module_specific;
+    while(info) {
+      const T *downcast = dynamic_cast<const T *>(info);
+      if(downcast)
+        return downcast;
+      info = info->next;
+    }
+    return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class BasicRangeAllocator<RT,TT>
   //
 
