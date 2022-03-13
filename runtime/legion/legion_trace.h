@@ -797,6 +797,7 @@ namespace Legion {
       PhysicalTemplate(const PhysicalTemplate &rhs);
       virtual ~PhysicalTemplate(void);
     public:
+      virtual size_t get_sharded_template_index(void) const { return 0; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
                                      bool need_lock = true);
       virtual void perform_replay(Runtime *rt, 
@@ -889,7 +890,7 @@ namespace Legion {
       virtual bool remove_recorder_reference(void) 
         { /*do nothing, never delete*/ return false; }
       virtual void pack_recorder(Serializer &rez, 
-          std::set<RtEvent> &applied, const AddressSpaceID target);
+                                 std::set<RtEvent> &applied);
     public:
       void record_premap_output(Memoizable *memo,
                                 const Mapper::PremapTaskOutput &output,
@@ -1072,9 +1073,10 @@ namespace Legion {
       inline ApEvent get_fence_completion(void) { return fence_completion; }
       void record_remote_memoizable(Memoizable *memo);
       void release_remote_memos(void);
-    protected:
+    public:
       PhysicalTrace * const trace;
       const TaskTreeCoordinates coordinates;
+    protected:
       std::atomic<bool> recording;
       Replayable replayable;
     protected:
@@ -1245,6 +1247,10 @@ namespace Legion {
         return continuation_pre;
       }
     public:
+      virtual void pack_recorder(Serializer &rez, 
+                                 std::set<RtEvent> &applied);
+      virtual size_t get_sharded_template_index(void) const
+        { return template_index; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent,
                                      bool need_lock = true);
       virtual void perform_replay(Runtime *runtime, 

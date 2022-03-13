@@ -2580,6 +2580,8 @@ namespace Legion {
                       const FieldMask &mask, DistributedID did, bool &first);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
+      ShardedPhysicalTemplate* find_local_shard_current_template(
+                                size_t index) const;
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:

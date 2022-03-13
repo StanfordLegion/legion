@@ -9391,6 +9391,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardedPhysicalTemplate* ShardManager::find_local_shard_current_template(
+                                                             size_t index) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!local_shards.empty());
+#endif
+      ReplicateContext* repl_ctx = 
+        local_shards.front()->get_shard_execution_context();
+      return repl_ctx->find_sharded_current_template(index);
+    }
+
+    //--------------------------------------------------------------------------
     bool ShardManager::is_total_sharding(void)
     //--------------------------------------------------------------------------
     {
