@@ -2345,18 +2345,22 @@ namespace Realm {
     // these work, but they are SLOW
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-      // create an async copy and then wait for it to finish...
-      BlockingCompletionNotification bcn;
-      gpu->copy_from_fb(dst, offset, size, &bcn);
-      bcn.wait();
+      // use a blocking copy - host memory probably isn't pinned anyway
+      {
+        AutoGPUContext agc(gpu);
+        CHECK_HIP( hipMemcpy
+                   (dst, reinterpret_cast<void*>(base + offset), size, hipMemcpyDeviceToHost) );
+      }
     }
 
     void GPUFBMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
-      // create an async copy and then wait for it to finish...
-      BlockingCompletionNotification bcn;
-      gpu->copy_to_fb(offset, src, size, &bcn);
-      bcn.wait();
+      // use a blocking copy - host memory probably isn't pinned anyway
+      {
+        AutoGPUContext agc(gpu);
+        CHECK_HIP( hipMemcpy
+                  (reinterpret_cast<void*>(base + offset), src, size, hipMemcpyHostToDevice) );
+      }
     }
 
     void *GPUFBMemory::get_direct_ptr(off_t offset, size_t size)
