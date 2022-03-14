@@ -94,7 +94,8 @@ namespace Legion {
       virtual bool is_inner_context(void) const;
 #ifdef LEGION_USE_LIBDL
       virtual void perform_global_registration_callbacks(
-                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     Realm::DSOReferenceImplementation *dso, const void *buffer,
+                     size_t buffer_size, bool withargs, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
 #endif
       virtual void handle_registration_callback_effects(RtEvent effects) = 0;
@@ -1977,7 +1978,8 @@ namespace Legion {
     public:
 #ifdef LEGION_USE_LIBDL
       virtual void perform_global_registration_callbacks(
-                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     Realm::DSOReferenceImplementation *dso, const void *buffer,
+                     size_t buffer_size, bool withargs, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions);
 #endif
       virtual void handle_registration_callback_effects(RtEvent effects);
@@ -2409,6 +2411,7 @@ namespace Legion {
       ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez,
                                                          AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
+      ShardedPhysicalTemplate* find_sharded_current_template(size_t index);
     public:
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);

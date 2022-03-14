@@ -23,6 +23,8 @@ DEBUG           ?= 1		# Include debugging symbols
 MAX_DIM         ?= 3		# Maximum number of dimensions
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_HIP         ?= 0		# Include HIP support (requires HIP)
+HIP_TARGET      ?= ROCM
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
@@ -34,11 +36,21 @@ GEN_SRC		?= realm_saxpy_cpu.cc	# .cc files
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= realm_saxpy_gpu.cu	# .cu files
 endif
+ifeq ($(strip $(USE_HIP)),1)
+ifeq ($(strip $(HIP_TARGET)),ROCM)
+GEN_HIP_SRC ?= realm_saxpy_gpu.cpp  # .cpp files
+endif
+ifeq ($(strip $(HIP_TARGET)),CUDA)
+GEN_HIP_SRC ?= realm_saxpy_gpu.cu   # .cu files
+endif
+endif
+
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
 CC_FLAGS	?=
 NVCC_FLAGS	?=
+HIPCC_FLAGS ?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 

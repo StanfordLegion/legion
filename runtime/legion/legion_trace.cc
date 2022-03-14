@@ -5738,15 +5738,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::pack_recorder(Serializer &rez,
-                 std::set<RtEvent> &applied_events, const AddressSpaceID target)
+                                         std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       rez.serialize(trace->runtime->address_space);
-      rez.serialize(target);
       rez.serialize(this);
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
       rez.serialize(recording_done);
+      rez.serialize<ReplicationID>(0);
       applied_events.insert(remote_applied);
     }
 
@@ -6935,6 +6935,21 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::pack_recorder(Serializer &rez,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(trace->runtime->address_space);
+      rez.serialize(this);
+      RtUserEvent remote_applied = Runtime::create_rt_user_event();
+      rez.serialize(remote_applied);
+      rez.serialize(recording_done);
+      rez.serialize(repl_ctx->shard_manager->repl_id);
+      rez.serialize(template_index);
+      applied_events.insert(remote_applied);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::record_merge_events(ApEvent &lhs,
                                  const std::set<ApEvent> &rhs, Memoizable *memo)
     //--------------------------------------------------------------------------
@@ -7835,14 +7850,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-        const DeferTraceUpdateArgs &rhs, RtUserEvent d)
+        const DeferTraceUpdateArgs &rhs, RtUserEvent d, IndexSpaceExpression *e)
       : LgTaskArgs<DeferTraceUpdateArgs>(rhs.provenance), target(rhs.target),
-        kind(rhs.kind), done(rhs.done), view(rhs.view), expr(rhs.expr), 
+        kind(rhs.kind), done(rhs.done), view(rhs.view), expr(e), 
         pending(rhs.pending), buffer_size(rhs.buffer_size), buffer(rhs.buffer),
         deferral_event(d)
     //--------------------------------------------------------------------------
     {
-      // Expression reference rolls over
+      // Expression reference rolls over unless its new and we need a reference
+      if (rhs.expr != expr)
+        expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -7942,7 +7959,7 @@ namespace Legion {
         }
         else
         {
-          DeferTraceUpdateArgs args(*dargs, deferral);
+          DeferTraceUpdateArgs args(*dargs, deferral, user_expr);
           repl_ctx->runtime->issue_runtime_meta_task(args, 
                   LG_LATENCY_MESSAGE_PRIORITY, pre);
 #ifdef DEBUG_LEGION
