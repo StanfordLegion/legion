@@ -26,10 +26,57 @@ namespace Realm {
     extern Logger log_stream;
     extern Logger log_gpudma;
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class HipDeviceMemoryInfo
+
+    HipDeviceMemoryInfo::HipDeviceMemoryInfo(int _device_id)
+      : device_id(_device_id)
+      , gpu(0)
+    {
+      // see if we can match this context to one of our GPU objects - handle
+      //  the case where the hip module didn't load though
+      HipModule *mod = get_runtime()->get_module<HipModule>("hip");
+      if(mod) {
+        for(std::vector<GPU *>::const_iterator it = mod->gpus.begin();
+            it != mod->gpus.end();
+            ++it)
+          if((*it)->device_id == _device_id) {
+            gpu = *it;
+            break;
+          }
+      }
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPUXferDes
+
+    static GPU *mem_to_gpu(const MemoryImpl *mem)
+    {
+      if(ID(mem->me).is_memory()) {
+        // might not be a GPUFBMemory...
+        const GPUFBMemory *fbmem = dynamic_cast<const GPUFBMemory *>(mem);
+        if(fbmem)
+          return fbmem->gpu;
+
+        // see if it has HipDeviceMemoryInfo with a valid gpu
+        const HipDeviceMemoryInfo *cdm = mem->find_module_specific<HipDeviceMemoryInfo>();
+        if(cdm && cdm->gpu)
+          return cdm->gpu;
+
+        // not a gpu-associated memory
+        return 0;
+      } else {
+        // is it an FBIBMemory?
+        const GPUFBIBMemory *ibmem = dynamic_cast<const GPUFBIBMemory *>(mem);
+        if(ibmem)
+          return ibmem->gpu;
+
+        // not a gpu-associated memory
+        return 0;
+      }
+    }
 
     GPUXferDes::GPUXferDes(uintptr_t _dma_op, Channel *_channel,
                            NodeID _launch_node, XferDesID _guid,
@@ -43,24 +90,26 @@ namespace Realm {
       kind = XFER_GPU_IN_FB; // TODO: is this needed at all?
 
       src_gpus.resize(inputs_info.size(), 0);
-      for(size_t i = 0; i < input_ports.size(); i++)
+      for(size_t i = 0; i < input_ports.size(); i++) {
+	      src_gpus[i] = mem_to_gpu(input_ports[i].mem);
+        // sanity-check
 	      if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB)
-          src_gpus[i] = (ID(input_ports[i].mem->me).is_memory() ?
-                           (checked_cast<GPUFBMemory *>(input_ports[i].mem))->gpu :
-                           (checked_cast<GPUFBIBMemory *>(input_ports[i].mem))->gpu);
+          assert(src_gpus[i]);
+      }
 
       dst_gpus.resize(outputs_info.size(), 0);
       dst_is_ipc.resize(outputs_info.size(), false);
-      for(size_t i = 0; i < output_ports.size(); i++)
-        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
-          dst_gpus[i] = (ID(output_ports[i].mem->me).is_memory() ?
-                           (checked_cast<GPUFBMemory *>(output_ports[i].mem))->gpu :
-                           (checked_cast<GPUFBIBMemory *>(output_ports[i].mem))->gpu);
+      for(size_t i = 0; i < output_ports.size(); i++) {
+        dst_gpus[i] = mem_to_gpu(output_ports[i].mem);
+	if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+          // sanity-check
+          assert(dst_gpus[i]);
         } else {
           // assume a memory owned by another node is ipc
           if(NodeID(ID(output_ports[i].mem->me).memory_owner_node()) != Network::my_node_id)
             dst_is_ipc[i] = true;
-        }      
+        }
+      }
     }
 	
     long GPUXferDes::get_requests(Request** requests, long nr)
@@ -483,6 +532,26 @@ namespace Realm {
           it != src_gpu->hipipc_mappings.end();
           ++it)
         peer_gpu_mems.push_back(it->mem);
+
+      // look for any other local memories that belong to our context or
+      //  peer-able contexts
+      const Node& n = get_runtime()->nodes[Network::my_node_id];
+      for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+          it != n.memories.end();
+          ++it) {
+        HipDeviceMemoryInfo *cdm = (*it)->find_module_specific<HipDeviceMemoryInfo>();
+        if(!cdm) continue;
+        if(cdm->device_id == src_gpu->device_id) {
+          local_gpu_mems.push_back((*it)->me);
+        } else {
+          // if the other context is associated with a gpu and we've got peer
+          //  access, use it
+          // TODO: add option to enable peer access at this point?  might be
+          //  expensive...
+          if(cdm->gpu && (src_gpu->info->peers.count(cdm->gpu->info->device) > 0))
+            peer_gpu_mems.push_back((*it)->me);
+        }
+      }
 
       std::vector<Memory> mapped_cpu_mems;
       mapped_cpu_mems.insert(mapped_cpu_mems.end(),
@@ -987,13 +1056,26 @@ namespace Realm {
                                                           stringbuilder() << "hip fill channel (gpu=" << _gpu->info->index << ")")
         , gpu(_gpu)
       {
-        Memory fbm = gpu->fbmem->me;
+        std::vector<Memory> local_gpu_mems;
+        local_gpu_mems.push_back(gpu->fbmem->me);
+
+        // look for any other local memories that belong to our context
+        const Node& n = get_runtime()->nodes[Network::my_node_id];
+        for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+            it != n.memories.end();
+            ++it) {
+          HipDeviceMemoryInfo *cdm = (*it)->find_module_specific<HipDeviceMemoryInfo>();
+          if(!cdm) continue;
+          if(cdm->device_id != gpu->device_id) continue;
+          local_gpu_mems.push_back((*it)->me);
+        }
 
         unsigned bw = 300000;  // HACK - estimate at 300 GB/s
         unsigned latency = 250;  // HACK - estimate at 250 ns
         unsigned frag_overhead = 2000;  // HACK - estimate at 2 us
 
-        add_path(Memory::NO_MEMORY, fbm, bw, latency, frag_overhead, XFER_GPU_IN_FB)
+        add_path(Memory::NO_MEMORY, local_gpu_mems,
+                 bw, latency, frag_overhead, XFER_GPU_IN_FB)
           .set_max_dim(2);
 
         xdq.add_to_manager(bgwork);
@@ -1329,6 +1411,26 @@ namespace Realm {
         peer_gpu_mems.insert(peer_gpu_mems.end(),
                              gpu->peer_fbs.begin(),
                              gpu->peer_fbs.end());
+
+        // look for any other local memories that belong to our context or
+        //  peer-able contexts
+        const Node& n = get_runtime()->nodes[Network::my_node_id];
+        for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+            it != n.memories.end();
+            ++it) {
+          HipDeviceMemoryInfo *cdm = (*it)->find_module_specific<HipDeviceMemoryInfo>();
+          if(!cdm) continue;
+          if(cdm->device_id == gpu->device_id) {
+            local_gpu_mems.push_back((*it)->me);
+          } else {
+            // if the other context is associated with a gpu and we've got peer
+            //  access, use it
+            // TODO: add option to enable peer access at this point?  might be
+            //  expensive...
+            if(cdm->gpu && (gpu->info->peers.count(cdm->gpu->info->device) > 0))
+              peer_gpu_mems.push_back((*it)->me);
+          }
+        }
 
         std::vector<Memory> mapped_cpu_mems;
         mapped_cpu_mems.insert(mapped_cpu_mems.end(),

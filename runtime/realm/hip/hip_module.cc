@@ -2371,6 +2371,132 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class GPUDynamicMemory
+
+    GPUDynamicFBMemory::GPUDynamicFBMemory(Memory _me, GPU *_gpu,
+                                           size_t _max_size)
+      : MemoryImpl(_me, _max_size, MKIND_GPUFB, Memory::GPU_DYNAMIC_MEM, 0)
+      , gpu(_gpu)
+      , cur_size(0)
+    {
+      // mark what context we belong to
+      add_module_specific(new HipDeviceMemoryInfo(gpu->device_id));
+    }
+
+    GPUDynamicFBMemory::~GPUDynamicFBMemory(void)
+    {
+      // free any remaining allocations
+      AutoGPUContext agc(gpu);
+      AutoLock<> al(mutex);
+      for(std::map<RegionInstance, void*>::const_iterator it = alloc_bases.begin();
+          it != alloc_bases.end();
+          ++it)
+        CHECK_HIP( hipFree(it->second) );
+      alloc_bases.clear();
+    }
+
+    MemoryImpl::AllocationResult GPUDynamicFBMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
+                                                                                bool need_alloc_result,
+                                                                                bool poisoned,
+                                                                                TimeLimit work_until)
+    {
+      // poisoned allocations are cancellled
+      if(poisoned) {
+        inst->notify_allocation(ALLOC_CANCELLED,
+                                RegionInstanceImpl::INSTOFFSET_FAILED,
+                                work_until);
+        return ALLOC_CANCELLED;
+      }
+
+      // attempt hipMalloc, except for size=0 allocations
+      size_t size = inst->metadata.layout->bytes_used;
+      void* base = NULL;
+      if(size > 0) {
+        hipError_t ret;
+        {
+          AutoGPUContext agc(gpu);
+          // TODO: handle large alignments?
+          ret = hipMalloc(&base, size);
+          if((ret != hipSuccess) && (ret != hipErrorOutOfMemory))
+            REPORT_HIP_ERROR("hipMalloc", ret);
+        }
+        if(ret == hipErrorOutOfMemory) {
+          log_gpu.warning() << "out of memory in hipMalloc: size=" << size;
+          inst->notify_allocation(ALLOC_INSTANT_FAILURE,
+                                  RegionInstanceImpl::INSTOFFSET_FAILED,
+                                  work_until);
+          return ALLOC_INSTANT_FAILURE;
+        }
+      }
+
+      // insert entry into our alloc_bases map
+      {
+        AutoLock<> al(mutex);
+        alloc_bases[inst->me] = base;
+      }
+
+      inst->notify_allocation(ALLOC_INSTANT_SUCCESS, reinterpret_cast<size_t>(base), work_until);
+      return ALLOC_INSTANT_SUCCESS;
+    }
+
+    void GPUDynamicFBMemory::release_storage_immediate(RegionInstanceImpl *inst,
+                                                       bool poisoned,
+                                                       TimeLimit work_until)
+    {
+      // ignore poisoned releases
+      if(poisoned)
+        return;
+
+      void* base;
+      {
+        AutoLock<> al(mutex);
+        std::map<RegionInstance, void*>::iterator it = alloc_bases.find(inst->me);
+        if(it == alloc_bases.end()) {
+          log_gpu.fatal() << "attempt to release unknown instance: inst=" << inst->me;
+          abort();
+        }
+        base = it->second;
+        alloc_bases.erase(it);
+      }
+
+      if(base != 0) {
+        AutoGPUContext agc(gpu);
+        CHECK_HIP( hipFree(base) );
+      }
+
+      inst->notify_deallocation();
+    }
+
+    // these work, but they are SLOW
+    void GPUDynamicFBMemory::get_bytes(off_t offset, void *dst, size_t size)
+    {
+      // use a blocking copy - host memory probably isn't pinned anyway
+      {
+        AutoGPUContext agc(gpu);
+        CHECK_HIP( hipMemcpy
+                  (dst, reinterpret_cast<void *>(offset), size, hipMemcpyDeviceToHost) );
+      }
+    }
+
+    void GPUDynamicFBMemory::put_bytes(off_t offset, const void *src, size_t size)
+    {
+      // use a blocking copy - host memory probably isn't pinned anyway
+      {
+        AutoGPUContext agc(gpu);
+        CHECK_HIP( hipMemcpy
+                  (reinterpret_cast<void *>(offset), src, size, hipMemcpyHostToDevice) );
+      }
+    }
+
+    void *GPUDynamicFBMemory::get_direct_ptr(off_t offset, size_t size)
+    {
+      // offset 'is' the pointer for instances in this memory
+      return reinterpret_cast<void *>(offset);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class GPUZCMemory
 
     GPUZCMemory::GPUZCMemory(Memory _me,
@@ -2921,6 +3047,37 @@ namespace Realm {
       	  runtime->add_proc_mem_affinity(pma);
       	}
       }
+
+      // look for any other local memories that belong to our context or
+      //  peer-able contexts
+      const Node& n = get_runtime()->nodes[Network::my_node_id];
+      for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
+          it != n.memories.end();
+          ++it) {
+        HipDeviceMemoryInfo *cdm = (*it)->find_module_specific<HipDeviceMemoryInfo>();
+        if(!cdm) continue;
+        if(cdm->device_id == device_id) {
+          Machine::ProcessorMemoryAffinity pma;
+          pma.p = p;
+          pma.m = (*it)->me;
+          pma.bandwidth = 200;  // "big"
+          pma.latency = 5;      // "ok"
+          runtime->add_proc_mem_affinity(pma);
+        } else {
+          // if the other context is associated with a gpu and we've got peer
+          //  access, use it
+          // TODO: add option to enable peer access at this point?  might be
+          //  expensive...
+          if(cdm->gpu && (info->peers.count(cdm->gpu->info->device) > 0)) {
+            Machine::ProcessorMemoryAffinity pma;
+            pma.p = p;
+            pma.m = (*it)->me;
+            pma.bandwidth = 10; // assuming pcie, this should be ~half the bw and
+            pma.latency = 400;  // ~twice the latency as zcmem
+            runtime->add_proc_mem_affinity(pma);
+          }
+        }
+      }
     }
 
     void GPU::create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size)
@@ -2984,6 +3141,24 @@ namespace Realm {
         fb_ibmem = new GPUFBIBMemory(m, this, fb_ibmem_base, ib_size);
         runtime->add_ib_memory(fb_ibmem);
       }
+    }
+
+    void GPU::create_dynamic_fb_memory(RuntimeImpl *runtime, size_t max_size)
+    {
+      // if the max_size is non-zero, also limit by what appears to be
+      //  currently available
+      if(max_size > 0) {
+        AutoGPUContext agc(this);
+
+        size_t free_bytes, total_bytes;
+        CHECK_HIP( hipMemGetInfo(&free_bytes, &total_bytes) );
+        if(total_bytes < max_size)
+          max_size = total_bytes;
+      }
+
+      Memory m = runtime->next_local_memory_id();
+      GPUDynamicFBMemory *dfb = new GPUDynamicFBMemory(m, this, max_size);
+      runtime->add_memory(dfb);
     }
 
 #ifdef REALM_USE_HIP_HIJACK
@@ -3162,6 +3337,8 @@ namespace Realm {
       , cfg_zc_ib_size(256 << 20)
       , cfg_fb_mem_size(256 << 20)
       , cfg_fb_ib_size(128 << 20)
+      , cfg_use_dynamic_fb(true)
+      , cfg_dynfb_max_size(~size_t(0))
       , cfg_num_gpus(0)
       , cfg_task_streams(12)
       , cfg_d2d_streams(4)
@@ -3218,6 +3395,8 @@ namespace Realm {
       	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
           .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
       	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+          .add_option_int("-hip:dynfb", m->cfg_use_dynamic_fb)
+          .add_option_int_units("-hip:dynfb_max", m->cfg_dynfb_max_size, 'm')
       	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
           .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
           .add_option_int("-ll:streams", m->cfg_task_streams)
@@ -3540,6 +3719,12 @@ namespace Realm {
             it != gpus.end();
             it++)
           (*it)->create_fb_memory(runtime, cfg_fb_mem_size, cfg_fb_ib_size);
+
+      if(cfg_use_dynamic_fb)
+        for(std::vector<GPU *>::iterator it = gpus.begin();
+            it != gpus.end();
+            it++)
+          (*it)->create_dynamic_fb_memory(runtime, cfg_dynfb_max_size);
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size > 0) && !gpus.empty()) {
