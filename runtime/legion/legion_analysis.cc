@@ -288,26 +288,16 @@ namespace Legion {
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                                     AddressSpaceID local, Memoizable *memo, 
                                     PhysicalTemplate *tpl, RtUserEvent applied,
-                                    RtEvent collect)
+                                    RtEvent collect, ReplicationID repl,
+                                    size_t index)
       : runtime(rt), origin_space(origin), local_space(local), memoizable(memo),
-        remote_tpl(tpl), applied_event(applied), collect_event(collect)
+        remote_tpl(tpl), applied_event(applied), collect_event(collect),
+        repl_id(repl), tpl_index(index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(remote_tpl != NULL);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteTraceRecorder::RemoteTraceRecorder(const RemoteTraceRecorder &rhs)
-      : runtime(rhs.runtime), origin_space(rhs.origin_space), 
-        local_space(rhs.local_space), memoizable(rhs.memoizable), 
-        remote_tpl(rhs.remote_tpl), applied_event(rhs.applied_event),
-        collect_event(rhs.collect_event)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -326,16 +316,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RemoteTraceRecorder& RemoteTraceRecorder::operator=(
-                                                 const RemoteTraceRecorder &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteTraceRecorder::add_recorder_reference(void)
     //--------------------------------------------------------------------------
     {
@@ -351,15 +331,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::pack_recorder(Serializer &rez,
-               std::set<RtEvent> &external_applied, const AddressSpaceID target)
+                                            std::set<RtEvent> &external_applied)
     //--------------------------------------------------------------------------
     {
       rez.serialize(origin_space);
-      rez.serialize(target);
       rez.serialize(remote_tpl);
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
       rez.serialize(collect_event);
+      rez.serialize(repl_id);
+      if (repl_id > 0)
+        rez.serialize(tpl_index);
       // Only need to store this one locally since we already hooked our whole 
       // chain of events into the operations applied set on the origin node
       // See PhysicalTemplate::pack_recorder
@@ -1261,17 +1243,35 @@ namespace Legion {
                         Deserializer &derez, Runtime *runtime, Memoizable *memo)
     //--------------------------------------------------------------------------
     {
-      AddressSpaceID origin_space, local_space;
+      AddressSpaceID origin_space;
       derez.deserialize(origin_space);
-      derez.deserialize(local_space);
       PhysicalTemplate *remote_tpl;
       derez.deserialize(remote_tpl);
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
       RtEvent collect_event;
       derez.deserialize(collect_event);
-      return new RemoteTraceRecorder(runtime, origin_space, local_space, memo,
-                                     remote_tpl, applied_event, collect_event);
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      size_t tpl_index = 0;
+      if (repl_id > 0)
+      {
+        derez.deserialize(tpl_index);
+        ShardManager *manager = 
+          runtime->find_shard_manager(repl_id, true/*can fail*/);
+        if (manager != NULL)
+        {
+          // If we have a shard manager then find the current template
+          // for the first local shard and pretend like we're local
+          remote_tpl = manager->find_local_shard_current_template(tpl_index);
+          collect_event = remote_tpl->get_collect_event();
+          origin_space = runtime->address_space;
+        }
+      }
+      return new RemoteTraceRecorder(runtime, origin_space, 
+                                     runtime->address_space, memo,
+                                     remote_tpl, applied_event, collect_event,
+                                     repl_id, tpl_index);
     }
 
     //--------------------------------------------------------------------------
@@ -2262,7 +2262,7 @@ namespace Legion {
         rez.serialize(index);
         rez.serialize(dst_index);
         rez.serialize<bool>(update_validity);
-        rec->pack_recorder(rez, applied, target); 
+        rec->pack_recorder(rez, applied); 
       }
     }
 
@@ -2284,7 +2284,7 @@ namespace Legion {
         rez.serialize(index);
         rez.serialize(dst_index);
         rez.serialize<bool>(update_validity);
-        rec->pack_recorder(rez, applied, target); 
+        rec->pack_recorder(rez, applied); 
       }
     }
 

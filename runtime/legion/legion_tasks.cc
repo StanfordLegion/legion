@@ -331,6 +331,7 @@ namespace Legion {
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
       mapper = NULL;
+      sharded_tpl_index = 0;
       must_epoch = NULL;
       must_epoch_task = false;
       local_function = false;
@@ -434,6 +435,10 @@ namespace Legion {
         {
           rez.serialize(tpl);
           rez.serialize(trace_local_id);
+          if (is_remote())
+            rez.serialize(sharded_tpl_index);
+          else
+            rez.serialize(tpl->get_sharded_template_index());
         }
       }
       rez.serialize(request_valid_instances);
@@ -480,6 +485,7 @@ namespace Legion {
         {
           derez.deserialize(tpl);
           derez.deserialize(trace_local_id);
+          derez.deserialize(sharded_tpl_index);
         }
       }
       derez.deserialize(request_valid_instances);
@@ -1398,6 +1404,10 @@ namespace Legion {
       this->target_proc = p;
       this->true_guard = rhs->true_guard;
       this->false_guard = rhs->false_guard;
+      // Memoizable stuff
+      this->tpl = rhs->tpl;
+      this->memo_state = rhs->memo_state;
+      this->sharded_tpl_index = rhs->sharded_tpl_index;
     }
 
     //--------------------------------------------------------------------------
@@ -3904,9 +3914,10 @@ namespace Legion {
       if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
       {
         const RtUserEvent remote_applied = Runtime::create_rt_user_event();
+        const ReplicationID repl_id = parent_ctx->get_replication_id(); 
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
             orig_proc.address_space(), runtime->address_space, this, tpl,
-            remote_applied, remote_collect_event);
+            remote_applied, remote_collect_event, repl_id, sharded_tpl_index);
         remote_trace_recorder->add_recorder_reference();
         map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION
@@ -9546,8 +9557,6 @@ namespace Legion {
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
-      result->tpl = tpl;
-      result->memo_state = memo_state;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -11063,8 +11072,6 @@ namespace Legion {
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
-      result->tpl = tpl;
-      result->memo_state = memo_state;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -11240,8 +11247,6 @@ namespace Legion {
       result->is_index_space = true;
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
-      result->tpl = tpl;
-      result->memo_state = memo_state;
       result->version_infos.resize(logical_regions.size());
       // Now figure out our local point information
       result->initialize_point(this, point, point_arguments,
