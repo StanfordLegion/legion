@@ -2044,7 +2044,6 @@ namespace Legion {
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Perform the registration
-      
 #ifdef DEBUG_LEGION
       assert(analysis == NULL);
       // Should be recording or must be read-only

@@ -11275,13 +11275,15 @@ namespace Legion {
         {
           // There aren't any analyses that will be local to the
           // logical owner space so we need to pick the closest one
-          if (local_space == mapping.find_nearest(logical_owner_space))
+          if ((local_space == mapping.find_nearest(logical_owner_space)) &&
+              analysis.collective_first_local)
             return false;
         }
         else 
         {
           // At least one node is local, see if we're it
-          if (logical_owner_space == local_space)
+          if ((logical_owner_space == local_space) &&
+              analysis.collective_first_local)
             return false;
         }
         return true;
