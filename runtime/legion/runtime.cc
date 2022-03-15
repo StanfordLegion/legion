@@ -17319,6 +17319,18 @@ namespace Legion {
       profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
 #endif
+#ifdef LEGION_GPU_REDUCTIONS
+      const GPUReductionTable &gpu_reduction_table = get_gpu_reduction_table();
+      for (GPUReductionTable::const_iterator it =
+            gpu_reduction_table.begin(); it != gpu_reduction_table.end(); it++)
+      {
+        char name[128];
+        snprintf(name, sizeof(name), 
+            "Built-in Reduction Task for Redop %d", it->first);
+        profiler->register_task_kind(it->second, name, true/*overwrite*/);
+        profiler->register_task_variant(it->second, 0, name);
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -30070,9 +30082,9 @@ namespace Legion {
 #ifdef LEGION_GPU_REDUCTIONS
       // Do this here to make sure we get the gpu reduction table
       // setup before we make the runtime object
-      register_builtin_gpu_reduction_tasks(get_gpu_reduction_table(),
-                                           registered_events);
       GPUReductionTable &gpu_reduction_table = get_gpu_reduction_table();
+      register_builtin_gpu_reduction_tasks(gpu_reduction_table,
+                                           registered_events);
       const std::map<ReductionOpID,CodeDescriptor> &pending_gpu_reductions =
         get_pending_gpu_reduction_table();
       for (std::map<ReductionOpID,CodeDescriptor>::const_iterator it = 

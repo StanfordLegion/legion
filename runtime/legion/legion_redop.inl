@@ -307,25 +307,44 @@ namespace Legion {
   __device__ __forceinline__
   unsigned int __hilohalf2uint(__half hi, __half lo)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; short2 as_short; } val;
+    val.as_short.x = __half_as_short(lo);
+    val.as_short.y = __half_as_short(hi);
+    return val.as_int;
+#else
     unsigned int result;
     asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(__half_as_short(lo)), "h"(__half_as_short(hi)));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   __half __uint2hihalf(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; short2 as_short; } val;
+    val.as_int = value;
+    return __short_as_half(val.as_short.y);
+#else
     short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
     return __short_as_half(hi) + __half(0)*__short_as_half(lo);
+#endif
   }
   
   __device__ __forceinline__
   __half __uint2lohalf(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; short2 as_short; } val;
+    val.as_int = value;
+    return __short_as_half(val.as_short.x);
+#else
     short int lo, hi;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(lo), "=h"(hi) : "r"(value));
     return __short_as_half(lo) + __half(0)*__short_as_half(hi);
+#endif  
   }
 #endif
 
