@@ -441,16 +441,23 @@ ifeq ($(strip $(USE_HIP)),1)
   endif
   ifeq ($(strip $(HIP_TARGET)),ROCM)
     #HIP on AMD
+    ifeq ($(strip $(USE_COMPLEX)),1)
+      ifndef THRUST_PATH
+        $(error THRUST_PATH variable is not defined, aborting build)
+      endif
+      # Please download the thrust from https://github.com/ROCmSoftwarePlatform/Thrust
+      # We need to put thrust inc ahead of HIP_PATH because the thrust comes with hip is broken
+      INC_FLAGS += -I$(THRUST_PATH)
+    endif
     HIPCC	        ?= $(HIP_PATH)/bin/hipcc
     # Latter is preferred, former is for backwards compatability
-    REALM_CC_FLAGS	+= -DREALM_USE_HIP
-    LEGION_CC_FLAGS	+= -DLEGION_USE_HIP
-    CC_FLAGS        	+= -D__HIP_PLATFORM_HCC__
-    HIPCC_FLAGS      	+= -fno-strict-aliasing
-    INC_FLAGS		+= -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
+    REALM_CC_FLAGS  += -DREALM_USE_HIP
+    LEGION_CC_FLAGS += -DLEGION_USE_HIP
+    CC_FLAGS        += -D__HIP_PLATFORM_HCC__
+    HIPCC_FLAGS     += -fno-strict-aliasing
+    INC_FLAGS       += -I$(HIP_PATH)/include -I$(HIP_PATH)/../include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g
-      #NVCC_FLAGS	+= -G
     else
       HIPCC_FLAGS	+= -O2
     endif
@@ -466,14 +473,13 @@ ifeq ($(strip $(USE_HIP)),1)
     endif
     HIPCC ?= $(CUDA_PATH)/bin/nvcc
     # Latter is preferred, former is for backwards compatability
-    REALM_CC_FLAGS	+= -DREALM_USE_HIP
-    LEGION_CC_FLAGS	+= -DLEGION_USE_HIP
-    CC_FLAGS        	+= -D__HIP_PLATFORM_NVCC__
-    HIPCC_FLAGS      	+= -D__HIP_PLATFORM_NVCC__
-    INC_FLAGS		+= -I$(HIP_PATH)/include  -I$(HIP_PATH)/../include -I$(CUDA_PATH)/include  
+    REALM_CC_FLAGS  += -DREALM_USE_HIP
+    LEGION_CC_FLAGS += -DLEGION_USE_HIP
+    CC_FLAGS        += -D__HIP_PLATFORM_NVCC__
+    HIPCC_FLAGS     += -D__HIP_PLATFORM_NVCC__
+    INC_FLAGS       += -I$(CUDA_PATH)/include -I$(HIP_PATH)/include  -I$(HIP_PATH)/../include
     ifeq ($(strip $(DEBUG)),1)
       HIPCC_FLAGS	+= -g -O0
-      #NVCC_FLAGS	+= -G
     else
       HIPCC_FLAGS	+= -O2
     endif

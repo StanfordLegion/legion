@@ -35,8 +35,8 @@
 #define COMPLEX_NAMESPACE thrust
 #endif
 #elif defined(LEGION_USE_HIP)
-#include "complex_hip.inl"
-#define COMPLEX_NAMESPACE complex_hip
+#include <thrust/complex.h>
+#define COMPLEX_NAMESPACE thrust
 #else
 #include <complex>
 #define COMPLEX_NAMESPACE std

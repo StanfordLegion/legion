@@ -792,6 +792,11 @@ if(LEGION_HIP_SRC)
       RELWITHDEBINFO -g -O2)
     target_sources(LegionRuntime PRIVATE ${LEGION_HIP_OBJS})
     target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES})
+
+    # complex reduction ops bring in a public dependency on cuda headers
+    if(Legion_REDOP_COMPLEX)
+      target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
+    endif()
   endif()
 
   if (Legion_HIP_TARGET STREQUAL "ROCM")
@@ -809,6 +814,16 @@ if(LEGION_HIP_SRC)
       RELWITHDEBINFO -g -O2)
     target_sources(LegionRuntime PRIVATE ${LEGION_HIP_OBJS})
     target_link_libraries(LegionRuntime PUBLIC ${HIP_LIBRARIES})
+
+    # complex reduction ops bring in a public dependency on hip thrust headers
+    if(Legion_REDOP_COMPLEX)
+      # set thrust package
+      # please download thrust from https://github.com/ROCmSoftwarePlatform/Thrust
+      if(NOT DEFINED THRUST_PATH)
+          set(THRUST_PATH $ENV{THRUST_PATH} CACHE PATH "Path to where Thrust has been installed")
+      endif()
+      target_include_directories(LegionRuntime PUBLIC ${THRUST_PATH})
+    endif()
   endif()
 endif()
 
