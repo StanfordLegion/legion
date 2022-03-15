@@ -1197,6 +1197,7 @@ namespace Legion {
       if (repl_id > 0)
       {
         derez.deserialize(tpl_index);
+#if 0
         ShardManager *manager = 
           runtime->find_shard_manager(repl_id, true/*can fail*/);
         if (manager != NULL)
@@ -1207,6 +1208,7 @@ namespace Legion {
           collect_event = remote_tpl->get_collect_event();
           origin_space = runtime->address_space;
         }
+#endif
       }
       return new RemoteTraceRecorder(runtime, origin_space, 
                                      runtime->address_space, memo,
