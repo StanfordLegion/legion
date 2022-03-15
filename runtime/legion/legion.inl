@@ -19426,6 +19426,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template <int DIM, typename COORD_T>
+    void OutputRequirement::set_type_tag()
+    //--------------------------------------------------------------------------
+    {
+      type_tag = Internal::NT_TemplateHelper::encode_tag<DIM,COORD_T>();
+    }
+
+    //--------------------------------------------------------------------------
     inline void TaskLauncher::add_field(unsigned idx, FieldID fid, bool inst)
     //--------------------------------------------------------------------------
     {

@@ -5835,22 +5835,8 @@ namespace Legion {
         if (!req.valid_requirement)
         {
           // Create a deferred index space
-          IndexSpace index_space;
-          switch (req.dim)
-          {
-#define DIMFUNC(DIM)                                                       \
-            case DIM:                                                      \
-              {                                                            \
-                index_space = parent_ctx->create_unbound_index_space(      \
-                  Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
-                break;                                                     \
-              }
-            LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-              default:
-                assert(false);
-          }
-
+          IndexSpace index_space =
+            parent_ctx->create_unbound_index_space(req.type_tag);
           // Create an output region
           LogicalRegion region = parent_ctx->create_logical_region(
               runtime->forest, index_space, req.field_space, 
@@ -8274,12 +8260,12 @@ namespace Legion {
       assert(index_domain.dense());
 #endif
       int32_t ndim = index_domain.dim;
-      DomainPoint launch_shape = index_domain.hi() - index_domain.lo() + 1;
+      DomainPoint launch_extents = index_domain.hi() - index_domain.lo() + 1;
 
       // Initialize the vector of extents with -1
       std::vector<std::vector<coord_t>> all_extents(ndim);
       for (int32_t dim = 0; dim < ndim; ++dim)
-        all_extents[dim].resize(launch_shape[dim] + 1, -1);
+        all_extents[dim].resize(launch_extents[dim] + 1, -1);
 
       // Check the alignment while populating the extent vector
       for (SizeMap::const_iterator it = output_sizes.begin();
@@ -8345,7 +8331,7 @@ namespace Legion {
           child->handle, Domain(lo, hi), runtime->address_space);
       }
 
-      // Finally, compute the shape of the root index space and return it
+      // Finally, compute the extents of the root index space and return it
       DomainPoint lo; lo.dim = ndim;
       DomainPoint hi; hi.dim = ndim;
       for (int32_t dim = 0; dim < ndim; ++dim)
@@ -8761,21 +8747,20 @@ namespace Legion {
         if (!req.valid_requirement)
         {
           TypeTag type_tag;
+          int requested_dim =
+            Internal::NT_TemplateHelper::get_dim(req.type_tag);
           if (req.global_indexing)
           {
-            switch (launch_space.get_dim())
-            {
-#define DIMFUNC(DIM)                                                       \
-              case DIM:                                                    \
-                {                                                          \
-                  type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
-                  break;                                                   \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-                default:
-                  assert(false);
-            }
+            if (launch_space.get_dim() != requested_dim)
+              REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
+                "Output region %u of task %s (UID: %lld) is requested to have "
+                "%d dimensions, but the launch domain has %d dimensions. "
+                "Dimensionalities of output regions must be the same as the "
+                "launch domain's in global indexing mode.",
+                idx, get_task_name(), get_unique_op_id(), requested_dim,
+                launch_space.get_dim());
+
+            type_tag = req.type_tag;
           }
           else
           {
@@ -8784,26 +8769,17 @@ namespace Legion {
 
             // Before creating the index space, we make sure that
             // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
-            if (launch_space.get_dim() + req.dim > LEGION_MAX_DIM)
+            if (launch_space.get_dim() + requested_dim > LEGION_MAX_DIM)
               REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_DOMAIN,
-                "Dimensionality of output regions of task %s (UID: %lld) "
+                "Dimensionality of output region %u of task %s (UID: %lld) "
                 "exceeded LEGION_MAX_DIM. You may rebuild your code with a "
                 "bigger LEGION_MAX_DIM value or reduce dimensionality of "
-                "the launch domain.", get_task_name(), get_unique_op_id());
+                "either the launch domain or the output region.",
+                idx, get_task_name(), get_unique_op_id());
 
-            switch (launch_space.get_dim() + req.dim)
-            {
-#define DIMFUNC(DIM) \
-              case DIM: \
-                { \
-                  type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
-                  break; \
-                }
-              LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-                default:
-                  assert(false);
-            }
+            OutputRegionTagCreator creator(&type_tag, launch_space.get_dim());
+            Internal::NT_TemplateHelper::demux<OutputRegionTagCreator>(
+                req.type_tag, &creator);
           }
 
           // Create a deferred index space
@@ -11431,7 +11407,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(output_sizes.find(point) == output_sizes.end());
 #endif
-        output_sizes[point] = outputs[idx].impl->get_shape();
+        output_sizes[point] = outputs[idx].impl->get_extents();
       }
     }
 

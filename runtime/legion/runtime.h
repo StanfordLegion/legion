@@ -904,15 +904,15 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        uintptr_t ptr,
                        size_t alignment,
                        bool eager_pool = false);
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments);
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        PhysicalInstance instance);
     private:
@@ -933,7 +933,7 @@ namespace Legion {
       bool is_complete(FieldID &unbound_field) const;
     public:
       const RegionRequirement &get_requirement(void) const { return req; }
-      DomainPoint get_shape(void) const { return shape; }
+      DomainPoint get_extents(void) const { return extents; }
     protected:
       IndividualManager *get_manager(FieldID field_id);
     public:
@@ -951,7 +951,7 @@ namespace Legion {
       // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;
       std::vector<PhysicalInstance> escaped_instances;
-      DomainPoint shape;
+      DomainPoint extents;
       const unsigned index;
       const bool created_region;
       const bool global_indexing;

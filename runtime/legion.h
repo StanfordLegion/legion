@@ -1159,7 +1159,10 @@ namespace Legion {
       bool operator==(const OutputRequirement &req) const;
       bool operator<(const OutputRequirement &req) const;
     public:
-      int dim;
+      template <int DIM, typename COORD_T>
+      void set_type_tag();
+    public:
+      TypeTag type_tag;
       FieldSpace field_space; /**< field space for the output region */
       bool global_indexing; /**< global indexing is used when true */
       bool valid_requirement; /**< indicate requirement is valid */
@@ -3569,18 +3572,18 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        void *ptr,
                        size_t alignment = 0);
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments = NULL);
       template<typename T, int DIM>
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        DeferredBuffer<T,DIM> &buffer);
-      void return_data(const DomainPoint &shape,
+      void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        Realm::RegionInstance instance);
     };

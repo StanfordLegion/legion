@@ -5221,7 +5221,7 @@ namespace Legion {
                                        Runtime *rt, const bool global,
                                        const bool valid)
       : Collectable(), runtime(rt), context(ctx),
-        req(r), instance_set(is), shape(), index(i), 
+        req(r), instance_set(is), extents(), index(i), 
         created_region(
           (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
         global_indexing(global)
@@ -5232,7 +5232,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(const OutputRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL),
-        req(), instance_set(), shape(), index(-1U), 
+        req(), instance_set(), extents(), index(-1U), 
         created_region(false), global_indexing(false)
     //--------------------------------------------------------------------------
     {
@@ -5289,7 +5289,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(const DomainPoint &new_shape,
+    void OutputRegionImpl::return_data(const DomainPoint &new_extents,
                                        FieldID field_id,
                                        uintptr_t ptr,
                                        size_t alignment,
@@ -5308,19 +5308,19 @@ namespace Legion {
           context->owner_task->get_unique_op_id());
       }
 
-      if (shape.dim != 0 && new_shape != shape)
+      if (extents.dim != 0 && new_extents != extents)
       {
         std::stringstream ss;
         ss << "Output region " << index << " of task "
            << context->owner_task->get_task_name() << " (UID: "
            << context->owner_task->get_unique_op_id() << ") has already been "
-           << "initialized to shape " << shape << ", but the new output data "
-           << "has shape " << new_shape << ". You must return data having "
-           << "the same shape to all the fields in the same output region.";
+           << "initialized to extents " << extents << ", but the new output "
+           << "has extents " << new_extents << ". You must return data having "
+           << "the same extents to all the fields in the same output region.";
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, "%s", ss.str().c_str());
       }
       else
-        shape = new_shape;
+        extents = new_extents;
 
       if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
       {
@@ -5336,14 +5336,14 @@ namespace Legion {
       info.eager_pool = eager_pool;
       // Sanitize the pointer when the size is 0
       size_t num_elements = 1;
-      for (int32_t dim = 0; dim < shape.dim; ++dim)
-        num_elements *= shape[dim];
+      for (int32_t dim = 0; dim < extents.dim; ++dim)
+        num_elements *= extents[dim];
       info.ptr = num_elements != 0 ? ptr : 0;
       info.alignment = alignment;
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(const DomainPoint &shape,
+    void OutputRegionImpl::return_data(const DomainPoint &extents,
                                        std::map<FieldID,void*> ptrs,
                                        std::map<FieldID,size_t> *_alignments)
     //--------------------------------------------------------------------------
@@ -5357,7 +5357,7 @@ namespace Legion {
       {
         std::map<FieldID,size_t>::iterator finder = alignments.find(it->first);
         size_t alignment = finder != alignments.end() ? finder->second : 0;
-        return_data(shape,
+        return_data(extents,
                     it->first,
                     reinterpret_cast<uintptr_t>(it->second),
                     alignment,
@@ -5366,7 +5366,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(const DomainPoint &shape,
+    void OutputRegionImpl::return_data(const DomainPoint &extents,
                                        FieldID field_id,
                                        PhysicalInstance instance)
     //--------------------------------------------------------------------------
@@ -5386,25 +5386,8 @@ namespace Legion {
       // now escapes the context.
       uintptr_t ptr = context->escape_task_local_instance(instance);
 
-      size_t alignment = 0;
-      switch (shape.dim)
-      {
-#define DIMFUNC(DIM)                                                    \
-        case DIM:                                                     \
-          {                                                           \
-            const Realm::InstanceLayout<DIM,coord_t> *layout =        \
-              static_cast<const Realm::InstanceLayout<DIM,coord_t>*>( \
-                instance.get_layout());                               \
-            alignment = layout->alignment_reqd;                       \
-            break;                                                    \
-          }
-        LEGION_FOREACH_N(DIMFUNC)
-#undef DIMFUNC
-        default:
-          assert(false);
-      }
-
-      return_data(shape, field_id, ptr, alignment, true);
+      return_data(
+          extents, field_id, ptr, instance.get_layout()->alignment_reqd, true);
 
       // This instance was escaped so the context is no longer responsible
       // for destroying it when the task is done, we take that responsibility
@@ -5439,7 +5422,7 @@ namespace Legion {
           if (!global_indexing)
           {
             DomainPoint index_point = context->owner_task->index_point;
-            domain.dim = index_point.dim + shape.dim;
+            domain.dim = index_point.dim + extents.dim;
 #ifdef DEBUG_LEGION
             assert(domain.dim <= LEGION_MAX_DIM);
 #endif
@@ -5448,11 +5431,11 @@ namespace Legion {
               domain.rect_data[idx] = index_point[idx];
               domain.rect_data[idx + domain.dim] = index_point[idx];
             }
-            for (int idx = 0; idx < shape.dim; ++idx)
+            for (int idx = 0; idx < extents.dim; ++idx)
             {
               int off = index_point.dim + idx;
               domain.rect_data[off] = 0;
-              domain.rect_data[domain.dim + off] = shape[idx] - 1;
+              domain.rect_data[domain.dim + off] = extents[idx] - 1;
             }
 
             runtime->forest->set_pending_space_domain(
@@ -5471,8 +5454,8 @@ namespace Legion {
         }
         else
         {
-          DomainPoint lo; lo.dim = shape.dim;
-          domain = Domain(lo, shape - 1);
+          DomainPoint lo; lo.dim = extents.dim;
+          domain = Domain(lo, extents - 1);
           index_node->set_domain(domain, runtime->address_space);
         }
       }
@@ -5535,8 +5518,8 @@ namespace Legion {
         if (alignment == 0)
           alignment = field_size;
         size_t num_elements = 1;
-        for (int32_t dim = 0; dim < shape.dim; ++dim)
-          num_elements *= shape[dim];
+        for (int32_t dim = 0; dim < extents.dim; ++dim)
+          num_elements *= extents[dim];
         size_t bytes_used =
           field_size > 0
           ? (num_elements * field_size + alignment - 1) / alignment * alignment

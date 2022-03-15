@@ -1071,6 +1071,33 @@ namespace Legion {
      */
     class IndexTask : public CollectiveInstanceCreator<MultiTask>,
                       public LegionHeapify<IndexTask> {
+    private:
+      struct OutputRegionTagCreator {
+      public:
+        OutputRegionTagCreator(TypeTag *_type_tag, int _launch_ndim)
+          : type_tag(_type_tag), launch_ndim(_launch_ndim) { }
+        template<typename DIM, typename COLOR_T>
+        static inline void demux(OutputRegionTagCreator *creator)
+        {
+          switch (DIM::N + creator->launch_ndim)
+          {
+#define DIMFUNC(DIM)                                             \
+            case DIM:                                            \
+              {                                                  \
+                *creator->type_tag =                             \
+                  NT_TemplateHelper::encode_tag<DIM, COLOR_T>(); \
+                break;                                           \
+              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+            default:
+              assert(false);
+          }
+        }
+      private:
+        TypeTag *type_tag;
+        int launch_ndim;
+      };
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
