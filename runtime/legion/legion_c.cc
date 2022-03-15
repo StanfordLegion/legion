@@ -2689,6 +2689,7 @@ legion_output_requirement_t
 legion_output_requirement_create(legion_field_space_t field_space_,
                                  legion_field_id_t *fields_,
                                  size_t fields_size,
+                                 int dim,
                                  bool global_indexing)
 {
   FieldSpace field_space = CObjectWrapper::unwrap(field_space_);
@@ -2698,6 +2699,7 @@ legion_output_requirement_create(legion_field_space_t field_space_,
 
   OutputRequirement *req = new OutputRequirement(field_space,
                                                  fields,
+                                                 dim,
                                                  global_indexing);
   return CObjectWrapper::wrap(req);
 }
