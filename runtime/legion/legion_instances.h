@@ -177,18 +177,14 @@ namespace Legion {
                       CollectiveMapping *mapping = NULL);
       virtual ~InstanceManager(void);
     public:
+      virtual PointerConstraint 
+                     get_pointer_constraint(const DomainPoint &point) const = 0;
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_accessor(void) const = 0;
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(FieldID fid) const = 0;
-    public: 
-      virtual ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const = 0;
-      virtual ApEvent get_unique_event(void) const = 0;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
-      virtual PointerConstraint 
-                     get_pointer_constraint(const DomainPoint &key) const = 0;
+          get_field_accessor(FieldID fid) const = 0; 
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_physical_manager(void) const;
@@ -218,9 +214,8 @@ namespace Legion {
                     it != fields.end(); it++) it->second = false; } 
       inline void remove_space_fields(std::set<FieldID> &fields) const
         { if (layout != NULL) layout->remove_space_fields(fields);
-          else fields.clear(); }
+          else fields.clear(); } 
     public:
-      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const; 
       bool entails(LayoutConstraints *constraints, const DomainPoint &key,
                    const LayoutConstraint **failed_constraint) const;
       bool entails(const LayoutConstraintSet &constraints, 
@@ -309,16 +304,21 @@ namespace Legion {
                       const ReductionOp *rop, FieldSpaceNode *node,
                       IndexSpaceExpression *index_domain, 
                       const void *piece_list, size_t piece_list_size,
-                      RegionTreeID tree_id, ApEvent unique, 
-                      bool register_now, bool shadow_instance = false,
+                      RegionTreeID tree_id, bool register_now,
+                      bool shadow_instance = false,
                       bool output_instance = false,
                       CollectiveMapping *mapping = NULL);
-      virtual ~PhysicalManager(void);
-    public:
-      virtual ApEvent get_unique_event(void) const { return unique_event; }
+      virtual ~PhysicalManager(void); 
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
-                     const std::vector<LogicalRegion> &regions) const; 
+                                 const std::vector<LogicalRegion> &regions,
+                                 const DomainPoint &collective_point) const; 
+    public: 
+      virtual ApEvent get_use_event(ApEvent e = ApEvent::NO_AP_EVENT) const = 0;
+      virtual ApEvent get_unique_event(const DomainPoint &point) const = 0;
+      virtual PhysicalInstance get_instance(const DomainPoint &point) const = 0;
+      virtual PointerConstraint 
+                     get_pointer_constraint(const DomainPoint &point) const = 0;
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -383,7 +383,6 @@ namespace Legion {
       virtual void force_deletion(void) = 0;
       virtual void set_garbage_collection_priority(MapperID mapper_id, 
                 Processor p, GCPriority priority, const DomainPoint &point) = 0;
-      virtual RtEvent get_instance_ready_event(void) const = 0;
       virtual RtEvent attach_external_instance(void) = 0;
       virtual RtEvent detach_external_instance(void) = 0;
       virtual bool has_visible_from(const std::set<Memory> &memories) const = 0;
@@ -442,9 +441,7 @@ namespace Legion {
     public:
       size_t instance_footprint;
       const ReductionOp *reduction_op;
-      const ReductionOpID redop;
-      // Unique identifier event that is common across nodes
-      const ApEvent unique_event;
+      const ReductionOpID redop; 
       const void *const piece_list;
       const size_t piece_list_size;
       const bool shadow_instance;
@@ -587,9 +584,10 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
-      virtual RtEvent get_instance_ready_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const 
                                                    { return instance; }
+      virtual ApEvent get_unique_event(const DomainPoint &point) const 
+        { return unique_event; }
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;
     public:
@@ -697,6 +695,8 @@ namespace Legion {
                                              Deserializer &derez);
     public:
       MemoryManager *const memory_manager;
+      // Unique identifier event that is common across nodes
+      const ApEvent unique_event;
       PhysicalInstance instance;
       // Event that needs to trigger before we can start using
       // this physical instance.
@@ -748,7 +748,7 @@ namespace Legion {
         DeferCollectiveManagerArgs(DistributedID d, AddressSpaceID own, 
             IndexSpace p, size_t tp, CollectiveMapping *map, size_t f,
             IndexSpaceExpression *lx, const PendingRemoteExpression &pending,
-            FieldSpace h, RegionTreeID tid, LayoutConstraintID l, ApBarrier use,
+            FieldSpace h, RegionTreeID tid, LayoutConstraintID l,
             ReductionOpID redop, const void *piece_list,size_t piece_list_size,
             const AddressSpaceID source, bool multi_instance);
       public:
@@ -763,7 +763,6 @@ namespace Legion {
         const FieldSpace handle;
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
-        const ApBarrier use_barrier;
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
@@ -800,6 +799,20 @@ namespace Legion {
         const AddressSpaceID source;
         const bool symbolic;
       };
+    protected:
+      struct RemoteInstInfo {
+        PhysicalInstance instance;
+        ApEvent unique_event;
+        unsigned index;
+      public:
+        inline bool operator==(const RemoteInstInfo &rhs) const
+        {
+          if (instance != rhs.instance) return false;
+          if (unique_event != rhs.unique_event) return false;
+          if (index != rhs.index) return false;
+          return true;
+        }
+      };
     public:
       CollectiveManager(RegionTreeForest *ctx, DistributedID did,
                         AddressSpaceID owner_space, IndexSpaceNode *point_space,
@@ -809,8 +822,7 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApBarrier unique_barrier, bool external_instance,
-                        bool multi_instance);
+                        bool external_instance, bool multi_instance);
       CollectiveManager(const CollectiveManager &rhs);
       virtual ~CollectiveManager(void);
     public:
@@ -825,13 +837,14 @@ namespace Legion {
       bool is_first_local_point(const DomainPoint &point) const;
     public:
       void record_point_instance(const DomainPoint &point,
-                                 PhysicalInstance instance);
+                                 PhysicalInstance instance,
+                                 ApEvent ready_event);
     public:
       virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
-      virtual RtEvent get_instance_ready_event(void) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const;
+      virtual ApEvent get_unique_event(const DomainPoint &point) const;
+      virtual PhysicalInstance get_instance(const DomainPoint &point) const;
       virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
+                     get_pointer_constraint(const DomainPoint &point) const;
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -873,8 +886,7 @@ namespace Legion {
       void find_or_forward_physical_instance(AddressSpaceID origin,
             std::set<DomainPoint> &points, RtUserEvent to_trigger);
       void record_remote_physical_instances(
-          const std::map<DomainPoint,
-                         std::pair<PhysicalInstance,unsigned> > &instances);
+            const std::map<DomainPoint,RemoteInstInfo> &instances);
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -1131,8 +1143,8 @@ namespace Legion {
           size_t inst_footprint, IndexSpaceExpression *inst_domain,
           const void *piece_list, size_t piece_list_size, 
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
-          LayoutConstraints *constraints, ApBarrier use_barrier,
-          ReductionOpID redop, bool multi_instance);
+          LayoutConstraints *constraints, ReductionOpID redop, 
+          bool multi_instance);
     public:
       const size_t total_points;
       // This can be NULL if the point set is implicit
@@ -1143,8 +1155,8 @@ namespace Legion {
       std::vector<MemoryManager*> memories; // local memories
       std::vector<PhysicalInstance> instances; // local instances
       std::vector<DomainPoint> instance_points; // points for local instances
-      std::map<DomainPoint,
-               std::pair<PhysicalInstance,unsigned/*index*/> > remote_instances;
+      std::vector<ApEvent> instance_events; // ready events for each instance 
+      std::map<DomainPoint,RemoteInstInfo> remote_instances;
     protected:
       struct UserRendezvous {
       public:
@@ -1185,7 +1197,6 @@ namespace Legion {
       std::map<std::pair<DistributedID,DomainPoint>,
                 std::map<unsigned,Reservation> > view_reservations;
     protected:
-      ApBarrier collective_barrier;
       std::atomic<uint64_t> unique_allreduce_tag;
       RtEvent detached;
       unsigned finalize_messages;
@@ -1225,13 +1236,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
-    public: 
-      virtual ApEvent get_use_event(ApEvent user = ApEvent::NO_AP_EVENT) const;
-      virtual RtEvent get_instance_ready_event(void) const;
-      virtual ApEvent get_unique_event(void) const;
-      virtual PhysicalInstance get_instance(const DomainPoint &key) const;
-      virtual PointerConstraint
-                     get_pointer_constraint(const DomainPoint &key) const;
+      virtual PointerConstraint 
+                     get_pointer_constraint(const DomainPoint &point) const;
       virtual void send_manager(AddressSpaceID target);
     };
 
@@ -1244,7 +1250,7 @@ namespace Legion {
     class PendingCollectiveManager : public Collectable {
     public:
       PendingCollectiveManager(DistributedID did, size_t total_points,
-                               IndexSpace point_space, ApBarrier ready_barrier,
+                               IndexSpace point_space,
                                CollectiveMapping *mapping, bool multi_instance);
       PendingCollectiveManager(const PendingCollectiveManager &rhs) = delete;
       ~PendingCollectiveManager(void);
@@ -1254,7 +1260,6 @@ namespace Legion {
       const DistributedID did;
       const size_t total_points;
       const IndexSpace point_space;
-      const ApBarrier ready_barrier;
       CollectiveMapping *const collective_mapping;
       const bool multi_instance;
     public:

@@ -3387,8 +3387,6 @@ namespace Legion {
               total_point_space = get_collective_space()->handle;
             point_space = total_point_space;
           }
-          const ApBarrier instance_barrier(
-              Realm::Barrier::create_barrier(it->second.total_points));
           bool multi_instance = true;
           std::vector<AddressSpaceID> unique_spaces;
           unique_spaces.reserve(it->second.memory_spaces.size());
@@ -3404,7 +3402,7 @@ namespace Legion {
           CollectiveMapping *collective_manager = new CollectiveMapping(
             unique_spaces, this->runtime->legion_collective_radix);
           managers[it->first] = new PendingCollectiveManager(did,
-              it->second.total_points, point_space, instance_barrier,
+              it->second.total_points, point_space,
               collective_manager, multi_instance);
         }
       }
@@ -4897,9 +4895,10 @@ namespace Legion {
         map_complete_event = mapped_instances[0].get_ready_event();
       if (runtime->legion_spy_enabled)
       {
+        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              mapped_instances);
+                                              mapped_instances, no_point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
@@ -5512,7 +5511,8 @@ namespace Legion {
           runtime->find_layout_constraints(layout_constraint_id);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          InstanceManager *manager = chosen_instances[idx].get_manager();
+          PhysicalManager *manager = 
+            chosen_instances[idx].get_physical_manager();
           const LayoutConstraint *conflict_constraint = NULL;
           if (manager->conflicts(constraints, get_shard_point(), 
                                  &conflict_constraint))
@@ -6652,7 +6652,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                                 idx, src_requirements[idx],
-                                                src_targets);
+                                                src_targets, index_point);
         ApEvent local_init_precondition = init_precondition;
         // See if we have any atomic locks we have to acquire
         if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
@@ -6753,7 +6753,7 @@ namespace Legion {
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-              dst_idx, dst_requirements[idx], dst_targets);
+              dst_idx, dst_requirements[idx], dst_targets, index_point);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE; 
@@ -6795,7 +6795,8 @@ namespace Legion {
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                gather_idx, src_indirect_requirements[idx], gather_targets);
+                gather_idx, src_indirect_requirements[idx],
+                gather_targets, index_point);
         }
         if (idx < dst_indirect_requirements.size())
         {
@@ -6835,7 +6836,8 @@ namespace Legion {
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                scatter_idx, dst_indirect_requirements[idx], scatter_targets);
+                scatter_idx, dst_indirect_requirements[idx],
+                scatter_targets, index_point);
         }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
@@ -7173,7 +7175,7 @@ namespace Legion {
       {
         const InstanceRef &ref = insts[idx];
         records.push_back(IndirectRecord(ref.get_valid_fields(),
-              ref.get_manager(), key, space, dom));
+              ref.get_physical_manager(), key, space, dom));
       }
       return std::make_pair(local_pre, local_post);
     }
@@ -8010,8 +8012,8 @@ namespace Legion {
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper selected a collective instance "
                         "for %s region requirement at index %d but copy "
-                        "(ID %lld) launched in task %s (ID %lld) is an index "
-                        "copy operation.", mapper->get_mapper_name(), 
+                        "(ID %lld) launched in task %s (ID %lld) is not an "
+                        "index copy operation.", mapper->get_mapper_name(), 
                         get_req_type_name<REQ_TYPE>(), ridx,
                         get_unique_op_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
@@ -9060,7 +9062,8 @@ namespace Legion {
           {
             const InstanceRef &ref = insts[idx];
             src_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
+                  ref.get_valid_fields(), ref.get_physical_manager(), 
+                  key, space, dom));
           }
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
@@ -9091,7 +9094,8 @@ namespace Legion {
           {
             const InstanceRef &ref = insts[idx];
             dst_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
+                  ref.get_valid_fields(), ref.get_physical_manager(),
+                  key, space, dom));
           }
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
@@ -11565,9 +11569,10 @@ namespace Legion {
         Runtime::trigger_event(NULL, close_event);
       if (runtime->legion_spy_enabled)
       {
+        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
                                               0/*idx*/, requirement,
-                                              target_instances);
+                                              target_instances, no_point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, close_event, 
                                         completion_event);
@@ -13231,9 +13236,10 @@ namespace Legion {
                                    acquire_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
+        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              restricted_instances);
+                                              restricted_instances, no_point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
                                         completion_event);
@@ -14162,9 +14168,10 @@ namespace Legion {
                             release_complete, init_precondition);
       if (runtime->legion_spy_enabled)
       {
+        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              restricted_instances);
+                                              restricted_instances, no_point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, release_complete,
                                         completion_event);
@@ -17863,7 +17870,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              mapped_instances);
+                                              mapped_instances, index_point);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
@@ -17932,7 +17939,7 @@ namespace Legion {
           instances.resize(instances.size() + 1);
           FieldDataDescriptor &desc = instances.back();
           const InstanceRef &ref = mapped_insts[0];
-          InstanceManager *manager = ref.get_manager();
+          PhysicalManager *manager = ref.get_physical_manager();
           desc.index_space = handle;
           desc.inst = manager->get_instance(key);
           desc.field_offset = manager->layout->find_field_info(
@@ -17969,7 +17976,7 @@ namespace Legion {
         instances.resize(1);
         FieldDataDescriptor &desc = instances[0];
         const InstanceRef &ref = mapped_insts[0];
-        InstanceManager *manager = ref.get_manager();
+        PhysicalManager *manager = ref.get_physical_manager();
         desc.index_space = handle;
         desc.inst = manager->get_instance(key);
         desc.field_offset = manager->layout->find_field_info(
@@ -18128,7 +18135,19 @@ namespace Legion {
         {
           CollectiveManager *collective_manager = 
             manager->as_collective_manager();
-          if (!collective_manager->contains_point(index_point))
+          if (!is_index_space)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper selected a "
+                        "collective instance for the region requirement but "
+                        "point partition (ID %lld) launched in task %s "
+                        "(ID %lld) is not an index dependent partition "
+                        "operation. Collective instances can only be mapped "
+                        "by index space operations.",
+                        mapper->get_mapper_name(), 
+                        get_unique_op_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+          else if (!collective_manager->contains_point(index_point))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected a "
@@ -22735,8 +22754,9 @@ namespace Legion {
         detach_event = effects_done;
       if (runtime->legion_spy_enabled)
       {
+        const DomainPoint no_point;
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
-                                              requirement, references);
+                                              requirement, references,no_point);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, detach_event,
                                         completion_event);

@@ -4069,7 +4069,8 @@ namespace Legion {
           {
             const InstanceRef &ref = instances[idx];
             src_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
+                  ref.get_valid_fields(), ref.get_physical_manager(),
+                  key, space, dom));
           }
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
@@ -4123,7 +4124,8 @@ namespace Legion {
           {
             const InstanceRef &ref = instances[idx];
             dst_records[index].push_back(IndirectRecord(
-                  ref.get_valid_fields(), ref.get_manager(), key, space, dom));
+                  ref.get_valid_fields(), ref.get_physical_manager(),
+                  key, space, dom));
           }
           if (index >= exchange_pre_events.size())
             exchange_pre_events.resize(index+1);
@@ -7336,7 +7338,8 @@ namespace Legion {
       {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
-                                              mapped_instances);
+                                              mapped_instances,
+                                              get_shard_point());
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
@@ -7501,7 +7504,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
                                               RtBarrier &resource_bar,
-                                              ApBarrier &attach_bar,
                                               bool collective_inst,
                                               bool dedup_across_shards,
                                               bool first_local_shard)
@@ -7550,8 +7552,6 @@ namespace Legion {
           point_space = ctx->find_collective_map_launch_space();
         else
           point_space = shard_space;
-        attach_barrier = attach_bar; 
-        ctx->advance_replicate_barrier(attach_bar, ctx->total_shards);
         const ShardID owner_shard = ctx->get_next_attach_did_origin();
         did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_77);
@@ -7609,7 +7609,6 @@ namespace Legion {
       activate_attach_op();
       shard_space = IndexSpace::NO_SPACE;
       point_space = IndexSpace::NO_SPACE;
-      attach_barrier = ApBarrier::NO_AP_BARRIER;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       shard_fn = NULL;
       exchange_index = 0;
@@ -7944,20 +7943,18 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
       {
-        ApEvent attach_event = 
-          collective_instance ? attach_barrier : ready_event;
         // We always need a unique ready event for Legion Spy
         if (!ready_event.exists())
         {
           ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
           Runtime::trigger_event(NULL, rename_ready);
-          attach_event = rename_ready;
+          ready_event = rename_ready;
         }
         for (std::set<FieldID>::const_iterator it = 
               requirement.privilege_fields.begin(); it !=
               requirement.privilege_fields.end(); it++)
           LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, 
-                                          *it, attach_event);
+                                          *it, ready_event);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
                                         completion_event);
@@ -8007,7 +8004,7 @@ namespace Legion {
               &shard_manager->get_collective_mapping(), node->row_source,
               NULL/*piece list*/, 0/*no piece list*/, field_node,
               node->handle.get_tree_id(), layout, 0/*redop*/,
-              true/*register now*/, footprint, attach_barrier,
+              true/*register now*/, footprint,
               true/*external instance*/, false/*not multi instance*/);
           // If we're the owner address space, record that we have 
           // instances on all other address spaces in the control
@@ -8041,7 +8038,7 @@ namespace Legion {
         if (!deduplicate_across_shards)
         {
           const DomainPoint point(repl_ctx->owner_shard->shard_id);
-          manager->record_point_instance(point, instance);
+          manager->record_point_instance(point, instance, ready_event);
           // Make sure that all the shards are done recording before we proceed
           shard_manager->barrier_shard_local(context_index, exchange_index++);
         }
@@ -8062,18 +8059,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(point.get_dim() == 1); // test if point was set
 #endif
-          manager->record_point_instance(point, instance);
+          manager->record_point_instance(point, instance, ready_event);
           shard_manager->exchange_shard_local_op_data(context_index,
                                           exchange_index++, manager);
         }
         else
-        {
           manager = shard_manager->find_shard_local_op_data<CollectiveManager*>(
                                                context_index, exchange_index++);
-          // Do the extra arrivals on the barrier since it is expecting
-          // one arrival per shard
-          Runtime::phase_barrier_arrive(attach_barrier, 1/*count*/);
-        }
         return manager;
       }
       else
@@ -8410,7 +8402,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
-                                              requirement, references);
+                                              requirement, references,
+                                              get_collective_instance_point());
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, detach_event,
                                         completion_event);
@@ -10372,8 +10365,6 @@ namespace Legion {
         // External resource barrier for synchronizing attach/detach ops
         attach_resource_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        attach_instance_barrier =
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -10461,7 +10452,6 @@ namespace Legion {
           deletion_mapping_barrier.destroy_barrier();
           deletion_execution_barrier.destroy_barrier();
           attach_resource_barrier.destroy_barrier();
-          attach_instance_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
           resource_return_barrier.destroy_barrier();
           trace_recording_barrier.destroy_barrier();
@@ -10690,7 +10680,6 @@ namespace Legion {
           assert(deletion_mapping_barrier.exists());
           assert(deletion_execution_barrier.exists());
           assert(attach_resource_barrier.exists());
-          assert(attach_instance_barrier.exists());
           assert(mapping_fence_barrier.exists());
           assert(resource_return_barrier.exists());
           assert(trace_recording_barrier.exists());
@@ -10707,7 +10696,6 @@ namespace Legion {
           rez.serialize(deletion_mapping_barrier);
           rez.serialize(deletion_execution_barrier);
           rez.serialize(attach_resource_barrier);
-          rez.serialize(attach_instance_barrier);
           rez.serialize(mapping_fence_barrier);
           rez.serialize(resource_return_barrier);
           rez.serialize(trace_recording_barrier);
@@ -10789,7 +10777,6 @@ namespace Legion {
         derez.deserialize(deletion_mapping_barrier);
         derez.deserialize(deletion_execution_barrier);
         derez.deserialize(attach_resource_barrier);
-        derez.deserialize(attach_instance_barrier);
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(resource_return_barrier);
         derez.deserialize(trace_recording_barrier);

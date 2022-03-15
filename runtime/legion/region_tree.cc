@@ -36,17 +36,17 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
+    IndirectRecord::IndirectRecord(const FieldMask &m, PhysicalManager *p,
                const DomainPoint &key, IndexSpace s, const Domain &d)
       : fields(m),inst(p->get_instance(key)),
-        instance_event(p->get_unique_event()),
+        instance_event(p->get_unique_event(key)),
         index_space(s), domain(d)
     //--------------------------------------------------------------------------
     {
     }
 #else
     //--------------------------------------------------------------------------
-    IndirectRecord::IndirectRecord(const FieldMask &m, InstanceManager *p,
+    IndirectRecord::IndirectRecord(const FieldMask &m, PhysicalManager *p,
                const DomainPoint &key, IndexSpace s, const Domain &d)
       : fields(m), inst(p->get_instance(key)), domain(d)
     //--------------------------------------------------------------------------
@@ -2836,13 +2836,13 @@ namespace Legion {
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
 #endif
+      PhysicalManager *idx_manager = idx_target.get_physical_manager();
       copy_expr->construct_indirections(src_indexes, idx_field, 
                src_req.region.get_index_space().get_type_tag(), 
-               gather_is_range, 
-               idx_target.get_manager()->get_instance(op->index_point),
+               gather_is_range, idx_manager->get_instance(op->index_point),
                src_records, indirections, indirection_indexes,
 #ifdef LEGION_SPY
-               indirect_id, idx_target.get_manager()->get_unique_event(),
+               indirect_id, idx_manager->get_unique_event(op->index_point),
 #endif
                possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
@@ -3004,13 +3004,13 @@ namespace Legion {
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
 #endif
+      PhysicalManager *idx_manager = idx_target.get_physical_manager();
       copy_expr->construct_indirections(dst_indexes, idx_field, 
                dst_req.region.get_index_space().get_type_tag(), 
-               scatter_is_range, 
-               idx_target.get_manager()->get_instance(op->index_point),
+               scatter_is_range, idx_manager->get_instance(op->index_point),
                dst_records, indirections, indirection_indexes,
 #ifdef LEGION_SPY
-               indirect_id, idx_target.get_manager()->get_unique_event(),
+               indirect_id, idx_manager->get_unique_event(op->index_point),
 #endif
                possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
@@ -3182,26 +3182,26 @@ namespace Legion {
 #ifdef LEGION_SPY
       const unsigned indirect_id = runtime->get_unique_indirections_id();
 #endif
+      PhysicalManager *src_idx_manager = src_idx_target.get_physical_manager();
       copy_expr->construct_indirections(src_indexes, src_idx_field,
                src_req.region.get_index_space().get_type_tag(),
-               both_are_range, 
-               src_idx_target.get_manager()->get_instance(op->index_point),
+               both_are_range, src_idx_manager->get_instance(op->index_point),
                src_records, indirections, src_indirection_indexes,
 #ifdef LEGION_SPY
-               indirect_id, src_idx_target.get_manager()->get_unique_event(),
+               indirect_id, src_idx_manager->get_unique_event(op->index_point),
 #endif
                possible_src_out_of_range, false/*possible aliasing*/);
 #ifdef DEBUG_LEGION
       assert(src_indirection_indexes.size() == src_req.instance_fields.size());
 #endif
       std::vector<unsigned> dst_indirection_indexes;
+      PhysicalManager *dst_idx_manager = dst_idx_target.get_physical_manager();
       copy_expr->construct_indirections(dst_indexes, dst_idx_field,
                dst_req.region.get_index_space().get_type_tag(),
-               both_are_range, 
-               dst_idx_target.get_manager()->get_instance(op->index_point),
+               both_are_range, dst_idx_manager->get_instance(op->index_point),
                dst_records, indirections, dst_indirection_indexes,
 #ifdef LEGION_SPY
-               indirect_id, dst_idx_target.get_manager()->get_unique_event(),
+               indirect_id, dst_idx_manager->get_unique_event(op->index_point),
 #endif
                possible_dst_out_of_range, possible_dst_aliasing);
 #ifdef DEBUG_LEGION
@@ -3747,11 +3747,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::log_mapping_decision(const UniqueID uid, 
-                                                TaskContext *context,
-                                                const unsigned index,
-                                                const RegionRequirement &req,
-                                                const InstanceSet &targets,
-                                                bool postmapping)
+                                        TaskContext *context,
+                                        const unsigned index,
+                                        const RegionRequirement &req,
+                                        const InstanceSet &targets,
+                                        const DomainPoint &collective_point,
+                                        bool postmapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3767,15 +3768,19 @@ namespace Legion {
         InstanceManager *manager = inst.get_manager();
         std::vector<FieldID> valid_fields;
         node->get_field_set(valid_mask, context, valid_fields);
+        ApEvent inst_event; // default to virtual manager
+        if (manager->is_physical_manager())
+        {
+          PhysicalManager *man = manager->as_physical_manager();
+          inst_event = man->get_unique_event(collective_point);
+        }
         for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
               it != valid_fields.end(); it++)
         {
           if (postmapping)
-            LegionSpy::log_post_mapping_decision(uid, index, *it,
-                                                 manager->get_unique_event());
+            LegionSpy::log_post_mapping_decision(uid, index, *it, inst_event);
           else
-            LegionSpy::log_mapping_decision(uid, index, *it,
-                                            manager->get_unique_event());
+            LegionSpy::log_mapping_decision(uid, index, *it, inst_event);
         }
       }
     }

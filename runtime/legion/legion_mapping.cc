@@ -112,7 +112,7 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
-      return impl->get_instance(DomainPoint()).id;
+      return impl->as_physical_manager()->get_instance(DomainPoint()).id;
     }
 
     //--------------------------------------------------------------------------
@@ -283,7 +283,10 @@ namespace Legion {
 					const PhysicalInstance& p)
     //--------------------------------------------------------------------------
     {
-      return os << p.impl->get_instance(DomainPoint());
+      if (!p.impl->is_physical_manager())
+        return os << Realm::RegionInstance::NO_INST;
+      else
+        return os << p.impl->as_physical_manager()->get_instance(DomainPoint());
     }
 
     /////////////////////////////////////////////////////////////

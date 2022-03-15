@@ -7995,7 +7995,17 @@ namespace Legion {
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
-            manager->log_instance_creation(creator_id, processor, regions);
+          {
+            if (point == NULL)
+            {
+              const DomainPoint no_point;
+              manager->log_instance_creation(creator_id, processor,
+                                             regions, no_point);
+            }
+            else
+              manager->log_instance_creation(creator_id, processor,
+                                             regions, *point);
+          }
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -8077,7 +8087,17 @@ namespace Legion {
         if (manager != NULL)
         {
           if (runtime->legion_spy_enabled)
-            manager->log_instance_creation(creator_id, processor, regions);
+          {
+            if (point == NULL)
+            {
+              const DomainPoint no_point;
+              manager->log_instance_creation(creator_id, processor,
+                                             regions, no_point);
+            }
+            else
+              manager->log_instance_creation(creator_id, processor,
+                                             regions, *point);
+          }
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -8176,7 +8196,8 @@ namespace Legion {
           {
             success = true;
             if (runtime->legion_spy_enabled)
-              manager->log_instance_creation(creator_id, processor, regions);
+              manager->log_instance_creation(creator_id, processor,
+                                             regions, dummy_point);
             record_created_instance(manager, acquire, mapper_id, processor,
                                     priority, remote);
             result = MappingInstance(manager);
@@ -8279,7 +8300,8 @@ namespace Legion {
           {
             success = true;
             if (runtime->legion_spy_enabled)
-              manager->log_instance_creation(creator_id, processor, regions);
+              manager->log_instance_creation(creator_id, processor,
+                                             regions, dummy_point);
             record_created_instance(manager, acquire, mapper_id, processor,
                                     priority, remote);
             result = MappingInstance(manager);

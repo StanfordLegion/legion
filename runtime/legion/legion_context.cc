@@ -873,6 +873,7 @@ namespace Legion {
       std::vector<MappingInstance> instances(1, 
             Mapping::PhysicalInstance::get_virtual_instance());
       const UniqueID unique_op_id = get_unique_id();
+      const DomainPoint &index_point = owner_task->index_point;
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -887,7 +888,7 @@ namespace Legion {
             it->second, instances, instance_set, bad_tree, 
             missing_fields, NULL, unacquired, false/*do acquire_checks*/);
         runtime->forest->log_mapping_decision(unique_op_id, this,
-            it->first, it->second, instance_set);
+            it->first, it->second, instance_set, index_point);
       }
     } 
 
@@ -1257,7 +1258,7 @@ namespace Legion {
                 req, instances, instance_set, bad_tree, 
                 missing_fields, NULL, unacquired, false/*do acquire_checks*/);
             runtime->forest->log_mapping_decision(get_unique_id(), this,
-                it->first, req, instance_set);
+                it->first, req, instance_set, owner_task->index_point);
           }
         }
       }
@@ -1293,6 +1294,7 @@ namespace Legion {
         std::vector<MappingInstance> instances(1, 
               Mapping::PhysicalInstance::get_virtual_instance());
         const UniqueID unique_op_id = get_unique_id();
+        const DomainPoint &index_point = owner_task->index_point;
         AutoLock priv_lock(privilege_lock);
         for (std::map<unsigned,RegionRequirement>::iterator it = 
               created_requirements.begin(); it != 
@@ -1318,7 +1320,7 @@ namespace Legion {
                   it->second, instances, instance_set, bad_tree, 
                   missing_fields, NULL, unacquired, false/*do acquire_checks*/);
               runtime->forest->log_mapping_decision(unique_op_id, this,
-                  it->first, it->second, instance_set);
+                  it->first, it->second, instance_set, index_point);
               // Then do the result of the normal operations
               delete_reqs.resize(delete_reqs.size()+1);
               RegionRequirement &req = delete_reqs.back();
@@ -11108,7 +11110,6 @@ namespace Legion {
       deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
       deletion_execution_barrier = manager->get_deletion_execution_barrier();
       attach_resource_barrier = manager->get_attach_resource_barrier();
-      attach_instance_barrier = manager->get_attach_instance_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       resource_return_barrier = manager->get_resource_return_barrier();
       trace_recording_barrier = manager->get_trace_recording_barrier();
@@ -17809,8 +17810,7 @@ namespace Legion {
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher);
       attach_op->initialize_replication(this, attach_resource_barrier,
-          attach_instance_barrier, launcher.collective, 
-          launcher.deduplicate_across_shards,
+          launcher.collective, launcher.deduplicate_across_shards,
           shard_manager->is_first_local_shard(owner_shard));
 
       bool parent_conflict = false, inline_conflict = false;

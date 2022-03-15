@@ -832,21 +832,6 @@ namespace Legion {
       if ((instance_domain != NULL) && 
           instance_domain->remove_nested_expression_reference(did))
         delete instance_domain;
-    } 
-
-    //--------------------------------------------------------------------------
-    bool InstanceManager::meets_region_tree(
-                                const std::vector<LogicalRegion> &regions) const
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++)
-      {
-        // Check to see if the region tree IDs are the same
-        if (it->get_field_space() != tree_id)
-          return false;
-      }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -958,7 +943,7 @@ namespace Legion {
                                      FieldSpaceNode *node, 
                                      IndexSpaceExpression *index_domain, 
                                      const void *pl, size_t pl_size,
-                                     RegionTreeID tree_id, ApEvent u_event,
+                                     RegionTreeID tree_id,
                                      bool register_now, bool shadow,
                                      bool output, CollectiveMapping *mapping)
       : InstanceManager(ctx, owner_space, did, layout, node,
@@ -969,8 +954,7 @@ namespace Legion {
              index_domain->create_layout_expression(pl, pl_size) : index_domain,
           tree_id, register_now, mapping), 
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
-        unique_event(u_event), piece_list(pl), piece_list_size(pl_size), 
-        shadow_instance(shadow)
+        piece_list(pl), piece_list_size(pl_size), shadow_instance(shadow)
     //--------------------------------------------------------------------------
     {
     }
@@ -1006,18 +990,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalManager::log_instance_creation(UniqueID creator_id,
-                Processor proc, const std::vector<LogicalRegion> &regions) const
+                                      Processor proc,
+                                      const std::vector<LogicalRegion> &regions,
+                                      const DomainPoint &collective_point) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(runtime->legion_spy_enabled);
-#endif
-      const ApEvent inst_event = get_unique_event();
+      const ApEvent inst_event = get_unique_event(collective_point);
+      const LayoutConstraints *constraints = layout->constraints;
       LegionSpy::log_physical_instance_creator(inst_event, creator_id, proc.id);
       for (unsigned idx = 0; idx < regions.size(); idx++)
         LegionSpy::log_physical_instance_creation_region(inst_event, 
                                                          regions[idx]);
-      const LayoutConstraints *constraints = layout->constraints;
       LegionSpy::log_instance_specialized_constraint(inst_event,
           constraints->specialized_constraint.kind, 
           constraints->specialized_constraint.redop);
@@ -1744,9 +1727,10 @@ namespace Legion {
            (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
-          instance_domain, pl, pl_size, tree_id, u_event, register_now, shadow,
+          instance_domain, pl, pl_size, tree_id, register_now, shadow,
           (k == UNBOUND_INSTANCE_KIND), mapping), memory_manager(memory),
-        instance(inst), use_event(Runtime::create_ap_user_event(NULL)),
+        unique_event(u_event), instance(inst),
+        use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
         kind(k), external_pointer(-1UL),
@@ -1791,7 +1775,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndividualManager::IndividualManager(const IndividualManager &rhs)
       : PhysicalManager(NULL, NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL, 0, 0, 
-                        ApEvent::NO_AP_EVENT, false, false),
+                        false, false),
         memory_manager(NULL), instance(PhysicalInstance::NO_INST)
     //--------------------------------------------------------------------------
     {
@@ -1944,15 +1928,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndividualManager::get_instance_ready_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return instance_ready;
-    }
-
-    //--------------------------------------------------------------------------
     PointerConstraint IndividualManager::get_pointer_constraint(
-                                                   const DomainPoint &key) const
+                                                 const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
       if (use_event.exists() && !use_event.has_triggered_faultignorant())
@@ -3359,15 +3336,14 @@ namespace Legion {
                                 FieldSpaceNode *node, RegionTreeID tree_id,
                                 LayoutDescription *desc, ReductionOpID redop_id,
                                 bool register_now, size_t footprint,
-                                ApBarrier u_barrier, bool external_instance,
-                                bool multi)
+                                bool external_instance, bool multi)
       : PhysicalManager(ctx, desc, encode_instance_did(did, external_instance,
             (redop_id != 0), true/*collective*/),
           owner_space, footprint, redop_id, (redop_id == 0) ? NULL : 
             ctx->runtime->get_reduction(redop_id),
-          node, instance_domain, pl, pl_size, tree_id, u_barrier, register_now,
+          node, instance_domain, pl, pl_size, tree_id, register_now,
           false/*shadow*/, false/*output*/, mapping),  total_points(total),
-        point_space(points), collective_barrier(u_barrier),
+        point_space(points),
         unique_allreduce_tag(mapping->find_index(local_space)), 
         finalize_messages(0), deleted_or_detached(false), multi_instance(multi)
     //--------------------------------------------------------------------------
@@ -3398,8 +3374,6 @@ namespace Legion {
     {
       if ((point_space != NULL) && point_space->remove_nested_valid_ref(did))
         delete point_space;
-      if (is_owner())
-        collective_barrier.destroy_barrier();
       for (std::map<std::pair<DistributedID,DomainPoint>,
                     std::map<unsigned,Reservation> >::iterator it1 =
             view_reservations.begin(); it1 != view_reservations.end(); it1++)
@@ -3450,9 +3424,8 @@ namespace Legion {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
         for (unsigned idx = 0; idx < instance_points.size(); idx++)
           known_points.insert(instance_points[idx]);
-        for (std::map<DomainPoint,
-                      std::pair<PhysicalInstance,unsigned> >::const_iterator
-              it = remote_instances.begin(); it != remote_instances.end(); it++)
+        for (std::map<DomainPoint,RemoteInstInfo>::const_iterator it =
+              remote_instances.begin(); it != remote_instances.end(); it++)
           known_points.insert(it->first);
       }
       std::vector<DomainPoint> unknown_points;
@@ -3494,9 +3467,8 @@ namespace Legion {
         wait_on.wait();
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-        for (std::map<DomainPoint,
-                      std::pair<PhysicalInstance,unsigned> >::const_iterator
-              it = remote_instances.begin(); it != remote_instances.end(); it++)
+        for (std::map<DomainPoint,RemoteInstInfo>::const_iterator it =
+              remote_instances.begin(); it != remote_instances.end(); it++)
           known_points.insert(it->first);
       }
       for (std::vector<DomainPoint>::const_iterator it =
@@ -3519,8 +3491,7 @@ namespace Legion {
           return true;
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-        std::map<DomainPoint,
-                 std::pair<PhysicalInstance,unsigned> >::const_iterator finder =
+        std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
           remote_instances.find(point);
         if (finder != remote_instances.end())
           return true;
@@ -3566,11 +3537,10 @@ namespace Legion {
           return (idx == 0);
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-        std::map<DomainPoint,
-                 std::pair<PhysicalInstance,unsigned> >::const_iterator finder =
+        std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
           remote_instances.find(point);
         if (finder != remote_instances.end())
-          return (finder->second.second == 0);
+          return (finder->second.index == 0);
       }
       // Broadcast out a request for this remote instance
       std::vector<AddressSpaceID> child_spaces;
@@ -3601,13 +3571,12 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
       AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-      std::map<DomainPoint,
-                 std::pair<PhysicalInstance,unsigned> >::const_iterator finder =
+      std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
           remote_instances.find(point);
 #ifdef DEBUG_LEGION
       assert(finder != remote_instances.end());
 #endif
-      return (finder->second.second == 0);
+      return (finder->second.index == 0);
     }
 
     //--------------------------------------------------------------------------
@@ -3618,14 +3587,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(origin != local_space);
 #endif
-      std::map<DomainPoint,std::pair<PhysicalInstance,unsigned> > found_insts;
+      std::map<DomainPoint,RemoteInstInfo> found_insts;
       for (unsigned idx = 0; idx < instance_points.size(); idx++)
       {
         std::set<DomainPoint>::iterator finder = 
           points.find(instance_points[idx]);
         if (finder == points.end())
           continue;
-        found_insts[instance_points[idx]] = std::make_pair(instances[idx], idx);
+        found_insts[instance_points[idx]] =
+          RemoteInstInfo{instances[idx], instance_events[idx], idx}; 
         points.erase(finder);
         if (points.empty())
           break;
@@ -3636,9 +3606,8 @@ namespace Legion {
         for (std::set<DomainPoint>::iterator it =
               points.begin(); it != points.end(); /*nothing*/)
         {
-          std::map<DomainPoint,
-                   std::pair<PhysicalInstance,unsigned> >::const_iterator 
-            finder = remote_instances.find(*it);
+          std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
+            remote_instances.find(*it);
           if (finder != remote_instances.end())
           {
             found_insts.insert(*finder);
@@ -3660,13 +3629,13 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(COLLECTIVE_REMOTE_INSTANCE_RESPONSE);
           rez.serialize<size_t>(found_insts.size());
-          for (std::map<DomainPoint,
-                        std::pair<PhysicalInstance,unsigned>>::const_iterator
-                it = found_insts.begin(); it != found_insts.end(); it++)
+          for (std::map<DomainPoint,RemoteInstInfo>::const_iterator it =
+                found_insts.begin(); it != found_insts.end(); it++)
           {
             rez.serialize(it->first);
-            rez.serialize(it->second.first);
-            rez.serialize(it->second.second);
+            rez.serialize(it->second.instance);
+            rez.serialize(it->second.unique_event);
+            rez.serialize(it->second.index);
           }
           rez.serialize(ready_event);
         }
@@ -3711,18 +3680,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveManager::record_remote_physical_instances(
-           const std::map<DomainPoint,
-                          std::pair<PhysicalInstance,unsigned> > &new_instances)
+                      const std::map<DomainPoint,RemoteInstInfo> &new_instances)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      for (std::map<DomainPoint,
-                    std::pair<PhysicalInstance,unsigned> >::const_iterator it =
+      for (std::map<DomainPoint,RemoteInstInfo>::const_iterator it =
             new_instances.begin(); it != new_instances.end(); it++)
       {
-        std::map<DomainPoint,
-                 std::pair<PhysicalInstance,unsigned>>::const_iterator finder =
+        std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
           remote_instances.find(it->first);
         if (finder == remote_instances.end())
           remote_instances.insert(*it);
@@ -3738,7 +3704,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveManager::record_point_instance(const DomainPoint &point,
-                                                  PhysicalInstance instance)
+                                       PhysicalInstance instance, ApEvent ready)
     //--------------------------------------------------------------------------
     {
       const Memory mem = instance.get_location();
@@ -3751,22 +3717,67 @@ namespace Legion {
       memories.push_back(memory);
       instances.push_back(instance);
       instance_points.push_back(point);
+      instance_events.push_back(ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveManager::get_use_event(ApEvent user) const
     //--------------------------------------------------------------------------
     {
-      return unique_event;
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    RtEvent CollectiveManager::get_instance_ready_event(void) const
+    ApEvent CollectiveManager::get_unique_event(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
+      // Check the local points first since they are read-only at this point
+      for (unsigned idx = 0; idx < instance_points.size(); idx++)
+        if (instance_points[idx] == point)
+          return instance_events[idx];
+      {
+        AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+        std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
+          remote_instances.find(point);
+        if (finder != remote_instances.end())
+          return finder->second.unique_event;
+      }
+      // Broadcast out a request for this remote instance
+      std::vector<AddressSpaceID> child_spaces;
+      collective_mapping->get_children(local_space, local_space, child_spaces);
+#ifdef DEBUG_LEGION
+      assert(!child_spaces.empty());
+#endif
+      std::vector<RtEvent> ready_events;
+      ready_events.reserve(child_spaces.size());
+      for (std::vector<AddressSpaceID>::const_iterator it =
+            child_spaces.begin(); it != child_spaces.end(); it++)
+      {
+        const RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez; 
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(COLLECTIVE_REMOTE_INSTANCE_REQUEST);
+          rez.serialize<size_t>(1); // total number of points
+          rez.serialize(point);
+          rez.serialize(local_space);
+          rez.serialize(ready_event);
+        }
+        runtime->send_collective_instance_message(*it, rez);
+        ready_events.push_back(ready_event);
+      }
+      const RtEvent wait_on = Runtime::merge_events(ready_events);
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      AutoLock i_lock(inst_lock,1,false/*exclusive*/);
+      std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
+        remote_instances.find(point);
+#ifdef DEBUG_LEGION
+      assert(finder != remote_instances.end());
+#endif
+      return finder->second.unique_event;
     }
 
     //--------------------------------------------------------------------------
@@ -3779,11 +3790,10 @@ namespace Legion {
           return instances[idx];
       {
         AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-        std::map<DomainPoint,
-                 std::pair<PhysicalInstance,unsigned> >::const_iterator finder =
+        std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
           remote_instances.find(p);
         if (finder != remote_instances.end())
-          return finder->second.first;
+          return finder->second.instance;
       }
       // Broadcast out a request for this remote instance
       std::vector<AddressSpaceID> child_spaces;
@@ -3814,21 +3824,20 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
       AutoLock i_lock(inst_lock,1,false/*exclusive*/);
-      std::map<DomainPoint,
-               std::pair<PhysicalInstance,unsigned> >::const_iterator finder =
+      std::map<DomainPoint,RemoteInstInfo>::const_iterator finder =
         remote_instances.find(p);
 #ifdef DEBUG_LEGION
       assert(finder != remote_instances.end());
 #endif
-      return finder->second.first;
+      return finder->second.instance;
     }
 
     //--------------------------------------------------------------------------
     PointerConstraint CollectiveManager::get_pointer_constraint(
-                                                   const DomainPoint &key) const
+                                                 const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
-      const PhysicalInstance instance = get_instance(key);
+      const PhysicalInstance instance = get_instance(point);
       void *inst_ptr = instance.pointer_untyped(0/*offset*/, 0/*elem size*/);
       return PointerConstraint(instance.get_location(), uintptr_t(inst_ptr));
     }
@@ -8257,7 +8266,6 @@ namespace Legion {
         rez.serialize(tree_id);
         rez.serialize(redop);
         rez.serialize<bool>(multi_instance);
-        rez.serialize(unique_event.id);
         layout->pack_layout_description(rez, target);
       }
       context->runtime->send_collective_instance_manager(target, rez);
@@ -8309,9 +8317,6 @@ namespace Legion {
       derez.deserialize(multi_instance);
       ReductionOpID redop;
       derez.deserialize(redop);
-      // Little cheat here on the barrier
-      ApBarrier unique_barrier;
-      derez.deserialize(unique_barrier.id);
 
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
@@ -8337,7 +8342,7 @@ namespace Legion {
           // We need to defer this instance creation
           DeferCollectiveManagerArgs args(did, owner_space, points_handle, 
               total_points, mapping, inst_footprint, inst_domain, pending,
-              handle, tree_id, layout_id, unique_barrier, redop, piece_list,
+              handle, tree_id, layout_id, redop, piece_list,
               piece_list_size, source, multi_instance);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
@@ -8357,7 +8362,7 @@ namespace Legion {
       // If we fall through here we can create the manager now
       create_collective_manager(runtime, did, owner_space, point_space,
           total_points, mapping, inst_footprint, inst_domain, piece_list,
-          piece_list_size, space_node, tree_id, constraints, unique_barrier,
+          piece_list_size, space_node, tree_id, constraints,
           redop, multi_instance);
     }
 
@@ -8366,12 +8371,12 @@ namespace Legion {
             DistributedID d, AddressSpaceID own, IndexSpace points, size_t tot,
             CollectiveMapping *map, size_t f, IndexSpaceExpression *lx, 
             const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, ApBarrier use, ReductionOpID r,
-            const void *pl, size_t pl_size, const AddressSpaceID src, bool m)
+            LayoutConstraintID l, ReductionOpID r, const void *pl,
+            size_t pl_size, const AddressSpaceID src, bool m)
       : LgTaskArgs<DeferCollectiveManagerArgs>(implicit_provenance),
         did(d), owner(own), point_space(points), total_points(tot),
         mapping(map), footprint(f), local_expr(lx), pending(p), handle(h),
-        tree_id(tid), layout_id(l), use_barrier(use), redop(r), piece_list(pl),
+        tree_id(tid), layout_id(l), redop(r), piece_list(pl),
         piece_list_size(pl_size), source(src), multi_instance(m)
     //--------------------------------------------------------------------------
     {
@@ -8398,7 +8403,7 @@ namespace Legion {
       create_collective_manager(runtime, dargs->did, dargs->owner, point_space,
           dargs->total_points, dargs->mapping, dargs->footprint, inst_domain,
           dargs->piece_list, dargs->piece_list_size, space_node, dargs->tree_id,
-          constraints, dargs->use_barrier, dargs->redop, dargs->multi_instance);
+          constraints, dargs->redop, dargs->multi_instance);
       // Remove the local expression reference if necessary
       if ((dargs->local_expr != NULL) &&
           dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
@@ -8468,7 +8473,7 @@ namespace Legion {
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
           RegionTreeID tree_id,LayoutConstraints *constraints,
-          ApBarrier use_barrier, ReductionOpID redop, bool multi_instance)
+          ReductionOpID redop, bool multi_instance)
     //--------------------------------------------------------------------------
     {
       LayoutDescription *layout = 
@@ -8483,15 +8488,15 @@ namespace Legion {
                                             mapping, inst_domain, piece_list, 
                                             piece_list_size, space_node,tree_id,
                                             layout, redop, false/*reg now*/, 
-                                            inst_footprint, use_barrier, 
-                                            external_instance, multi_instance);
+                                            inst_footprint, external_instance,
+                                            multi_instance);
       else
-        man = new CollectiveManager(runtime->forest, did, owner_space, 
-                                  point_space, points, mapping, inst_domain, 
-                                  piece_list, piece_list_size, space_node, 
-                                  tree_id, layout, redop, false/*reg now*/,
-                                  inst_footprint, use_barrier,
-                                  external_instance, multi_instance);
+        man = new CollectiveManager(runtime->forest, did, owner_space,
+                                    point_space, points, mapping, inst_domain,
+                                    piece_list, piece_list_size, space_node,
+                                    tree_id, layout, redop, false/*reg now*/,
+                                    inst_footprint, external_instance,
+                                    multi_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -8592,14 +8597,15 @@ namespace Legion {
           {
             size_t num_points;
             derez.deserialize(num_points);
-            std::map<DomainPoint,std::pair<PhysicalInstance,unsigned> > insts;
+            std::map<DomainPoint,RemoteInstInfo> insts;
             for (unsigned idx = 0; idx < num_points; idx++)
             {
               DomainPoint point;
               derez.deserialize(point);
-              std::pair<PhysicalInstance,unsigned> &inst = insts[point];
-              derez.deserialize(inst.first);
-              derez.deserialize(inst.second);
+              RemoteInstInfo &inst = insts[point];
+              derez.deserialize(inst.instance);
+              derez.deserialize(inst.unique_event);
+              derez.deserialize(inst.index);
             }
             RtUserEvent to_trigger;
             derez.deserialize(to_trigger);
@@ -8723,38 +8729,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent VirtualManager::get_use_event(ApEvent user) const
-    //--------------------------------------------------------------------------
-    {
-      return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent VirtualManager::get_instance_ready_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent VirtualManager::get_unique_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance VirtualManager::get_instance(const DomainPoint &p) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return PhysicalInstance::NO_INST;
-    }
-
-    //--------------------------------------------------------------------------
     PointerConstraint VirtualManager::get_pointer_constraint(
                                                    const DomainPoint &key) const
     //--------------------------------------------------------------------------
@@ -8776,9 +8750,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PendingCollectiveManager::PendingCollectiveManager(DistributedID id,
-                              size_t total, IndexSpace points, ApBarrier ready,
-                              CollectiveMapping *mapping, bool multi_inst)
-      : did(id), total_points(total), point_space(points), ready_barrier(ready),
+                                    size_t total, IndexSpace points,
+                                    CollectiveMapping *mapping, bool multi_inst)
+      : did(id), total_points(total), point_space(points),
         collective_mapping(mapping), multi_instance(multi_inst)
     //--------------------------------------------------------------------------
     {
@@ -8804,7 +8778,6 @@ namespace Legion {
       rez.serialize(did);
       rez.serialize(total_points);
       rez.serialize(point_space);
-      rez.serialize(ready_barrier);
       collective_mapping->pack(rez);
       rez.serialize<bool>(multi_instance);
     }
@@ -8822,15 +8795,13 @@ namespace Legion {
       derez.deserialize(total_points);
       IndexSpace point_space;
       derez.deserialize(point_space);
-      ApBarrier ready_barrier;
-      derez.deserialize(ready_barrier);
       size_t total_spaces;
       derez.deserialize(total_spaces);
       CollectiveMapping *mapping = new CollectiveMapping(derez, total_spaces);
       bool multi_instance;
       derez.deserialize(multi_instance);
       return new PendingCollectiveManager(did, total_points, point_space,
-                                  ready_barrier, mapping, multi_instance);
+                                          mapping, multi_instance);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8891,10 +8862,6 @@ namespace Legion {
           *unsat_kind = LEGION_FIELD_CONSTRAINT;
         if (unsat_index != NULL)
           *unsat_index = 0;
-        // If we didn't make a collective instance we still need to arrive
-        // on its ready barrier so the barrier completes
-        if (pending_collective != NULL)
-          Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
         return NULL;
       }
       if (realm_layout == NULL)
@@ -8919,13 +8886,7 @@ namespace Legion {
              &piece_list, &piece_list_size);
         // If constraints were unsatisfied then return now
         if (realm_layout == NULL)
-        {
-          // If we didn't make a collective instance we still need to arrive
-          // on its ready barrier so the barrier completes
-          if (pending_collective != NULL)
-            Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
           return NULL;
-        }
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
@@ -8987,10 +8948,6 @@ namespace Legion {
             *unsat_kind = LEGION_MEMORY_CONSTRAINT;
           if (unsat_index != NULL)
             *unsat_index = 0;
-          // If we didn't make a collective instance we still need to arrive
-          // on its ready barrier so the barrier completes
-          if (pending_collective != NULL)
-            Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
           return NULL;
         }
       }
@@ -9010,10 +8967,6 @@ namespace Legion {
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
           *unsat_index = 0;
-        // If we didn't make a collective instance we still need to arrive
-        // on its ready barrier so the barrier completes
-        if (pending_collective != NULL)
-          Runtime::phase_barrier_arrive(pending_collective->ready_barrier, 1);
         return NULL;
       }
 #ifdef LEGION_DEBUG
@@ -9080,8 +9033,7 @@ namespace Legion {
               instance_domain, piece_list, piece_list_size,
               field_space_node, tree_id, layout, redop_id,
               true/*register now*/, instance_footprint,
-              pending_collective->ready_barrier, false/*external*/,
-              pending_collective->multi_instance);
+              false/*external*/, pending_collective->multi_instance);
 #ifdef DEBUG_LEGION
           assert(manager == collectable);
 #endif
@@ -9104,11 +9056,7 @@ namespace Legion {
           manager = static_cast<CollectiveManager*>(collectable);
 #endif
         }
-        manager->record_point_instance(*collective_point, instance);
-        // Signal that the point instance has been updated and that
-        // the manager is ready once it is triggered
-        Runtime::phase_barrier_arrive(pending_collective->ready_barrier,
-            1/*count*/, ready);
+        manager->record_point_instance(*collective_point, instance, ready);
         result = manager;
       }
       else

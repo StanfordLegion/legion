@@ -1714,7 +1714,7 @@ namespace Legion {
         RegionTreeID tree_id = 0;
         FieldSpaceNode *field_space_node = NULL;
         std::map<unsigned/*field index*/,
-          std::pair<InstanceManager*,unsigned> > colocation_instances;
+          std::pair<PhysicalManager*,unsigned> > colocation_instances;
         for (std::set<unsigned>::const_iterator iit = con_it->indexes.begin();
               iit != con_it->indexes.end(); iit++, idx++)
         {
@@ -1740,7 +1740,7 @@ namespace Legion {
               {
                 unsigned index = field_space_node->get_field_index(*it);
                 colocation_instances[index] = 
-                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
+                  std::pair<PhysicalManager*,unsigned>(NULL, *iit);
                 colocation_mask.set_bit(index);
               }
             }
@@ -1754,7 +1754,7 @@ namespace Legion {
                   continue;
                 unsigned index = field_space_node->get_field_index(*it);
                 colocation_instances[index] = 
-                  std::pair<InstanceManager*,unsigned>(NULL, *iit);
+                  std::pair<PhysicalManager*,unsigned>(NULL, *iit);
                 colocation_mask.set_bit(index);
               }
             }
@@ -1765,8 +1765,8 @@ namespace Legion {
                 colocation_mask & ref.get_valid_fields();
               if (!overlap)
                 continue;
-              InstanceManager *manager = ref.get_manager();
-              if (manager->is_virtual_manager())
+              InstanceManager *man = ref.get_manager();
+              if (man->is_virtual_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                     "Invalid mapper output. Mapper %s selected a virtual "
                     "instance for region requirement %d of task %s (UID %lld), "
@@ -1775,11 +1775,12 @@ namespace Legion {
                     "request a virtual mapping for a region requirement with a "
                     "colocation constraint.", local_mapper->get_mapper_name(),
                     *iit, get_task_name(), get_unique_id(), impl->vid)
+              PhysicalManager *manager = man->as_physical_manager();
               int index = overlap.find_first_set();
               while (index >= 0)
               {
                 std::map<unsigned,
-                  std::pair<InstanceManager*,unsigned> >::iterator finder = 
+                  std::pair<PhysicalManager*,unsigned> >::iterator finder = 
                     colocation_instances.find(index);
 #ifdef DEBUG_LEGION
                 assert(finder != colocation_instances.end());
@@ -1813,8 +1814,8 @@ namespace Legion {
             for (unsigned idx = 0; idx < insts.size(); idx++)
             {
               const InstanceRef &ref = insts[idx];
-              InstanceManager *manager = ref.get_manager();
-              if (manager->is_virtual_manager())
+              InstanceManager *man = ref.get_manager();
+              if (man->is_virtual_manager())
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                     "Invalid mapper output. Mapper %s selected a virtual "
                     "instance for region requirement %d of task %s (UID %lld), "
@@ -1823,6 +1824,7 @@ namespace Legion {
                     "request a virtual mapping for a region requirement with a "
                     "colocation constraint.", local_mapper->get_mapper_name(),
                     *iit, get_task_name(), get_unique_id(), impl->vid)
+              PhysicalManager *manager = man->as_physical_manager();
               const FieldMask &inst_mask = ref.get_valid_fields();
               std::vector<FieldID> field_names;
               field_space_node->get_field_set(inst_mask,parent_ctx,field_names);
@@ -1831,7 +1833,7 @@ namespace Legion {
               while (index >= 0)
               {
                 std::map<unsigned,
-                  std::pair<InstanceManager*,unsigned> >::const_iterator
+                  std::pair<PhysicalManager*,unsigned> >::const_iterator
                     finder = colocation_instances.find(index);
                 if (finder != colocation_instances.end())
                 {
@@ -3058,10 +3060,7 @@ namespace Legion {
                           idx, get_task_name(), get_unique_id())
           virtual_mapped[idx] = true;
         }
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                idx, regions[idx],
-                                                physical_instances[idx]);
+        
         // Skip checks if the mapper promises it is safe
         if (runtime->unsafe_mapper)
           continue;
@@ -3293,6 +3292,15 @@ namespace Legion {
         }
       }
 
+      if (runtime->legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
+                                                idx, regions[idx],
+                                                physical_instances[idx],
+                                                index_point);
+      }
+
       if (!output_regions.empty())
       {
         // Now we prepare output instances
@@ -3325,7 +3333,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < output_regions.size(); idx++)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
                 output_offset + idx, output_regions[idx],
-                physical_instances[output_offset + idx]);
+                physical_instances[output_offset + idx], index_point);
         }
       }
 
@@ -3542,7 +3550,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
                                                 idx, regions[idx],
-                                                instances);
+                                                instances, index_point);
       }
 #ifdef DEBUG_LEGION
       assert(!task_effects_complete.exists());

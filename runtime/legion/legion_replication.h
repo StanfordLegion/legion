@@ -2238,7 +2238,6 @@ namespace Legion {
     public:
       void initialize_replication(ReplicateContext *ctx,
                                   RtBarrier &resource_barrier,
-                                  ApBarrier &attach_barrier,
                                   bool collective_instances,
                                   bool deduplicate_across_shards,
                                   bool first_local_shard);
@@ -2260,7 +2259,6 @@ namespace Legion {
     protected:
       IndexSpace shard_space;
       IndexSpace point_space;
-      ApBarrier attach_barrier;
       RtBarrier collective_map_barrier;
       ShardingFunction *shard_fn;
       size_t exchange_index;
@@ -2718,8 +2716,6 @@ namespace Legion {
         { return deletion_mapping_barrier; }
       inline RtBarrier get_attach_resource_barrier(void) const
         { return attach_resource_barrier; }
-      inline ApBarrier get_attach_instance_barrier(void) const
-        { return attach_instance_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
       inline RtBarrier get_resource_return_barrier(void) const
@@ -2929,7 +2925,6 @@ namespace Legion {
       RtBarrier deletion_mapping_barrier;
       RtBarrier deletion_execution_barrier;
       RtBarrier attach_resource_barrier;
-      ApBarrier attach_instance_barrier;
       RtBarrier mapping_fence_barrier;
       RtBarrier resource_return_barrier;
       RtBarrier trace_recording_barrier;
