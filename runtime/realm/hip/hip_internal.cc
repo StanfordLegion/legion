@@ -758,9 +758,9 @@ namespace Realm {
                   assert((bytes & 1) == 0);
   #endif
                   CHECK_HIP( hipMemsetD16Async((hipDeviceptr_t)(out_base + out_offset),
-                                             fill_u16,
-                                             bytes >> 1,
-                                             stream->get_stream()) );
+                                                fill_u16,
+                                                bytes >> 1,
+                                                stream->get_stream()) );
                   out_alc.advance(0, bytes);
                   total_bytes += bytes;
                 } else {
@@ -791,9 +791,9 @@ namespace Realm {
                   assert((bytes & 3) == 0);
   #endif
                   CHECK_HIP( hipMemsetD32Async((hipDeviceptr_t)(out_base + out_offset),
-                                             fill_u32,
-                                             bytes >> 2,
-                                             stream->get_stream()) );
+                                                fill_u32,
+                                                bytes >> 2,
+                                                stream->get_stream()) );
                   out_alc.advance(0, bytes);
                   total_bytes += bytes;
                 } else {
@@ -861,10 +861,10 @@ namespace Realm {
                          reinterpret_cast<const uint8_t *>(fill_data) + partial_bytes,
                          1);
                   CHECK_HIP( hipMemset2DAsync((void*)(out_base + out_offset + partial_bytes),
-                                             reduced_fill_size,
-                                             fill_u8,
-                                             1 /*"width"*/, elems /*"height"*/,
-                                             stream->get_stream()) );
+                                              reduced_fill_size,
+                                              fill_u8,
+                                              1 /*"width"*/, elems /*"height"*/,
+                                              stream->get_stream()) );
                   partial_bytes += 1;
                 }
 

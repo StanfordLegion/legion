@@ -409,7 +409,7 @@ namespace Realm {
 			     void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind,
 			     GPUCompletionNotification *_notification)
       : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src), 
-	elmt_size(_bytes), notification(_notification)
+      elmt_size(_bytes), notification(_notification)
     {}
 
     GPUMemcpy1D::~GPUMemcpy1D(void)
@@ -440,7 +440,7 @@ namespace Realm {
                                         span_bytes,
                                         raw_stream) );
 #ifdef REALM_USE_VALGRIND_ANNOTATIONS
-	    VALGRIND_MAKE_MEM_DEFINED((((char*)dst)+span_start), span_bytes);
+            VALGRIND_MAKE_MEM_DEFINED((((char*)dst)+span_start), span_bytes);
 #endif
             break;
           }
@@ -511,7 +511,7 @@ namespace Realm {
       do_span(0, 1);
       
       if(notification)
-	stream->add_notification(notification);
+        stream->add_notification(notification);
 
       log_gpudma.info("gpu memcpy complete: dst=%p src=%p bytes=%zd kind=%d",
                    dst, src, elmt_size, kind);
@@ -540,7 +540,7 @@ namespace Realm {
     {
       log_gpudma.info("gpu memcpy 2d: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind); 
+                      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind); 
 #if 0      
       hip_Memcpy2D copy_info;
 
@@ -593,7 +593,7 @@ namespace Realm {
 
       log_gpudma.info("gpu memcpy 2d complete: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind);
+                      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind);
     }
 
   ////////////////////////////////////////////////////////////////////////
@@ -742,24 +742,24 @@ namespace Realm {
       , notification(_notification)
     {
       if(fill_data_size <= MAX_DIRECT_SIZE) {
-	memcpy(fill_data.direct, _fill_data, fill_data_size);
+        memcpy(fill_data.direct, _fill_data, fill_data_size);
       } else {
-	fill_data.indirect = new char[fill_data_size];
-	assert(fill_data.indirect != 0);
-	memcpy(fill_data.indirect, _fill_data, fill_data_size);
+        fill_data.indirect = new char[fill_data_size];
+        assert(fill_data.indirect != 0);
+        memcpy(fill_data.indirect, _fill_data, fill_data_size);
       }
     }
 
     GPUMemset1D::~GPUMemset1D(void)
     {
       if(fill_data_size > MAX_DIRECT_SIZE)
-	delete[] fill_data.indirect;
+        delete[] fill_data.indirect;
     }
 
     void GPUMemset1D::execute(GPUStream *stream)
     {
       log_gpudma.info("gpu memset: dst=%p bytes=%zd fill_data_size=%zd",
-		      dst, bytes, fill_data_size);
+                      dst, bytes, fill_data_size);
 
       hipStream_t raw_stream = stream->get_stream();
 
@@ -835,7 +835,7 @@ namespace Realm {
       }
       
       if(notification)
-	stream->add_notification(notification);
+        stream->add_notification(notification);
 
       log_gpudma.info("gpu memset complete: dst=%p bytes=%zd fill_data_size=%zd",
 		      dst, bytes, fill_data_size);
@@ -857,24 +857,24 @@ namespace Realm {
       , notification(_notification)
     {
       if(fill_data_size <= MAX_DIRECT_SIZE) {
-	memcpy(fill_data.direct, _fill_data, fill_data_size);
+        memcpy(fill_data.direct, _fill_data, fill_data_size);
       } else {
-	fill_data.indirect = new char[fill_data_size];
-	assert(fill_data.indirect != 0);
-	memcpy(fill_data.indirect, _fill_data, fill_data_size);
+        fill_data.indirect = new char[fill_data_size];
+        assert(fill_data.indirect != 0);
+        memcpy(fill_data.indirect, _fill_data, fill_data_size);
       }
     }
 
     GPUMemset2D::~GPUMemset2D(void)
     {
       if(fill_data_size > MAX_DIRECT_SIZE)
-	delete[] fill_data.indirect;
+        delete[] fill_data.indirect;
     }
 
     void GPUMemset2D::execute(GPUStream *stream)
     {
       log_gpudma.info("gpu memset 2d: dst=%p dst_str=%ld bytes=%zd lines=%zd fill_data_size=%zd",
-		      dst, dst_stride, bytes, lines, fill_data_size);
+                      dst, dst_stride, bytes, lines, fill_data_size);
 
       hipStream_t raw_stream = stream->get_stream();
 
@@ -903,21 +903,21 @@ namespace Realm {
             for(size_t offset = 0; offset < fill_data_size; offset += 4) {
               unsigned int val = *reinterpret_cast<const unsigned int *>(srcdata + offset);
               for(size_t l = 0; l < lines; l++)
-          CHECK_HIP( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-                    fill_data_size /*pitch*/,
-                    val,
-                    1 /*width*/, elements /*height*/,
-                    raw_stream) );
+                CHECK_HIP( cuMemsetD2D32Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+                                              fill_data_size /*pitch*/,
+                                              val,
+                                              1 /*width*/, elements /*height*/,
+                                              raw_stream) );
             }
           } else if((fill_data_size & 1) == 0) {
             for(size_t offset = 0; offset < fill_data_size; offset += 2) {
               unsigned short val = *reinterpret_cast<const unsigned short *>(srcdata + offset);
               for(size_t l = 0; l < lines; l++)
-          CHECK_HIP( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
-                    fill_data_size /*pitch*/,
-                    val,
-                    1 /*width*/, elements /*height*/,
-                    raw_stream) );
+                CHECK_HIP( cuMemsetD2D16Async(CUdeviceptr(dst) + offset + (l * dst_stride),
+                                              fill_data_size /*pitch*/,
+                                              val,
+                                              1 /*width*/, elements /*height*/,
+                                              raw_stream) );
             }
           } else 
 #endif    
@@ -927,10 +927,10 @@ namespace Realm {
               memcpy(&fill_u8, srcdata + offset, 1);
               for(size_t l = 0; l < lines; l++)
                 CHECK_HIP( hipMemset2DAsync((void *)(static_cast<char*>(dst) + offset + (l * dst_stride)),
-                                           fill_data_size /*pitch*/,
-                                           fill_u8,
-                                           1 /*width*/, elements /*height*/,
-                                           raw_stream) );
+                                            fill_data_size /*pitch*/,
+                                            fill_u8,
+                                            1 /*width*/, elements /*height*/,
+                                            raw_stream) );
             }
           }
         }
@@ -940,7 +940,7 @@ namespace Realm {
 	stream->add_notification(notification);
 
       log_gpudma.info("gpu memset 2d complete: dst=%p dst_str=%ld bytes=%zd lines=%zd fill_data_size=%zd",
-		      dst, dst_stride, bytes, lines, fill_data_size);
+                      dst, dst_stride, bytes, lines, fill_data_size);
     }
     
   ////////////////////////////////////////////////////////////////////////
@@ -976,8 +976,8 @@ namespace Realm {
     void GPUMemset3D::execute(GPUStream *stream)
     {
       log_gpudma.info("gpu memset 3d: dst=%p dst_str=%ld dst_pstr=%ld bytes=%zd height=%zd depth=%zd fill_data_size=%zd",
-		      dst, dst_stride, dst_pstride,
-		      bytes, height, depth, fill_data_size);
+                      dst, dst_stride, dst_pstride,
+                      bytes, height, depth, fill_data_size);
 
       hipStream_t raw_stream = stream->get_stream();
 
@@ -991,8 +991,8 @@ namespace Realm {
           unsigned char fill_u8;
           memcpy(&fill_u8, fill_data.direct, 1);
       	  CHECK_HIP( hipMemset2DAsync((void*)(dst), dst_stride,
-                                     fill_u8, bytes, height,
-                                     raw_stream) );
+                                      fill_u8, bytes, height,
+                                      raw_stream) );
       	  break;
       	}
       default:
@@ -1000,8 +1000,8 @@ namespace Realm {
       	  // use strided 2D memsets to deal with larger patterns
       	  size_t elements = bytes / fill_data_size;
       	  const char *srcdata = ((fill_data_size <= MAX_DIRECT_SIZE) ?
-      				   fill_data.direct :
-      				   fill_data.indirect);
+                                   fill_data.direct :
+                                   fill_data.indirect);
 #if 0
       	  // 16- and 32-bit fills must be aligned on every piece
       	  if((fill_data_size & 3) == 0) {
@@ -1067,8 +1067,8 @@ namespace Realm {
       	stream->add_notification(notification);
 
       log_gpudma.info("gpu memset 3d complete: dst=%p dst_str=%ld dst_pstr=%ld bytes=%zd height=%zd depth=%zd fill_data_size=%zd",
-		      dst, dst_stride, dst_pstride,
-		      bytes, height, depth, fill_data_size);
+                      dst, dst_stride, dst_pstride,
+                      bytes, height, depth, fill_data_size);
     }
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
@@ -1153,9 +1153,9 @@ namespace Realm {
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
-	CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
+        CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_callback, (void *)this, 0) );
       } else {
-	stream->add_fence(this);
+        stream->add_fence(this);
       }
     }
 
@@ -1183,9 +1183,9 @@ namespace Realm {
     void GPUWorkStart::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
-	CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
+        CHECK_HIP( hipStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
       } else {
-	stream->add_start_event(this);
+        stream->add_start_event(this);
       }
     }
     
@@ -1242,7 +1242,7 @@ namespace Realm {
       assert(available_events.empty());
 
       if(init_size == 0)
-	init_size = batch_size;
+        init_size = batch_size;
 
       available_events.resize(init_size);
 
@@ -1252,7 +1252,7 @@ namespace Realm {
       // TODO: measure how much benefit is derived from CU_EVENT_DISABLE_TIMING and
       //  consider using them for completion callbacks
       for(int i = 0; i < init_size; i++)
-	CHECK_HIP( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
+        CHECK_HIP( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
     }
 
     void GPUEventPool::empty_pool(void)
@@ -1263,7 +1263,7 @@ namespace Realm {
         log_stream.warning() << "Application leaking " << external_count << " cuda events";
 
       for(int i = 0; i < current_size; i++)
-	CHECK_HIP( hipEventDestroy(available_events[i]) );
+        CHECK_HIP( hipEventDestroy(available_events[i]) );
 
       current_size = 0;
       total_size = 0;
@@ -1277,17 +1277,17 @@ namespace Realm {
       AutoLock<> al(mutex);
 
       if(current_size == 0) {
-	// if we need to make an event, make a bunch
-	current_size = batch_size;
-	total_size += batch_size;
+        // if we need to make an event, make a bunch
+        current_size = batch_size;
+        total_size += batch_size;
 
-	log_stream.info() << "event pool " << this << " depleted - adding " << batch_size << " events";
-      
-	// resize the vector (considering all events that might come back)
-	available_events.resize(total_size);
+        log_stream.info() << "event pool " << this << " depleted - adding " << batch_size << " events";
+            
+        // resize the vector (considering all events that might come back)
+        available_events.resize(total_size);
 
-	for(int i = 0; i < batch_size; i++)
-	  CHECK_HIP( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
+        for(int i = 0; i < batch_size; i++)
+          CHECK_HIP( hipEventCreateWithFlags(&available_events[i], hipEventDefault) );
       }
 
       if(external)
@@ -1726,8 +1726,8 @@ namespace Realm {
 			 GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					(void *)(fbmem->base + dst_offset),
-					src, bytes, GPU_MEMCPY_HOST_TO_DEVICE, notification);
+                                        (void *)(fbmem->base + dst_offset),
+                                        src, bytes, GPU_MEMCPY_HOST_TO_DEVICE, notification);
       host_to_device_stream->add_copy(copy);
     }
 
@@ -1735,8 +1735,8 @@ namespace Realm {
 			   GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					dst, (const void *)(fbmem->base + src_offset),
-					bytes, GPU_MEMCPY_DEVICE_TO_HOST, notification);
+                                        dst, (const void *)(fbmem->base + src_offset),
+                                        bytes, GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     } 
 
@@ -1745,21 +1745,21 @@ namespace Realm {
 			     GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy1D(this,
-					(void *)(fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					bytes, GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
+                                        (void *)(fbmem->base + dst_offset),
+                                        (const void *)(fbmem->base + src_offset),
+                                        bytes, GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
 
     void GPU::copy_to_fb_2d(off_t dst_offset, const void *src, 
-                                     off_t dst_stride, off_t src_stride,
-                                     size_t bytes, size_t lines,
-				     GPUCompletionNotification *notification /*= 0*/)
+                            off_t dst_stride, off_t src_stride,
+                            size_t bytes, size_t lines,
+                            GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy2D(this,
-					(void *)(fbmem->base + dst_offset),
-					src, dst_stride, src_stride, bytes, lines,
-					GPU_MEMCPY_HOST_TO_DEVICE, notification);
+                                        (void *)(fbmem->base + dst_offset),
+                                        src, dst_stride, src_stride, bytes, lines,
+                                        GPU_MEMCPY_HOST_TO_DEVICE, notification);
       host_to_device_stream->add_copy(copy);
     }
 
@@ -1770,11 +1770,11 @@ namespace Realm {
                             GPUCompletionNotification *notification /* = 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy3D(this,
-					(void *)(fbmem->base + dst_offset),
-					src, dst_stride, src_stride,
+                                        (void *)(fbmem->base + dst_offset),
+                                        src, dst_stride, src_stride,
                                         dst_height, src_height,
                                         bytes, height, depth,
-					GPU_MEMCPY_HOST_TO_DEVICE, notification);
+                                        GPU_MEMCPY_HOST_TO_DEVICE, notification);
       host_to_device_stream->add_copy(copy);
     }
 
@@ -1784,9 +1784,9 @@ namespace Realm {
 			      GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy2D(this, dst,
-					(const void *)(fbmem->base + src_offset),
-					dst_stride, src_stride, bytes, lines,
-					GPU_MEMCPY_DEVICE_TO_HOST, notification);
+                                        (const void *)(fbmem->base + src_offset),
+                                        dst_stride, src_stride, bytes, lines,
+                                        GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     }
 
@@ -1797,24 +1797,24 @@ namespace Realm {
                               GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy3D(this, dst,
-					(const void *)(fbmem->base + src_offset),
-					dst_stride, src_stride,
+                                        (const void *)(fbmem->base + src_offset),
+                                        dst_stride, src_stride,
                                         dst_height, src_height,
                                         bytes, height, depth,
-					GPU_MEMCPY_DEVICE_TO_HOST, notification);
+                                        GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     }
 
     void GPU::copy_within_fb_2d(off_t dst_offset, off_t src_offset,
-                                         off_t dst_stride, off_t src_stride,
-                                         size_t bytes, size_t lines,
-					 GPUCompletionNotification *notification /*= 0*/)
+                                off_t dst_stride, off_t src_stride,
+                                size_t bytes, size_t lines,
+                                GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy2D(this,
-					(void *)(fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					dst_stride, src_stride, bytes, lines,
-					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
+                                        (void *)(fbmem->base + dst_offset),
+                                        (const void *)(fbmem->base + src_offset),
+                                        dst_stride, src_stride, bytes, lines,
+                                        GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
 
@@ -1825,12 +1825,12 @@ namespace Realm {
                                 GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemcpy3D(this,
-					(void *)(fbmem->base + dst_offset),
-					(const void *)(fbmem->base + src_offset),
-					dst_stride, src_stride,
+                                        (void *)(fbmem->base + dst_offset),
+                                        (const void *)(fbmem->base + src_offset),
+                                        dst_stride, src_stride,
                                         dst_height, src_height,
                                         bytes, height, depth,
-					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
+                                        GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
 
@@ -1924,31 +1924,31 @@ namespace Realm {
     }
 
     void GPU::fill_within_fb(off_t dst_offset,
-			     size_t bytes,
-			     const void *fill_data, size_t fill_data_size,
-			     GPUCompletionNotification *notification /*= 0*/)
+                             size_t bytes,
+                             const void *fill_data, size_t fill_data_size,
+                             GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemset1D(this,
-					(void *)(fbmem->base + dst_offset),
-					bytes,
-					fill_data,
-					reduce_fill_size(fill_data, fill_data_size),
-					notification);
+                                        (void *)(fbmem->base + dst_offset),
+                                        bytes,
+                                        fill_data,
+                                        reduce_fill_size(fill_data, fill_data_size),
+                                        notification);
       device_to_device_stream->add_copy(copy);
     }
 
     void GPU::fill_within_fb_2d(off_t dst_offset, off_t dst_stride,
-				size_t bytes, size_t lines,
-				const void *fill_data, size_t fill_data_size,
-				GPUCompletionNotification *notification /*= 0*/)
+                                size_t bytes, size_t lines,
+                                const void *fill_data, size_t fill_data_size,
+                                GPUCompletionNotification *notification /*= 0*/)
     {
       GPUMemcpy *copy = new GPUMemset2D(this,
-					(void *)(fbmem->base + dst_offset),
-					dst_stride,
-					bytes, lines,
-					fill_data,
-					reduce_fill_size(fill_data, fill_data_size),
-					notification);
+                                        (void *)(fbmem->base + dst_offset),
+                                        dst_stride,
+                                        bytes, lines,
+                                        fill_data,
+                                        reduce_fill_size(fill_data, fill_data_size),
+                                        notification);
       device_to_device_stream->add_copy(copy);
     }
     
@@ -1977,8 +1977,8 @@ namespace Realm {
       op->add_async_work_item(f);
 
       host_to_device_stream->add_copy(new GPUMemcpyFence(this,
-							 GPU_MEMCPY_HOST_TO_DEVICE,
-							 f));
+                                                         GPU_MEMCPY_HOST_TO_DEVICE,
+                                                         f));
     }
 
     void GPU::fence_from_fb(Realm::Operation *op)
@@ -1989,8 +1989,8 @@ namespace Realm {
       op->add_async_work_item(f);
 
       device_to_host_stream->add_copy(new GPUMemcpyFence(this,
-							 GPU_MEMCPY_DEVICE_TO_HOST,
-							 f));
+                                                         GPU_MEMCPY_DEVICE_TO_HOST,
+                                                         f));
     }
 
     void GPU::fence_within_fb(Realm::Operation *op)
@@ -2001,8 +2001,8 @@ namespace Realm {
       op->add_async_work_item(f);
 
       device_to_device_stream->add_copy(new GPUMemcpyFence(this,
-							   GPU_MEMCPY_DEVICE_TO_DEVICE,
-							   f));
+                                                           GPU_MEMCPY_DEVICE_TO_DEVICE,
+                                                           f));
     }
 
     void GPU::fence_to_peer(Realm::Operation *op, GPU *dst)
@@ -2013,8 +2013,8 @@ namespace Realm {
       op->add_async_work_item(f);
 
       GPUMemcpyFence *fence = new GPUMemcpyFence(this,
-						 GPU_MEMCPY_PEER_TO_PEER,
-						 f);
+                                                 GPU_MEMCPY_PEER_TO_PEER,
+                                                 f);
       peer_to_peer_streams[dst->info->index]->add_copy(fence);
     }
 
@@ -2083,7 +2083,7 @@ namespace Realm {
       {
         AutoGPUContext agc(gpu);
 
-	CHECK_HIP( hipDeviceSynchronize() );
+        CHECK_HIP( hipDeviceSynchronize() );
       }
     }
 
@@ -2108,15 +2108,15 @@ namespace Realm {
       assert(manager == 0);
       
       core_rsrv = new Realm::CoreReservation("GPU worker thread", crs,
-					     Realm::CoreReservationParameters());
+                                             Realm::CoreReservationParameters());
 
       Realm::ThreadLaunchParameters tlp;
 
       worker_thread = Realm::Thread::create_kernel_thread<GPUWorker,
-							  &GPUWorker::thread_main>(this,
-										   tlp,
-										   *core_rsrv,
-										   0);
+                                                          &GPUWorker::thread_main>(this,
+                                                                                   tlp,
+                                                                                   *core_rsrv,
+                                                                                   0);
     }
 
     void GPUWorker::shutdown_background_thread(void)
@@ -2597,10 +2597,10 @@ namespace Realm {
     {}
 
     void GPUProcessor::configure_call(dim3 grid_dim,
-				      dim3 block_dim,
-				      size_t shared_mem,
-				      hipStream_t stream)
-    {
+                                      dim3 block_dim,
+                                      size_t shared_mem,
+                                      hipStream_t stream)
+                                      {
       launch_configs.push_back(CallConfig(grid_dim, block_dim, shared_mem, stream));
     }
 
@@ -2672,7 +2672,7 @@ namespace Realm {
 #endif
 
     void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
-				  hipMemcpyKind kind)
+                                  hipMemcpyKind kind)
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
@@ -2682,7 +2682,7 @@ namespace Realm {
     }
 
     void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size,
-					hipMemcpyKind kind, hipStream_t stream)
+                                        hipMemcpyKind kind, hipStream_t stream)
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
@@ -2692,31 +2692,31 @@ namespace Realm {
 
 #ifdef REALM_USE_HIP_HIJACK
     void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
-					    size_t size, size_t offset,
-					    hipMemcpyKind kind)
+                                            size_t size, size_t offset,
+                                            hipMemcpyKind kind)
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(dst);
       CHECK_HIP( hipMemcpyAsync((void *)(var_base + offset),
-			      src, size, kind, current) );
+                                src, size, kind, current) );
       stream_synchronize(current);
     }
 
     void GPUProcessor::gpu_memcpy_to_symbol_async(const void *dst, const void *src,
-						  size_t size, size_t offset,
-						  hipMemcpyKind kind, hipStream_t stream)
+                                                  size_t size, size_t offset,
+                                                  hipMemcpyKind kind, hipStream_t stream)
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(dst);
       CHECK_HIP( hipMemcpyAsync((void *)(var_base + offset),
-			                                  src, size, kind, stream) );
+                                src, size, kind, stream) );
       // no synchronization here   
     }
 
     void GPUProcessor::gpu_memcpy_from_symbol(void *dst, const void *src,
-					      size_t size, size_t offset,
-					      hipMemcpyKind kind)
+                                              size_t size, size_t offset,
+                                              hipMemcpyKind kind)
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       char *var_base = gpu->lookup_variable(src);
@@ -2727,8 +2727,8 @@ namespace Realm {
     }
 
     void GPUProcessor::gpu_memcpy_from_symbol_async(void *dst, const void *src,
-						    size_t size, size_t offset,
-						    hipMemcpyKind kind, hipStream_t stream)
+                                                    size_t size, size_t offset,
+                                                    hipMemcpyKind kind, hipStream_t stream)
     {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
@@ -2744,7 +2744,7 @@ namespace Realm {
     {
       hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_HIP( hipMemsetAsync(dst, (unsigned char)value, 
-                                  count, current) );    
+                                count, current) );    
     }
 
     void GPUProcessor::gpu_memset_async(void *dst, int value, 
@@ -2753,7 +2753,7 @@ namespace Realm {
       if (IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_HIP( hipMemsetAsync(dst, (unsigned char)value,
-                               count, stream) );    
+                                count, stream) );    
     }
     
     ////////////////////////////////////////////////////////////////////////
@@ -3201,7 +3201,7 @@ namespace Realm {
     }
 
     /*static*/ Module *HipModule::create_module(RuntimeImpl *runtime,
-						 std::vector<std::string>& cmdline)
+                                                std::vector<std::string>& cmdline)
     {
       HipModule *m = new HipModule;
       
@@ -3869,7 +3869,7 @@ namespace Realm {
     // struct RegisteredFunction
 
     RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
-					   const char *_device_fun)
+                                           const char *_device_fun)
       : fat_bin(_fat_bin), host_fun(_host_fun), device_fun(_device_fun)
     {}
      
@@ -3878,8 +3878,8 @@ namespace Realm {
     // struct RegisteredVariable
 
     RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
-					   const char *_device_name, bool _external,
-					   int _size, bool _constant, bool _global)
+                                           const char *_device_name, bool _external,
+                                           int _size, bool _constant, bool _global)
       : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
 	external(_external), size(_size), constant(_constant), global(_global)
     {}
