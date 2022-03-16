@@ -18416,8 +18416,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!node->as_region_node()->row_source->is_empty() ||
-             (node == set->region_node));
+      assert((node == set->region_node)
+             || !node->as_region_node()->row_source->is_empty());
 #endif
       AutoLock m_lock(manager_lock);
       if (equivalence_sets.insert(set, mask))
@@ -18502,8 +18502,8 @@ namespace Legion {
             if (it->second * finder->second)
               continue;
 #ifdef DEBUG_LEGION
-            assert(!node->as_region_node()->row_source->is_empty() ||
-                   (node == it->first->region_node));
+            assert((node == it->first->region_node)
+                   || !node->as_region_node()->row_source->is_empty());
 #endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
