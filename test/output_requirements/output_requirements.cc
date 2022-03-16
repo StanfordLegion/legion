@@ -104,6 +104,7 @@ class OutReqTestMapper : public DefaultMapper
  private:
   Memory local_sysmem;
   bool request_speculate;
+  std::map<TaskIDs, Processor> producer_mappings;
 };
 
 OutReqTestMapper::OutReqTestMapper(MapperRuntime *rt,
@@ -132,8 +133,18 @@ void OutReqTestMapper::select_task_options(const MapperContext    ctx,
                                                  TaskOptions&     output)
 {
   DefaultMapper::select_task_options(ctx, task, output);
-  if (task.tag == TAG_LOCAL_PROCESSOR)
-    output.initial_proc = task.parent_task->current_proc;
+  if (task.task_id == TID_PRODUCER_GLOBAL || task.task_id == TID_PRODUCER_LOCAL)
+    producer_mappings[static_cast<TaskIDs>(task.task_id)] = output.initial_proc;
+  else if (task.tag == TAG_LOCAL_PROCESSOR)
+  {
+    if (task.task_id == TID_CONSUMER_GLOBAL)
+      output.initial_proc = producer_mappings[TID_PRODUCER_GLOBAL];
+    else
+    {
+      assert(task.task_id == TID_CONSUMER_LOCAL);
+      output.initial_proc = producer_mappings[TID_PRODUCER_LOCAL];
+    }
+  }
 }
 
 void OutReqTestMapper::speculate(const MapperContext      ctx,
