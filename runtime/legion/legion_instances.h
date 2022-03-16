@@ -344,7 +344,8 @@ namespace Legion {
                                 const bool manage_dst_events,
                                 const bool need_valid_return) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields) = 0;
+                                std::vector<CopySrcDstField> &fields,
+                                const DomainPoint *collective_point = NULL) = 0;
       virtual ApEvent register_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -615,7 +616,8 @@ namespace Legion {
                                 const bool manage_dst_events,
                                 const bool need_valid_return);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields,
+                                const DomainPoint *collective_point = NULL);
       virtual ApEvent register_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -912,7 +914,8 @@ namespace Legion {
                                 const bool manage_dst_events,
                                 const bool need_valid_return);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields,
+                                const DomainPoint *collective_point = NULL);
       virtual ApEvent register_collective_user(InstanceView *view, 
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -1017,7 +1020,7 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent all_done,
                                 AddressSpaceID target);
-      void perform_collective_allreduce(InstanceView *src_view,
+      void perform_collective_allreduce(ReductionView *src_view,
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expresison,
@@ -1043,7 +1046,8 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 AddressSpaceID origin);
     protected:
-      void perform_single_allreduce(const uint64_t allreduce_tag,
+      void perform_single_allreduce(FillView *fill_view,
+                                const uint64_t allreduce_tag,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
                                 const PhysicalTraceInfo &trace_info,
@@ -1053,7 +1057,8 @@ namespace Legion {
               const std::vector<std::vector<Reservation> > &reservations,
                                 std::vector<ApEvent> &local_init_events,
                                 std::vector<ApEvent> &local_final_events);
-      unsigned perform_multi_allreduce(const uint64_t allreduce_tag,
+      unsigned perform_multi_allreduce(FillView *fill_view,
+                                const uint64_t allreduce_tag,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
                                 const PhysicalTraceInfo &trace_info,

@@ -2398,7 +2398,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualManager::compute_copy_offsets(const FieldMask &copy_mask,
-                                           std::vector<CopySrcDstField> &fields)
+      std::vector<CopySrcDstField> &fields, const DomainPoint *collective_point)
     //--------------------------------------------------------------------------
     {
       // Make sure the instance is ready before we compute the offsets
@@ -3712,6 +3712,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memory->is_owner);
       assert((point_space == NULL) || point_space->contains_point(point));
+      assert(!runtime->legion_spy_enabled || ready.exists());
 #endif
       AutoLock i_lock(inst_lock);
       memories.push_back(memory);
@@ -4692,7 +4693,7 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         layout->compute_copy_offsets(fill_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      dst_fields);
         const ApEvent result = fill_expression->issue_fill(trace_info, 
@@ -4872,7 +4873,7 @@ namespace Legion {
       std::vector<CopySrcDstField> src_fields;
       layout->compute_copy_offsets(copy_mask, instances[instance_index],
 #ifdef LEGION_SPY
-                                   unique_event,
+                                   instance_events[instance_index],
 #endif
                                    src_fields);
       // Issue the copy
@@ -4989,7 +4990,7 @@ namespace Legion {
       std::vector<CopySrcDstField> local_fields;
       layout->compute_copy_offsets(copy_mask, instances.front(),
 #ifdef LEGION_SPY
-                                   unique_event,
+                                   instance_events.front(),
 #endif
                                    local_fields);
 
@@ -5088,7 +5089,7 @@ namespace Legion {
         std::vector<CopySrcDstField> src_fields;
         layout->compute_copy_offsets(copy_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      src_fields);
         ApEvent local_reduce = copy_expression->issue_copy(trace_info,
@@ -5543,8 +5544,10 @@ namespace Legion {
         // Better have the same collective mappings if we're doing all-reduce
         assert((collective_mapping == source->collective_mapping) ||
             ((*collective_mapping) == (*(source->collective_mapping))));
+        assert(src_view->is_reduction_view());
 #endif
-        perform_collective_allreduce(src_view, precondition, predicate_guard,
+        ReductionView *red_view = src_view->as_reduction_view();
+        perform_collective_allreduce(red_view, precondition, predicate_guard,
             copy_expression, op_id, index, copy_mask, trace_info,
             recorded_events, applied_events, allreduce_tag);
       }
@@ -5570,7 +5573,7 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         layout->compute_copy_offsets(copy_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      dst_fields); 
         std::vector<Reservation> reservations;
@@ -5738,7 +5741,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::perform_collective_allreduce(InstanceView *view,
+    void CollectiveManager::perform_collective_allreduce(ReductionView *view,
                                           ApEvent precondition,
                                           PredEvent predicate_guard,
                                           IndexSpaceExpression *copy_expression,
@@ -5798,7 +5801,7 @@ namespace Legion {
       std::vector<std::vector<CopySrcDstField> > local_fields(instances.size());
       layout->compute_copy_offsets(copy_mask, instances.front(),
 #ifdef LEGION_SPY
-                                   unique_event,
+                                   instance_events.front(),
 #endif
                                    local_fields.front());
       std::vector<std::vector<Reservation> > reservations(instances.size());
@@ -5816,7 +5819,7 @@ namespace Legion {
                                       reservations[idx]);
         layout->compute_copy_offsets(copy_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      local_fields.front());
         const ApEvent reduced = copy_expression->issue_copy(trace_info,
@@ -5842,16 +5845,16 @@ namespace Legion {
 #endif
         if (multi_instance)
           // Case 1: each node has multiple instances
-          final_inst_index = perform_multi_allreduce(allreduce_tag,
-              predicate_guard, copy_expression, trace_info, applied_events,
-              instance_preconditions, local_fields, reservations,
-              local_init_events, local_final_events);
+          final_inst_index = perform_multi_allreduce(view->fill_view,
+              allreduce_tag, predicate_guard, copy_expression, trace_info,
+              applied_events, instance_preconditions, local_fields,
+              reservations, local_init_events, local_final_events);
         else
           // Case 2: there are some nodes that only have one instance
           // Pair up nodes to have them cooperate to have two buffers
           // that we can ping-pong between to do the all-reduce "inplace"
-          perform_single_allreduce(allreduce_tag, predicate_guard,
-              copy_expression, trace_info, applied_events,
+          perform_single_allreduce(view->fill_view, allreduce_tag,
+              predicate_guard, copy_expression, trace_info, applied_events,
               instance_preconditions, local_fields, reservations,
               local_init_events, local_final_events);
       }
@@ -5905,7 +5908,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::perform_single_allreduce(
+    void CollectiveManager::perform_single_allreduce(FillView *fill_view,
                                   const uint64_t allreduce_tag,
                                   PredEvent predicate_guard,
                                   IndexSpaceExpression *copy_expression,
@@ -6047,7 +6050,7 @@ namespace Legion {
                 trace_info, local_fields[0], reduction_op->identity,
                 reduction_op->sizeof_rhs,
 #ifdef LEGION_SPY
-                op_id, field_space_node->handle, tree_id,
+                fill_view->fill_op_uid, field_space_node->handle, tree_id,
 #endif
                 instance_preconditions[0], predicate_guard);
             // Then check to see if we've received any reductions
@@ -6162,7 +6165,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned CollectiveManager::perform_multi_allreduce(
+    unsigned CollectiveManager::perform_multi_allreduce(FillView *fill_view,
                                   const uint64_t allreduce_tag,
                                   PredEvent predicate_guard,
                                   IndexSpaceExpression *copy_expression,
@@ -6253,7 +6256,7 @@ namespace Legion {
                 local_fields[dst_inst_index],
                 reduction_op->identity, reduction_op->sizeof_rhs,
 #ifdef LEGION_SPY
-                op_id, field_space_node->handle, tree_id,
+                fill_view->fill_op_uid, field_space_node->handle, tree_id,
 #endif
                 instance_preconditions[dst_inst_index],
                 predicate_guard);
@@ -6695,7 +6698,7 @@ namespace Legion {
       std::vector<CopySrcDstField> local_fields;
       layout->compute_copy_offsets(copy_mask, instances.front(),
 #ifdef LEGION_SPY
-                                   unique_event,
+                                   instance_events.front(),
 #endif
                                    local_fields);
       const std::vector<Reservation> no_reservations;
@@ -6791,7 +6794,7 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         layout->compute_copy_offsets(copy_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      dst_fields);
         ApEvent local_copy = copy_expression->issue_copy(trace_info,
@@ -6993,7 +6996,7 @@ namespace Legion {
       std::vector<CopySrcDstField> local_fields;
       layout->compute_copy_offsets(copy_mask, instances.front(),
 #ifdef LEGION_SPY
-                                   unique_event,
+                                   instance_events.front(),
 #endif
                                    local_fields);
       std::vector<Reservation> reservations;
@@ -7139,7 +7142,7 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         layout->compute_copy_offsets(copy_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      local_fields);
         const std::vector<Reservation> no_reservations;
@@ -7364,7 +7367,7 @@ namespace Legion {
         std::vector<CopySrcDstField> src_fields;
         layout->compute_copy_offsets(copy_mask, instances[idx],
 #ifdef LEGION_SPY
-                                     unique_event,
+                                     instance_events[idx],
 #endif
                                      src_fields);
         const ApEvent copy_post = copy_expression->issue_copy(trace_info,
@@ -7476,11 +7479,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveManager::compute_copy_offsets(const FieldMask &mask,
-                                           std::vector<CopySrcDstField> &fields)
+    void CollectiveManager::compute_copy_offsets(const FieldMask &copy_mask,
+      std::vector<CopySrcDstField> &fields, const DomainPoint *collective_point)
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
+#ifdef DEBUG_LEGION
+      assert(layout != NULL);
+      assert(collective_point != NULL);
+#endif
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        if (instance_points[idx] != *collective_point)
+          continue;
+        layout->compute_copy_offsets(copy_mask, instances[idx],
+#ifdef LEGION_SPY
+                                     instance_events[idx],
+#endif
+                                     fields);
+        return;
+      }
+      // We should never get here because the instance should always be local
       assert(false);
     }
 

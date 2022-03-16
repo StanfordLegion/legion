@@ -189,10 +189,11 @@ namespace Legion {
       // calls as we use the extra layer of indirection below
       // to issue calls for collective cases
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &dst_fields,
+                           std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &src_fields) = 0;
+                             const DomainPoint &collective_point,
+                             std::vector<CopySrcDstField> &src_fields) = 0;
     public:
       void find_atomic_reservations(const FieldMask &mask, Operation *op, 
                                     const unsigned index,
@@ -541,10 +542,11 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const;
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &dst_fields,
+                           std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &src_fields);
+                             const DomainPoint &collective_point,
+                             std::vector<CopySrcDstField> &src_fields);
     public:
       virtual bool has_manager(void) const { return true; }
       virtual PhysicalManager* get_manager(void) const { return manager; }
@@ -777,10 +779,11 @@ namespace Legion {
                     const bool trace_recording);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &dst_fields,
+                           std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &src_fields);
+                             const DomainPoint &collective_point,
+                             std::vector<CopySrcDstField> &src_fields);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

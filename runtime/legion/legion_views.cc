@@ -2264,6 +2264,9 @@ namespace Legion {
                                    CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!manager->is_collective_manager());
+#endif
       if (across_helper == NULL)
         manager->compute_copy_offsets(copy_mask, dst_fields);
       else
@@ -2272,10 +2275,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::copy_from(const FieldMask &copy_mask,
+                                     const DomainPoint &collective_point,
                                      std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-      manager->compute_copy_offsets(copy_mask, src_fields);
+      manager->compute_copy_offsets(copy_mask, src_fields, &collective_point);
     }
 
     //--------------------------------------------------------------------------
@@ -4755,6 +4759,9 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!manager->is_collective_manager());
+#endif
       // Get the destination fields for this copy
       if (across_helper == NULL)
         manager->compute_copy_offsets(copy_mask, dst_fields);
@@ -4764,13 +4771,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::copy_from(const FieldMask &copy_mask,
+                                  const DomainPoint &collective_point,
                                   std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(FieldMask::pop_count(copy_mask) == 1); // only one field
 #endif
-      manager->compute_copy_offsets(copy_mask, src_fields);
+      manager->compute_copy_offsets(copy_mask, src_fields, &collective_point);
     }
 
     //--------------------------------------------------------------------------
