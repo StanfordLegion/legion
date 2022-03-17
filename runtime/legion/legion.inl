@@ -16877,6 +16877,8 @@ namespace Legion {
       Realm::RegionInstance get_instance() const;
     protected:
       friend class OutputRegion;
+      bool fortran_order_dims;
+      size_t alignment;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
     };
@@ -16946,6 +16948,8 @@ namespace Legion {
       Realm::RegionInstance get_instance() const;
     protected:
       friend class OutputRegion;
+      bool fortran_order_dims;
+      size_t alignment;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
       DomainT<N,T> bounds;
