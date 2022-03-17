@@ -21,7 +21,7 @@
 #include <cmath>
 
 #ifndef __CUDA_HD__
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define __CUDA_HD__ __host__ __device__
 #else
 #define __CUDA_HD__
@@ -131,13 +131,14 @@ inline float __convert_halfint_to_float(uint16_t __x)
   return result;
 }
 
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 // The CUDA Toolkit only provides device versions for half precision operators,
 // so we have to provide custom implementations below.
-#define __CUDA_NO_HALF_OPERATORS__
 #if defined(LEGION_USE_CUDA)
+#define __CUDA_NO_HALF_OPERATORS__
 #include <cuda_fp16.h>
 #elif defined(LEGION_USE_HIP)
+#define __HIP_NO_HALF_OPERATORS__
 #include <hip/hip_fp16.h>
 #endif
 
@@ -150,6 +151,8 @@ inline __half operator-(const __half &one)
 #else
   return __float2half(-__half2float(one));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hneg(one);
 #else
   return __half(-(float(one)));
 #endif
@@ -164,6 +167,8 @@ inline __half operator+(const __half &one, const __half &two)
 #else
   return __float2half(__half2float(one) + __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hadd(one, two);
 #else
   return __half(float(one) + float(two));
 #endif
@@ -178,6 +183,8 @@ inline __half operator-(const __half &one, const __half &two)
 #else
   return __float2half(__half2float(one) - __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hsub(one, two);
 #else
   return __half(float(one) - float(two));
 #endif
@@ -192,6 +199,8 @@ inline __half operator*(const __half &one, const __half &two)
 #else
   return __float2half(__half2float(one) * __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hmul(one, two);
 #else
   return __half(float(one) * float(two));
 #endif
@@ -208,6 +217,8 @@ inline __half operator/(const __half &one, const __half &two)
 #else
   return __float2half(__half2float(one) / __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hdiv(one, two);
 #else
   return __half(float(one) / float(two));
 #endif
@@ -222,6 +233,8 @@ inline bool operator==(const __half &one, const __half &two)
 #else
   return (__half2float(one) == __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __heq(one, two);
 #else
   return (float(one) == float(two));
 #endif
@@ -236,6 +249,8 @@ inline bool operator!=(const __half &one, const __half &two)
 #else
   return (__half2float(one) != __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hne(one, two);
 #else
   return (float(one) != float(two));
 #endif
@@ -250,6 +265,8 @@ inline bool operator<(const __half &one, const __half &two)
 #else
   return (__half2float(one) < __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hlt(one, two);
 #else
   return (float(one) < float(two));
 #endif
@@ -264,6 +281,8 @@ inline bool operator<=(const __half &one, const __half &two)
 #else
   return (__half2float(one) <= __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hle(one, two);
 #else
   return (float(one) <= float(two));
 #endif
@@ -278,6 +297,8 @@ inline bool operator>(const __half &one, const __half &two)
 #else
   return (__half2float(one) > __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hgt(one, two);
 #else
   return (float(one) > float(two));
 #endif
@@ -292,6 +313,8 @@ inline bool operator>=(const __half &one, const __half &two)
 #else
   return (__half2float(one) >= __half2float(two));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hge(one, two);
 #else
   return (float(one) >= float(two));
 #endif
@@ -302,6 +325,8 @@ inline __half asin(const __half &one)
 {
 #ifdef __CUDA_ARCH__
   return (__float2half(asinf(__half2float(one))));
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return (__float2half(asinf(__half2float(one))));
 #else
   return (__float2half(std::asin(__half2float(one))));
 #endif
@@ -311,6 +336,8 @@ __CUDA_HD__
 inline __half atan(const __half &one)
 {
 #ifdef __CUDA_ARCH__
+  return (__float2half(atanf(__half2float(one))));
+#elif defined(__HIP_DEVICE_COMPILE__)
   return (__float2half(atanf(__half2float(one))));
 #else
   return (__float2half(std::atan(__half2float(one))));
@@ -326,6 +353,8 @@ inline __half ceil(__half a)
 #else
   return __float2half(ceilf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hceil(a);
 #else
   return static_cast<__half>(::ceilf(static_cast<float>(a)));
 #endif
@@ -340,6 +369,8 @@ inline __half cos(__half a)
 #else
   return __float2half(cosf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hcos(a);
 #else
   return static_cast<__half>(::cosf(static_cast<float>(a)));
 #endif
@@ -354,6 +385,8 @@ inline __half exp(__half a)
 #else
   return __float2half(expf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hexp(a);
 #else
   return static_cast<__half>(::expf(static_cast<float>(a)));
 #endif
@@ -368,6 +401,8 @@ inline __half fabs(__half a)
 #else
   return __float2half(fabs(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __habs(a);
 #else
   return static_cast<__half>(::fabsf(static_cast<float>(a)));
 #endif
@@ -382,6 +417,8 @@ inline __half floor(__half a)
 #else
   return __float2half(floorf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hfloor(a);
 #else
   return static_cast<__half>(::floorf(static_cast<float>(a)));
 #endif
@@ -391,6 +428,8 @@ __CUDA_HD__
 inline bool isinf(__half a)
 {
 #ifdef __CUDA_ARCH__
+  return __hisinf(a);
+#elif defined(__HIP_DEVICE_COMPILE__)
   return __hisinf(a);
 #else
   return std::isinf(static_cast<float>(a));
@@ -406,6 +445,8 @@ inline bool isnan(__half a)
 #else
   return ::isnan(__half2float(a));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return __hisnan(a);
 #else
   return std::isnan(static_cast<float>(a));
 #endif
@@ -420,6 +461,8 @@ inline __half log(__half a)
 #else
   return __float2half(logf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hlog(a);
 #else
   return static_cast<__half>(::logf(static_cast<float>(a)));
 #endif
@@ -434,6 +477,8 @@ inline __half sin(__half a)
 #else
   return __float2half(sinf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hsin(a);
 #else
   return static_cast<__half>(::sinf(static_cast<float>(a)));
 #endif
@@ -448,6 +493,8 @@ inline __half sqrt(__half a)
 #else
   return __float2half(sqrtf(__half2float(a)));
 #endif
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return hsqrt(a);
 #else
   return static_cast<__half>(::sqrtf(static_cast<float>(a)));
 #endif
@@ -457,6 +504,8 @@ __CUDA_HD__
 inline __half pow(const __half &one, const __half &two)
 {
 #ifdef __CUDA_ARCH__
+  return (__float2half(powf(__half2float(one), __half2float(two))));
+#elif defined(__HIP_DEVICE_COMPILE__)
   return (__float2half(powf(__half2float(one), __half2float(two))));
 #else
   return (__float2half(std::pow(__half2float(one), __half2float(two))));
@@ -468,6 +517,8 @@ inline __half tan(const __half &one)
 {
 #ifdef __CUDA_ARCH__
   return (__float2half(tanf(__half2float(one))));
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return (__float2half(tanf(__half2float(one))));
 #else
   return (__float2half(std::tan(__half2float(one))));
 #endif
@@ -477,6 +528,8 @@ __CUDA_HD__
 inline __half tanh(const __half &one)
 {
 #ifdef __CUDA_ARCH__
+  return (__float2half(tanhf(__half2float(one))));
+#elif defined(__HIP_DEVICE_COMPILE__)
   return (__float2half(tanhf(__half2float(one))));
 #else
   return (__float2half(std::tanh(__half2float(one))));
@@ -488,12 +541,14 @@ inline __half acos(const __half &one)
 {
 #ifdef __CUDA_ARCH__
   return (__float2half(acosf(__half2float(one))));
+#elif defined(__HIP_DEVICE_COMPILE__)
+  return (__float2half(acosf(__half2float(one))));
 #else
   return (__float2half(std::acos(__half2float(one))));
 #endif
 }
 
-#else // not __CUDACC__
+#else // not __CUDACC__ or __HIPCC__
 
 struct __half
 {
@@ -705,6 +760,6 @@ inline __half sqrt(const __half &a)
   return static_cast<__half>(::sqrt(static_cast<float>(a)));
 }
 
-#endif // Not nvcc
+#endif // Not nvcc or hipcc
 
 #endif // __HALF_H__

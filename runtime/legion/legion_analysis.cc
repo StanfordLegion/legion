@@ -288,11 +288,9 @@ namespace Legion {
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                                     AddressSpaceID local, Memoizable *memo, 
                                     PhysicalTemplate *tpl, RtUserEvent applied,
-                                    RtEvent collect, ReplicationID repl,
-                                    size_t index)
+                                    RtEvent collect)
       : runtime(rt), origin_space(origin), local_space(local), memoizable(memo),
-        remote_tpl(tpl), applied_event(applied), collect_event(collect),
-        repl_id(repl), tpl_index(index)
+        remote_tpl(tpl), applied_event(applied), collect_event(collect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -339,9 +337,6 @@ namespace Legion {
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
       rez.serialize(collect_event);
-      rez.serialize(repl_id);
-      if (repl_id > 0)
-        rez.serialize(tpl_index);
       // Only need to store this one locally since we already hooked our whole 
       // chain of events into the operations applied set on the origin node
       // See PhysicalTemplate::pack_recorder
@@ -1251,27 +1246,9 @@ namespace Legion {
       derez.deserialize(applied_event);
       RtEvent collect_event;
       derez.deserialize(collect_event);
-      ReplicationID repl_id;
-      derez.deserialize(repl_id);
-      size_t tpl_index = 0;
-      if (repl_id > 0)
-      {
-        derez.deserialize(tpl_index);
-        ShardManager *manager = 
-          runtime->find_shard_manager(repl_id, true/*can fail*/);
-        if (manager != NULL)
-        {
-          // If we have a shard manager then find the current template
-          // for the first local shard and pretend like we're local
-          remote_tpl = manager->find_local_shard_current_template(tpl_index);
-          collect_event = remote_tpl->get_collect_event();
-          origin_space = runtime->address_space;
-        }
-      }
       return new RemoteTraceRecorder(runtime, origin_space, 
                                      runtime->address_space, memo,
-                                     remote_tpl, applied_event, collect_event,
-                                     repl_id, tpl_index);
+                                     remote_tpl, applied_event, collect_event);
     }
 
     //--------------------------------------------------------------------------
@@ -5513,7 +5490,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
-                      ApEvent precondition, const bool manage_dst_events,
+                      ApEvent precondition, const bool restricted_output,
+                      const bool manage_dst_events,
                       std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
     //--------------------------------------------------------------------------
     {
@@ -5523,7 +5501,8 @@ namespace Legion {
       if (guard_precondition.exists() && !guard_precondition.has_triggered())
       {
         CopyFillAggregation args(this, trace_info, precondition,
-            manage_dst_events, op->get_unique_op_id(), dst_events);
+                                 manage_dst_events, restricted_output,
+                                 op->get_unique_op_id(), dst_events);
         op->runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
         return;
@@ -5543,7 +5522,7 @@ namespace Legion {
 #else
             recorded_events,
 #endif
-            -1/*redop index*/, manage_dst_events, dst_events);
+            -1/*redop index*/, manage_dst_events, restricted_output,dst_events);
       // Then apply any reductions that we might have
       if (!reductions.empty())
       {
@@ -5555,7 +5534,8 @@ namespace Legion {
 #else
                           recorded_events,
 #endif
-                          idx/*redop index*/, manage_dst_events, dst_events);
+                          idx/*redop index*/, manage_dst_events,
+                          restricted_output, dst_events);
       }
 #ifndef NON_AGGRESSIVE_AGGREGATORS
       if (!recorded_events.empty())
@@ -5633,8 +5613,8 @@ namespace Legion {
     void CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> > &updates,
          const PhysicalTraceInfo &trace_info, const ApEvent precondition,
-         std::set<RtEvent> &recorded_events,
-         const int redop_index, const bool manage_dst_events,
+         std::set<RtEvent> &recorded_events, const int redop_index,
+         const bool manage_dst_events, const bool restricted_output,
          std::map<InstanceView*,std::vector<ApEvent> > *dst_events)
     //--------------------------------------------------------------------------
     {
@@ -5691,10 +5671,12 @@ namespace Legion {
           // Issue the copies and fills
           if (!fills.empty())
             issue_fills(uit->first, fills, recorded_events, dst_precondition,
-                dst_mask, trace_info, manage_dst_events, target_events);
+                        dst_mask, trace_info, manage_dst_events,
+                        restricted_output, target_events);
           if (!copies.empty())
             issue_copies(uit->first, copies, recorded_events, dst_precondition,
-                dst_mask, trace_info, manage_dst_events, target_events);
+                         dst_mask, trace_info, manage_dst_events,
+                         restricted_output, target_events);
         }
       }
     }
@@ -5707,6 +5689,7 @@ namespace Legion {
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          const bool manage_dst_events,
+                                         const bool restricted_output,
                                          std::vector<ApEvent> *dst_events)
     //--------------------------------------------------------------------------
     {
@@ -5746,6 +5729,7 @@ namespace Legion {
                                                   recorded_events, effects,
                                                   fills[0]->across_helper,
                                                   manage_dst_events,
+                                                  restricted_output,
                                                   track_events);
         if (result.exists())
         {
@@ -5795,6 +5779,7 @@ namespace Legion {
                                                     recorded_events, effects, 
                                                     fills[0]->across_helper,
                                                     manage_dst_events,
+                                                    restricted_output,
                                                     track_events);
           if (result.exists())
           {
@@ -5813,7 +5798,8 @@ namespace Legion {
                std::set<RtEvent> &recorded_events,
                const ApEvent precondition, const FieldMask &copy_mask,
                const PhysicalTraceInfo &trace_info,
-               const bool manage_dst_events, std::vector<ApEvent> *dst_events)
+               const bool manage_dst_events, const bool restricted_output,
+               std::vector<ApEvent> *dst_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5860,7 +5846,8 @@ namespace Legion {
                                       : src_index, copy_mask, trace_info,
                                     recorded_events, effects,
                                     cit->second[0]->across_helper,
-                                    manage_dst_events, track_events);
+                                    manage_dst_events, restricted_output,
+                                    track_events);
           if (result.exists())
           {
             if (track_events)
@@ -5910,7 +5897,8 @@ namespace Legion {
                                       src_index, copy_mask, trace_info,
                                     recorded_events, effects,
                                     cit->second[0]->across_helper,
-                                    manage_dst_events, track_events);
+                                    manage_dst_events, restricted_output,
+                                    track_events);
             if (result.exists())
             {
               if (track_events)
@@ -5928,8 +5916,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
-      cfargs->aggregator->issue_updates(*cfargs, cfargs->pre,
-          cfargs->manage_dst_events, cfargs->dst_events);
+      cfargs->aggregator->issue_updates(*cfargs, cfargs->pre, 
+          cfargs->restricted_output, cfargs->manage_dst_events,
+          cfargs->dst_events);
       cfargs->remove_recorder_reference();
       if (cfargs->dst_events != NULL)
         delete cfargs->dst_events;
@@ -7494,7 +7483,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!skip_output);
 #endif
-        output_aggregator->issue_updates(trace_info, term_event);
+        output_aggregator->issue_updates(trace_info, term_event,
+                                         true/*restricted output*/);
         // We need to wait for the aggregator updates to be applied
         // here before we can summarize the output
 #ifdef NON_AGGRESSIVE_AGGREGATORS
@@ -8536,8 +8526,8 @@ namespace Legion {
         // This is a copy-across aggregator so the destination events
         // are being handled by the copy operation that mapped the
         // target instance for us
-        across_aggregator->issue_updates(trace_info, precondition, 
-                          false/*manage dst events*/, &dst_events);
+        across_aggregator->issue_updates(trace_info, precondition,
+            false/*restricted*/, false/*manage dst events*/, &dst_events);
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (!across_aggregator->effects_applied.has_triggered())
           return across_aggregator->effects_applied;
@@ -8977,7 +8967,8 @@ namespace Legion {
       }
       if (output_aggregator != NULL)
       {
-        output_aggregator->issue_updates(trace_info, precondition);
+        output_aggregator->issue_updates(trace_info, precondition, 
+                                         true/*restricted output*/);
         // Need to wait before we can get the summary
 #ifdef NON_AGGRESSIVE_AGGREGATORS
         if (!output_aggregator->effects_applied.has_triggered())

@@ -278,8 +278,7 @@ namespace Legion {
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
                           Memoizable *memo, PhysicalTemplate *tpl, 
-                          RtUserEvent applied_event, RtEvent collect_event,
-                          ReplicationID repl_id, size_t tpl_index);
+                          RtUserEvent applied_event, RtEvent collect_event);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs) = delete;
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -408,8 +407,6 @@ namespace Legion {
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
       const RtEvent collect_event;
-      const ReplicationID repl_id;
-      const size_t tpl_index;
     };
 
     /**
@@ -1317,12 +1314,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_COPY_FILL_AGGREGATION_TASK_ID;
       public:
         CopyFillAggregation(CopyFillAggregator *a, const PhysicalTraceInfo &i,
-                            ApEvent p, const bool manage_dst, UniqueID uid,
+                            ApEvent p, const bool manage_dst, 
+                            const bool restricted, UniqueID uid,
                             std::map<InstanceView*,std::vector<ApEvent> > *dsts)
           : LgTaskArgs<CopyFillAggregation>(uid), PhysicalTraceInfo(i),
             dst_events((dsts == NULL) ? NULL : 
                 new std::map<InstanceView*,std::vector<ApEvent> >()),
-            aggregator(a), pre(p), manage_dst_events(manage_dst)
+            aggregator(a), pre(p), manage_dst_events(manage_dst),
+            restricted_output(restricted)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -1337,6 +1336,7 @@ namespace Legion {
         CopyFillAggregator *const aggregator;
         const ApEvent pre;
         const bool manage_dst_events;
+        const bool restricted_output;
       }; 
     public:
       typedef LegionMap<InstanceView*,
@@ -1466,6 +1466,7 @@ namespace Legion {
                              CopyAcrossHelper *across_helper = NULL);
       void issue_updates(const PhysicalTraceInfo &trace_info, 
                          ApEvent precondition,
+                         const bool restricted_output = false,
                          // Next args are used for across-copies
                          // to indicate that the precondition already
                          // describes the precondition for the 
@@ -1488,6 +1489,7 @@ namespace Legion {
                            std::set<RtEvent> &recorded_events, 
                            const int redop_index,
                            const bool manage_dst_events,
+                           const bool restricted_output,
                            std::map<InstanceView*,
                                     std::vector<ApEvent> > *dst_events);
       void issue_fills(InstanceView *target,
@@ -1496,6 +1498,7 @@ namespace Legion {
                        const ApEvent precondition, const FieldMask &fill_mask,
                        const PhysicalTraceInfo &trace_info,
                        const bool manage_dst_events,
+                       const bool restricted_output,
                        std::vector<ApEvent> *dst_events);
       void issue_copies(InstanceView *target, 
                         const std::map<InstanceView*,
@@ -1504,6 +1507,7 @@ namespace Legion {
                         const ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info,
                         const bool manage_dst_events,
+                        const bool restricted_output,
                         std::vector<ApEvent> *dst_events);
     public:
       inline void clear_update_fields(void) 

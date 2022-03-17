@@ -331,7 +331,6 @@ namespace Legion {
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
       mapper = NULL;
-      sharded_tpl_index = 0;
       must_epoch = NULL;
       must_epoch_task = false;
       local_function = false;
@@ -435,10 +434,6 @@ namespace Legion {
         {
           rez.serialize(tpl);
           rez.serialize(trace_local_id);
-          if (is_remote())
-            rez.serialize(sharded_tpl_index);
-          else
-            rez.serialize(tpl->get_sharded_template_index());
         }
       }
       rez.serialize(request_valid_instances);
@@ -485,7 +480,6 @@ namespace Legion {
         {
           derez.deserialize(tpl);
           derez.deserialize(trace_local_id);
-          derez.deserialize(sharded_tpl_index);
         }
       }
       derez.deserialize(request_valid_instances);
@@ -1407,7 +1401,6 @@ namespace Legion {
       // Memoizable stuff
       this->tpl = rhs->tpl;
       this->memo_state = rhs->memo_state;
-      this->sharded_tpl_index = rhs->sharded_tpl_index;
     }
 
     //--------------------------------------------------------------------------
@@ -3922,10 +3915,9 @@ namespace Legion {
       if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
       {
         const RtUserEvent remote_applied = Runtime::create_rt_user_event();
-        const ReplicationID repl_id = parent_ctx->get_replication_id(); 
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
             orig_proc.address_space(), runtime->address_space, this, tpl,
-            remote_applied, remote_collect_event, repl_id, sharded_tpl_index);
+            remote_applied, remote_collect_event);
         remote_trace_recorder->add_recorder_reference();
         map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION

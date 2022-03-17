@@ -2407,7 +2407,6 @@ namespace Legion {
       ShardedPhysicalTemplate* find_or_buffer_trace_update(Deserializer &derez,
                                                          AddressSpaceID source);
       void unregister_trace_template(size_t template_index);
-      ShardedPhysicalTemplate* find_sharded_current_template(size_t index);
     public:
       ShardID get_next_attach_did_origin(void);
       // Support for making equivalence sets (logical analysis stage only)

@@ -1952,6 +1952,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
                                          const bool manage_dst_events,
+                                         const bool fill_restricted,
                                          const bool need_valid_return)
     //--------------------------------------------------------------------------
     {
@@ -2024,6 +2025,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
                                          const bool manage_dst_events,
+                                         const bool copy_restricted,
                                          const bool need_valid_return)
     //--------------------------------------------------------------------------
     {
@@ -4516,6 +4518,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
                                          const bool manage_dst_events,
+                                         const bool fill_restricted,
                                          const bool need_valid_return)
     //--------------------------------------------------------------------------
     {
@@ -5233,6 +5236,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
                                          const bool manage_dst_events,
+                                         const bool fill_restricted,
                                          const bool need_valid_return)
     //--------------------------------------------------------------------------
     {
