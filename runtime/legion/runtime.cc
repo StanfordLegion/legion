@@ -2572,19 +2572,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureInstance::FutureInstance(const FutureInstance &rhs)
-      : runtime(rhs.runtime), data(rhs.data), size(rhs.size), 
-        memory(rhs.memory), freefunc(rhs.freefunc), freeproc(rhs.freeproc),
-        eager_allocation(rhs.eager_allocation),
-        external_allocation(rhs.external_allocation),
-        is_meta_visible(rhs.is_meta_visible)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     FutureInstance::~FutureInstance(void)
     //--------------------------------------------------------------------------
     {
@@ -2634,15 +2621,6 @@ namespace Legion {
 #endif
         inst.destroy(ready_event);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    FutureInstance& FutureInstance::operator=(const FutureInstance &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------

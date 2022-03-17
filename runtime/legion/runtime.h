@@ -460,10 +460,10 @@ namespace Legion {
                      void (*freefunc)(void*,size_t) = NULL,
                      Processor free_proc = Processor::NO_PROC,
                      RtEvent use_event = RtEvent::NO_RT_EVENT);
-      FutureInstance(const FutureInstance &rhs);
+      FutureInstance(const FutureInstance &rhs) = delete;
       ~FutureInstance(void);
     public:
-      FutureInstance& operator=(const FutureInstance &rhs);
+      FutureInstance& operator=(const FutureInstance &rhs) = delete;
     public:
       ApEvent initialize(const ReductionOp *redop, Operation *op);
       ApEvent copy_from(FutureInstance *source, Operation *op,
