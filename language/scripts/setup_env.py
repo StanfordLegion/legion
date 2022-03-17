@@ -101,7 +101,7 @@ def git_update(repo_dir):
 def build_gasnet(gasnet_dir, conduit):
     subprocess.check_call(['make', 'CONDUIT=%s' % conduit], cwd=gasnet_dir)
 
-def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_count, is_cray):
+def build_llvm(source_dir, build_dir, install_dir, is_project_build, use_cmake, cmake_exe, thread_count, is_cray):
     env = None
     if is_cray:
         env = dict(list(os.environ.items()) + [
@@ -109,6 +109,12 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
             ('CXX', os.environ['HOST_CXX']),
         ])
     if use_cmake:
+        extra_flags = []
+        if is_project_build:
+            extra_flags = [
+                '-DLLVM_ENABLE_PROJECTS=clang;lld',
+                '-DLLVM_ENABLE_RUNTIMES=libunwind',
+            ]
         subprocess.check_call(
             [cmake_exe,
              '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
@@ -116,8 +122,9 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
              '-DLLVM_ENABLE_ASSERTIONS=OFF',
              '-DLLVM_ENABLE_ZLIB=OFF',
              '-DLLVM_ENABLE_TERMINFO=OFF',
-             '-DLLVM_ENABLE_LIBEDIT=OFF',
-             source_dir],
+             '-DLLVM_ENABLE_LIBEDIT=OFF'] +
+            extra_flags +
+            [source_dir],
             cwd=build_dir,
             env=env)
     else:
@@ -272,27 +279,27 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         download(clang_tarball, '%s/llvmorg-11.1.0/clang-11.1.0.src.tar.xz' % mirror, '0a8288f065d1f57cb6d96da4d2965cbea32edc572aa972e466e954d17148558b', insecure=insecure)
     elif llvm_version == '130':
         mirror = 'https://github.com/llvm/llvm-project/releases/download'
-        llvm_tarball = os.path.join(llvm_dir, 'llvm-13.0.0.src.tar.xz')
-        llvm_source_dir = os.path.join(llvm_dir, 'llvm-13.0.0.src')
-        clang_tarball = os.path.join(llvm_dir, 'clang-13.0.0.src.tar.xz')
-        clang_source_dir = os.path.join(llvm_dir, 'clang-13.0.0.src')
-        download(llvm_tarball, '%s/llvmorg-13.0.0/llvm-13.0.0.src.tar.xz' % mirror, '408d11708643ea826f519ff79761fcdfc12d641a2510229eec459e72f8163020', insecure=insecure)
-        download(clang_tarball, '%s/llvmorg-13.0.0/clang-13.0.0.src.tar.xz' % mirror, '5d611cbb06cfb6626be46eb2f23d003b2b80f40182898daa54b1c4e8b5b9e17e', insecure=insecure)
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-project-13.0.0.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-project-13.0.0.src', 'llvm')
+        clang_tarball = None
+        download(llvm_tarball, '%s/llvmorg-13.0.0/llvm-project-13.0.0.src.tar.xz' % mirror, '6075ad30f1ac0e15f07c1bf062c1e1268c241d674f11bd32cdf0e040c71f2bf3', insecure=insecure)
     else:
         assert False
 
     if not cache:
         extract(llvm_dir, llvm_tarball, 'xz')
-        extract(llvm_dir, clang_tarball, 'xz')
+        if clang_tarball:
+            extract(llvm_dir, clang_tarball, 'xz')
         if llvm_version == '35':
             apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.5-gcc.patch'))
         elif llvm_version == '38':
             apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.8-gcc.patch'))
-        os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
+        if clang_tarball:
+            os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
 
         llvm_build_dir = tempfile.mkdtemp(prefix='setup_env_llvm_build', dir=scratch_dir or llvm_dir)
         os.mkdir(llvm_install_dir)
-        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
+        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, clang_tarball is None, llvm_use_cmake, cmake_exe, thread_count, is_cray)
 
 def install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure):
     try:

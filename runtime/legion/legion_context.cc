@@ -135,7 +135,8 @@ namespace Legion {
 #ifdef LEGION_USE_LIBDL
     //--------------------------------------------------------------------------
     void TaskContext::perform_global_registration_callbacks(
-                     Realm::DSOReferenceImplementation *dso, RtEvent local_done,
+                     Realm::DSOReferenceImplementation *dso, const void *buffer,
+                     size_t buffer_size, bool withargs, RtEvent local_done,
                      RtEvent global_done, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -146,7 +147,7 @@ namespace Legion {
         if (space == runtime->address_space)
           continue;
         runtime->send_registration_callback(space, dso, global_done,
-                                            preconditions);
+                      preconditions, buffer, buffer_size, withargs);
       }
     }
 #endif
