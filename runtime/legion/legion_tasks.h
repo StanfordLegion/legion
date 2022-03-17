@@ -326,9 +326,6 @@ namespace Legion {
       bool children_commit;
     protected:
       MapperManager *mapper;
-    protected:
-      // Template index for sharded templates
-      size_t sharded_tpl_index;
     public:
       // Index for this must epoch op
       unsigned must_epoch_index;

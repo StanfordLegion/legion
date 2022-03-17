@@ -276,7 +276,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events) = 0;
+                                const bool manage_dst_events,
+                                const bool fill_restricted) = 0;
       virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
                                 PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
@@ -287,7 +288,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events) = 0;
+                                const bool manage_dst_events,
+                                const bool copy_restricted) = 0;
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                              std::vector<CopySrcDstField> &fields) = 0;
     public:
@@ -515,7 +517,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool fill_restricted);
       virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
                                 PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
@@ -526,7 +529,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool copy_restricted);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                              std::vector<CopySrcDstField> &fields);
     public:
@@ -721,7 +725,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool fill_restricted);
       virtual ApEvent copy_from(InstanceView *src_view, InstanceView *dst_view,
                                 PhysicalManager *manager, ApEvent precondition,
                                 PredEvent predicate_guard, ReductionOpID redop,
@@ -732,7 +737,8 @@ namespace Legion {
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 CopyAcrossHelper *across_helper,
-                                const bool manage_dst_events);
+                                const bool manage_dst_events,
+                                const bool copy_restricted);
       virtual void compute_copy_offsets(const FieldMask &copy_mask,
                              std::vector<CopySrcDstField> &fields);
 #ifdef LEGION_GPU_REDUCTIONS
