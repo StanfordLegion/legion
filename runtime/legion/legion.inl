@@ -16984,8 +16984,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /* = false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -17061,8 +17062,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /* = false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -17139,8 +17141,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
                              const FT *initial_value /*= NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims /*= false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /*= false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -17216,8 +17219,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /* = false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -17293,8 +17297,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory memory, const Domain &space,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /* = false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       const DomainT<N,T> bounds = space;
@@ -17352,8 +17357,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(Memory memory, const IndexSpace space,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /* = false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
@@ -17412,8 +17418,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
                              const FT *initial_value /*= NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims /*= false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /*= false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       const DomainT<N,T> bounds(rect);
@@ -17471,8 +17478,9 @@ namespace Legion {
 #endif
            >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t al /* = 16*/,
+                             bool fortran_order /* = false*/)
+      : fortran_order_dims(fortran_order), alignment(al)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
@@ -18857,7 +18865,24 @@ namespace Legion {
                                    DeferredBuffer<T,DIM> &buffer)
     //--------------------------------------------------------------------------
     {
-      return_data(shape, field_id, buffer.instance);
+      // Populate the layout constraints for the returned buffer
+      // for the constraint checks.
+      LayoutConstraintSet constraints;
+      std::vector<DimensionKind> ordering(DIM + 1);
+      if (buffer.fortran_order_dims)
+        for (int i = 0; i < DIM; ++i)
+            ordering[i] =
+              static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+      else
+        for (int i = DIM - 1; i >= 0; --i)
+            ordering[i] =
+              static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+      ordering[DIM] = LEGION_DIM_F;
+      constraints.ordering_constraint = OrderingConstraint(ordering, false);
+      constraints.alignment_constraints.push_back(
+        AlignmentConstraint(field_id, LEGION_EQ_EK, buffer.alignment));
+
+      return_data(shape, field_id, buffer.instance, &constraints, true);
     }
 
     //--------------------------------------------------------------------------
