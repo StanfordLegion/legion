@@ -93,6 +93,7 @@ else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
 NVCC_FLAGS	+= -Xcompiler -fPIC
+HIPCC_FLAGS     += -fPIC
 ifeq ($(shell uname -s),Darwin)
 SLIB_LEGION     := liblegion.dylib
 SLIB_REALM      := librealm.dylib
