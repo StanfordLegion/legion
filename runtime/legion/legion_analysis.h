@@ -1635,13 +1635,13 @@ namespace Legion {
       PhysicalAnalysis(Runtime *rt, Operation *op, unsigned index,
                        IndexSpaceExpression *expr, bool on_heap,
                        bool immutable, CollectiveMapping *mapping = NULL,
-                       bool exclusive = false, bool first_local = false);
+                       bool exclusive = false, bool first_local = true);
       // Remote physical analysis
       PhysicalAnalysis(Runtime *rt, AddressSpaceID source, AddressSpaceID prev,
                        Operation *op, unsigned index, 
                        IndexSpaceExpression *expr, bool on_heap,
                        bool immutable = false,CollectiveMapping *mapping = NULL,
-                       bool exclusive = false, bool first_local = false);
+                       bool exclusive = false, bool first_local = true);
       PhysicalAnalysis(const PhysicalAnalysis &rhs);
       virtual ~PhysicalAnalysis(void);
     public:
@@ -1728,6 +1728,45 @@ namespace Legion {
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EquivalenceSet> > remote_sets; 
       FieldMaskSet<LogicalView> *recorded_instances;
+    };
+
+    /**
+     * \class CollectiveCopyFillAnalysis
+     * This is an intermediate base class for analyses that helps support
+     * performing collective copies and fills on a destination collective
+     * instance. It works be registering itself with the local collective
+     * instance for its point so any collective copies and fills can be
+     * attributed to the correct operation. After the analysis is done
+     * then the analysis will unregister itself with the collecitve instance.
+     */
+    class CollectiveCopyFillAnalysis : public PhysicalAnalysis {
+    public:
+      CollectiveCopyFillAnalysis(Runtime *rt, Operation *op, unsigned index,
+                                 IndexSpaceExpression *expr, bool on_heap,
+                                 const InstanceSet &target_instances,
+                                 std::vector<InstanceView*> &target_views,
+                                 std::vector<InstanceView*> &source_views,
+                                 const PhysicalTraceInfo &trace_info,
+                                 CollectiveMapping *mapping, bool first_local,
+                                 const DomainPoint &point, bool exclusive);
+      CollectiveCopyFillAnalysis(Runtime *rt, AddressSpaceID src, 
+                                 AddressSpaceID prev, Operation *op,
+                                 unsigned index, IndexSpaceExpression *expr,
+                                 bool on_heap, InstanceSet &target_instances,
+                                 std::vector<InstanceView*> &target_views,
+                                 std::vector<InstanceView*> &source_views,
+                                 const PhysicalTraceInfo &trace_info,
+                                 CollectiveMapping *collective_mapping,
+                                 bool first_local, const DomainPoint &point,
+                                 bool exclusive);
+      virtual ~CollectiveCopyFillAnalysis(void);
+    public:
+      const DomainPoint collective_point;
+      const size_t context_index;
+      const InstanceSet target_instances;
+      const std::vector<InstanceView*> target_views;
+      const std::vector<InstanceView*> source_views;
+      const PhysicalTraceInfo trace_info;
     };
 
     /**
@@ -1859,7 +1898,7 @@ namespace Legion {
      * \class UpdateAnalysis
      * For performing updates on equivalence set trees
      */
-    class UpdateAnalysis : public PhysicalAnalysis,
+    class UpdateAnalysis : public CollectiveCopyFillAnalysis,
                            public LegionHeapify<UpdateAnalysis> {
     public:
       UpdateAnalysis(Runtime *rt, Operation *op, unsigned index,
@@ -1884,10 +1923,10 @@ namespace Legion {
                      const ApEvent precondition, const ApEvent term_event,
                      const bool check_initialized, const bool record_valid,
                      const bool skip_output, const bool first_local);
-      UpdateAnalysis(const UpdateAnalysis &rhs);
+      UpdateAnalysis(const UpdateAnalysis &rhs) = delete;
       virtual ~UpdateAnalysis(void);
     public:
-      UpdateAnalysis& operator=(const UpdateAnalysis &rhs);
+      UpdateAnalysis& operator=(const UpdateAnalysis &rhs) = delete;
     public:
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
@@ -1914,13 +1953,7 @@ namespace Legion {
                                         AddressSpaceID previous);
     public:
       const RegionUsage usage;
-      // Collective instance point
-      const DomainPoint point;
       RegionNode *const node;
-      const InstanceSet target_instances;
-      const std::vector<InstanceView*> target_views;
-      const std::vector<InstanceView*> source_views;
-      const PhysicalTraceInfo trace_info;
       const ApEvent precondition;
       const ApEvent term_event;
       const bool check_initialized;
@@ -1983,7 +2016,7 @@ namespace Legion {
      * \class ReleaseAnalysis
      * For performing releases on equivalence set trees
      */
-    class ReleaseAnalysis : public PhysicalAnalysis,
+    class ReleaseAnalysis : public CollectiveCopyFillAnalysis,
                             public LegionHeapify<ReleaseAnalysis> {
     public:
       ReleaseAnalysis(Runtime *rt, Operation *op, unsigned index,
@@ -1993,18 +2026,20 @@ namespace Legion {
                       std::vector<InstanceView*> &source_views,
                       const PhysicalTraceInfo &trace_info,
                       CollectiveMapping *collective_mapping,
-                      const bool first_local);
+                      const bool first_local, const DomainPoint &point);
       ReleaseAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                       Operation *op, unsigned index, IndexSpaceExpression *expr,
                       ApEvent precondition, ReleaseAnalysis *target, 
                       InstanceSet &target_instances,
                       std::vector<InstanceView*> &target_views,
                       std::vector<InstanceView*> &source_views,
-                      const PhysicalTraceInfo &info);
-      ReleaseAnalysis(const ReleaseAnalysis &rhs);
+                      const PhysicalTraceInfo &info,
+                      CollectiveMapping *mapping, const bool first_local,
+                      const DomainPoint &point);
+      ReleaseAnalysis(const ReleaseAnalysis &rhs) = delete;
       virtual ~ReleaseAnalysis(void);
     public:
-      ReleaseAnalysis& operator=(const ReleaseAnalysis &rhs);
+      ReleaseAnalysis& operator=(const ReleaseAnalysis &rhs) = delete;
     public:
       virtual bool perform_traversal(EquivalenceSet *set,
                                      IndexSpaceExpression *expr,
@@ -2025,10 +2060,6 @@ namespace Legion {
     public:
       const ApEvent precondition;
       ReleaseAnalysis *const target_analysis;
-      const InstanceSet target_instances;
-      const std::vector<InstanceView*> target_views;
-      const std::vector<InstanceView*> source_views;
-      const PhysicalTraceInfo trace_info;
     public:
       // Can only safely be accessed when analysis is locked
       CopyFillAggregator *release_aggregator;

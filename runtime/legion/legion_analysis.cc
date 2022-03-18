@@ -5950,7 +5950,7 @@ namespace Legion {
                                IndexSpaceExpression *e, bool h, bool im,
                                CollectiveMapping *mapping, bool ex, bool first)
       : previous(prev), original_source(source), runtime(rt), analysis_expr(e),
-        collective_mapping(mapping), op(o), index(idx), owns_op(true), 
+        collective_mapping(mapping), op(o), index(idx), owns_op(true),
         on_heap(h), exclusive(ex), immutable(im), collective_first_local(first),
         parallel_traversals(false), restricted(false), recorded_instances(NULL)
     //--------------------------------------------------------------------------
@@ -6412,6 +6412,86 @@ namespace Legion {
         Runtime::trigger_event(dargs->applied_event);
       if (on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CollectiveCopyFillAnalysis
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveCopyFillAnalysis::CollectiveCopyFillAnalysis(
+                                 Runtime *rt, Operation *op, unsigned index,
+                                 IndexSpaceExpression *expr, bool on_heap,
+                                 const InstanceSet &target_insts,
+                                 std::vector<InstanceView*> &target_vws,
+                                 std::vector<InstanceView*> &source_vws,
+                                 const PhysicalTraceInfo &t_info,
+                                 CollectiveMapping *mapping, bool first_local,
+                                 const DomainPoint &point, bool exclusive)
+      : PhysicalAnalysis(rt, op, index, expr, on_heap, false/*immutable*/,
+                         mapping, exclusive, first_local),
+        collective_point(point), context_index(op->get_ctx_index()),
+        target_instances(target_insts), target_views(target_vws),
+        source_views(source_vws), trace_info(t_info)
+    //--------------------------------------------------------------------------
+    {
+      // Record ourselves with any collective managers
+      for (unsigned idx = 0; idx < target_instances.size(); idx++)
+      {
+        InstanceManager *manager = target_instances[idx].get_manager();
+        if (!manager->is_collective_manager())
+          continue;
+        CollectiveManager *collective = manager->as_collective_manager();
+        collective->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
+        collective->register_collective_analysis(this);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveCopyFillAnalysis::CollectiveCopyFillAnalysis(
+                                Runtime *rt, AddressSpaceID src, 
+                                AddressSpaceID prev, Operation *op,
+                                unsigned index, IndexSpaceExpression *expr, 
+                                bool on_heap, InstanceSet &target_insts,
+                                std::vector<InstanceView*> &target_vws,
+                                std::vector<InstanceView*> &source_vws,
+                                const PhysicalTraceInfo &t_info,
+                                CollectiveMapping *mapping, bool first_local,
+                                const DomainPoint &point, bool exclusive)
+      : PhysicalAnalysis(rt, src, prev, op, index, expr, on_heap, 
+                         false/*immutable*/, mapping, exclusive, first_local),
+        collective_point(point), context_index(op->get_ctx_index()),
+        target_instances(target_insts), target_views(target_vws),
+        source_views(source_vws), trace_info(t_info)
+    //--------------------------------------------------------------------------
+    {
+      // Record ourselves with any collective managers
+      for (unsigned idx = 0; idx < target_instances.size(); idx++)
+      {
+        InstanceManager *manager = target_instances[idx].get_manager();
+        if (!manager->is_collective_manager())
+          continue;
+        CollectiveManager *collective = manager->as_collective_manager();
+        collective->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
+        collective->register_collective_analysis(this);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveCopyFillAnalysis::~CollectiveCopyFillAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Unregister ourselves with any collective instances
+      for (unsigned idx = 0; idx < target_instances.size(); idx++)
+      {
+        InstanceManager *manager = target_instances[idx].get_manager();
+        if (!manager->is_collective_manager())
+          continue;
+        CollectiveManager *collective = manager->as_collective_manager();
+        collective->unregister_collective_analysis(this);
+        if (collective->remove_base_resource_ref(PHYSICAL_ANALYSIS_REF))
+          delete collective;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -7198,11 +7278,10 @@ namespace Legion {
                      const ApEvent pre, const ApEvent term,
                      const bool check, const bool record,
                      const bool skip, const bool first_local)
-      : PhysicalAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
-          false/*immutable*/, mapping, IS_WRITE(req), first_local),
-        usage(req), point(p), node(rn), target_instances(target_insts), 
-        target_views(target_vws), source_views(source_vws), trace_info(t_info),
-        precondition(pre), term_event(term),
+      : CollectiveCopyFillAnalysis(rt, o, idx, rn->row_source, true/*on heap*/,
+                                   target_insts, target_vws, source_vws, t_info,
+                                   mapping, first_local, p, IS_WRITE(req)),
+        usage(req), node(rn), precondition(pre), term_event(term),
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
         record_valid(record), skip_output(skip), output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -7220,11 +7299,10 @@ namespace Legion {
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool check, 
                      const bool record, const bool skip, const bool first_local)
-      : PhysicalAnalysis(rt, src, prev, o, idx, rn->row_source, true/*on heap*/,
-          false/*immutable*/, mapping, IS_WRITE(use), first_local),
-        usage(use), point(p), node(rn), target_instances(target_insts), 
-        target_views(target_vws), source_views(source_vws), trace_info(info), 
-        precondition(pre), term_event(term),
+      : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, rn->row_source,
+          true/*on heap*/, target_insts, target_vws, source_vws, info,
+          mapping, first_local, p, IS_WRITE(use)),
+        usage(use), node(rn), precondition(pre), term_event(term),
         check_initialized(check), record_valid(record), skip_output(skip), 
         output_aggregator(NULL), remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
@@ -7232,32 +7310,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    UpdateAnalysis::UpdateAnalysis(const UpdateAnalysis &rhs)
-      : PhysicalAnalysis(rhs), usage(rhs.usage), point(rhs.point), 
-        node(rhs.node), target_instances(rhs.target_instances), 
-        target_views(rhs.target_views), source_views(rhs.source_views),
-        trace_info(rhs.trace_info), precondition(rhs.precondition),
-        term_event(rhs.term_event), check_initialized(rhs.check_initialized),
-        record_valid(rhs.record_valid), skip_output(rhs.skip_output)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
     { 
-    }
-
-    //--------------------------------------------------------------------------
-    UpdateAnalysis& UpdateAnalysis::operator=(const UpdateAnalysis &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -7349,7 +7404,7 @@ namespace Legion {
           }
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
-          rez.serialize(point);
+          rez.serialize(collective_point);
           rez.serialize(node->handle);
           rez.serialize(usage);
           rez.serialize<size_t>(target_instances.size());
@@ -7575,7 +7630,7 @@ namespace Legion {
       }
       PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
-      bool first_local = false;
+      bool first_local = true;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *collective_mapping = ((collective_mapping_size) > 0) ?
@@ -7906,12 +7961,11 @@ namespace Legion {
                                      std::vector<InstanceView*> &source_vws, 
                                      const PhysicalTraceInfo &t_info,
                                      CollectiveMapping *mapping,
-                                     const bool first_local)
-      : PhysicalAnalysis(rt, o, idx, expr, false/*on heap*/, false/*immutable*/,
-                         mapping, true/*exclusive*/, first_local), 
-        precondition(pre), target_analysis(this), 
-        target_instances(target_insts), target_views(target_vws),
-        source_views(source_vws), trace_info(t_info), release_aggregator(NULL)
+                                     const bool first, const DomainPoint &p)
+      : CollectiveCopyFillAnalysis(rt, o, idx, expr, false/*on heap*/,
+                                   target_insts, target_vws, source_vws,
+                                   t_info, mapping, first, p,true/*exclusive*/),
+        precondition(pre), target_analysis(this), release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -7921,39 +7975,20 @@ namespace Legion {
           AddressSpaceID prev, Operation *o, unsigned idx, 
           IndexSpaceExpression *expr, ApEvent pre, ReleaseAnalysis *t, 
           InstanceSet &target_insts, std::vector<InstanceView*> &target_vws,
-          std::vector<InstanceView*> &source_vws, const PhysicalTraceInfo &info)
-      : PhysicalAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/),
-        precondition(pre), target_analysis(t), target_instances(target_insts),
-        target_views(target_vws), source_views(source_vws), trace_info(info),
-        release_aggregator(NULL)
+          std::vector<InstanceView*> &source_vws, const PhysicalTraceInfo &info,
+          CollectiveMapping *mapping, const bool first,const DomainPoint &point)
+      : CollectiveCopyFillAnalysis(rt, src, prev, o, idx, expr, true/*on heap*/,
+                                   target_insts, target_vws, source_vws, info, 
+                                   mapping, first, point, true/*exclusive*/),
+        precondition(pre), target_analysis(t), release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReleaseAnalysis::ReleaseAnalysis(const ReleaseAnalysis &rhs)
-      : PhysicalAnalysis(rhs), target_analysis(rhs.target_analysis), 
-        target_instances(rhs.target_instances), target_views(rhs.target_views),
-        source_views(rhs.source_views), trace_info(rhs.trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     ReleaseAnalysis::~ReleaseAnalysis(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReleaseAnalysis& ReleaseAnalysis::operator=(const ReleaseAnalysis &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -8033,6 +8068,17 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(target_analysis);
           trace_info.pack_trace_info<false>(rez, applied_events, target);
+          // We only need to pack the collective mapping once when going
+          // from the origin space to the next space
+          if ((collective_mapping != NULL) &&
+              (original_source == runtime->address_space))
+          {
+            collective_mapping->pack(rez);
+            rez.serialize(collective_point);
+            rez.serialize<bool>(collective_first_local);
+          }
+          else
+            rez.serialize<size_t>(0);
         }
         runtime->send_equivalence_set_remote_releases(target, rez);
         applied_events.insert(applied);
@@ -8188,10 +8234,21 @@ namespace Legion {
       derez.deserialize(target);
       const PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+      size_t collective_mapping_size;
+      derez.deserialize(collective_mapping_size);
+      CollectiveMapping *mapping = ((collective_mapping_size) > 0) ?
+        new CollectiveMapping(derez, collective_mapping_size) : NULL;
+      DomainPoint point;
+      bool first_local = true;
+      if (mapping != NULL)
+      {
+        derez.deserialize(point);
+        derez.deserialize<bool>(first_local);
+      }
 
       ReleaseAnalysis *analysis = new ReleaseAnalysis(runtime, original_source,
           previous, op, index, expr, precondition, target, target_instances,
-          target_views, source_views, trace_info);
+          target_views, source_views, trace_info, mapping, first_local, point);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       RtEvent ready_event;

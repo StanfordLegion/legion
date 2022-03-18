@@ -565,8 +565,6 @@ namespace Legion {
                                    ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
-                                   CollectiveMapping *collective_mapping,
-                                   const bool collective_first_local,
                                    std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                    , const char *log_name
@@ -580,8 +578,6 @@ namespace Legion {
                                    InstanceSet &restricted_instances,
                                    const std::vector<PhysicalManager*> &sources,
                                    const PhysicalTraceInfo &trace_info,
-                                   CollectiveMapping *collective_mapping,
-                                   const bool collective_first_local,
                                    std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
                                    , const char *log_name
@@ -679,15 +675,13 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               CollectiveMapping *collective_mapping,
                               std::set<RtEvent> &map_applied_events,
-                              const bool restricted,
-                              const bool collective_first_local);
+                              const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               InstanceView *local_view,
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               CollectiveMapping *collective_mapping,
-                              const bool collective_first_local,
                               LogicalView *registration_view = NULL);
       void invalidate_fields(Operation *op, unsigned index,
                              const RegionRequirement &req,

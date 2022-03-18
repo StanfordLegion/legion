@@ -2567,7 +2567,8 @@ namespace Legion {
                                             const CollectiveMapping *mapping,
                                             const PhysicalTraceInfo &trace_info,
                                             const AddressSpaceID source,
-                                            bool symbolic)
+                                            const bool collective_per_space,
+                                            const bool symbolic)
     //--------------------------------------------------------------------------
     {
       // This should only ever be called on collective instances
@@ -7520,7 +7521,8 @@ namespace Legion {
                                             const CollectiveMapping *mapping,
                                             const PhysicalTraceInfo &trace_info,
                                             const AddressSpaceID source,
-                                            bool symbolic)
+                                            const bool collective_per_space,
+                                            const bool symbolic)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7784,6 +7786,113 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CollectiveManager::register_collective_analysis(
+                                           CollectiveCopyFillAnalysis *analysis)
+    //--------------------------------------------------------------------------
+    {
+      int index = -1;
+      // Figure out which index we are, if we are not local we can ignore it
+      for (unsigned idx = 0; idx < instance_points.size(); idx++)
+      {
+        if (instance_points[idx] != analysis->collective_point)
+          continue;
+        index = idx;
+        break;
+      }
+      if (index < 0)
+        return;
+      AutoLock i_lock(inst_lock);
+      std::map<size_t,CollectiveAnalyses>::iterator finder =
+        collective_analyses.find(analysis->context_index);
+      if (finder == collective_analyses.end())
+      {
+        CollectiveAnalyses &entry = 
+          collective_analyses[analysis->context_index];
+        entry.analyses.resize(instances.size(), NULL);
+        entry.analyses[index] = analysis;
+        entry.valid_count = 1;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second.analyses[index] == NULL);
+        assert(finder->second.valid_count < instances.size());
+#endif
+        finder->second.analyses[index] = analysis;
+        if ((++finder->second.valid_count == instances.size()) &&
+            finder->second.pending.exists())
+          Runtime::trigger_event(finder->second.pending);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveManager::unregister_collective_analysis(
+                                           CollectiveCopyFillAnalysis *analysis)
+    //--------------------------------------------------------------------------
+    {
+      int index = -1;
+      // Figure out which index we are, if we are not local we can ignore it
+      for (unsigned idx = 0; idx < instance_points.size(); idx++)
+      {
+        if (instance_points[idx] != analysis->collective_point)
+          continue;
+        index = idx;
+        break;
+      }
+      if (index < 0)
+        return;
+      AutoLock i_lock(inst_lock);
+      std::map<size_t,CollectiveAnalyses>::iterator finder =
+        collective_analyses.find(analysis->context_index);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_analyses.end());
+      assert(finder->second.valid_count > 0);
+      assert(finder->second.analyses[index] == analysis);
+      finder->second.analyses[index] = NULL;
+#endif
+      if ((--finder->second.valid_count) == 0)
+        collective_analyses.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CollectiveManager::find_collective_analyses(size_t context_index,
+                            std::vector<CollectiveCopyFillAnalysis*> *&analyses)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!instances.empty());
+      assert(collective_mapping != NULL);
+#endif
+      AutoLock i_lock(inst_lock);
+      std::map<size_t,CollectiveAnalyses>::iterator finder =
+        collective_analyses.find(context_index);
+      if (finder == collective_analyses.end())
+      {
+        CollectiveAnalyses &entry = collective_analyses[context_index];
+        entry.analyses.resize(instances.size(), NULL);
+        entry.valid_count = 0;
+        entry.pending = Runtime::create_rt_user_event();
+        analyses = &entry.analyses;
+        return entry.pending;  
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second.valid_count <= instances.size());
+#endif
+        analyses = &finder->second.analyses;
+        if (finder->second.valid_count < instances.size())
+        {
+          if (!finder->second.pending.exists())
+            finder->second.pending = Runtime::create_rt_user_event();
+          return finder->second.pending;
+        }
+        else
+          return RtEvent::NO_RT_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void CollectiveManager::finalize_collective_user(
                               InstanceView *view, 
                               const RegionUsage &usage,
@@ -7814,7 +7923,8 @@ namespace Legion {
           trace_info.record_managed_barrier(common_term, total_points);
         result = view->register_user(usage, user_mask, expr, op_id,
             op_ctx_index, index, common_term, collect_event, local_applied,
-            NULL/*collective mapping*/, trace_info, source, symbolic);
+            NULL/*collective mapping*/, trace_info, source, false/*no-op*/,
+            symbolic);
         for (std::map<ApEvent,PhysicalTraceInfo*>::const_iterator it =
               term_events.begin(); it != term_events.end(); it++)
         {
@@ -7842,7 +7952,8 @@ namespace Legion {
         const ApEvent merged_term = Runtime::merge_events(&trace_info, terms);
         result = view->register_user(usage, user_mask, expr, op_id,
             op_ctx_index, index, merged_term, collect_event, local_applied,
-            NULL/*collective mapping*/, trace_info, source, symbolic);
+            NULL/*collective mapping*/, trace_info, source, false/*no-op*/,
+            symbolic);
       }
       const std::pair<size_t,unsigned> tag(op_ctx_index, index);
       // Retake the lock and do what we need to do to send the results

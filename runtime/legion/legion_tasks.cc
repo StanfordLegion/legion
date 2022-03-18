@@ -3084,13 +3084,25 @@ namespace Legion {
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "
                             "mapper %s. Mapper selected a collective instance "
-                            "for region requirement %d of individual task %s "
+                            "for region requirement %d of task %s "
                             "(ID %lld). This region requirement has write "
                             "privileges. Collective instances can only be "
                             "mapped by region requirements with read-only "
                             "or reduction privileges by tasks.", "map_task",
                             mapper->get_mapper_name(), idx, get_task_name(),
                             get_unique_id())
+              if (!variant_impl->is_leaf())
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper selected a collective instance "
+                            "for region requirement %d of task %s (ID %lld), "
+                            "but selected a non-leaf task variant %s (%d). "
+                            "Non-leaf tasks are not currently permitted to map "
+                            "collective instances. We may be open to relaxing "
+                            "this restriction in the future.", "map_task",
+                            mapper->get_mapper_name(), idx, get_task_name(),
+                            get_unique_id(), variant_impl->get_name(),
+                            variant_impl->vid)
               if (!is_index_space)
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "

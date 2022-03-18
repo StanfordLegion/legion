@@ -209,7 +209,7 @@ namespace Legion {
                                              term_event, collect_event, 
                                              applied_events, 
                                              NULL/*no collective mapping*/,
-                                             trace_info, source);
+                                             trace_info, source,false/*no-op*/);
       if (ready_event.exists())
         Runtime::trigger_event(&trace_info, ready_event, pre);
       if (!applied_events.empty())
@@ -2356,7 +2356,8 @@ namespace Legion {
                                           CollectiveMapping *collective_mapping,
                                           const PhysicalTraceInfo &trace_info,
                                           const AddressSpaceID source,
-                                          bool symbolic /*=false*/)
+                                          const bool collective_per_space,
+                                          const bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
       // Quick test for empty index space expressions
@@ -2368,7 +2369,8 @@ namespace Legion {
       if (collective_mapping != NULL)
         return manager->register_collective_user(this, usage, user_mask,
             user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, trace_info, source, symbolic);
+            applied_events, collective_mapping, trace_info, source,
+            collective_per_space, symbolic);
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
@@ -4182,7 +4184,8 @@ namespace Legion {
                                          CollectiveMapping *collective_mapping,
                                          const PhysicalTraceInfo &trace_info,
                                          const AddressSpaceID source,
-                                         bool symbolic /*=false*/)
+                                         const bool collective_per_space,
+                                         const bool symbolic /*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4197,7 +4200,8 @@ namespace Legion {
       if (collective_mapping != NULL)
         return manager->register_collective_user(this, usage, user_mask,
             user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, trace_info, source, symbolic);
+            applied_events, collective_mapping, trace_info, source,
+            collective_per_space, symbolic);
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION

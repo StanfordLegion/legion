@@ -13218,10 +13218,7 @@ namespace Legion {
         runtime->forest->acquire_restrictions(requirement, version_info,
                                               this, 0/*idx*/, completion_event,
                                               restricted_instances,
-                                              trace_info, 
-                                              get_collective_mapping(),
-                                              is_collective_first_local_shard(),
-                                              map_applied_conditions
+                                              trace_info, map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -13272,7 +13269,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(finalize_complete_mapping(mapping_applied));
+      complete_mapping(mapping_applied);
       if (!request_early_complete(acquire_complete))
         complete_execution(Runtime::protect_event(acquire_complete));
       else
@@ -14152,8 +14149,6 @@ namespace Legion {
                                               completion_event,
                                               restricted_instances, 
                                               source_instances, trace_info,
-                                              get_collective_mapping(),
-                                              is_collective_first_local_shard(),
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
@@ -14204,7 +14199,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(finalize_complete_mapping(mapping_applied));
+      complete_mapping(mapping_applied);
       if (!request_early_complete(release_complete))
         complete_execution(Runtime::protect_event(release_complete));
       else
@@ -21235,8 +21230,7 @@ namespace Legion {
                                                         trace_info,
                                                         NULL/*not collective*/,
                                                         map_applied_conditions,
-                                                        restricted,
-                                                        false/*no collective*/);
+                                                        restricted);
         // Signal to any other point tasks that we performed the attach for them
         if (attached_event.exists())
           Runtime::trigger_event(&trace_info, attached_event, attach_event);
@@ -22745,8 +22739,7 @@ namespace Legion {
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
                                          version_info, ext_view, trace_info,
                                          map_applied_conditions,
-                                         NULL/*no collective map*/,
-                                         false/*no collective map*/);
+                                         NULL/*no collective map*/);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
           Runtime::merge_events(&trace_info, detach_event, effects_done);

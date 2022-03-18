@@ -2469,8 +2469,7 @@ namespace Legion {
     public:
       // These are helper methods for ReplAcquireOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
-      virtual bool is_collective_first_local_shard(void) const { return false; }
-      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual bool is_collective_first_local_shard(void) const { return true; }
     protected:
       void activate_acquire(void);
       void deactivate_acquire(void);
@@ -2591,7 +2590,6 @@ namespace Legion {
       // These are helper methods for ReplReleaseOp
       virtual CollectiveMapping* get_collective_mapping(void) { return NULL; }
       virtual bool is_collective_first_local_shard(void) const { return false; }
-      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     protected:
       void activate_release(void);

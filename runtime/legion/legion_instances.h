@@ -361,7 +361,8 @@ namespace Legion {
                                 const CollectiveMapping *mapping,
                                 const PhysicalTraceInfo &trace_info,
                                 const AddressSpaceID source,
-                                bool symbolic) = 0;
+                                const bool collective_per_space,
+                                const bool symbolic) = 0;
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
                                 DistributedID view_did,const DomainPoint &point,
@@ -635,7 +636,8 @@ namespace Legion {
                                 const CollectiveMapping *mapping,
                                 const PhysicalTraceInfo &trace_info,
                                 const AddressSpaceID source,
-                                bool symbolic);
+                                const bool collective_per_space,
+                                const bool symbolic);
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
                                 DistributedID view_did,const DomainPoint &point,
@@ -935,7 +937,8 @@ namespace Legion {
                                 const CollectiveMapping *mapping,
                                 const PhysicalTraceInfo &trace_info,
                                 const AddressSpaceID source,
-                                bool symbolic);
+                                const bool collective_per_space,
+                                const bool symbolic);
     public:
       virtual RtEvent find_field_reservations(const FieldMask &mask,
                                 DistributedID view_did,const DomainPoint &point,
@@ -949,6 +952,10 @@ namespace Legion {
                                 std::vector<Reservation> &to_delete);
     public:
       AddressSpaceID select_source_space(AddressSpaceID destination) const;
+      void register_collective_analysis(CollectiveCopyFillAnalysis *analysis);
+      void unregister_collective_analysis(CollectiveCopyFillAnalysis *analysis);
+      RtEvent find_collective_analyses(size_t context_index,
+                           std::vector<CollectiveCopyFillAnalysis*> *&analyses);
       void perform_collective_fill(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
@@ -1183,6 +1190,13 @@ namespace Legion {
         unsigned remaining_remote_arrivals;
       };
       std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
+    protected:
+      struct CollectiveAnalyses {
+        std::vector<CollectiveCopyFillAnalysis*> analyses;
+        RtUserEvent pending;
+        unsigned valid_count;
+      };
+      std::map<size_t,CollectiveAnalyses> collective_analyses;
     protected:
       struct AllReduceCopy {
         std::vector<CopySrcDstField> src_fields;

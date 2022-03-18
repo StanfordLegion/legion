@@ -148,7 +148,8 @@ namespace Legion {
                                     CollectiveMapping *collective_mapping,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    bool symbolic = false) = 0;
+                                    const bool collective_per_space,
+                                    const bool symbolic = false) = 0;
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,              
                                     const FieldMask &copy_mask,
@@ -569,7 +570,8 @@ namespace Legion {
                                     CollectiveMapping *collective_mapping,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    bool symbolic = false);
+                                    const bool collective_per_space,
+                                    const bool symbolic = false);
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,
                                     const FieldMask &copy_mask,
@@ -740,7 +742,8 @@ namespace Legion {
                                     CollectiveMapping *collective_mapping,
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
-                                    bool symbolic = false);
+                                    const bool collective_per_space,
+                                    const bool symbolic = false);
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,
                                     const FieldMask &copy_mask,
