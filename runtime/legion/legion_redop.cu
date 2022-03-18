@@ -55,7 +55,8 @@ namespace Legion {
 
     // Legion's builtin reduction ops define apply and fold as host/device
     //  methods, whereas Realm is looking for apply_cuda/fold_cuda and a
-    //  'has_cuda_reductions' flag, so add those with a templated wrapper
+    //  'has_cuda/hip_reductions' flag, so add those with a templated wrapper
+#ifdef LEGION_USE_CUDA
     template <typename T>
     class AddCudaReductions : public T {
     public:
@@ -73,6 +74,29 @@ namespace Legion {
         T::template fold<EXCLUSIVE>(lhs, rhs);
       }
     };
+#endif
+
+    // We have added the hip code here becasue we rely on the hip tool to
+    // auto-generate the legion_redop.cpp from the legion_redop.cu
+#ifdef LEGION_USE_HIP
+    template <typename T>
+    class AddHipReductions : public T {
+    public:
+      static const bool has_hip_reductions = true;
+
+      template <bool EXCLUSIVE>
+      __device__ static void apply_hip(typename T::LHS& lhs, typename T::RHS rhs)
+      {
+        T::template apply<EXCLUSIVE>(lhs, rhs);
+      }
+
+      template <bool EXCLUSIVE>
+      __device__ static void fold_hip(typename T::LHS& lhs, typename T::RHS rhs)
+      {
+        T::template fold<EXCLUSIVE>(lhs, rhs);
+      }
+    };
+#endif
 
     // This is defined in runtime.h, but we can't include that here due
     //  to nvcc's inability to handle some constructs
@@ -83,6 +107,7 @@ namespace Legion {
                                               bool permit_duplicates,
                                               bool has_lock = false);
 
+#ifdef LEGION_USE_CUDA
 #define REGISTER_BUILTIN_REDOP_CUDA(id, type)                           \
   runtime_register_reduction_op(id, \
       Realm::ReductionOpUntyped::create_reduction_op< AddCudaReductions<type> \
@@ -93,6 +118,21 @@ namespace Legion {
       // Register all of our reductions
       LEGION_REDOP_LIST(REGISTER_BUILTIN_REDOP_CUDA)
     }
+#endif
+    
+#ifdef LEGION_USE_HIP
+#define REGISTER_BUILTIN_REDOP_HIP(id, type)                           \
+  runtime_register_reduction_op(id, \
+      Realm::ReductionOpUntyped::create_reduction_op< AddHipReductions<type> \
+      >(), NULL, NULL, false);
+
+    void register_builtin_reduction_operators_hip(void)
+    {
+      // Register all of our reductions
+      LEGION_REDOP_LIST(REGISTER_BUILTIN_REDOP_HIP)
+    }
+#endif
+
 #endif
 
   }; 
