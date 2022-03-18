@@ -23993,7 +23993,7 @@ namespace Legion {
       return table;
     }
 
-#if defined(LEGION_USE_CUDA) && !defined(LEGION_GPU_REDUCTIONS)
+#if ( defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP) )&& !defined(LEGION_GPU_REDUCTIONS)
     // Define a free function for Runtime::register_reduction_op because
     //  legion_redop.cu cannot include runtime.h
     //--------------------------------------------------------------------------

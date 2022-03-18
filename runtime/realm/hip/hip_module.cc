@@ -1079,6 +1079,7 @@ namespace Realm {
       
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
+      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
 
       if(!pinned_sysmems.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));

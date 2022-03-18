@@ -983,13 +983,11 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
-ifeq ($(strip $(USE_GPU_REDUCTIONS)),1)
-  ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
-    LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
-    LEGION_HIP_GENERATED_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
-  else ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
-    LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
-  endif
+ifeq ($(strip $(MK_HIP_TARGET)),ROCM)
+  LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
+  LEGION_HIP_GENERATED_SRC  += $(LG_RT_DIR)/legion/legion_redop.cpp
+else ifeq ($(strip $(MK_HIP_TARGET)),CUDA)
+  LEGION_HIP_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 endif
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
 LEGION_INST_SRC  += $(LG_RT_DIR)/legion/region_tree_tmpl.cc
