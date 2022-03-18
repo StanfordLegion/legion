@@ -324,6 +324,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_ctx_index, 
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -337,6 +338,7 @@ namespace Legion {
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -599,6 +601,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -612,6 +615,7 @@ namespace Legion {
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -900,6 +904,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -913,6 +918,7 @@ namespace Legion {
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -952,19 +958,23 @@ namespace Legion {
                                 std::vector<Reservation> &to_delete);
     public:
       AddressSpaceID select_source_space(AddressSpaceID destination) const;
-      void register_collective_analysis(CollectiveCopyFillAnalysis *analysis);
-      void unregister_collective_analysis(CollectiveCopyFillAnalysis *analysis);
-      RtEvent find_collective_analyses(size_t context_index,
-                           std::vector<CollectiveCopyFillAnalysis*> *&analyses);
+      void register_collective_analysis(DistributedID view_did,
+                                        CollectiveCopyFillAnalysis *analysis);
+      void unregister_collective_analysis(DistributedID view_did,
+                                          CollectiveCopyFillAnalysis *analysis);
+      RtEvent find_collective_analyses(DistributedID v_did,size_t context_index,
+                     const std::vector<CollectiveCopyFillAnalysis*> *&analyses);
       void perform_collective_fill(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 const UniqueID op_id, const unsigned index,
+                                const size_t op_context_index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
-                                ApUserEvent result, AddressSpaceID origin);
+                                ApUserEvent result, AddressSpaceID origin,
+                                const bool fill_restricted);
       ApEvent perform_collective_point(InstanceView *src_view,
                                 const std::vector<CopySrcDstField> &dst_fields,
                                 const std::vector<Reservation> &reservations,
@@ -986,13 +996,15 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const UniqueID op_id,
                                 const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent all_done, ApBarrier all_bar,
                                 ShardID owner_shard, AddressSpaceID origin,
-                                const uint64_t allreduce_tag);
+                                const uint64_t allreduce_tag,
+                                const bool copy_restricted);
       void perform_collective_reduction(InstanceView *src_view,
                                 const std::vector<CopySrcDstField> &dst_fields,
                                 const std::vector<Reservation> &reservations,
@@ -1013,13 +1025,15 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expresison,
                                 const UniqueID op_id,
                                 const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent copy_done, ApUserEvent all_done,
                                 ApBarrier all_bar, ShardID owner_shard,
-                                AddressSpaceID origin);
+                                AddressSpaceID origin,
+                                const bool copy_restricted);
       void perform_collective_reducecast(CollectiveManager *source,
                                 InstanceView *src_view, InstanceView *dst_view,
                                 ApEvent precondition,
@@ -1027,12 +1041,14 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expresison,
                                 const UniqueID op_id,
                                 const unsigned index,
+                                const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent all_done,
-                                AddressSpaceID target);
+                                AddressSpaceID target,
+                                const bool copy_restricted);
       void perform_collective_allreduce(ReductionView *src_view,
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
@@ -1041,6 +1057,7 @@ namespace Legion {
                                 const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
+                       const std::vector<CollectiveCopyFillAnalysis*> *analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 const uint64_t allreduce_tag);
@@ -1075,6 +1092,7 @@ namespace Legion {
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
                                 const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveCopyFillAnalysis*> *analyses,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_preconditions,
                     std::vector<std::vector<CopySrcDstField> > &local_fields,
@@ -1196,7 +1214,10 @@ namespace Legion {
         RtUserEvent pending;
         unsigned valid_count;
       };
-      std::map<size_t,CollectiveAnalyses> collective_analyses;
+      // The distributed ID from the view for this manager provides context
+      // scoping for context indexes to prevent collisions
+      std::map<std::pair<DistributedID,size_t>,
+               CollectiveAnalyses> collective_analyses;
     protected:
       struct AllReduceCopy {
         std::vector<CopySrcDstField> src_fields;

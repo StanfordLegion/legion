@@ -5725,6 +5725,7 @@ namespace Legion {
         const ApEvent result = manager->fill_from(fill_view, target, 
                                                   precondition, predicate_guard,
                                                   fill_expr, op_id, dst_index,
+                                                  op->get_ctx_index(),
                                                   fill_mask, trace_info, 
                                                   recorded_events, effects,
                                                   fills[0]->across_helper,
@@ -5765,6 +5766,7 @@ namespace Legion {
 #endif
           exprs[(*it)->source].insert((*it)->expr);
         }
+        const size_t op_ctx_index = op->get_ctx_index();
         for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
               const_iterator it = exprs.begin(); it != exprs.end(); it++)
         {
@@ -5774,7 +5776,8 @@ namespace Legion {
           const ApEvent result = manager->fill_from(it->first, target,
                                                     precondition,
                                                     predicate_guard, fill_expr,
-                                                    op_id, dst_index, 
+                                                    op_id, dst_index,
+                                                    op_ctx_index,
                                                     fill_mask, trace_info,
                                                     recorded_events, effects, 
                                                     fills[0]->across_helper,
@@ -5843,9 +5846,9 @@ namespace Legion {
                                     source->get_manager(), precondition,
                                     predicate_guard, update->redop, copy_expr,
                                     op_id, manage_dst_events ? dst_index
-                                      : src_index, copy_mask, trace_info,
-                                    recorded_events, effects,
-                                    cit->second[0]->across_helper,
+                                      : src_index, op->get_ctx_index(),
+                                    copy_mask, trace_info, recorded_events,
+                                    effects, cit->second[0]->across_helper,
                                     manage_dst_events, restricted_output,
                                     track_events);
           if (result.exists())
@@ -5885,6 +5888,7 @@ namespace Legion {
 #endif
             fused_exprs[(*it)->source].insert((*it)->expr);
           }
+          const size_t op_ctx_index = op->get_ctx_index();
           for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
                iterator it = fused_exprs.begin(); it != fused_exprs.end(); it++)
           {
@@ -5894,8 +5898,8 @@ namespace Legion {
                                     it->first->get_manager(), precondition,
                                     predicate_guard, redop, copy_expr, op_id,
                                     manage_dst_events ? dst_index : 
-                                      src_index, copy_mask, trace_info,
-                                    recorded_events, effects,
+                                      src_index, op_ctx_index, copy_mask,
+                                    trace_info, recorded_events, effects,
                                     cit->second[0]->across_helper,
                                     manage_dst_events, restricted_output,
                                     track_events);
@@ -6435,7 +6439,10 @@ namespace Legion {
         source_views(source_vws), trace_info(t_info)
     //--------------------------------------------------------------------------
     {
-      // Record ourselves with any collective managers
+#ifdef DEBUG_LEGION
+      assert(target_instances.size() == target_views.size());
+#endif
+      // If we're tracing then Record ourselves with any collective managers
       for (unsigned idx = 0; idx < target_instances.size(); idx++)
       {
         InstanceManager *manager = target_instances[idx].get_manager();
@@ -6443,7 +6450,9 @@ namespace Legion {
           continue;
         CollectiveManager *collective = manager->as_collective_manager();
         collective->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
-        collective->register_collective_analysis(this);
+        InstanceView *view = target_views[idx];
+        view->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
+        collective->register_collective_analysis(view->did, this);
       }
     }
 
@@ -6465,7 +6474,10 @@ namespace Legion {
         source_views(source_vws), trace_info(t_info)
     //--------------------------------------------------------------------------
     {
-      // Record ourselves with any collective managers
+#ifdef DEBUG_LEGION
+      assert(target_instances.size() == target_views.size());
+#endif
+      // If we're tracing then Record ourselves with any collective managers
       for (unsigned idx = 0; idx < target_instances.size(); idx++)
       {
         InstanceManager *manager = target_instances[idx].get_manager();
@@ -6473,7 +6485,9 @@ namespace Legion {
           continue;
         CollectiveManager *collective = manager->as_collective_manager();
         collective->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
-        collective->register_collective_analysis(this);
+        InstanceView *view = target_views[idx];
+        view->add_base_resource_ref(PHYSICAL_ANALYSIS_REF);
+        collective->register_collective_analysis(view->did, this);
       }
     }
 
@@ -6488,9 +6502,12 @@ namespace Legion {
         if (!manager->is_collective_manager())
           continue;
         CollectiveManager *collective = manager->as_collective_manager();
-        collective->unregister_collective_analysis(this);
+        InstanceView *view = target_views[idx];
+        collective->unregister_collective_analysis(view->did, this);
         if (collective->remove_base_resource_ref(PHYSICAL_ANALYSIS_REF))
           delete collective;
+        if (view->remove_base_resource_ref(PHYSICAL_ANALYSIS_REF))
+          delete view;
       }
     }
 
