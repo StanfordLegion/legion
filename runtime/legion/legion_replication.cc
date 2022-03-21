@@ -1948,15 +1948,15 @@ namespace Legion {
         assert(reduction_instance == reduction_instances.front());
 #endif
         ApEvent local_precondition;
-        if (!complete_effects.empty())
+        if (!reduction_effects.empty())
         {
-          local_precondition = Runtime::merge_events(NULL, complete_effects);
-          complete_effects.clear();
+          local_precondition = Runtime::merge_events(NULL, reduction_effects);
+          reduction_effects.clear();
         }
         const RtEvent collective_done = all_reduce_collective->async_reduce(
                                     reduction_instance, local_precondition);
         if (local_precondition.exists())
-          complete_effects.insert(local_precondition);
+          reduction_effects.push_back(local_precondition);
         // No need to do anything with the output local precondition
         // We already added it to the complete_effects when we made
         // the collective at the beginning

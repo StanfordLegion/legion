@@ -690,7 +690,7 @@ namespace Legion {
     public:
       // Return true if it is safe to delete the future
       bool fold_reduction_future(FutureInstance *instance, 
-          std::set<ApEvent> &applied_effects, bool exclusive);
+          std::vector<ApEvent> &applied_effects, bool exclusive);
     protected:
       std::list<SliceTask*> slices;
       bool sliced;
@@ -709,6 +709,7 @@ namespace Legion {
       const SerdezRedopFns *serdez_redop_fns;
       FutureInstance *reduction_instance;
       ApEvent reduction_inst_precondition;
+      std::vector<ApEvent> reduction_effects;
       // Only for handling serdez reductions
       void *serdez_redop_state;
       size_t serdez_redop_state_size;
@@ -1230,6 +1231,7 @@ namespace Legion {
       std::vector<RegionTreePath> privilege_paths;
       std::set<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
+      std::vector<ApUserEvent> reduction_instances_ready;
       std::vector<Memory> serdez_redop_targets;
     protected:
       std::set<RtEvent> map_applied_conditions;

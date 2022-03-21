@@ -343,7 +343,6 @@ namespace Legion {
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
                         UniqueID op_uid, bool eager, bool need_lock = true,
                         ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
-                        bool create_instance = false,
                         FutureInstance *existing = NULL);
       void mark_sampled(void);
       void broadcast_result(std::set<AddressSpaceID> &targets,
@@ -461,10 +460,10 @@ namespace Legion {
                      void (*freefunc)(void*,size_t) = NULL,
                      Processor free_proc = Processor::NO_PROC,
                      RtEvent use_event = RtEvent::NO_RT_EVENT);
-      FutureInstance(const FutureInstance &rhs);
+      FutureInstance(const FutureInstance &rhs) = delete;
       ~FutureInstance(void);
     public:
-      FutureInstance& operator=(const FutureInstance &rhs);
+      FutureInstance& operator=(const FutureInstance &rhs) = delete;
     public:
       ApEvent initialize(const ReductionOp *redop, Operation *op);
       ApEvent copy_from(FutureInstance *source, Operation *op,
@@ -504,9 +503,9 @@ namespace Legion {
       const bool is_meta_visible;
     protected:
       bool own_allocation;
-      PhysicalInstance instance;
-      RtEvent use_event;
-      bool own_instance;
+      std::atomic<PhysicalInstance> instance;
+      std::atomic<RtEvent> use_event;
+      std::atomic<bool> own_instance;
     };
 
     /**
@@ -4126,7 +4125,7 @@ namespace Legion {
       // Memory managers for all the memories we know about
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
-      MessageManager *message_managers[LEGION_MAX_NUM_NODES];
+      std::atomic<MessageManager*> message_managers[LEGION_MAX_NUM_NODES];
       // Pending message manager requests
       std::map<AddressSpaceID,RtUserEvent> pending_endpoint_requests;
       // For every processor map it to its address space

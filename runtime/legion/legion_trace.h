@@ -1259,8 +1259,6 @@ namespace Legion {
         return continuation_pre;
       }
     public:
-      virtual void pack_recorder(Serializer &rez, 
-                                 std::set<RtEvent> &applied);
       virtual size_t get_sharded_template_index(void) const
         { return template_index; }
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent,

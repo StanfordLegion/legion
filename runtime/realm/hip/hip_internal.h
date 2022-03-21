@@ -906,6 +906,112 @@ namespace Realm {
 
       GPU* gpu;
     };
+    
+    class GPUreduceChannel;
+
+    class GPUreduceXferDes : public XferDes {
+    public:
+      GPUreduceXferDes(uintptr_t _dma_op, Channel *_channel,
+                       NodeID _launch_node, XferDesID _guid,
+                       const std::vector<XferDesPortInfo>& inputs_info,
+                       const std::vector<XferDesPortInfo>& outputs_info,
+                       int _priority,
+                       XferDesRedopInfo _redop_info);
+
+      long get_requests(Request** requests, long nr);
+
+      bool progress_xd(GPUreduceChannel *channel, TimeLimit work_until);
+
+    protected:
+      XferDesRedopInfo redop_info;
+      const ReductionOpUntyped *redop;
+#if defined(REALM_USE_HIP_HIJACK)
+      void *kernel;
+#else
+      const void *kernel_host_proxy;
+#endif
+      GPUStream *stream;
+    };
+
+    class GPUreduceChannel : public SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes> {
+    public:
+      GPUreduceChannel(GPU* _gpu, BackgroundWorkManager *bgwork);
+
+      // multiple concurrent cuda reduces ok
+      static const bool is_ordered = false;
+      
+      // helper method here so that GPUreduceRemoteChannel can use it too
+      static bool is_gpu_redop(ReductionOpID redop_id);
+
+      // override this because we have to be picky about which reduction ops
+      //  we support
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
+         
+      virtual RemoteChannelInfo *construct_remote_info() const;
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op,
+				       NodeID launch_node,
+				       XferDesID guid,
+				       const std::vector<XferDesPortInfo>& inputs_info,
+				       const std::vector<XferDesPortInfo>& outputs_info,
+				       int priority,
+				       XferDesRedopInfo redop_info,
+				       const void *fill_data, size_t fill_size);
+
+      long submit(Request** requests, long nr);
+
+    protected:
+      friend class GPUreduceXferDes;
+
+      GPU* gpu;
+    };
+    
+    class GPUreduceRemoteChannelInfo : public SimpleRemoteChannelInfo {
+    public:
+      GPUreduceRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
+                                 uintptr_t _remote_ptr,
+                                 const std::vector<Channel::SupportedPath>& _paths);
+
+      virtual RemoteChannel *create_remote_channel();
+
+      template <typename S>
+      bool serialize(S& serializer) const;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S& deserializer);
+
+    protected:
+      static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      GPUreduceRemoteChannelInfo> serdez_subclass;
+    };
+
+    class GPUreduceRemoteChannel : public RemoteChannel {
+      friend class GPUreduceRemoteChannelInfo;
+
+      GPUreduceRemoteChannel(uintptr_t _remote_ptr);
+
+      virtual uint64_t supports_path(Memory src_mem, Memory dst_mem,
+                                     CustomSerdezID src_serdez_id,
+                                     CustomSerdezID dst_serdez_id,
+                                     ReductionOpID redop_id,
+                                     size_t total_bytes,
+                                     const std::vector<size_t> *src_frags,
+                                     const std::vector<size_t> *dst_frags,
+                                     XferDesKind *kind_ret = 0,
+                                     unsigned *bw_ret = 0,
+                                     unsigned *lat_ret = 0);
+
+    };
+
 
     // active messages for establishing cuda ipc mappings
 

@@ -437,38 +437,64 @@ namespace Legion {
   __device__ __forceinline__
   unsigned int __complex_as_uint(complex<__half> value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; __half as_float[2]; } val; 
+    val.as_float[0] = __half_as_ushort(value.real());
+    val.as_float[1] = __half_as_ushort(value.imag());
+    return val.as_int;
+#else
     unsigned int result;
     unsigned short int real = __half_as_ushort(value.real());
     unsigned short int imag = __half_as_ushort(value.imag());
     asm("mov.b32 %0, {%1,%2};" : "=r"(result) : "h"(real), "h"(imag));
     return result;
+#endif
   }
 
   __device__ __forceinline__
   complex<__half> __uint_as_complex(unsigned int value)
   {
+#ifdef __HIPCC__
+    union { unsigned int as_int; __half as_float[2]; } val;
+    val.as_int = value;
+    return complex<__half>(__ushort_as_half(val.as_float[0]), __ushort_as_half(val.as_float[1]));
+#else
     unsigned short int real, imag;
     asm("mov.b32 {%0,%1}, %2;" : "=h"(real), "=h"(imag) : "r"(value));
     return complex<__half>(__ushort_as_half(real), __ushort_as_half(imag));
+#endif
   }
 #endif // LEGION_REDOP_HALF
   __device__ __forceinline__
   unsigned long long __complex_as_ulonglong(complex<float> value)
   {
+#ifdef __HIPCC__
+    union { unsigned long long as_int; float as_float[2]; } val; 
+    val.as_float[0] = value.real();
+    val.as_float[1] = value.imag();
+    return val.as_int;
+#else
     unsigned long long result;
     asm("mov.b64 %0, {%1,%2};" : "=l"(result) : "f"(value.real()), "f"(value.imag()));
     return result;
+#endif  
   }
 
   __device__ __forceinline__
   complex<float> __ulonglong_as_complex(unsigned long long value)
   {
+#ifdef __HIPCC__
+    union { unsigned long long as_int; float as_float[2]; } val; 
+    val.as_int = value;
+    return complex<float>(val.as_float[0], val.as_float[1]);
+#else
     float real, imag;
     asm("mov.b64 {%0,%1}, %2;" : "=f"(real), "=f"(imag) : "l"(value));
     return complex<float>(real, imag);
+#endif
   }
 #endif // LEGION_REDOP_COMPLEX
-#endif // __CUDACC__
+#endif // __CUDACC__ or __HIPCC__
 
   template<> __CUDA_HD__ inline
   void SumReduction<bool>::apply<true>(LHS &lhs, RHS rhs)

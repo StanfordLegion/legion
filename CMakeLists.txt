@@ -374,12 +374,16 @@ if(Legion_USE_HIP)
     install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
     )
-    set(HIPCC_FLAGS "-D__HIP_PLATFORM_NVCC__")
+  set(HIPCC_FLAGS "${HIPCC_FLAGS} -D__HIP_PLATFORM_NVCC__")
   endif()
 
   if (Legion_HIP_TARGET STREQUAL "ROCM")
     set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
 
+    if(BUILD_SHARED_LIBS)
+      set(HIPCC_FLAGS "${HIPCC_FLAGS} -fPIC")
+    endif()
+    
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
