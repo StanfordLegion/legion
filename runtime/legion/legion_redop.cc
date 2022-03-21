@@ -71,13 +71,22 @@ namespace Legion {
     // Defined in legion_redop.cu
     extern void register_builtin_reduction_operators_cuda(void);
 #endif
+#if defined(LEGION_USE_HIP) && !defined(LEGION_GPU_REDUCTIONS)
+    // Defined in legion_redop.cpp
+    extern void register_builtin_reduction_operators_hip(void);
+#endif
 
     /*static*/ void Runtime::register_builtin_reduction_operators(void)
     {
-#if defined(LEGION_USE_CUDA) && !defined(LEGION_GPU_REDUCTIONS)
-      // We need to register CUDA reductions with Realm, so that happens in
-      //  legion_redop.cu
+#if ( defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP) )&& !defined(LEGION_GPU_REDUCTIONS)
+      // We need to register CUDA/HIP reductions with Realm, so that happens in
+      //  legion_redop.cu/cpp
+#ifdef LEGION_USE_CUDA
       register_builtin_reduction_operators_cuda();
+#endif
+#ifdef LEGION_USE_HIP
+      register_builtin_reduction_operators_hip();
+#endif      
 #else
       // Only CPU reductions are needed, so register them here
       LEGION_REDOP_LIST(REGISTER_BUILTIN_REDOP)

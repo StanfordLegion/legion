@@ -1,6 +1,27 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 22.03.0 (March ??, 2022)
+  * Build
+     - Minimum supported cmake version is now 3.7.  (Some optional features
+        continue to require even newer versions.)
+  * Realm
+     - Numerous bug fixes in the `gasnetex` network layer
+     - CUDA and HIP support allow direct specification of which gpus to
+        use via `-ll:gpu_ids` command-line option
+     - Added support for copy paths using Cuda IPC between gpus on the same
+        physical node
+     - For applications using CUDA without the runtime API hijack AND only
+        submitting work to the default CUDA stream, `-cuda:legacysync 1`
+        improves the overhead of detecting the completion of device-side work
+        launched by a task
+     - Realm reduction copies may now indicate exclusive access to the
+        destination instance, improving performance by allowing simple
+        load/store instead of atomic operations
+    - Custom reduction operations (including Legion's built-in ones) can
+        provide HIP implementations, permitting in-place reductions in
+        HIP device memory
+
 Version 21.12.0 (December 31, 2021)
   * Realm
      - Performance improvements for multi-dimensional copies, especially

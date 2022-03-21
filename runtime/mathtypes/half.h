@@ -138,8 +138,13 @@ inline float __convert_halfint_to_float(uint16_t __x)
 #define __CUDA_NO_HALF_OPERATORS__
 #include <cuda_fp16.h>
 #elif defined(LEGION_USE_HIP)
+#ifdef __HIP_PLATFORM_NVCC__
+#define __CUDA_NO_HALF_OPERATORS__
+#include <cuda_fp16.h>
+#else
 #define __HIP_NO_HALF_OPERATORS__
 #include <hip/hip_fp16.h>
+#endif
 #endif
 
 __CUDA_HD__
