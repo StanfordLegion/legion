@@ -16445,7 +16445,7 @@ namespace Legion {
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
-        message_managers[idx] = NULL;
+        message_managers[idx].store(NULL);
       
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
@@ -16572,10 +16572,11 @@ namespace Legion {
       // Make sure we don't send anymore messages
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
-        if (message_managers[idx] != NULL)
+        MessageManager *manager = message_managers[idx].load();
+        if (manager != NULL)
         {
-          delete message_managers[idx];
-          message_managers[idx] = NULL;
+          delete manager;
+          message_managers[idx].store(NULL);
         }
       }
       if (profiler != NULL)
@@ -20998,7 +20999,7 @@ namespace Legion {
       assert(sid < LEGION_MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
 #endif
-      MessageManager *result = message_managers[sid];
+      MessageManager *result = message_managers[sid].load();
       if (result != NULL)
         return result;
       // If we made it here, then we don't have a message manager yet
@@ -21010,7 +21011,7 @@ namespace Legion {
         AutoLock m_lock(message_manager_lock);
         // Re-check to see if we lost the race, force the compiler
         // to re-load the value here
-        result = *(((MessageManager**)message_managers)+sid);
+        result = message_managers[sid].load();
         if (result != NULL)
           return result;
         // Figure out if there is an event to wait on yet
@@ -21061,7 +21062,7 @@ namespace Legion {
       if (!wait_on.has_triggered())
         wait_on.wait();
       // When we wake up there should be a result
-      result = *(((MessageManager**)message_managers)+sid);
+      result = message_managers[sid].load();
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -21122,8 +21123,8 @@ namespace Legion {
         AddressSpaceID remote_space;
         derez.deserialize(remote_space);
         AutoLock m_lock(message_manager_lock);
-        message_managers[remote_space] = new MessageManager(remote_space, 
-                            this, max_message_size, remote_utility_group);
+        message_managers[remote_space].store(new MessageManager(remote_space,
+                              this, max_message_size, remote_utility_group));
         // Also update the endpoint spaces
         endpoint_spaces[remote_utility_group] = remote_space;
         std::map<AddressSpaceID,RtUserEvent>::iterator finder = 
@@ -26460,8 +26461,9 @@ namespace Legion {
       // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
-        if (message_managers[idx] != NULL)
-          message_managers[idx]->confirm_shutdown(shutdown_manager, phase_one);
+        MessageManager *manager = message_managers[idx].load();
+        if (manager != NULL)
+          manager->confirm_shutdown(shutdown_manager, phase_one);
       }
     }
 
