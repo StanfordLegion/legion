@@ -9159,45 +9159,45 @@ namespace Legion {
       // and then trigger it
       if (redop != 0)
       {
-#ifdef DEBUG_LEGION
-        assert(!reduction_instances.empty());
-        assert(reduction_instances.size() == reduction_instances_ready.size());
-        assert(reduction_instance == reduction_instances.front());
-#endif
-        // Complete the event for the first future instance 
-        if (!reduction_effects.empty())
-          Runtime::trigger_event(NULL, reduction_instances_ready.front(),
-              Runtime::merge_events(NULL, reduction_effects));
-        else
-          Runtime::trigger_event(NULL, reduction_instances_ready.front(),
-              reduction_inst_precondition);
-        // Now do the copy out from the reduction_instance to any other
-        // target futures that we have, we'll do this with a broadcast tree
-        if (reduction_instances.size() > 1)
-        {
-          // Do the copy from 0 to 1 first
-          Runtime::trigger_event(NULL, reduction_instances_ready[1],
-              reduction_instances[1]->copy_from(reduction_instance, 
-                this, reduction_instances_ready[0]));
-          for (unsigned idx = 1; idx < reduction_instances.size(); idx++)
-          {
-            if (reduction_instances.size() <= (2*idx))
-              break;
-            Runtime::trigger_event(NULL, reduction_instances_ready[2*idx],
-                reduction_instances[2*idx]->copy_from(reduction_instances[idx],
-                  this, reduction_instances_ready[idx]));
-            if (reduction_instances.size() <= (2*idx+1))
-              break;
-            Runtime::trigger_event(NULL, reduction_instances_ready[2*idx+1],
-               reduction_instances[2*idx+1]->copy_from(reduction_instances[idx],
-                 this, reduction_instances_ready[idx]));
-          }
-        }
-        complete_effects.insert(reduction_instances_ready.begin(),
-                                reduction_instances_ready.end());
         // Set the future if we actually ran the task or we speculated
         if ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists())
         {
+#ifdef DEBUG_LEGION
+          assert(!reduction_instances.empty());
+          assert(reduction_instances.size() == reduction_instances_ready.size());
+          assert(reduction_instance == reduction_instances.front());
+#endif
+          // Complete the event for the first future instance 
+          if (!reduction_effects.empty())
+            Runtime::trigger_event(NULL, reduction_instances_ready.front(),
+                Runtime::merge_events(NULL, reduction_effects));
+          else
+            Runtime::trigger_event(NULL, reduction_instances_ready.front(),
+                reduction_inst_precondition);
+          // Now do the copy out from the reduction_instance to any other
+          // target futures that we have, we'll do this with a broadcast tree
+          if (reduction_instances.size() > 1)
+          {
+            // Do the copy from 0 to 1 first
+            Runtime::trigger_event(NULL, reduction_instances_ready[1],
+                reduction_instances[1]->copy_from(reduction_instance, 
+                  this, reduction_instances_ready[0]));
+            for (unsigned idx = 1; idx < reduction_instances.size(); idx++)
+            {
+              if (reduction_instances.size() <= (2*idx))
+                break;
+              Runtime::trigger_event(NULL, reduction_instances_ready[2*idx],
+                reduction_instances[2*idx]->copy_from(reduction_instances[idx],
+                  this, reduction_instances_ready[idx]));
+              if (reduction_instances.size() <= (2*idx+1))
+                break;
+              Runtime::trigger_event(NULL, reduction_instances_ready[2*idx+1],
+               reduction_instances[2*idx+1]->copy_from(reduction_instances[idx],
+                 this, reduction_instances_ready[idx]));
+            }
+          }
+          complete_effects.insert(reduction_instances_ready.begin(),
+                                  reduction_instances_ready.end());
           reduction_future.impl->set_results(reduction_instances, 
                           reduction_metadata, reduction_metasize);
           // Clear this since we no longer own the buffer
