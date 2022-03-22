@@ -222,6 +222,14 @@ namespace Legion {
         FutureFunctor *const functor;
         const bool own_functor;
       };
+      struct FutureBroadcastArgs : public LgTaskArgs<FutureBroadcastArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_FUTURE_BROADCAST_TASK_ID;
+      public:
+        FutureBroadcastArgs(FutureImpl *i);
+      public:
+        FutureImpl *const impl;
+      };
       struct PendingInstance {
       public:
         PendingInstance(void)
@@ -352,6 +360,7 @@ namespace Legion {
     protected:
       RtEvent invoke_callback(void); // must be holding lock
       void perform_callback(void);
+      void perform_broadcast(void);
       void pack_future_result(Serializer &rez) const; // must be holding lock
     public:
       void record_future_registered(ReferenceMutator *mutator);
@@ -372,6 +381,7 @@ namespace Legion {
       static void handle_contribute_to_collective(const void *args);
       static void handle_callback(const void *args);
       static void handle_release(const void *args);
+      static void handle_broadcast(const void *args);
     public:
       TaskContext *const context;
       // These three fields are only valid on the owner node

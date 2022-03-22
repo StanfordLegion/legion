@@ -330,6 +330,7 @@ namespace Legion {
       LG_CONTRIBUTE_COLLECTIVE_ID,
       LG_FUTURE_CALLBACK_TASK_ID,
       LG_CALLBACK_RELEASE_TASK_ID,
+      LG_FUTURE_BROADCAST_TASK_ID,
       LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID,
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
@@ -455,6 +456,7 @@ namespace Legion {
         "Contribute Collective",                                  \
         "Future Callback",                                        \
         "Future Callback Release",                                \
+        "Future Broadcast",                                       \
         "Defer Delete Future Instance",                           \
         "Top Finish",                                             \
         "Mapper Task",                                            \
