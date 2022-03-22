@@ -1833,6 +1833,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureImpl::perform_broadcast(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(future_lock);
+      broadcast_result(subscribers, false/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
     FutureImpl::FutureCallbackArgs::FutureCallbackArgs(FutureImpl *i)
       : LgTaskArgs<FutureCallbackArgs>(implicit_provenance), impl(i)
     //--------------------------------------------------------------------------
@@ -1847,6 +1855,14 @@ namespace Legion {
         functor(f), own_functor(own)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    FutureImpl::FutureBroadcastArgs::FutureBroadcastArgs(FutureImpl *i)
+      : LgTaskArgs<FutureBroadcastArgs>(implicit_provenance), impl(i)
+    //--------------------------------------------------------------------------
+    {
+      impl->add_base_gc_ref(DEFERRED_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1867,6 +1883,16 @@ namespace Legion {
       cargs->functor->callback_release_future();
       if (cargs->own_functor)
         delete cargs->functor;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureImpl::handle_broadcast(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const FutureBroadcastArgs *fargs = (const FutureBroadcastArgs*)args;
+      fargs->impl->perform_broadcast();
+      if (fargs->impl->remove_base_gc_ref(DEFERRED_TASK_REF))
+        delete fargs->impl;
     }
 
     //--------------------------------------------------------------------------
@@ -2268,12 +2294,32 @@ namespace Legion {
           // it is in flight and that the subscriber is there
           // for it to be messaged when the callback is done
           subscribers.insert(subscriber);
-          return;
         }
-        // We've got the result so we can't send it back right away
-        Serializer rez;
-        pack_future_result(rez);
-        runtime->send_future_result(subscriber, rez);
+        else if ((canonical_instance != NULL) &&
+            canonical_instance->can_pack_by_value() &&
+            !canonical_instance->is_ready())
+        {
+          // Save the subscriber and launch a broadcast task
+          // if one is not already in flight to broadcast the
+          // result to the subscriptions once it is ready
+          if (subscribers.empty())
+          {
+            // First one so launch the broadcast task
+            const RtEvent precondition =
+              Runtime::protect_event(canonical_instance->get_ready());
+            FutureBroadcastArgs args(this);
+            runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_WORK_PRIORITY, precondition);
+          }
+          subscribers.insert(subscriber);  
+        }
+        else
+        {
+          // We've got the result so we can't send it back right away
+          Serializer rez;
+          pack_future_result(rez);
+          runtime->send_future_result(subscriber, rez);
+        }
       }
     }
 
@@ -32500,6 +32546,11 @@ namespace Legion {
         case LG_CALLBACK_RELEASE_TASK_ID:
           {
             FutureImpl::handle_release(args);
+            break;
+          }
+        case LG_FUTURE_BROADCAST_TASK_ID:
+          {
+            FutureImpl::handle_broadcast(args);
             break;
           }
         case LG_REPLAY_SLICE_TASK_ID:

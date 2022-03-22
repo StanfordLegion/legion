@@ -1882,7 +1882,7 @@ namespace Legion {
             runtime->find_memory_manager(reduction_instance->memory);
           FutureInstance *shadow_instance = 
             manager->create_future_instance(this, unique_op_id,
-                completion_event, reduction_op->sizeof_rhs, false/*eager*/);
+                ApEvent::NO_AP_EVENT, reduction_op->sizeof_rhs, false/*eager*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
