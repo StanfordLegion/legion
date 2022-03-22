@@ -642,7 +642,11 @@ namespace Legion {
 #endif
       const unsigned offset = convert_to_offset(local_index, origin_index);
       const unsigned index = convert_to_index((offset-1) / radix, origin_index);
-      return unique_sorted_spaces.get_index(index);
+      const int result = unique_sorted_spaces.get_index(index);
+#ifdef DEBUG_LEGION
+      assert(result >= 0);
+#endif
+      return result;
     }
     
     //--------------------------------------------------------------------------
@@ -687,7 +691,11 @@ namespace Legion {
         if (child_offset < total_spaces)
         {
           const unsigned index = convert_to_index(child_offset, origin_index);
-          children.push_back(unique_sorted_spaces.get_index(index));
+          const int child = unique_sorted_spaces.get_index(index);
+#ifdef DEBUG_LEGION
+          assert(child >= 0);
+#endif
+          children.push_back(child);
         }
       }
     }
