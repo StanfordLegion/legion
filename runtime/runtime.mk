@@ -624,11 +624,6 @@ NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
 endif
 
-# Add support for Legion GPU reduction tasks if requested
-ifeq ($(strip $(USE_GPU_REDUCTIONS)),1)
-LEGION_CC_FLAGS	+= -DLEGION_GPU_REDUCTIONS
-endif
-
 # Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
 ifeq ($(strip $(USE_NETWORK)),1)
 ifeq ($(findstring gasnet,$(REALM_NETWORKS)),gasnet)

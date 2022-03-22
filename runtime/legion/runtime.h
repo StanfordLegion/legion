@@ -2312,12 +2312,6 @@ namespace Legion {
                                             Serializer &rez);
       void send_collective_instance_message(AddressSpaceID target, 
                                             Serializer &rez);
-#ifdef LEGION_GPU_REDUCTIONS
-      void send_create_shadow_reduction_request(AddressSpaceID target, 
-                                                Serializer &rez);
-      void send_create_shadow_reduction_response(AddressSpaceID target,
-                                                 Serializer &rez);
-#endif
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -2562,11 +2556,6 @@ namespace Legion {
       void handle_collective_instance_manager(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_collective_instance_message(Deserializer &derez);
-#ifdef LEGION_GPU_REDUCTIONS
-      void handle_create_shadow_reduction_request(Deserializer &derez,
-                                                  AddressSpaceID source);
-      void handle_create_shadow_reduction_response(Deserializer &derez);
-#endif
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -3421,13 +3410,6 @@ namespace Legion {
                                const UntypedBuffer &buffer, bool global);
 #endif
       static ReductionOpTable& get_reduction_table(bool safe);
-#ifdef LEGION_GPU_REDUCTIONS
-      static GPUReductionTable& get_gpu_reduction_table(void);
-      static std::map<ReductionOpID,CodeDescriptor>& 
-                                get_pending_gpu_reduction_table(void);
-      static void preregister_gpu_reduction_op(ReductionOpID redop_id,
-                                            const CodeDescriptor &desc);
-#endif
       static SerdezOpTable& get_serdez_table(bool safe);
       static SerdezRedopTable& get_serdez_redop_table(bool safe);
       static void register_reduction_op(ReductionOpID redop_id,
@@ -4332,10 +4314,6 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_MESSAGE:
           return REFERENCE_VIRTUAL_CHANNEL;
-        case SEND_CREATE_SHADOW_REQUEST:
-          break;
-        case SEND_CREATE_SHADOW_RESPONSE:
-          break;
         case SEND_CREATE_TOP_VIEW_REQUEST:
           break;
         case SEND_CREATE_TOP_VIEW_RESPONSE:
