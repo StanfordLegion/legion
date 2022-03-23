@@ -31447,6 +31447,11 @@ namespace Legion {
             FutureImpl::handle_contribute_to_collective(args);
             break;
           }
+        case LG_FUTURE_BROADCAST_TASK_ID:
+          {
+            FutureImpl::handle_broadcast(args);
+            break;
+          }
         case LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID:
           {
             FutureInstance::handle_deferred_delete(args);
@@ -32030,12 +32035,7 @@ namespace Legion {
           {
             FutureImpl::handle_release(args);
             break;
-          }
-        case LG_FUTURE_BROADCAST_TASK_ID:
-          {
-            FutureImpl::handle_broadcast(args);
-            break;
-          }
+          } 
         case LG_REPLAY_SLICE_TASK_ID:
           {
             PhysicalTemplate::handle_replay_slice(args);
