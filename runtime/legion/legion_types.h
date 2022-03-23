@@ -400,7 +400,6 @@ namespace Legion {
       LG_DEFER_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
-      LG_DEFER_COLLECTIVE_RENDEZVOUS_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
@@ -526,7 +525,6 @@ namespace Legion {
         "Defer Instance Manager Registration",                    \
         "Defer Instance Manager Deletion",                        \
         "Defer Collective Manager Registration",                  \
-        "Defer Collective Manager Rendezvous",                    \
         "Defer Verify Partition",                                 \
         "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
@@ -811,6 +809,8 @@ namespace Legion {
       SEND_COLLECTIVE_DISTRIBUTE_REDUCECAST,
       SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE,
       SEND_COLLECTIVE_HAMMER_REDUCTION,
+      SEND_COLLECTIVE_USER_REQUEST,
+      SEND_COLLECTIVE_USER_RESPONSE,
       SEND_CREATE_SHADOW_REQUEST,
       SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -1035,6 +1035,8 @@ namespace Legion {
         "Send Collective Distribute Reducecast",                      \
         "Send Collective Distribute Allreduce",                       \
         "Send Collective Hammer Reduction",                           \
+        "Send Collective User Request",                               \
+        "Send Collective User Response",                              \
         "Send Create Shadow Reduction Instance Request",              \
         "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \

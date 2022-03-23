@@ -748,8 +748,6 @@ namespace Legion {
         COLLECTIVE_FINALIZE_MESSAGE,
         COLLECTIVE_REMOTE_INSTANCE_REQUEST,
         COLLECTIVE_REMOTE_INSTANCE_RESPONSE,
-        COLLECTIVE_RENDEZVOUS_REQUEST,
-        COLLECTIVE_RENDEZVOUS_RESPONSE,
       };
     public:
       struct DeferCollectiveManagerArgs : 
@@ -780,36 +778,6 @@ namespace Legion {
         const size_t piece_list_size;
         const AddressSpaceID source;
         const bool multi_instance;
-      };
-      struct DeferCollectiveRendezvousArgs :
-        public LgTaskArgs<DeferCollectiveRendezvousArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_RENDEZVOUS_TASK_ID;
-      public:
-        DeferCollectiveRendezvousArgs(CollectiveManager *manager,
-            InstanceView *view, const RegionUsage &usage, const FieldMask &mask,
-            IndexSpaceNode *expr, UniqueID op_id, size_t op_ctx_index,
-            unsigned index, std::map<ApEvent,PhysicalTraceInfo*> &term_events,
-            RtEvent collect_event, RtUserEvent applied,
-            const PhysicalTraceInfo *trace_info, AddressSpaceID origin,
-            AddressSpaceID source, bool symbolic,
-            std::set<RtEvent> &applied_events);
-      public:
-        CollectiveManager *const manager;
-        InstanceView *const view;
-        const RegionUsage usage;
-        FieldMask *const mask;
-        IndexSpaceNode *const expr;
-        const UniqueID op_id;
-        const size_t op_ctx_index;
-        const unsigned index;
-        std::map<ApEvent,PhysicalTraceInfo*> *const term_events;
-        const RtEvent collect_event;
-        const RtUserEvent applied;
-        const PhysicalTraceInfo *const trace_info;
-        const AddressSpaceID origin;
-        const AddressSpaceID source;
-        const bool symbolic;
       };
     protected:
       struct RemoteInstInfo {
@@ -1123,6 +1091,10 @@ namespace Legion {
                                 const ApEvent src_precondition,
                                 ApUserEvent src_postcondition,
                                 ApBarrier src_barrier, ShardID bar_shard);
+      void process_register_user_request(const size_t op_ctx_index,
+                                const unsigned index, const RtEvent registered);
+      void process_register_user_response(const size_t op_ctx_index,
+                                const unsigned index, const RtEvent registered);
       void finalize_collective_user(InstanceView *view,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
@@ -1130,15 +1102,13 @@ namespace Legion {
                                 const UniqueID op_id,
                                 const size_t op_ctx_index,
                                 const unsigned index,
-                                std::map<ApEvent,PhysicalTraceInfo*> &terms,
                                 RtEvent collect_event,
-                                RtUserEvent applied_event,
+                                RtUserEvent local_registered,
+                                RtEvent global_registered,
+                                ApUserEvent ready_event,
+                                ApEvent term_event,
                                 const PhysicalTraceInfo &trace_info,
-                                const AddressSpaceID origin,
-                                const AddressSpaceID source,
-                                const bool symbolic);
-      void process_rendezvous_request(Deserializer &derez);
-      void process_rendezvous_response(Deserializer &derez);
+                                const bool symbolic) const;
 #ifdef LEGION_GPU_REDUCTIONS
     public:
       virtual bool is_gpu_visible(PhysicalManager *other) const;
@@ -1154,7 +1124,6 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
       static void handle_defer_manager(const void *args, Runtime *runtime);
-      static void handle_defer_rendezvous(const void *args);
       static void handle_collective_message(Deserializer &derez,
                                             Runtime *runtime);
       static void handle_distribute_fill(Runtime *runtime, 
@@ -1173,6 +1142,10 @@ namespace Legion {
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_hammer_reduction(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
+      static void handle_register_user_request(Runtime *runtime,
+                                    Deserializer &derez);
+      static void handle_register_user_response(Runtime *runtime,
+                                    Deserializer &derez);
       static void create_collective_manager(Runtime *runtime, DistributedID did,
           AddressSpaceID owner_space, IndexSpaceNode *point_space,
           size_t points, CollectiveMapping *collective_mapping,
@@ -1195,17 +1168,34 @@ namespace Legion {
       std::map<DomainPoint,RemoteInstInfo> remote_instances;
     protected:
       struct UserRendezvous {
-      public:
-        // events for when users are done
-        // In the case we're recording, save the trace infos for each of
-        // the term events so we can update the traces when we get the 
-        // name of the barrier back from the origin node
-        std::map<ApEvent,PhysicalTraceInfo*> term_events; 
-        std::map<ApUserEvent,PhysicalTraceInfo*> ready_events;
-        RtUserEvent applied; // event for when mapping is done
-        RtUserEvent deferred; // event to trigger to start local analysis
+        UserRendezvous(void) 
+          : remaining_local_arrivals(0), remaining_remote_arrivals(0),
+            view(NULL), mask(NULL), expr(NULL), op_id(0), op_ctx_index(0),
+            index(0), trace_info(NULL), symbolic(false) { }
+        // event for when local instances can be used
+        ApUserEvent ready_event; 
+        // all the local term events
+        std::vector<ApEvent> local_term_events;
+        // events from remote nodes indicating they are registered
+        std::vector<RtEvent> remote_registered;
+        // event to trigger when local registration is done
+        RtUserEvent local_registered; 
+        // event that marks when all registrations are done
+        RtUserEvent global_registered;
+        // Counts of remaining notficiations before registration
         unsigned remaining_local_arrivals;
         unsigned remaining_remote_arrivals;
+        // Arguments for performing the local registration
+        InstanceView *view;
+        RegionUsage usage;
+        FieldMask *mask;
+        IndexSpaceNode *expr;
+        UniqueID op_id;
+        size_t op_ctx_index;
+        unsigned index;
+        RtEvent collect_event;
+        PhysicalTraceInfo *trace_info;
+        bool symbolic;
       };
       std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
     protected:

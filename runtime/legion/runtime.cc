@@ -12507,6 +12507,16 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_USER_REQUEST:
+            {
+              runtime->handle_collective_user_request(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_USER_RESPONSE:
+            {
+              runtime->handle_collective_user_response(derez);
+              break;
+            }
 #ifdef LEGION_GPU_REDUCTIONS
           case SEND_CREATE_SHADOW_REQUEST:
             {
@@ -22469,6 +22479,24 @@ namespace Legion {
                                                           rez, true/*flush*/);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_register_user_request(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_USER_REQUEST>(
+                                                      rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_register_user_response(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_USER_RESPONSE>(
+                                    rez, true/*flush*/, true/*response*/);
+    }
+
 #ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
     void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
@@ -24526,6 +24554,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_hammer_reduction(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_user_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_register_user_request(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_user_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveManager::handle_register_user_response(this, derez);
     }
 
 #ifdef LEGION_GPU_REDUCTIONS
@@ -32344,11 +32386,6 @@ namespace Legion {
         case LG_DEFER_COLLECTIVE_MANAGER_TASK_ID:
           {
             CollectiveManager::handle_defer_manager(args, runtime);
-            break;
-          }
-        case LG_DEFER_COLLECTIVE_RENDEZVOUS_TASK_ID:
-          {
-            CollectiveManager::handle_defer_rendezvous(args);
             break;
           }
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:
