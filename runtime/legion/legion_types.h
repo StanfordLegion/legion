@@ -811,6 +811,7 @@ namespace Legion {
       SEND_COLLECTIVE_HAMMER_REDUCTION,
       SEND_COLLECTIVE_USER_REQUEST,
       SEND_COLLECTIVE_USER_RESPONSE,
+      SEND_COLLECTIVE_REGISTER_USER,
       SEND_CREATE_SHADOW_REQUEST,
       SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -1037,6 +1038,7 @@ namespace Legion {
         "Send Collective Hammer Reduction",                           \
         "Send Collective User Request",                               \
         "Send Collective User Response",                              \
+        "Send Collective Individual Register User",                   \
         "Send Create Shadow Reduction Instance Request",              \
         "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \

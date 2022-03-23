@@ -12517,6 +12517,11 @@ namespace Legion {
               runtime->handle_collective_user_response(derez);
               break;
             }
+          case SEND_COLLECTIVE_REGISTER_USER:
+            {
+              runtime->handle_collective_user_registration(derez);
+              break;
+            }
 #ifdef LEGION_GPU_REDUCTIONS
           case SEND_CREATE_SHADOW_REQUEST:
             {
@@ -22497,6 +22502,15 @@ namespace Legion {
                                     rez, true/*flush*/, true/*response*/);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_individual_register_user(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_REGISTER_USER>(
+                                                        rez, true/*flush*/);
+    }
+
 #ifdef LEGION_GPU_REDUCTIONS
     //--------------------------------------------------------------------------
     void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
@@ -24568,6 +24582,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CollectiveManager::handle_register_user_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_user_registration(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager::handle_collective_user_registration(this, derez);
     }
 
 #ifdef LEGION_GPU_REDUCTIONS

@@ -3176,6 +3176,8 @@ namespace Legion {
                                                  Serializer &rez);
       void send_collective_register_user_response(AddressSpaceID target,
                                                   Serializer &rez);
+      void send_collective_individual_register_user(AddressSpaceID target,
+                                                    Serializer &rez);
 #ifdef LEGION_GPU_REDUCTIONS
       void send_create_shadow_reduction_request(AddressSpaceID target, 
                                                 Serializer &rez);
@@ -3509,6 +3511,7 @@ namespace Legion {
                                               AddressSpaceID source);
       void handle_collective_user_request(Deserializer &derez);
       void handle_collective_user_response(Deserializer &derez);
+      void handle_collective_user_registration(Deserializer &derez);
 #ifdef LEGION_GPU_REDUCTIONS
       void handle_create_shadow_reduction_request(Deserializer &derez,
                                                   AddressSpaceID source);
@@ -5598,6 +5601,8 @@ namespace Legion {
         case SEND_COLLECTIVE_USER_REQUEST:
           break;
         case SEND_COLLECTIVE_USER_RESPONSE:
+          break;
+        case SEND_COLLECTIVE_REGISTER_USER:
           break;
         case SEND_CREATE_SHADOW_REQUEST:
           break;

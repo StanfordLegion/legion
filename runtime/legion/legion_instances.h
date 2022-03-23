@@ -362,7 +362,6 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 const CollectiveMapping *mapping,
                                 const PhysicalTraceInfo &trace_info,
-                                const AddressSpaceID source,
                                 const bool collective_per_space,
                                 const bool symbolic) = 0;
     public:
@@ -639,7 +638,6 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 const CollectiveMapping *mapping,
                                 const PhysicalTraceInfo &trace_info,
-                                const AddressSpaceID source,
                                 const bool collective_per_space,
                                 const bool symbolic);
     public:
@@ -654,6 +652,14 @@ namespace Legion {
       virtual void reclaim_field_reservations(DistributedID view_did,
                                 std::vector<Reservation> &to_delete);
     public:
+      void process_collective_user_registration(const size_t op_ctx_index,
+                                            const unsigned index,
+                                            const AddressSpaceID origin,
+                                            const CollectiveMapping *mapping,
+                                            const PhysicalTraceInfo &trace_info,
+                                            ApEvent remote_term_event,
+                                            ApUserEvent remote_ready_event,
+                                            RtUserEvent remote_registered);
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
@@ -673,6 +679,8 @@ namespace Legion {
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
           InstanceKind kind, ReductionOpID redop, bool shadow_instance);
+      static void handle_collective_user_registration(Runtime *runtime,
+                                                      Deserializer &derez);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
                                     ReferenceMutator *mutator,
@@ -724,6 +732,39 @@ namespace Legion {
       const ApEvent producer_event;
     protected:
       std::map<DistributedID,std::map<unsigned,Reservation> > view_reservations;
+    protected:
+      // This is an infrequently used data structure for handling collective
+      // register user calls on individual managers that occurs with certain
+      // operation in control replicated contexts
+      struct UserRendezvous {
+        UserRendezvous(void) 
+          : remaining_local_arrivals(0), remaining_remote_arrivals(0),
+            view(NULL), mask(NULL), expr(NULL), op_id(0), trace_info(NULL),
+            symbolic(false) { }
+        // event for when local instances can be used
+        ApUserEvent ready_event; 
+        // remote ready events to trigger
+        std::map<ApUserEvent,PhysicalTraceInfo*> remote_ready_events;
+        // all the local term events
+        std::vector<ApEvent> term_events;
+        // event that marks when all registrations are done
+        RtUserEvent registered;
+        // event for when any local effects are applied
+        RtUserEvent applied;
+        // Counts of remaining notficiations before registration
+        unsigned remaining_local_arrivals;
+        unsigned remaining_remote_arrivals;
+        // Arguments for performing the local registration
+        InstanceView *view;
+        RegionUsage usage;
+        FieldMask *mask;
+        IndexSpaceNode *expr;
+        UniqueID op_id;
+        RtEvent collect_event;
+        PhysicalTraceInfo *trace_info;
+        bool symbolic;
+      };
+      std::map<std::pair<size_t,unsigned>,UserRendezvous> rendezvous_users;
     };
 
     /**
@@ -910,7 +951,6 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events,
                                 const CollectiveMapping *mapping,
                                 const PhysicalTraceInfo &trace_info,
-                                const AddressSpaceID source,
                                 const bool collective_per_space,
                                 const bool symbolic);
     public:
@@ -1092,7 +1132,8 @@ namespace Legion {
                                 ApUserEvent src_postcondition,
                                 ApBarrier src_barrier, ShardID bar_shard);
       void process_register_user_request(const size_t op_ctx_index,
-                                const unsigned index, const RtEvent registered);
+                                const unsigned index, const RtEvent registered,
+                                const bool collective_per_space);
       void process_register_user_response(const size_t op_ctx_index,
                                 const unsigned index, const RtEvent registered);
       void finalize_collective_user(InstanceView *view,
@@ -1170,8 +1211,8 @@ namespace Legion {
       struct UserRendezvous {
         UserRendezvous(void) 
           : remaining_local_arrivals(0), remaining_remote_arrivals(0),
-            view(NULL), mask(NULL), expr(NULL), op_id(0), op_ctx_index(0),
-            index(0), trace_info(NULL), symbolic(false) { }
+            view(NULL), mask(NULL), expr(NULL), op_id(0), trace_info(NULL),
+            symbolic(false) { }
         // event for when local instances can be used
         ApUserEvent ready_event; 
         // all the local term events
@@ -1191,8 +1232,6 @@ namespace Legion {
         FieldMask *mask;
         IndexSpaceNode *expr;
         UniqueID op_id;
-        size_t op_ctx_index;
-        unsigned index;
         RtEvent collect_event;
         PhysicalTraceInfo *trace_info;
         bool symbolic;

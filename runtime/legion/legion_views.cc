@@ -2369,7 +2369,7 @@ namespace Legion {
       if (collective_mapping != NULL)
         return manager->register_collective_user(this, usage, user_mask,
             user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, trace_info, source,
+            applied_events, collective_mapping, trace_info,
             collective_per_space, symbolic);
       if (!is_logical_owner())
       {
@@ -4200,7 +4200,7 @@ namespace Legion {
       if (collective_mapping != NULL)
         return manager->register_collective_user(this, usage, user_mask,
             user_expr, op_id, op_ctx_index, index, term_event, collect_event,
-            applied_events, collective_mapping, trace_info, source,
+            applied_events, collective_mapping, trace_info,
             collective_per_space, symbolic);
       if (!is_logical_owner())
       {
