@@ -18,9 +18,12 @@ Version 22.03.0 (March ??, 2022)
      - Realm reduction copies may now indicate exclusive access to the
         destination instance, improving performance by allowing simple
         load/store instead of atomic operations
-    - Custom reduction operations (including Legion's built-in ones) can
+     - Custom reduction operations (including Legion's built-in ones) can
         provide HIP implementations, permitting in-place reductions in
         HIP device memory
+  * Regent
+     - Support for custom serialization of types in task parameters and results
+     - New experimental timing library under std/timing
 
 Version 21.12.0 (December 31, 2021)
   * Realm
