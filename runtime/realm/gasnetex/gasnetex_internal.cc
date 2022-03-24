@@ -4856,7 +4856,7 @@ namespace Realm {
 
   PendingCompletion *GASNetEXInternal::extract_arg0_local_comp(gex_AM_Arg_t& arg0)
   {
-    unsigned comp_info = arg0 >> MSGID_BITS;
+    unsigned comp_info = unsigned(arg0) >> MSGID_BITS;
     if((comp_info & PendingCompletion::LOCAL_PENDING_BIT) != 0) {
       PendingCompletion *comp = compmgr.lookup_completion(comp_info >> 2);
       // remove local bit, or whole thing if remote bit isn't set

@@ -894,7 +894,7 @@ namespace Legion {
             runtime->find_memory_manager(reduction_instance->memory);
           FutureInstance *shadow_instance = 
             manager->create_future_instance(this, unique_op_id,
-                completion_event, reduction_op->sizeof_rhs, false/*eager*/);
+                ApEvent::NO_AP_EVENT, reduction_op->sizeof_rhs, false/*eager*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -960,15 +960,15 @@ namespace Legion {
         assert(reduction_instance == reduction_instances.front());
 #endif
         ApEvent local_precondition;
-        if (!complete_effects.empty())
+        if (!reduction_effects.empty())
         {
-          local_precondition = Runtime::merge_events(NULL, complete_effects);
-          complete_effects.clear();
+          local_precondition = Runtime::merge_events(NULL, reduction_effects);
+          reduction_effects.clear();
         }
         const RtEvent collective_done = all_reduce_collective->async_reduce(
                                     reduction_instance, local_precondition);
         if (local_precondition.exists())
-          complete_effects.insert(local_precondition);
+          reduction_effects.push_back(local_precondition);
         // No need to do anything with the output local precondition
         // We already added it to the complete_effects when we made
         // the collective at the beginning
@@ -8549,7 +8549,11 @@ namespace Legion {
 #endif
       const unsigned offset = convert_to_offset(local_index, origin_index);
       const unsigned index = convert_to_index((offset-1) / radix, origin_index);
-      return unique_sorted_spaces.get_index(index);
+      const int result = unique_sorted_spaces.get_index(index);
+#ifdef DEBUG_LEGION
+      assert(result >= 0);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8571,7 +8575,11 @@ namespace Legion {
         if (child_offset < total_spaces)
         {
           const unsigned index = convert_to_index(child_offset, origin_index);
-          children.push_back(unique_sorted_spaces.get_index(index)); 
+          const int child = unique_sorted_spaces.get_index(index);
+#ifdef DEBUG_LEGION
+          assert(child >= 0);
+#endif
+          children.push_back(child); 
         }
       }
     }
@@ -9372,19 +9380,6 @@ namespace Legion {
       }
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedPhysicalTemplate* ShardManager::find_local_shard_current_template(
-                                                             size_t index) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!local_shards.empty());
-#endif
-      ReplicateContext* repl_ctx = 
-        local_shards.front()->get_shard_execution_context();
-      return repl_ctx->find_sharded_current_template(index);
     }
 
     //--------------------------------------------------------------------------

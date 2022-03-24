@@ -20115,25 +20115,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardedPhysicalTemplate* ReplicateContext::find_sharded_current_template(
-                                                                   size_t index)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock r_lock(replication_lock, 1, false/*exclusive*/);
-      std::map<size_t,ShardedPhysicalTemplate*>::iterator finder = 
-        physical_templates.find(index);
-#ifdef DEBUG_LEGION
-      // If we ever hit this assertion it's because there is a race somewhere
-      // in the synchronization of the operations that manage the capturing
-      // of the trace. Today all these operations are ReplFenceOps which 
-      // should sync across all the shards when updating traces so we should
-      // always be able to find this trace when we look for it on a shard
-      assert(finder != physical_templates.end());
-#endif
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
     ShardID ReplicateContext::get_next_equivalence_set_origin(void)
     //--------------------------------------------------------------------------
     {

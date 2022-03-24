@@ -5746,7 +5746,6 @@ namespace Legion {
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
       rez.serialize(recording_done);
-      rez.serialize<ReplicationID>(0);
       applied_events.insert(remote_applied);
     }
 
@@ -6933,21 +6932,6 @@ namespace Legion {
       if (repl_ctx->remove_reference())
         delete repl_ctx;
     } 
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::pack_recorder(Serializer &rez,
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(trace->runtime->address_space);
-      rez.serialize(this);
-      RtUserEvent remote_applied = Runtime::create_rt_user_event();
-      rez.serialize(remote_applied);
-      rez.serialize(recording_done);
-      rez.serialize(repl_ctx->shard_manager->repl_id);
-      rez.serialize(template_index);
-      applied_events.insert(remote_applied);
-    }
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::record_merge_events(ApEvent &lhs,

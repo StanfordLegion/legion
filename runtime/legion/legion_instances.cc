@@ -1674,7 +1674,8 @@ namespace Legion {
                                          std::set<RtEvent> &recorded_events,
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
-                                         const bool manage_dst_events)
+                                         const bool manage_dst_events,
+                                         const bool fill_restricted)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1745,7 +1746,8 @@ namespace Legion {
                                          std::set<RtEvent> &recorded_events,
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
-                                         const bool manage_dst_events)
+                                         const bool manage_dst_events,
+                                         const bool copy_restricted)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3525,7 +3527,8 @@ namespace Legion {
                                          std::set<RtEvent> &recorded_events,
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
-                                         const bool manage_dst_events)
+                                         const bool manage_dst_events,
+                                         const bool fill_restricted)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -3548,7 +3551,8 @@ namespace Legion {
                                          std::set<RtEvent> &recorded_events,
                                          std::set<RtEvent> &applied_events,
                                          CopyAcrossHelper *across_helper,
-                                         const bool manage_dst_events)
+                                         const bool manage_dst_events,
+                                         const bool fill_restricted)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this

@@ -1425,7 +1425,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -2141,7 +2141,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -2912,7 +2912,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -3610,7 +3610,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -4377,7 +4377,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -5142,7 +5142,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -6009,7 +6009,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {
@@ -6725,7 +6725,7 @@
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         unsigned local = __builtin_popcountll(bits.bit_vector[idx]);
-        if (index <= local)
+        if (index < local)
         {
           for (unsigned j = 0; j < ELEMENT_SIZE; j++)
           {

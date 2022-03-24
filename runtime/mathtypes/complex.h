@@ -17,7 +17,7 @@
 #define __COMPLEX_H__
 
 #ifndef __CUDA_HD__
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #define __CUDA_HD__ __host__ __device__
 #else
 #define __CUDA_HD__
@@ -25,7 +25,7 @@
 #endif
 
 #include <cmath>
-#ifdef LEGION_USE_CUDA
+#if defined (LEGION_USE_CUDA)
 #if __CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ == 2
 #error "No complex number support for GPUs due to a Thrust bug in CUDA 9.2"
 #elif __CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ == 0
@@ -34,6 +34,9 @@
 #include <thrust/complex.h>
 #define COMPLEX_NAMESPACE thrust
 #endif
+#elif defined(LEGION_USE_HIP)
+#include <thrust/complex.h>
+#define COMPLEX_NAMESPACE thrust
 #else
 #include <complex>
 #define COMPLEX_NAMESPACE std
@@ -44,12 +47,12 @@
 
 using COMPLEX_NAMESPACE::complex;
 
-#ifdef LEGION_USE_CUDA
+#if defined (LEGION_USE_CUDA) || defined (LEGION_USE_HIP)
 // We need fabs for situations where we process complex, floating point, and
 // integral types in the same generic call. This is only needed for the thrust
 // version of complex as the std one already has fabs.
 // Overload for __half defined after complex<__half>
-namespace thrust {
+namespace COMPLEX_NAMESPACE {
 template<class T>
 __CUDA_HD__ constexpr T fabs(const complex<T>& arg) {
   return abs(arg);
@@ -95,12 +98,12 @@ public:
   __CUDA_HD__
   complex(__half re, __half im = __half()) : _real(re), _imag(im) { }
   complex(const complex<__half> &rhs) = default;
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __device__ // Device only constructor
   complex(__half2 val) : _real(val.x), _imag(val.y) { }
 #endif
 public:
-#ifdef __CUDACC__
+#if defined (__CUDACC__) || defined (__HIPCC__)
   __device__
   operator __half2(void) const
   {
@@ -160,7 +163,7 @@ protected:
 
 __CUDA_HD__
 inline __half abs(const complex<__half>& z) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return hypotf(z.real(), z.imag());
 #elif __cplusplus >= 201103L
   return (__half)(std::hypotf(z.real(), z.imag()));
