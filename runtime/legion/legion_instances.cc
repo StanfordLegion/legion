@@ -5275,8 +5275,8 @@ namespace Legion {
       size_t num_fields;
       derez.deserialize(num_fields);
       std::vector<CopySrcDstField> dst_fields(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-        derez.deserialize(dst_fields[idx]);
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      unpack_fields(dst_fields, derez, ready_events);
       size_t num_reservations;
       derez.deserialize(num_reservations);
       std::vector<Reservation> reservations(num_reservations);
@@ -5296,7 +5296,6 @@ namespace Legion {
       derez.deserialize(copy_mask);
       Memory location;
       derez.deserialize(location);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
@@ -5524,8 +5523,8 @@ namespace Legion {
       size_t num_fields;
       derez.deserialize(num_fields);
       std::vector<CopySrcDstField> dst_fields(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-        derez.deserialize(dst_fields[idx]);
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      unpack_fields(dst_fields, derez, ready_events);
       size_t num_reservations;
       derez.deserialize(num_reservations);
       std::vector<Reservation> reservations(num_reservations);
@@ -5543,7 +5542,6 @@ namespace Legion {
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
@@ -7075,8 +7073,8 @@ namespace Legion {
       size_t num_src_fields;
       derez.deserialize(num_src_fields);
       std::vector<CopySrcDstField> src_fields(num_src_fields);
-      for (unsigned idx = 0; idx < num_src_fields; idx++)
-        derez.deserialize(src_fields[idx]);
+      std::set<RtEvent> ready_events;
+      unpack_fields(src_fields, derez, ready_events);
       ApEvent src_precondition;
       derez.deserialize(src_precondition);
       bool recording;
@@ -7093,7 +7091,14 @@ namespace Legion {
         derez.deserialize(src_postcondition);
 
       if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+        ready_events.insert(ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+
       manager->process_distribute_allreduce(allreduce_tag, src_rank, stage,
                             src_fields, src_precondition, src_postcondition,
                             src_barrier, barrier_shard);
@@ -7335,8 +7340,8 @@ namespace Legion {
       size_t num_fields;
       derez.deserialize(num_fields);
       std::vector<CopySrcDstField> src_fields(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-        derez.deserialize(src_fields[idx]);
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      unpack_fields(src_fields, derez, ready_events);
       ApEvent precondition;
       derez.deserialize(precondition);
       PredEvent predicate_guard;
@@ -7351,7 +7356,6 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
@@ -7916,8 +7920,8 @@ namespace Legion {
       size_t num_fields;
       derez.deserialize(num_fields);
       std::vector<CopySrcDstField> dst_fields(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-        derez.deserialize(dst_fields[idx]);
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      unpack_fields(dst_fields, derez, ready_events);
       size_t num_reservations;
       derez.deserialize(num_reservations);
       std::vector<Reservation> reservations(num_reservations);
@@ -7935,7 +7939,6 @@ namespace Legion {
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
         PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
@@ -7983,6 +7986,27 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveManager::unpack_fields(
+                           std::vector<CopySrcDstField> &fields,
+                           Deserializer &derez, std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!fields.empty());
+#endif
+      const Processor local_proc = Processor::get_executing_processor();
+      for (unsigned idx = 0; idx < fields.size(); idx++)
+      {
+        CopySrcDstField &field = fields[idx];
+        derez.deserialize(field);
+        // Check to see if we fetched the metadata for this instance
+        RtEvent ready(field.inst.fetch_metadata(local_proc));
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
     }
 
     //--------------------------------------------------------------------------

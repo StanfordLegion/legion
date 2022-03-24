@@ -1195,6 +1195,8 @@ namespace Legion {
           FieldSpaceNode *space_node, RegionTreeID tree_id, 
           LayoutConstraints *constraints, ReductionOpID redop, 
           bool multi_instance);
+      static void unpack_fields(std::vector<CopySrcDstField> &fields,
+          Deserializer &derez, std::set<RtEvent> &ready_events);
     public:
       const size_t total_points;
       // This can be NULL if the point set is implicit
