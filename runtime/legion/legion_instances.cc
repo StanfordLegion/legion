@@ -5118,9 +5118,9 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       FieldMask fill_mask;
       derez.deserialize(fill_mask);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -5150,11 +5150,17 @@ namespace Legion {
 
       // Make sure all the distributed collectables are ready
       if (man_ready.exists() && !man_ready.has_triggered())
-        man_ready.wait();
+        ready_events.insert(man_ready);
       if (fill_ready.exists() && !fill_ready.has_triggered())
-        fill_ready.wait();
+        ready_events.insert(fill_ready);
       if (dst_ready.exists() && !dst_ready.has_triggered())
-        dst_ready.wait();
+        ready_events.insert(dst_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       manager->perform_collective_fill(fill_view, dst_view, precondition,
           predicate_guard, fill_expression, op_id, index, op_ctx_index,
@@ -5290,9 +5296,9 @@ namespace Legion {
       derez.deserialize(copy_mask);
       Memory location;
       derez.deserialize(location);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -5300,9 +5306,15 @@ namespace Legion {
       derez.deserialize(ready);
 
       if (man_ready.exists() && !man_ready.has_triggered())
-        man_ready.wait();
+        ready_events.insert(man_ready);
       if (src_ready.exists() && !src_ready.has_triggered())
-        src_ready.wait();
+        ready_events.insert(src_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       const ApEvent result = manager->perform_collective_point(src_view,
           dst_fields, reservations, precondition, predicate_guard,
@@ -5531,9 +5543,9 @@ namespace Legion {
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -5557,9 +5569,15 @@ namespace Legion {
       derez.deserialize(origin);
 
       if (man_ready.exists() && !man_ready.has_triggered())
-        man_ready.wait();
+        ready_events.insert(man_ready);
       if (src_ready.exists() && !src_ready.has_triggered())
-        src_ready.wait();
+        ready_events.insert(src_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       manager->perform_collective_reduction(src_view, dst_fields, reservations,
         precondition, predicate_guard, copy_expression, op_id, index,
@@ -6099,9 +6117,9 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -6124,13 +6142,19 @@ namespace Legion {
       derez.deserialize(copy_restricted);
 
       if (dst_man_ready.exists() && !dst_man_ready.has_triggered())
-        dst_man_ready.wait();
+        ready_events.insert(dst_man_ready);
       if (src_man_ready.exists() && !src_man_ready.has_triggered())
-        src_man_ready.wait();
+        ready_events.insert(src_man_ready);
       if (src_view_ready.exists() && !src_view_ready.has_triggered())
-        src_view_ready.wait();
+        ready_events.insert(src_view_ready);
       if (dst_view_ready.exists() && !dst_view_ready.has_triggered())
-        dst_view_ready.wait();
+        ready_events.insert(dst_view_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       target->perform_collective_pointwise(manager, src_view, dst_view,
           precondition, predicate_guard, copy_expression, op_id, index,
@@ -7327,9 +7351,9 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7363,9 +7387,15 @@ namespace Legion {
       derez.deserialize(copy_restricted);
 
       if (man_ready.exists() && !man_ready.has_triggered())
-        man_ready.wait();
+        ready_events.insert(man_ready);
       if (dst_ready.exists() && !dst_ready.has_triggered())
-        dst_ready.wait();
+        ready_events.insert(dst_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       manager->perform_collective_broadcast(dst_view, src_fields, precondition,
           predicate_guard, copy_expression, op_id, index, op_ctx_index,
@@ -7698,9 +7728,9 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7710,13 +7740,19 @@ namespace Legion {
       derez.deserialize<bool>(copy_restricted);
 
       if (dst_man_ready.exists() && !dst_man_ready.has_triggered())
-        dst_man_ready.wait();
+        ready_events.insert(dst_man_ready);
       if (src_man_ready.exists() && !src_man_ready.has_triggered())
-        src_man_ready.wait();
+        ready_events.insert(src_man_ready);
       if (src_view_ready.exists() && !src_view_ready.has_triggered())
-        src_view_ready.wait();
+        ready_events.insert(src_view_ready);
       if (dst_view_ready.exists() && !dst_view_ready.has_triggered())
-        dst_view_ready.wait();
+        ready_events.insert(dst_view_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       target->perform_collective_reducecast(manager, src_view, dst_view,
           precondition, predicate_guard, copy_expression, op_id, index,
@@ -7899,9 +7935,9 @@ namespace Legion {
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, applied_events;
+      std::set<RtEvent> recorded_events, ready_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7923,9 +7959,15 @@ namespace Legion {
       derez.deserialize(origin);
 
       if (man_ready.exists() && !man_ready.has_triggered())
-        man_ready.wait();
+        ready_events.insert(man_ready);
       if (src_ready.exists() && !src_ready.has_triggered())
-        src_ready.wait();
+        ready_events.insert(src_ready);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
 
       const ApEvent result = manager->perform_hammer_reduction(src_view,
           dst_fields, reservations, precondition, predicate_guard,
