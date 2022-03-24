@@ -350,7 +350,7 @@ namespace Legion {
       inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
     public:
 #ifdef DEBUG_LEGION
-      bool check_valid(void) const { return (current_state == VALID_STATE); }
+      bool check_valid(void) const;
 #endif
       // Atomic check and increment operations 
       bool check_valid_and_increment(ReferenceSource source,int cnt = 1);

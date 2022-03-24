@@ -469,6 +469,18 @@ namespace Legion {
       return do_deletion;
     }
 
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::check_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      return ((current_state == VALID_STATE) || 
+          (current_state == PENDING_VALID_STATE) || 
+          (current_state == PENDING_ACTIVE_VALID_STATE));
+    }
+#endif
+
     //--------------------------------------------------------------------------
     bool DistributedCollectable::check_valid_and_increment(
                                                 ReferenceSource source, int cnt)
