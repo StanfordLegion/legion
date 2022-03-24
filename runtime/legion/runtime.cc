@@ -1599,7 +1599,21 @@ namespace Legion {
         runtime->send_future_notification(owner_space, rez); 
       }
       else if (!subscribers.empty())
-        broadcast_result(subscribers, false/*need lock*/);
+      {
+        if ((canonical_instance != NULL) && 
+            canonical_instance->can_pack_by_value() &&
+            !canonical_instance->is_ready())
+        {
+          // Defer until the instance can be packed by value
+          const RtEvent precondition =
+            Runtime::protect_event(canonical_instance->get_ready());
+          FutureBroadcastArgs args(this);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, precondition);
+        }
+        else
+          broadcast_result(subscribers, false/*need lock*/);
+      }
       if (subscription_event.exists())
       {
         Runtime::trigger_event(subscription_event);
