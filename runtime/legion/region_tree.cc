@@ -6852,22 +6852,24 @@ namespace Legion {
                                                        RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      if (canonical != NULL)
-        return canonical;
-      IndexSpaceExpression *expr = forest->find_canonical_expression(this);
+      IndexSpaceExpression *expr = canonical.load();
+      if (expr != NULL)
+        return expr;
+      expr = forest->find_canonical_expression(this);
       if (expr == this)
       {
         // If we're our own canonical expression then the forest didn't
         // give us a reference to ourself, so just write it, everyone will
         // write the same value so there's no risk here
-        canonical = expr;
+        canonical.store(expr);
         return expr;
       }
       // If the canonical expression is not ourself, then the region tree
       // forest has given us a reference back on it, see if we're the first
       // ones to write it, if not we can remove the reference now
       const DistributedID did = get_distributed_id();
-      if (!__sync_bool_compare_and_swap(&canonical, NULL, expr))
+      IndexSpaceExpression *expected = NULL;
+      if (!canonical.compare_exchange_strong(expected, expr))
         expr->remove_canonical_reference(did);
       else // We're the first so add our resource reference
         expr->add_tree_expression_reference(did);
@@ -7147,15 +7149,16 @@ namespace Legion {
       // If we're not the owner send a valid reference to the owner
       if (!is_owner())
         send_remote_valid_increment(owner_space, mutator);
-      if ((canonical != NULL) && (canonical != this) &&
-          !canonical->try_add_canonical_reference(did))
+      IndexSpaceExpression *canon = canonical.load();
+      if ((canon != NULL) && (canon != this) &&
+          !canon->try_add_canonical_reference(did))
       {
         // We were unsuccessful at adding our canonical reference so 
         // remove the resource reference to the canonical object and
         // and mark that we no longer have a canonical expression
-        if (canonical->remove_tree_expression_reference(did))
-          delete canonical;
-        canonical = NULL;
+        if (canon->remove_tree_expression_reference(did))
+          delete canon;
+        canonical.store(NULL);
       }
     }
 
@@ -7168,8 +7171,9 @@ namespace Legion {
            RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
       // If we have a canonical reference that is not ourselves then 
       // we need to remove the nested reference that we are holding on it too
-      if ((canonical != NULL) && (canonical != this) &&
-          canonical->remove_canonical_reference(did))
+      IndexSpaceExpression *canon = canonical.load();
+      if ((canon != NULL) && (canon != this) &&
+          canon->remove_canonical_reference(did))
         // should never actually delete it since we have a resource ref too
         assert(false); 
     }
@@ -7205,17 +7209,18 @@ namespace Legion {
       invalidate_derived_operations(did, context);
       // Remove this operation from the region tree
       remove_operation();
-      if (canonical != NULL)
+      IndexSpaceExpression *canon = canonical.load();
+      if (canon != NULL)
       {
-        if (canonical == this)
+        if (canon == this)
         {
 #ifdef DEBUG_LEGION
           assert(has_volume);
 #endif
           context->remove_canonical_expression(this, volume);
         }
-        else if (canonical->remove_tree_expression_reference(did))
-          delete canonical;
+        else if (canon->remove_tree_expression_reference(did))
+          delete canon;
       }
     }
 
@@ -7223,7 +7228,7 @@ namespace Legion {
     bool IndexSpaceOperation::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -7237,7 +7242,7 @@ namespace Legion {
     bool IndexSpaceOperation::try_add_live_reference(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -8016,15 +8021,16 @@ namespace Legion {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
         send_remote_valid_increment(owner_space, mutator);
-      if ((canonical != NULL) && (canonical != this) &&
-          !canonical->try_add_canonical_reference(did))
+      IndexSpaceExpression *canon = canonical.load();
+      if ((canon != NULL) && (canon != this) &&
+          !canon->try_add_canonical_reference(did))
       {
         // We were unsuccessful at adding our canonical reference so 
         // remove the resource reference to the canonical object and
         // and mark that we no longer have a canonical expression
-        if (canonical->remove_tree_expression_reference(did))
-          delete canonical;
-        canonical = NULL;
+        if (canon->remove_tree_expression_reference(did))
+          delete canon;
+        canonical.store(NULL);
       }
     }
 
@@ -8047,8 +8053,9 @@ namespace Legion {
            RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
       // If we have a canonical reference that is not ourselves then 
       // we need to remove the nested reference that we are holding on it too
-      if ((canonical != NULL) && (canonical != this) &&
-          canonical->remove_canonical_reference(did))
+      IndexSpaceExpression *canon = canonical.load();
+      if ((canon != NULL) && (canon != this) &&
+          canon->remove_canonical_reference(did))
         // should never actually delete it since we have a resource ref too
         assert(false);
     }
@@ -8088,17 +8095,18 @@ namespace Legion {
         context->unregister_remote_expression(expr_id);
       // Invalidate any derived operations
       invalidate_derived_operations(did, context);
-      if (canonical != NULL)
+      IndexSpaceExpression *canon = canonical.load();
+      if (canon != NULL)
       {
-        if (canonical == this)
+        if (canon == this)
         {
 #ifdef DEBUG_LEGION
           assert(has_volume);
 #endif
           context->remove_canonical_expression(this, volume);
         }
-        else if (canonical->remove_tree_expression_reference(did))
-          delete canonical;
+        else if (canon->remove_tree_expression_reference(did))
+          delete canon;
       }
     }
 
@@ -9279,7 +9287,7 @@ namespace Legion {
     bool IndexSpaceNode::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -9293,7 +9301,7 @@ namespace Legion {
     bool IndexSpaceNode::try_add_live_reference(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -19061,7 +19069,7 @@ namespace Legion {
     bool PartitionTracker::can_prune(void)
     //--------------------------------------------------------------------------
     {
-      const int remainder = __sync_fetch_and_add(&references, 0); 
+      const unsigned remainder = references.load(); 
 #ifdef DEBUG_LEGION
       assert((remainder == 1) || (remainder == 2));
 #endif

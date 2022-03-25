@@ -3429,7 +3429,7 @@ namespace Legion {
         else
           update_cache = true;
         // increment the number of outstanding additions
-        __sync_fetch_and_add(&outstanding_additions,1);
+        outstanding_additions.fetch_add(1);
       }
       else // This is just going to add at the top so never needs to wait
       {
@@ -3475,9 +3475,9 @@ namespace Legion {
       if (update_count)
       {
 #ifdef DEBUG_LEGION
-        assert(outstanding_additions > 0);
+        assert(outstanding_additions.load() > 0);
 #endif
-        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        if ((outstanding_additions.fetch_sub(1) == 1) && clean_waiting.exists())
         {
           // Wake up the clean waiter
           Runtime::trigger_event(clean_waiting);
@@ -3494,7 +3494,7 @@ namespace Legion {
           if (expr_cache_uses == user_cache_timeout)
           {
             // Wait until there are are no more outstanding additions
-            while (outstanding_additions > 0)
+            while (outstanding_additions.load() > 0)
             {
 #ifdef DEBUG_LEGION
               assert(!clean_waiting.exists());
@@ -3549,7 +3549,7 @@ namespace Legion {
             has_target_view = true;
         }
         // increment the number of outstanding additions
-        __sync_fetch_and_add(&outstanding_additions,1);
+        outstanding_additions.fetch_add(1);
         update_count = true;
       }
       else // This is just going to add at the top so never needs to wait
@@ -3612,9 +3612,10 @@ namespace Legion {
           if (update_count)
           {
 #ifdef DEBUG_LEGION
-            assert(outstanding_additions > 0);
+            assert(outstanding_additions.load() > 0);
 #endif
-            if ((--outstanding_additions == 0) && clean_waiting.exists())
+            if ((outstanding_additions.fetch_sub(1) == 1) && 
+                clean_waiting.exists())
             {
               // Wake up the clean waiter
               Runtime::trigger_event(clean_waiting);
@@ -3643,9 +3644,9 @@ namespace Legion {
         }
         AutoLock v_lock(view_lock);
 #ifdef DEBUG_LEGION
-        assert(outstanding_additions > 0);
+        assert(outstanding_additions.load() > 0);
 #endif
-        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        if ((outstanding_additions.fetch_sub(1) == 1) && clean_waiting.exists())
         {
           // Wake up the clean waiter
           Runtime::trigger_event(clean_waiting);
@@ -3757,7 +3758,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         // There should be no outstanding_additions when we're here
         // because we're already protected by the replication lock
-        assert(outstanding_additions == 0);
+        assert(outstanding_additions.load() == 0);
 #endif
         // Go through and remove any users for the deactivate mask
         // Need an exclusive copy of the expr_lock to do this

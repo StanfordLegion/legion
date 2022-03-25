@@ -1381,7 +1381,7 @@ namespace Legion {
       size_t total_children_count; // total number of sub-operations
       size_t total_close_count; 
       size_t total_summary_count;
-      size_t outstanding_children_count;
+      std::atomic<size_t> outstanding_children_count;
       LegionMap<Operation*,GenerationID,
                 EXECUTING_CHILD_ALLOC> executing_children;
       LegionMap<Operation*,GenerationID,

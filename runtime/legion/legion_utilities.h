@@ -1655,8 +1655,6 @@ namespace Legion {
         if (leaf->elems[offset].load() == NULL)
         {
           ET *elem = new ET();
-          // Enforce total store ordering
-          __sync_synchronize();
           leaf->elems[offset].store(elem);
         }
         result = leaf->elems[offset].load();
@@ -1686,8 +1684,6 @@ namespace Legion {
         if (leaf->elems[offset].load() == NULL)
         {
           ET *elem = new ET(arg);
-          // Enforce total store ordering
-          __sync_synchronize();
           leaf->elems[offset].store(elem);
         }
         result = leaf->elems[offset].load();
@@ -1718,8 +1714,6 @@ namespace Legion {
         if (leaf->elems[offset].load() == NULL)
         {
           ET *elem = new ET(arg1, arg2);
-          // Enforce total store ordering
-          __sync_synchronize();
           leaf->elems[offset].store(elem);
         }
         result = leaf->elems[offset].load();
@@ -1765,7 +1759,6 @@ namespace Legion {
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
-            __sync_synchronize();
             inner->elems[0].store(n);
             n = parent;
           }
@@ -1807,7 +1800,6 @@ namespace Legion {
 
             NodeBase *next = new_tree_node(child_level, 
                                            child_first, child_last);
-            __sync_synchronize();
             inner->elems[i].store(next);
           }
           child = inner->elems[i].load();

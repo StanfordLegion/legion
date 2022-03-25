@@ -1355,7 +1355,7 @@ namespace Legion {
       LocalLock &expr_lock;
     protected:
       std::set<IndexSpaceOperation*> derived_operations;
-      IndexSpaceExpression *canonical;
+      std::atomic<IndexSpaceExpression*> canonical;
       std::atomic<unsigned> remote_owner_valid_references;
       size_t volume;
       bool has_volume;

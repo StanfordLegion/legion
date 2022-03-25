@@ -2325,14 +2325,14 @@ namespace Legion {
     void LegionProfiler::increment_total_outstanding_requests(unsigned cnt)
     //--------------------------------------------------------------------------
     {
-      __sync_fetch_and_add(&total_outstanding_requests,cnt);
+      total_outstanding_requests.fetch_add(cnt);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfiler::decrement_total_outstanding_requests(unsigned cnt)
     //--------------------------------------------------------------------------
     {
-      unsigned prev = __sync_fetch_and_sub(&total_outstanding_requests,cnt);
+      unsigned prev = total_outstanding_requests.fetch_sub(cnt);
 #ifdef DEBUG_LEGION
       assert(prev >= cnt);
 #endif
@@ -2351,7 +2351,7 @@ namespace Legion {
     void LegionProfiler::update_footprint(size_t diff, LegionProfInstance *inst)
     //--------------------------------------------------------------------------
     {
-      size_t footprint = __sync_add_and_fetch(&total_memory_footprint, diff);
+      size_t footprint = total_memory_footprint.fetch_add(diff) + diff;
       if (footprint > output_footprint_threshold)
       {
         // An important bit of logic here, if we're over the threshold then
@@ -2379,7 +2379,7 @@ namespace Legion {
         footprint = 
 #endif
 #endif
-          __sync_fetch_and_sub(&total_memory_footprint, diff);
+          total_memory_footprint.fetch_sub(diff);
 #ifdef DEBUG_LEGION
         assert(footprint >= diff); // check for wrap-around
 #endif
@@ -2395,8 +2395,7 @@ namespace Legion {
       if (op == NULL)
         return;
       // We'll only issue this warning once on each node for now
-      if (!__sync_bool_compare_and_swap(&need_default_mapper_warning,
-                                        true/*oldval*/, false/*newval*/))
+      if (!need_default_mapper_warning.exchange(false/*no longer needed*/))
         return;
       // Give a massive warning for profilig when using the default mapper
       for (int i = 0; i < 2; i++)
