@@ -2806,11 +2806,10 @@ namespace Legion {
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL),
-        physical_trace_replay_status(ReplayStatus(RtEvent::NO_RT_EVENT,0)),
-        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0),
-        pending_frames(0), currently_active_context(false), 
-        current_mapping_fence(NULL), mapping_fence_gen(0),
-        current_mapping_fence_index(0), 
+        physical_trace_replay_status(0), valid_wait_event(false), 
+        outstanding_subtasks(0), pending_subtasks(0), pending_frames(0),
+        currently_active_context(false), current_mapping_fence(NULL),
+        mapping_fence_gen(0), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
         last_implicit_gen(0)
@@ -2862,8 +2861,7 @@ namespace Legion {
         tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
-        virtual_mapped(rhs.virtual_mapped),
-        physical_trace_replay_status(ReplayStatus(RtEvent::NO_RT_EVENT,0))
+        virtual_mapped(rhs.virtual_mapped)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9015,8 +9013,7 @@ namespace Legion {
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, trace);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store(
-            ReplayStatus(replay->get_mapped_event(), -1));
+        physical_trace_replay_status.store(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
       }
 
@@ -9028,10 +9025,8 @@ namespace Legion {
     void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay)
     //--------------------------------------------------------------------------
     {
-      ReplayStatus expected(ready, -1);
-      ReplayStatus replace(RtEvent::NO_RT_EVENT, replay ? 1 : 0);
-      // Only need to set this if we're still inside the trace launching
-      physical_trace_replay_status.compare_exchange_strong(expected, replace);
+      physical_trace_replay_status.compare_exchange_strong(ready.id, 
+                                                           replay ? 1 : 0);
     }
 
     //--------------------------------------------------------------------------
@@ -9042,21 +9037,22 @@ namespace Legion {
         return false;
       if (!current_trace->is_fixed())
         return false;
-      ReplayStatus replay = physical_trace_replay_status.load();
-      if (replay.status < 0)
+      realm_id_t status = physical_trace_replay_status.load();
+      if (status > 1)
       {
         // Result is not ready yet so wait until it is
+        RtEvent ready;
+        ready.id = status;
+        if (!ready.has_triggered())
+          ready.wait();
+        status = physical_trace_replay_status.load();
+        // No need to spin again because there won't be anymore outstanding
+        // trace capture ops to be setting this
 #ifdef DEBUG_LEGION
-        assert(replay.ready.exists());
-#endif
-        if (!replay.ready.has_triggered())
-          replay.ready.wait();
-        replay = physical_trace_replay_status.load();
-#ifdef DEBUG_LEGION
-        assert(replay.status >= 0);
+        assert((status == 0) || (status == 1));
 #endif
       }
-      return (replay.status > 0);
+      return (status == 1);
     }
 
     //--------------------------------------------------------------------------
@@ -9099,8 +9095,6 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
-      // We are no longer performing a physical trace replay
-      physical_trace_replay_status.store(ReplayStatus(RtEvent::NO_RT_EVENT, 0));
     }
 
     //--------------------------------------------------------------------------
@@ -18151,8 +18145,7 @@ namespace Legion {
         ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
         replay->initialize_replay(this, trace);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store(
-            ReplayStatus(replay->get_mapped_event(), -1));
+        physical_trace_replay_status.store(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
       }
 
@@ -18209,8 +18202,6 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
-      // We are no longer performing a physical trace replay
-      physical_trace_replay_status.store(ReplayStatus(RtEvent::NO_RT_EVENT, 0));
     }
 
     //--------------------------------------------------------------------------
