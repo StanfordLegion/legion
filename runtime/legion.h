@@ -3288,6 +3288,13 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
+    protected:
+      Memory get_memory_from_kind(Memory::Kind kind);
+      void initialize(Memory memory,
+                      DomainT<DIM,COORD_T> bounds,
+                      const T *initial_value,
+                      size_t alignment,
+                      bool fortran_order_dims);
     public:
       __CUDA_HD__
       inline T read(const Point<DIM,COORD_T> &p) const;
