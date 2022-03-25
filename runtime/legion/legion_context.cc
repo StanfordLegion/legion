@@ -9029,9 +9029,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(physical_trace_replay_ready.exists());
       assert(!physical_trace_replay_ready.has_triggered());
-      assert(physical_trace_replay.load() < 0);
 #endif
-      physical_trace_replay.exchange(replay ? 1 : 0);
+      int expected = -1;
+      // Only need to set this if we're still inside the trace launching
+      physical_trace_replay.compare_exchange_strong(expected, replay ? 1 : 0);
     }
 
     //--------------------------------------------------------------------------
