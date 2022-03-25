@@ -6416,8 +6416,7 @@ namespace Legion {
       // We can trigger the ready event now that we know its precondition
       Runtime::trigger_event(NULL, ready_event, map_complete_event);
       // Remove profiling our guard and trigger the profiling event if necessary
-      int diff = -1; // need this dumbness for PGI
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
+      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Now we can trigger the mapping event and indicate

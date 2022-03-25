@@ -7571,9 +7571,7 @@ namespace Legion {
         // Outstanding children count has already been incremented for the
         // operation being launched so decrement it in case we wait and then
         // re-increment it when we wake up again
-        int diff = -1; // Need this for PGI dumbness
-        const int outstanding_count = 
-          __sync_fetch_and_add(&outstanding_children_count, diff);
+        const int outstanding_count = outstanding_children_count.fetch_sub(1);
         // We already decided to wait, so we need to wait for any hysteresis
         // to play a role here
         if (outstanding_count >
@@ -7592,7 +7590,7 @@ namespace Legion {
       wait_event.wait();
       end_task_wait();
       // Re-increment the count once we are awake again
-      __sync_fetch_and_add(&outstanding_children_count,1);
+      outstanding_children_count.fetch_add(1);
     }
 
     //--------------------------------------------------------------------------
@@ -7992,7 +7990,7 @@ namespace Legion {
         op->set_trace(current_trace, dependences);
       size_t result = total_children_count++;
       const size_t outstanding_count =
-        __sync_add_and_fetch(&outstanding_children_count,1);
+        outstanding_children_count.fetch_add(1) + 1;
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) &&
           (context_configuration.max_window_size > 0) &&
@@ -8040,7 +8038,7 @@ namespace Legion {
         executing_children[*it] = (*it)->get_generation();
         dependence_queue.push_back(*it);
       }
-      __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());
+      outstanding_children_count.fetch_add(unordered_ops.size());
       unordered_ops.clear();
     }
 
@@ -8062,8 +8060,8 @@ namespace Legion {
     {
       // For now we just bump our counter
       size_t result = total_summary_count++;
-      const size_t outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,1);
+      const size_t outstanding_count =
+        outstanding_children_count.fetch_add(1) + 1; 
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
@@ -8109,9 +8107,7 @@ namespace Legion {
         executing_children.erase(finder);
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
-        int diff = -1; // Need this for PGI dumbness
-        int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count, diff);
+        int outstanding_count = outstanding_children_count.fetch_sub(1) - 1;
 #ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif
@@ -16618,7 +16614,7 @@ namespace Legion {
         for (std::vector<Operation*>::const_iterator it = 
               ready_ops.begin(); it != ready_ops.end(); it++)
           dependence_queue.push_back(*it);
-        __sync_fetch_and_add(&outstanding_children_count, ready_ops.size());
+        outstanding_children_count.fetch_add(ready_ops.size());
         if (ready_ops.size() != local_unordered.size())
         {
           // For any operations which we aren't in the ready ops

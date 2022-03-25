@@ -1219,8 +1219,8 @@ namespace Legion {
       std::vector<MapProfilingInfo>                     profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
-      int                               outstanding_profiling_requests;
-      int                               outstanding_profiling_reported;
+      std::atomic<int>                  outstanding_profiling_requests;
+      std::atomic<int>                  outstanding_profiling_reported;
     };
 
     /**
@@ -1428,8 +1428,8 @@ namespace Legion {
       std::vector<CopyProfilingInfo>                  profiling_info;
       RtUserEvent                                 profiling_reported;
       int                                         profiling_priority;
-      int                             outstanding_profiling_requests;
-      int                             outstanding_profiling_reported;
+      std::atomic<int>                outstanding_profiling_requests;
+      std::atomic<int>                outstanding_profiling_reported;
     public:
       bool                            possible_src_indirect_out_of_range;
       bool                            possible_dst_indirect_out_of_range;
@@ -2018,8 +2018,8 @@ namespace Legion {
       std::vector<CloseProfilingInfo>                  profiling_info;
       RtUserEvent                                  profiling_reported;
       int                                          profiling_priority;
-      int                              outstanding_profiling_requests;
-      int                              outstanding_profiling_reported;
+      std::atomic<int>                 outstanding_profiling_requests;
+      std::atomic<int>                 outstanding_profiling_reported;
     };
 
     /**
@@ -2281,8 +2281,8 @@ namespace Legion {
       std::vector<AcquireProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
-      int                                outstanding_profiling_requests;
-      int                                outstanding_profiling_reported;
+      std::atomic<int>                   outstanding_profiling_requests;
+      std::atomic<int>                   outstanding_profiling_reported;
     };
 
     /**
@@ -2396,8 +2396,8 @@ namespace Legion {
       std::vector<ReleaseProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
-      int                                outstanding_profiling_requests;
-      int                                outstanding_profiling_reported;
+      std::atomic<int>                   outstanding_profiling_requests;
+      std::atomic<int>                   outstanding_profiling_reported;
     };
 
     /**
@@ -3434,8 +3434,8 @@ namespace Legion {
       std::vector<PartitionProfilingInfo>                  profiling_info;
       RtUserEvent                                      profiling_reported;
       int                                              profiling_priority;
-      int                                  outstanding_profiling_requests;
-      int                                  outstanding_profiling_reported;
+      std::atomic<int>                     outstanding_profiling_requests;
+      std::atomic<int>                     outstanding_profiling_reported;
     };
 
     /**
@@ -4193,7 +4193,7 @@ namespace Legion {
       int                                 profiling_priority;
       Processor                           profiling_target;
       RtUserEvent                         profiling_response;
-      int                                 profiling_reports;
+      std::atomic<int>                    profiling_reports;
     };
 
     /**

@@ -598,8 +598,8 @@ namespace Legion {
       std::vector<SingleProfilingInfo>                  profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
-      int                               outstanding_profiling_requests;
-      int                               outstanding_profiling_reported;
+      std::atomic<int>                  outstanding_profiling_requests;
+      std::atomic<int>                  outstanding_profiling_reported;
 #ifdef DEBUG_LEGION
     protected:
       // For checking that premapped instances didn't change during mapping
@@ -1232,8 +1232,8 @@ namespace Legion {
       std::vector<IndexProfilingInfo>                   profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
-      int                               outstanding_profiling_requests;
-      int                               outstanding_profiling_reported;
+      std::atomic<int>                  outstanding_profiling_requests;
+      std::atomic<int>                  outstanding_profiling_reported;
     protected:
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;

@@ -7798,7 +7798,7 @@ namespace Legion {
     bool IndexSpaceOperation::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -7812,7 +7812,7 @@ namespace Legion {
     bool IndexSpaceOperation::try_add_live_reference(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -9892,7 +9892,7 @@ namespace Legion {
     bool IndexSpaceNode::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -9906,7 +9906,7 @@ namespace Legion {
     bool IndexSpaceNode::try_add_live_reference(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -21915,7 +21915,7 @@ namespace Legion {
     bool PartitionTracker::can_prune(void)
     //--------------------------------------------------------------------------
     {
-      const int remainder = __sync_fetch_and_add(&references, 0); 
+      const unsigned remainder = references.load(); 
 #ifdef DEBUG_LEGION
       assert((remainder == 1) || (remainder == 2));
 #endif
