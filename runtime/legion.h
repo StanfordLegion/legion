@@ -3288,6 +3288,27 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
+    public: // Constructors specifying a specific ordering
+      DeferredBuffer(Memory memory,
+                     const Domain &bounds,
+                     DimensionKind ordering[DIM],
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
+      DeferredBuffer(Memory memory,
+                     IndexSpace bounds,
+                     DimensionKind ordering[DIM],
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
+      DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
+                     Memory memory,
+                     DimensionKind ordering[DIM],
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
+      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds,
+                     Memory memory,
+                     DimensionKind ordering[DIM],
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
       void initialize_layout(size_t alignment, bool fortran_order_dims);
