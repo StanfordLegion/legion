@@ -648,7 +648,7 @@ namespace Legion {
       unsigned expr_cache_uses;
       // Helping with making sure that there are no outstanding users being
       // added for when we go to invalidate the cache and clean the views
-      unsigned outstanding_additions;
+      std::atomic<unsigned> outstanding_additions;
       RtUserEvent clean_waiting; 
 #ifdef ENABLE_VIEW_REPLICATION
     protected:

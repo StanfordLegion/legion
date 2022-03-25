@@ -4678,8 +4678,8 @@ namespace Legion {
       ready_event = Runtime::create_ap_user_event(NULL);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
-      outstanding_profiling_requests = 0;
-      outstanding_profiling_reported = 0;
+      outstanding_profiling_requests.store(0);
+      outstanding_profiling_reported.store(0);
     }
 
     //--------------------------------------------------------------------------
@@ -4966,7 +4966,7 @@ namespace Legion {
       // Check to see if we need to do a profiling response
       if (profiling_reported.exists())
       {
-        if (outstanding_profiling_requests > 0)
+        if (outstanding_profiling_requests.load() > 0)
         {
 #ifdef DEBUG_LEGION
           assert(mapped_event.has_triggered());
@@ -4982,17 +4982,17 @@ namespace Legion {
             {
               MapProfilingInfo &info = to_perform[idx];
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests;
+              info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
               mapper->invoke_inline_report_profiling(this, &info);
               free(info.buffer);
             }
-            const int count = __sync_add_and_fetch(
-                &outstanding_profiling_reported, to_perform.size());
+            const int count = to_perform.size() + 
+              outstanding_profiling_reported.fetch_add(to_perform.size());
 #ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests);
+            assert(count <= outstanding_profiling_requests.load());
 #endif
-            if (count == outstanding_profiling_requests)
+            if (count == outstanding_profiling_requests.load())
               Runtime::trigger_event(profiling_reported);
           }
         }
@@ -5580,14 +5580,14 @@ namespace Legion {
       // If we get here then we can handle the response now
       Mapping::Mapper::InlineProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests;
+      info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
       mapper->invoke_inline_report_profiling(this, &info);
-      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+      const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests);
+      assert(count <= outstanding_profiling_requests.load());
 #endif
-      if (count == outstanding_profiling_requests)
+      if (count == outstanding_profiling_requests.load())
         Runtime::trigger_event(profiling_reported);
     }
 
@@ -5599,7 +5599,7 @@ namespace Legion {
       assert(count > 0);
       assert(!mapped_event.has_triggered());
 #endif
-      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+      outstanding_profiling_requests.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------
@@ -6088,8 +6088,8 @@ namespace Legion {
       activate_speculative();
       activate_memoizable();
       mapper = NULL;
-      outstanding_profiling_requests = 0;
-      outstanding_profiling_reported = 0;
+      outstanding_profiling_requests.store(0);
+      outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       predication_guard = PredEvent::NO_PRED_EVENT;
@@ -7097,7 +7097,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
-      if (outstanding_profiling_requests > 0)
+      if (outstanding_profiling_requests.load() > 0)
       {
 #ifdef DEBUG_LEGION
         assert(mapped_event.has_triggered());
@@ -7113,17 +7113,17 @@ namespace Legion {
           {
             CopyProfilingInfo &info = to_perform[idx];
             const Realm::ProfilingResponse resp(info.buffer, info.buffer_size);
-            info.total_reports = outstanding_profiling_requests;
+            info.total_reports = outstanding_profiling_requests.load();
             info.profiling_responses.attach_realm_profiling_response(resp);
             mapper->invoke_copy_report_profiling(this, &info);
             free(info.buffer);
           }
-          const int count = __sync_add_and_fetch(
-              &outstanding_profiling_reported, to_perform.size());
+          const int count = to_perform.size() +
+              outstanding_profiling_reported.fetch_add(to_perform.size());
 #ifdef DEBUG_LEGION
-          assert(count <= outstanding_profiling_requests);
+          assert(count <= outstanding_profiling_requests.load());
 #endif
-          if (count == outstanding_profiling_requests)
+          if (count == outstanding_profiling_requests.load())
             Runtime::trigger_event(profiling_reported);
         }
       }
@@ -8219,14 +8219,14 @@ namespace Legion {
       info.profiling_responses.attach_realm_profiling_response(response);
       info.src_index = op_info->src;
       info.dst_index = op_info->dst;
-      info.total_reports = outstanding_profiling_requests;
+      info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
       mapper->invoke_copy_report_profiling(this, &info);
-      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+      const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests);
+      assert(count <= outstanding_profiling_requests.load());
 #endif
-      if (count == outstanding_profiling_requests)
+      if (count == outstanding_profiling_requests.load())
         Runtime::trigger_event(profiling_reported);
     }
 
@@ -8238,7 +8238,7 @@ namespace Legion {
       assert(count > 0);
       assert(!mapped_event.has_triggered());
 #endif
-      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+      outstanding_profiling_requests.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------
@@ -11452,8 +11452,8 @@ namespace Legion {
     {
       activate_close();
       mapper = NULL;
-      outstanding_profiling_requests = 0;
-      outstanding_profiling_reported = 0;
+      outstanding_profiling_requests.store(0);
+      outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
@@ -11599,7 +11599,7 @@ namespace Legion {
       // Check to see if we need to do a profiling response
       if (profiling_reported.exists())
       {
-        if (outstanding_profiling_requests > 0)
+        if (outstanding_profiling_requests.load() > 0)
         {
 #ifdef DEBUG_LEGION
           assert(mapped_event.has_triggered());
@@ -11615,17 +11615,17 @@ namespace Legion {
             {
               CloseProfilingInfo &info = to_perform[idx];
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests;
+              info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
               mapper->invoke_close_report_profiling(this, &info);
               free(info.buffer);
             }
-            const int count = __sync_add_and_fetch(
-                &outstanding_profiling_reported, to_perform.size());
+            const int count = to_perform.size() +
+                outstanding_profiling_reported.fetch_add(to_perform.size());
 #ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests);
+            assert(count <= outstanding_profiling_requests.load());
 #endif
-            if (count == outstanding_profiling_requests)
+            if (count == outstanding_profiling_requests.load())
               Runtime::trigger_event(profiling_reported);
           }
         }
@@ -11744,14 +11744,14 @@ namespace Legion {
       // If we get here then we can handle the response now
       Mapping::Mapper::CloseProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests;
+      info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
       mapper->invoke_close_report_profiling(this, &info);
-      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+      const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests);
+      assert(count <= outstanding_profiling_requests.load());
 #endif
-      if (count == outstanding_profiling_requests)
+      if (count == outstanding_profiling_requests.load())
         Runtime::trigger_event(profiling_reported);
     }
 
@@ -11763,7 +11763,7 @@ namespace Legion {
       assert(count > 0);
       assert(!mapped_event.has_triggered());
 #endif
-      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+      outstanding_profiling_requests.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------
@@ -13022,8 +13022,8 @@ namespace Legion {
       activate_speculative(); 
       activate_memoizable();
       mapper = NULL;
-      outstanding_profiling_requests = 0;
-      outstanding_profiling_reported = 0;
+      outstanding_profiling_requests.store(0);
+      outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
@@ -13256,8 +13256,7 @@ namespace Legion {
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
-      int diff = -1; // need this for PGI dumbness
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
+      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
@@ -13283,7 +13282,7 @@ namespace Legion {
       // Check to see if we need to do a profiling response
       if (profiling_reported.exists())
       {
-        if (outstanding_profiling_requests > 0)
+        if (outstanding_profiling_requests.load() > 0)
         {
 #ifdef DEBUG_LEGION
           assert(mapped_event.has_triggered());
@@ -13299,17 +13298,17 @@ namespace Legion {
             {
               AcquireProfilingInfo &info = to_perform[idx];
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests;
+              info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
               mapper->invoke_acquire_report_profiling(this, &info);
               free(info.buffer);
             }
-            const int count = __sync_add_and_fetch(
-                &outstanding_profiling_reported, to_perform.size());
+            const int count = to_perform.size() +
+                outstanding_profiling_reported.fetch_add(to_perform.size());
 #ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests);
+            assert(count <= outstanding_profiling_requests.load());
 #endif
-            if (count == outstanding_profiling_requests)
+            if (count == outstanding_profiling_requests.load())
               Runtime::trigger_event(profiling_reported);
           }
         }
@@ -13703,14 +13702,14 @@ namespace Legion {
       // If we get here then we can handle the response now
       Mapping::Mapper::AcquireProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests;
+      info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
       mapper->invoke_acquire_report_profiling(this, &info);
-      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+      const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests);
+      assert(count <= outstanding_profiling_requests.load());
 #endif
-      if (count == outstanding_profiling_requests)
+      if (count == outstanding_profiling_requests.load())
         Runtime::trigger_event(profiling_reported);
     }
 
@@ -13722,7 +13721,7 @@ namespace Legion {
       assert(count > 0);
       assert(!mapped_event.has_triggered());
 #endif
-      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+      outstanding_profiling_requests.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------
@@ -13942,8 +13941,8 @@ namespace Legion {
       activate_speculative(); 
       activate_memoizable();
       mapper = NULL;
-      outstanding_profiling_requests = 0;
-      outstanding_profiling_reported = 0;
+      outstanding_profiling_requests.store(0);
+      outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
@@ -14186,8 +14185,7 @@ namespace Legion {
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
-      int diff = -1; // need this for PGI dumbness
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
+      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
@@ -14213,7 +14211,7 @@ namespace Legion {
       // Check to see if we need to do a profiling response
       if (profiling_reported.exists())
       {
-        if (outstanding_profiling_requests > 0)
+        if (outstanding_profiling_requests.load() > 0)
         {
 #ifdef DEBUG_LEGION
           assert(mapped_event.has_triggered());
@@ -14229,17 +14227,17 @@ namespace Legion {
             {
               ReleaseProfilingInfo &info = to_perform[idx];
               const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests;
+              info.total_reports = outstanding_profiling_requests.load();
               info.profiling_responses.attach_realm_profiling_response(resp);
               mapper->invoke_release_report_profiling(this, &info);
               free(info.buffer);
             }
-            const int count = __sync_add_and_fetch(
-                &outstanding_profiling_reported, to_perform.size());
+            const int count = to_perform.size() +
+                outstanding_profiling_reported.fetch_add(to_perform.size());
 #ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests);
+            assert(count <= outstanding_profiling_requests.load());
 #endif
-            if (count == outstanding_profiling_requests)
+            if (count == outstanding_profiling_requests.load())
               Runtime::trigger_event(profiling_reported);
           }
         }
@@ -14663,14 +14661,14 @@ namespace Legion {
       // If we get here then we can handle the response now
       Mapping::Mapper::ReleaseProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests;
+      info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
       mapper->invoke_release_report_profiling(this, &info);
-      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+      const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests);
+      assert(count <= outstanding_profiling_requests.load());
 #endif
-      if (count == outstanding_profiling_requests)
+      if (count == outstanding_profiling_requests.load())
         Runtime::trigger_event(profiling_reported);
     }
 
@@ -14682,7 +14680,7 @@ namespace Legion {
       assert(count > 0);
       assert(!mapped_event.has_triggered());
 #endif
-      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+      outstanding_profiling_requests.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------
@@ -18313,7 +18311,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
-      if (outstanding_profiling_requests > 0)
+      if (outstanding_profiling_requests.load() > 0)
       {
 #ifdef DEBUG_LEGION
         assert(mapped_event.has_triggered());
@@ -18329,17 +18327,17 @@ namespace Legion {
           {
             PartitionProfilingInfo &info = to_perform[idx];
             const Realm::ProfilingResponse resp(info.buffer, info.buffer_size);
-            info.total_reports = outstanding_profiling_requests;
+            info.total_reports = outstanding_profiling_requests.load();
             info.profiling_responses.attach_realm_profiling_response(resp);
             mapper->invoke_partition_report_profiling(this, &info);
             free(info.buffer);
           }
-          const int count = __sync_add_and_fetch(
-              &outstanding_profiling_reported, to_perform.size());
+          const int count = to_perform.size() +
+              outstanding_profiling_reported.fetch_add(to_perform.size());
 #ifdef DEBUG_LEGION
-          assert(count <= outstanding_profiling_requests);
+          assert(count <= outstanding_profiling_requests.load());
 #endif
-          if (count == outstanding_profiling_requests)
+          if (count == outstanding_profiling_requests.load())
             Runtime::trigger_event(profiling_reported);
         }
       }
@@ -18524,8 +18522,8 @@ namespace Legion {
       mapper = NULL;
       points_committed = 0;
       commit_request = false;
-      outstanding_profiling_requests = 0;
-      outstanding_profiling_reported = 0;
+      outstanding_profiling_requests.store(0);
+      outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
@@ -18692,14 +18690,14 @@ namespace Legion {
       // If we get here then we can handle the response now
       Mapping::Mapper::PartitionProfilingInfo info; 
       info.profiling_responses.attach_realm_profiling_response(response);
-      info.total_reports = outstanding_profiling_requests;
+      info.total_reports = outstanding_profiling_requests.load();
       info.fill_response = op_info->fill;
       mapper->invoke_partition_report_profiling(this, &info);
-      const int count = __sync_add_and_fetch(&outstanding_profiling_reported,1);
+      const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests);
+      assert(count <= outstanding_profiling_requests.load());
 #endif
-      if (count == outstanding_profiling_requests)
+      if (count == outstanding_profiling_requests.load())
         Runtime::trigger_event(profiling_reported);
     }
 
@@ -18711,7 +18709,7 @@ namespace Legion {
       assert(count > 0);
       assert(!mapped_event.has_triggered());
 #endif
-      __sync_fetch_and_add(&outstanding_profiling_requests, count);
+      outstanding_profiling_requests.fetch_add(count);
     }
 
     //--------------------------------------------------------------------------
@@ -24186,11 +24184,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(profiling_response.exists());
 #endif
-        if (profiling_reports > 0)
+        if (profiling_reports.load() > 0)
         {
           Serializer rez;
           rez.serialize(remote_ptr);
-          rez.serialize(profiling_reports);
+          rez.serialize(profiling_reports.load());
           rez.serialize(profiling_response);
           runtime->send_remote_op_profiling_count_update(source, rez);
         }
@@ -24359,7 +24357,7 @@ namespace Legion {
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-      __sync_fetch_and_add(&profiling_reports, 1);
+      profiling_reports.fetch_add(1);
     }
 
     //--------------------------------------------------------------------------

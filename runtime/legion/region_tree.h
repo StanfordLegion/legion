@@ -1230,7 +1230,7 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) const = 0;
+      virtual bool is_valid(void) = 0;
 #endif
       virtual DistributedID get_distributed_id(void) const = 0;
       virtual bool try_add_canonical_reference(DistributedID source) = 0;
@@ -1580,7 +1580,7 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) const { return check_valid(); }
+      virtual bool is_valid(void) { return check_valid(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -2234,7 +2234,7 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) const { return check_valid(); }
+      virtual bool is_valid(void) { return check_valid(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);

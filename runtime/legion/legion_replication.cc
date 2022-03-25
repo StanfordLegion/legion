@@ -8980,8 +8980,7 @@ namespace Legion {
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
-      int diff = -1; // need this for PGI dumbness
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
+      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
@@ -9257,8 +9256,7 @@ namespace Legion {
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
-      int diff = -1; // need this for PGI dumbness
-      if ((__sync_add_and_fetch(&outstanding_profiling_requests, diff) == 0) &&
+      if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
@@ -10203,7 +10201,10 @@ namespace Legion {
         fence_registered = true;
       }
 
-      if (physical_trace->get_current_template() != NULL)
+      const bool replaying = (physical_trace->get_current_template() != NULL);
+      // Tell the parent context about the physical trace replay result
+      parent_ctx->record_physical_trace_replay(mapped_event, replaying);
+      if (replaying)
       {
         // If we're recurrent, then check to see if we had any intermeidate
         // ops for which we still need to perform the fence analysis
