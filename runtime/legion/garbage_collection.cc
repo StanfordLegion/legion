@@ -487,6 +487,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent wait_for;
+      bool result = false;
       do
       {
         if (wait_for.exists() && !wait_for.has_triggered())
@@ -496,9 +497,10 @@ namespace Legion {
         if (wait_for.exists())
           continue; 
         assert(in_stable_state());
-        return (current_state == VALID_STATE);
+        result = (current_state == VALID_STATE);
+        break;
       } while (true);
-      return false;
+      return result;
     }
 #endif
 
