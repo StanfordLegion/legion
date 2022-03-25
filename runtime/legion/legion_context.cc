@@ -2353,7 +2353,8 @@ namespace Legion {
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
-        current_trace(NULL), previous_trace(NULL), valid_wait_event(false), 
+        current_trace(NULL), previous_trace(NULL),
+        physical_trace_replaying(false), valid_wait_event(false), 
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
@@ -7103,10 +7104,9 @@ namespace Legion {
       RtEvent precondition;
       ApEvent term_event;
       // We disable program order execution when we are replaying a
-      // fixed trace since it might not be sound to block
+      // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
-          ((current_trace == NULL) || !current_trace->is_fixed() || 
-           !current_trace->has_physical_trace()))
+          !physical_trace_replaying)
         term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -8367,6 +8367,8 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+      // We're no longer replaying a physical trace either
+      physical_trace_replaying = false;
     }
 
     //--------------------------------------------------------------------------

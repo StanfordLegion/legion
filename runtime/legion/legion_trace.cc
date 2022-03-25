@@ -1647,6 +1647,13 @@ namespace Legion {
               parent_ctx->get_current_execution_fence_event());
         physical_trace->initialize_template(fence_completion, recurrent);
         local_trace->set_state_replay();
+        // If we're doing program order execution, tell the parent
+        // context that we're doing a physical trace replay so it 
+        // knows not to block when replaying the trace, note that 
+        // this is only safe because we know program order execution
+        // has the context waiting for this operation to finish too
+        if (runtime->program_order_execution)
+          parent_ctx->record_physical_trace_replay();
 #ifdef LEGION_SPY
         physical_trace->get_current_template()->set_fence_uid(unique_op_id);
 #endif
