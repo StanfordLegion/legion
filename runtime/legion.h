@@ -3291,22 +3291,22 @@ namespace Legion {
     public: // Constructors specifying a specific ordering
       DeferredBuffer(Memory memory,
                      const Domain &bounds,
-                     DimensionKind ordering[DIM],
+                     std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
                      size_t alignment = 16);
       DeferredBuffer(Memory memory,
                      IndexSpace bounds,
-                     DimensionKind ordering[DIM],
+                     std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
                      size_t alignment = 16);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory memory,
-                     DimensionKind ordering[DIM],
+                     std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
                      size_t alignment = 16);
       DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds,
                      Memory memory,
-                     DimensionKind ordering[DIM],
+                     std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
                      size_t alignment = 16);
     protected:
@@ -3332,7 +3332,7 @@ namespace Legion {
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
-      DimensionKind ordering[DIM];
+      std::array<DimensionKind,DIM> ordering;
       size_t alignment;
 #ifdef LEGION_BOUNDS_CHECKS
       DomainT<DIM,COORD_T> bounds;
