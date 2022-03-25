@@ -342,7 +342,8 @@ namespace Legion {
       inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
     public:
 #ifdef DEBUG_LEGION
-      bool check_valid(void) const;
+      bool check_valid(void);
+      // Better be called while holding the lock
       inline bool in_stable_state(void) const 
         { return (current_state <= DELETED_STATE); }
 #endif
