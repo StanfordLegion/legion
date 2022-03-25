@@ -834,13 +834,8 @@ namespace Legion {
     public:
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
-      inline void record_physical_trace_replay(void)
-        { 
-#ifdef DEBUG_LEGION
-          assert(runtime->program_order_execution);          
-#endif
-          physical_trace_replaying = true; 
-        }
+      void record_physical_trace_replay(bool replay);
+      bool is_replaying_physical_trace(void);
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -1429,7 +1424,8 @@ namespace Legion {
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC> traces;
       LegionTrace *current_trace;
       LegionTrace *previous_trace;
-      bool physical_trace_replaying;
+      RtEvent physical_trace_replay_ready;
+      std::atomic<int> physical_trace_replay;
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
