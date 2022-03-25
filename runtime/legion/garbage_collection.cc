@@ -243,7 +243,11 @@ namespace Legion {
 #endif
           // See if we lost the race to update the references
           if (gc_references.fetch_add(cnt) > 0)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
+          }
 #ifdef DEBUG_LEGION
           assert(!has_gc_references);
 #endif
@@ -392,7 +396,11 @@ namespace Legion {
 #endif
           // See if we lost the race to update the references
           if (valid_references.fetch_add(cnt) > 0)
+          {
+            if (!reentrant)
+              reentrant_event = RtEvent::NO_RT_EVENT;
             break;
+          }
 #ifdef DEBUG_LEGION
           assert(!has_valid_references);
 #endif
@@ -491,21 +499,24 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_valid(void) const
+    bool DistributedCollectable::check_valid(void)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_for;
       bool result = false;
+      bool reentrant = false;
       do
       {
         if (wait_for.exists() && !wait_for.has_triggered())
           wait_for.wait();
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
-        wait_for = transition_event;
+        AutoLock gc(gc_lock); 
+        wait_for = check_for_transition_event(reentrant);
         if (wait_for.exists())
           continue; 
         assert(in_stable_state());
         result = (current_state == VALID_STATE);
+        if (!reentrant)
+          reentrant_event = RtEvent::NO_RT_EVENT;
         break;
       } while (true);
       return result;
@@ -532,19 +543,24 @@ namespace Legion {
 #endif
       // Need to wait until all transitions are done 
       RtEvent wait_for;
+      bool reentrant = false;
       do
       {
         if (wait_for.exists() && !wait_for.has_triggered())
           wait_for.wait();
         AutoLock gc(gc_lock); 
-        wait_for = transition_event;
+        wait_for = check_for_transition_event(reentrant);
         if (wait_for.exists())
           continue;
 #ifdef DEBUG_LEGION
         assert(in_stable_state());
 #endif
         if (current_state != VALID_STATE)
+        {
+          if (!reentrant)
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
+        }
 #ifdef LEGION_GC
         log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
@@ -562,6 +578,8 @@ namespace Legion {
 #else
         valid_references.fetch_add(cnt);
 #endif
+        if (!reentrant)
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -587,19 +605,24 @@ namespace Legion {
 #endif
       // Need to wait until all transitions are done 
       RtEvent wait_for;
+      bool reentrant = false;
       do
       {
         if (wait_for.exists() && !wait_for.has_triggered())
           wait_for.wait();
         AutoLock gc(gc_lock); 
-        wait_for = transition_event;
+        wait_for = check_for_transition_event(reentrant);
         if (wait_for.exists())
           continue;
 #ifdef DEBUG_LEGION
         assert(in_stable_state());
 #endif
         if (current_state != VALID_STATE)
+        {
+          if (!reentrant)
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
+        }
 #ifdef LEGION_GC
         log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
@@ -618,6 +641,8 @@ namespace Legion {
 #else
         valid_references.fetch_add(cnt);
 #endif
+        if (!reentrant)
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -643,12 +668,13 @@ namespace Legion {
 #endif
       // Need to wait until all transitions are done 
       RtEvent wait_for;
+      bool reentrant = false;
       do
       {
         if (wait_for.exists() && !wait_for.has_triggered())
           wait_for.wait();
         AutoLock gc(gc_lock); 
-        wait_for = transition_event;
+        wait_for = check_for_transition_event(reentrant);
         if (wait_for.exists())
           continue;
 #ifdef DEBUG_LEGION
@@ -656,7 +682,11 @@ namespace Legion {
 #endif
         if ((current_state != ACTIVE_INVALID_STATE) && 
             (current_state != VALID_STATE))
+        {
+          if (!reentrant)
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
+        }
 #ifdef LEGION_GC
         log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
@@ -674,6 +704,8 @@ namespace Legion {
         if (gc_references.fetch_add(cnt) == 0)
           has_gc_references = true;
 #endif
+        if (!reentrant)
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;
@@ -699,12 +731,13 @@ namespace Legion {
 #endif
       // Need to wait until all transitions are done 
       RtEvent wait_for;
+      bool reentrant = false;
       do
       {
         if (wait_for.exists() && !wait_for.has_triggered())
           wait_for.wait();
         AutoLock gc(gc_lock); 
-        wait_for = transition_event;
+        wait_for = check_for_transition_event(reentrant);
         if (wait_for.exists())
           continue;
 #ifdef DEBUG_LEGION
@@ -712,7 +745,11 @@ namespace Legion {
 #endif
         if ((current_state != ACTIVE_INVALID_STATE) && 
             (current_state != VALID_STATE))
+        {
+          if (!reentrant)
+            reentrant_event = RtEvent::NO_RT_EVENT;
           break;
+        }
 #ifdef LEGION_GC
         log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
@@ -731,6 +768,8 @@ namespace Legion {
         if (gc_references.fetch_add(cnt) == 0)
           has_gc_references = true;
 #endif
+        if (!reentrant)
+          reentrant_event = RtEvent::NO_RT_EVENT;
         return true;
       } while (true);
       return false;

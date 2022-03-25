@@ -2805,7 +2805,8 @@ namespace Legion {
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
-        current_trace(NULL), previous_trace(NULL), valid_wait_event(false), 
+        current_trace(NULL), previous_trace(NULL),
+        physical_trace_replay(0), valid_wait_event(false), 
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
         currently_active_context(false), current_mapping_fence(NULL), 
         mapping_fence_gen(0), current_mapping_fence_index(0), 
@@ -7706,10 +7707,9 @@ namespace Legion {
       RtEvent precondition;
       ApEvent term_event;
       // We disable program order execution when we are replaying a
-      // fixed trace since it might not be sound to block
+      // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
-          ((current_trace == NULL) || !current_trace->is_fixed() || 
-           !current_trace->has_physical_trace()))
+          !is_replaying_physical_trace())
         term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -7995,8 +7995,7 @@ namespace Legion {
       if ((context_configuration.min_frames_to_schedule == 0) &&
           (context_configuration.max_window_size > 0) &&
             (outstanding_count > context_configuration.max_window_size) &&
-            ((current_trace == NULL) || !current_trace->is_fixed() ||
-             !current_trace->has_physical_trace()))
+            !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result,
@@ -8066,8 +8065,7 @@ namespace Legion {
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
             (outstanding_count > context_configuration.max_window_size) &&
-            ((current_trace == NULL) || !current_trace->is_fixed() ||
-             !current_trace->has_physical_trace()))
+            !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
@@ -9014,11 +9012,51 @@ namespace Legion {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, trace);
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_ready = replay->get_mapped_event();
+        physical_trace_replay.store(-1);
         add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
       current_trace = trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::record_physical_trace_replay(bool replay)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(physical_trace_replay_ready.exists());
+      assert(!physical_trace_replay_ready.has_triggered());
+      assert(physical_trace_replay.load() < 0);
+#endif
+      physical_trace_replay.exchange(replay ? 1 : 0);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::is_replaying_physical_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace == NULL)
+        return false;
+      if (!current_trace->is_fixed())
+        return false;
+      int result = physical_trace_replay.load();
+      if (result < 0)
+      {
+        // Result is not ready yet so wait until it is
+#ifdef DEBUG_LEGION
+        assert(physical_trace_replay_ready.exists());
+#endif
+        if (!physical_trace_replay_ready.has_triggered())
+          physical_trace_replay_ready.wait();
+        result = physical_trace_replay.load();
+#ifdef DEBUG_LEGION
+        assert(result >= 0);
+#endif
+      }
+      return (result > 0);
     }
 
     //--------------------------------------------------------------------------
@@ -9061,6 +9099,8 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+      // We are no longer performing a physical trace replay
+      physical_trace_replay.store(0);
     }
 
     //--------------------------------------------------------------------------
@@ -18110,6 +18150,9 @@ namespace Legion {
         // Issue a replay op
         ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
         replay->initialize_replay(this, trace);
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_ready = replay->get_mapped_event();
+        physical_trace_replay.store(-1);
         add_to_dependence_queue(replay);
       }
 
@@ -18166,6 +18209,8 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+      // We are no longer performing a physical trace replay
+      physical_trace_replay.store(0);
     }
 
     //--------------------------------------------------------------------------
@@ -18333,8 +18378,7 @@ namespace Legion {
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered &&
-          ((current_trace == NULL) || !current_trace->is_fixed() ||
-           !current_trace->has_physical_trace()))
+          !is_replaying_physical_trace())
       {
 #ifdef DEBUG_LEGION
         assert(inorder_barrier.exists());

@@ -1662,7 +1662,10 @@ namespace Legion {
         fence_registered = true;
       }
 
-      if (physical_trace->get_current_template() != NULL)
+      const bool replaying = (physical_trace->get_current_template() != NULL);
+      // Tell the parent context about the physical trace replay result
+      parent_ctx->record_physical_trace_replay(replaying);
+      if (replaying)
       {
         // If we're recurrent, then check to see if we had any intermeidate
         // ops for which we still need to perform the fence analysis
