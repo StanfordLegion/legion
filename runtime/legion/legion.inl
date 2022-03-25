@@ -16576,11 +16576,10 @@ namespace Legion {
                             bool fortran_order_dims = false);
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
+      void initialize_layout(size_t alignment, bool fortran_order_dims);
       void initialize(Memory memory,
                       DomainT<N,T> bounds,
-                      const FT *initial_value,
-                      size_t alignment,
-                      bool fortran_order_dims);
+                      const FT *initial_value);
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const;
@@ -16597,6 +16596,8 @@ namespace Legion {
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
+      DimensionKind ordering[N];
+      size_t alignment;
 #ifndef LEGION_BOUNDS_CHECKS
       DomainT<N,T> bounds;
 #endif
@@ -16639,7 +16640,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize(memory, space, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16664,7 +16666,8 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds =
         runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16686,7 +16689,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize(memory, rect, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16710,7 +16714,8 @@ namespace Legion {
       const Realm::Memory memory = get_memory_from_kind(kind);
       const DomainT<N,T> bounds =
         Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16731,7 +16736,8 @@ namespace Legion {
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      initialize(memory, space, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16755,7 +16761,8 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds =
         runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16776,7 +16783,8 @@ namespace Legion {
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
-      initialize(memory, rect, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16799,7 +16807,8 @@ namespace Legion {
     {
       const DomainT<N,T> bounds =
         Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16849,35 +16858,59 @@ namespace Legion {
 #else
                         CB
 #endif
+                        >::initialize_layout(size_t _alignment,
+                                             bool fortran_order_dims)
+    //--------------------------------------------------------------------------
+    {
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          ordering[i] =
+            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          ordering[i] =
+            static_cast<DimensionKind>(
+                static_cast<int>(LEGION_DIM_X) + N - (i + 1));
+      }
+
+      alignment = _alignment;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                        false
+#else
+                        CB
+#endif
                         >::initialize(Memory memory,
                                       DomainT<N,T> bounds,
-                                      const FT *initial_value,
-                                      size_t alignment,
-                                      bool fortran_order_dims)
+                                      const FT *initial_value)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
       const std::vector<size_t> field_sizes(1,sizeof(FT));
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
+      for (int i = 0; i < N; ++i)
+        dim_order[i] =
+          static_cast<int>(ordering[i]) - static_cast<int>(LEGION_DIM_X);
       Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
+        Realm::InstanceLayoutGeneric::choose_instance_layout(
+          bounds, constraints, dim_order);
       layout->alignment_reqd = alignment;
       instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
-        Realm::ProfilingRequestSet no_requests; 
+        Realm::ProfilingRequestSet no_requests;
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
         const Internal::LgEvent wait_on(
@@ -17058,7 +17091,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize(memory, space, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17083,7 +17117,8 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds =
         runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17105,7 +17140,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize(memory, rect, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17129,7 +17165,8 @@ namespace Legion {
       const Realm::Memory memory = get_memory_from_kind(kind);
       const DomainT<N,T> bounds =
         Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17150,7 +17187,8 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      initialize(memory, space, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17174,7 +17212,8 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime();
       const DomainT<N,T> bounds =
         runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17195,7 +17234,8 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      initialize(memory, rect, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17218,7 +17258,8 @@ namespace Legion {
     {
       const DomainT<N,T> bounds =
         Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize(memory, bounds, initial_value, alignment, fortran_order_dims);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17268,11 +17309,42 @@ namespace Legion {
 #else
                         true
 #endif
+                        >::initialize_layout(size_t _alignment,
+                                             bool fortran_order_dims)
+    //--------------------------------------------------------------------------
+    {
+      if (fortran_order_dims)
+      {
+        for (int i = 0; i < N; i++)
+          ordering[i] =
+            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
+      }
+      else
+      {
+        for (int i = 0; i < N; i++)
+          ordering[i] =
+            static_cast<DimensionKind>(
+                static_cast<int>(LEGION_DIM_X) + N - (i + 1));
+      }
+
+      alignment = _alignment;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                        CB
+#else
+                        true
+#endif
                         >::initialize(Memory memory,
                                       DomainT<N,T> domain,
-                                      const FT *initial_value,
-                                      size_t alignment,
-                                      bool fortran_order_dims)
+                                      const FT *initial_value)
     //--------------------------------------------------------------------------
     {
       bounds = domain;
@@ -17280,16 +17352,9 @@ namespace Legion {
       const std::vector<size_t> field_sizes(1,sizeof(FT));
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
+      for (int i = 0; i < N; ++i)
+        dim_order[i] =
+          static_cast<int>(ordering[i]) - static_cast<int>(LEGION_DIM_X);
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);

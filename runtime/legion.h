@@ -3290,11 +3290,10 @@ namespace Legion {
                      bool fortran_order_dims = false);
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
+      void initialize_layout(size_t alignment, bool fortran_order_dims);
       void initialize(Memory memory,
                       DomainT<DIM,COORD_T> bounds,
-                      const T *initial_value,
-                      size_t alignment,
-                      bool fortran_order_dims);
+                      const T *initial_value);
     public:
       __CUDA_HD__
       inline T read(const Point<DIM,COORD_T> &p) const;
@@ -3312,6 +3311,8 @@ namespace Legion {
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
+      DimensionKind ordering[DIM];
+      size_t alignment;
 #ifdef LEGION_BOUNDS_CHECKS
       DomainT<DIM,COORD_T> bounds;
 #endif
