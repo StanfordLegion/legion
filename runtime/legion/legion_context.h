@@ -1587,6 +1587,8 @@ namespace Legion {
       LegionTrace *current_trace;
       LegionTrace *previous_trace;
       struct ReplayStatus {
+        ReplayStatus(void) noexcept : status(0) { }
+        ReplayStatus(const RtEvent &r, int s) noexcept : ready(r), status(s) { }
         RtEvent ready;
         int status;
       };
