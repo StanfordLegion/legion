@@ -2354,7 +2354,7 @@ namespace Legion {
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL),
-        physical_trace_replay_status({RtEvent::NO_RT_EVENT,0}),
+        physical_trace_replay_status(ReplayStatus(RtEvent::NO_RT_EVENT,0)),
         valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0),
         pending_frames(0), currently_active_context(false), 
         current_mapping_fence(NULL), mapping_fence_gen(0),
@@ -2410,7 +2410,7 @@ namespace Legion {
         tree_context(rhs.tree_context), context_uid(0), remote_context(false), 
         full_inner_context(false), parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped),
-        physical_trace_replay_status({RtEvent::NO_RT_EVENT,0})
+        physical_trace_replay_status(ReplayStatus(RtEvent::NO_RT_EVENT,0))
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8321,7 +8321,8 @@ namespace Legion {
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, trace);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_status.store({replay->get_mapped_event(), -1});
+        physical_trace_replay_status.store(
+            ReplayStatus(replay->get_mapped_event(), -1));
         add_to_dependence_queue(replay);
       }
 
@@ -8333,8 +8334,8 @@ namespace Legion {
     void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay)
     //--------------------------------------------------------------------------
     {
-      ReplayStatus expected = {ready, -1};
-      ReplayStatus replace = {RtEvent::NO_RT_EVENT, replay ? 1 : 0};
+      ReplayStatus expected(ready, -1);
+      ReplayStatus replace(RtEvent::NO_RT_EVENT, replay ? 1 : 0);
       // Only need to set this if we're still inside the trace launching
       physical_trace_replay_status.compare_exchange_strong(expected, replace);
     }
@@ -8405,7 +8406,7 @@ namespace Legion {
       // We no longer have a trace that we're executing 
       current_trace = NULL;
       // We are no longer performing a physical trace replay
-      physical_trace_replay_status.store({RtEvent::NO_RT_EVENT, 0});
+      physical_trace_replay_status.store(ReplayStatus(RtEvent::NO_RT_EVENT, 0));
     }
 
     //--------------------------------------------------------------------------
