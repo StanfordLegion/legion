@@ -1424,13 +1424,9 @@ namespace Legion {
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC> traces;
       LegionTrace *current_trace;
       LegionTrace *previous_trace;
-      struct ReplayStatus {
-        ReplayStatus(void) noexcept : status(0) { }
-        ReplayStatus(const RtEvent &r, int s) noexcept : ready(r), status(s) { }
-        RtEvent ready;
-        int status;
-      };
-      std::atomic<ReplayStatus> physical_trace_replay_status;
+      // ID is either 0 for not replaying, 1 for replaying, or
+      // the event id for signaling that the status isn't ready 
+      std::atomic<realm_id_t> physical_trace_replay_status;
       bool valid_wait_event;
       RtUserEvent window_wait;
       std::deque<ApEvent> frame_events;
