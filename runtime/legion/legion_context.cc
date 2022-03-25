@@ -2354,10 +2354,11 @@ namespace Legion {
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
         current_trace(NULL), previous_trace(NULL),
-        physical_trace_replay(0), valid_wait_event(false), 
-        outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
-        currently_active_context(false), current_mapping_fence(NULL), 
-        mapping_fence_gen(0), current_mapping_fence_index(0), 
+        physical_trace_replay_status({RtEvent::NO_RT_EVENT,0}),
+        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0),
+        pending_frames(0), currently_active_context(false), 
+        current_mapping_fence(NULL), mapping_fence_gen(0),
+        current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
         last_implicit_gen(0)
@@ -8319,8 +8320,7 @@ namespace Legion {
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, trace);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_ready = replay->get_mapped_event();
-        physical_trace_replay.store(-1);
+        physical_trace_replay_status.store({replay->get_mapped_event(), -1});
         add_to_dependence_queue(replay);
       }
 
@@ -8329,16 +8329,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_physical_trace_replay(bool replay)
+    void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(physical_trace_replay_ready.exists());
-      assert(!physical_trace_replay_ready.has_triggered());
-#endif
-      int expected = -1;
+      ReplayStatus expected = {ready, -1};
+      ReplayStatus replace = {RtEvent::NO_RT_EVENT, replay ? 1 : 0};
       // Only need to set this if we're still inside the trace launching
-      physical_trace_replay.compare_exchange_strong(expected, replay ? 1 : 0);
+      physical_trace_replay_status.compare_exchange_strong(expected, replace);
     }
 
     //--------------------------------------------------------------------------
@@ -8349,21 +8346,21 @@ namespace Legion {
         return false;
       if (!current_trace->is_fixed())
         return false;
-      int result = physical_trace_replay.load();
-      if (result < 0)
+      ReplayStatus replay = physical_trace_replay_status.load();
+      if (replay.status < 0)
       {
         // Result is not ready yet so wait until it is
 #ifdef DEBUG_LEGION
-        assert(physical_trace_replay_ready.exists());
+        assert(replay.ready.exists());
 #endif
-        if (!physical_trace_replay_ready.has_triggered())
-          physical_trace_replay_ready.wait();
-        result = physical_trace_replay.load();
+        if (!replay.ready.has_triggered())
+          replay.ready.wait();
+        replay = physical_trace_replay_status.load();
 #ifdef DEBUG_LEGION
-        assert(result >= 0);
+        assert(replay.status >= 0);
 #endif
       }
-      return (result > 0);
+      return (replay.status > 0);
     }
 
     //--------------------------------------------------------------------------
@@ -8407,7 +8404,7 @@ namespace Legion {
       // We no longer have a trace that we're executing 
       current_trace = NULL;
       // We are no longer performing a physical trace replay
-      physical_trace_replay.store(0);
+      physical_trace_replay_status.store({RtEvent::NO_RT_EVENT, 0});
     }
 
     //--------------------------------------------------------------------------
