@@ -2353,10 +2353,12 @@ namespace Legion {
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
-        current_trace(NULL), previous_trace(NULL), valid_wait_event(false), 
-        outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
-        currently_active_context(false), current_mapping_fence(NULL), 
-        mapping_fence_gen(0), current_mapping_fence_index(0), 
+        current_trace(NULL), previous_trace(NULL),
+        physical_trace_replay_status(ReplayStatus(RtEvent::NO_RT_EVENT,0)),
+        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0),
+        pending_frames(0), currently_active_context(false), 
+        current_mapping_fence(NULL), mapping_fence_gen(0),
+        current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
         last_implicit_gen(0)
@@ -2407,7 +2409,8 @@ namespace Legion {
       : TaskContext(NULL, NULL, 0, rhs.regions, false), 
         tree_context(rhs.tree_context), context_uid(0), remote_context(false), 
         full_inner_context(false), parent_req_indexes(rhs.parent_req_indexes), 
-        virtual_mapped(rhs.virtual_mapped)
+        virtual_mapped(rhs.virtual_mapped),
+        physical_trace_replay_status(ReplayStatus(RtEvent::NO_RT_EVENT,0))
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6876,7 +6879,7 @@ namespace Legion {
         op->set_trace(current_trace, dependences);
       size_t result = total_children_count++;
       const size_t outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,1);
+        outstanding_children_count.fetch_add(1) + 1;
       // Need to check if we are not tracing by frames
       // Also, do not perform window waits if we are in the middle of a 
       // physical trace because we might deadlock if the trace is bigger
@@ -6884,8 +6887,7 @@ namespace Legion {
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
             (outstanding_count > context_configuration.max_window_size) &&
-            ((current_trace == NULL) || !current_trace->is_fixed() ||
-             !current_trace->has_physical_trace()))
+            !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
@@ -6917,7 +6919,7 @@ namespace Legion {
         executing_children[*it] = (*it)->get_generation();
         dependence_queue.push_back(*it);
       }
-      __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());
+      outstanding_children_count.fetch_add(unordered_ops.size());
       unordered_ops.clear();
     }
 
@@ -6940,7 +6942,7 @@ namespace Legion {
       // For now we just bump our counter
       size_t result = total_summary_count++;
       const size_t outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,1);
+        outstanding_children_count.fetch_add(1) + 1;
       // Need to check if we are not tracing by frames
       // Also, do not perform window waits if we are in the middle of a 
       // physical trace because we might deadlock if the trace is bigger
@@ -6948,8 +6950,7 @@ namespace Legion {
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
             (outstanding_count > context_configuration.max_window_size) &&
-            ((current_trace == NULL) || !current_trace->is_fixed() ||
-             !current_trace->has_physical_trace()))
+            !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
@@ -6969,9 +6970,7 @@ namespace Legion {
         // Outstanding children count has already been incremented for the
         // operation being launched so decrement it in case we wait and then
         // re-increment it when we wake up again
-        int diff = -1; // Need this for PGI dumbness
-        const int outstanding_count = 
-          __sync_fetch_and_add(&outstanding_children_count, diff);
+        const int outstanding_count = outstanding_children_count.fetch_sub(1);
         // We already decided to wait, so we need to wait for any hysteresis
         // to play a role here
         if (outstanding_count >
@@ -6990,7 +6989,7 @@ namespace Legion {
       wait_event.wait();
       end_task_wait();
       // Re-increment the count once we are awake again
-      __sync_fetch_and_add(&outstanding_children_count,1);
+      outstanding_children_count.fetch_add(1);
     }
 
     //--------------------------------------------------------------------------
@@ -7105,10 +7104,9 @@ namespace Legion {
       RtEvent precondition;
       ApEvent term_event;
       // We disable program order execution when we are replaying a
-      // fixed trace since it might not be sound to block
+      // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
-          ((current_trace == NULL) || !current_trace->is_fixed() || 
-           !current_trace->has_physical_trace()))
+          !is_replaying_physical_trace())
         term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -7427,9 +7425,7 @@ namespace Legion {
         executing_children.erase(finder);
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
-        int diff = -1; // Need this for PGI dumbness
-        int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count, diff);
+        int outstanding_count = outstanding_children_count.fetch_sub(1) - 1;
 #ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif
@@ -8324,11 +8320,49 @@ namespace Legion {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, trace);
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_status.store(
+            ReplayStatus(replay->get_mapped_event(), -1));
         add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
       current_trace = trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay)
+    //--------------------------------------------------------------------------
+    {
+      ReplayStatus expected(ready, -1);
+      ReplayStatus replace(RtEvent::NO_RT_EVENT, replay ? 1 : 0);
+      // Only need to set this if we're still inside the trace launching
+      physical_trace_replay_status.compare_exchange_strong(expected, replace);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::is_replaying_physical_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace == NULL)
+        return false;
+      if (!current_trace->is_fixed())
+        return false;
+      ReplayStatus replay = physical_trace_replay_status.load();
+      if (replay.status < 0)
+      {
+        // Result is not ready yet so wait until it is
+#ifdef DEBUG_LEGION
+        assert(replay.ready.exists());
+#endif
+        if (!replay.ready.has_triggered())
+          replay.ready.wait();
+        replay = physical_trace_replay_status.load();
+#ifdef DEBUG_LEGION
+        assert(replay.status >= 0);
+#endif
+      }
+      return (replay.status > 0);
     }
 
     //--------------------------------------------------------------------------
@@ -8371,6 +8405,8 @@ namespace Legion {
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+      // We are no longer performing a physical trace replay
+      physical_trace_replay_status.store(ReplayStatus(RtEvent::NO_RT_EVENT, 0));
     }
 
     //--------------------------------------------------------------------------

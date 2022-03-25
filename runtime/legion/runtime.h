@@ -2848,9 +2848,9 @@ namespace Legion {
       void decrement_total_outstanding_tasks(unsigned tid, bool meta);
 #else
       inline void increment_total_outstanding_tasks(void)
-        { __sync_fetch_and_add(&total_outstanding_tasks,1); }
+        { total_outstanding_tasks.fetch_add(1); }
       inline void decrement_total_outstanding_tasks(void)
-        { __sync_fetch_and_sub(&total_outstanding_tasks,1); }
+        { total_outstanding_tasks.fetch_sub(1); }
 #endif
     public:
       template<typename T>
@@ -3040,12 +3040,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       mutable LocalLock outstanding_task_lock;
       std::map<std::pair<unsigned,bool>,unsigned> outstanding_task_counts;
-#endif
       unsigned total_outstanding_tasks;
-      unsigned outstanding_top_level_tasks;
+#else
+      std::atomic<unsigned> total_outstanding_tasks;
+#endif
+      std::atomic<unsigned> outstanding_top_level_tasks;
 #ifdef DEBUG_SHUTDOWN_HANG
     public:
-      std::vector<int> outstanding_counts;
+      std::vector<std::atomic<int> > outstanding_counts;
 #endif
     protected:
       // Internal runtime state 
@@ -3098,25 +3100,25 @@ namespace Legion {
       TreeStateLogger *get_tree_state_logger(void) { return tree_state_logger; }
 #endif
     protected:
-      unsigned unique_index_space_id;
-      unsigned unique_index_partition_id;
-      unsigned unique_field_space_id;
-      unsigned unique_index_tree_id;
-      unsigned unique_region_tree_id;
-      unsigned unique_operation_id;
-      unsigned unique_field_id; 
-      unsigned unique_code_descriptor_id;
-      unsigned unique_constraint_id;
-      unsigned unique_is_expr_id;
+      std::atomic<unsigned> unique_index_space_id;
+      std::atomic<unsigned> unique_index_partition_id;
+      std::atomic<unsigned> unique_field_space_id;
+      std::atomic<unsigned> unique_index_tree_id;
+      std::atomic<unsigned> unique_region_tree_id;
+      std::atomic<unsigned> unique_operation_id;
+      std::atomic<unsigned> unique_field_id; 
+      std::atomic<unsigned> unique_code_descriptor_id;
+      std::atomic<unsigned> unique_constraint_id;
+      std::atomic<unsigned> unique_is_expr_id;
 #ifdef LEGION_SPY
-      unsigned unique_indirections_id;
+      std::atomic<unsigned> unique_indirections_id;
 #endif
-      unsigned unique_task_id;
-      unsigned unique_mapper_id;
-      unsigned unique_trace_id;
-      unsigned unique_projection_id;
-      unsigned unique_redop_id;
-      unsigned unique_serdez_id;
+      std::atomic<unsigned> unique_task_id;
+      std::atomic<unsigned> unique_mapper_id;
+      std::atomic<unsigned> unique_trace_id;
+      std::atomic<unsigned> unique_projection_id;
+      std::atomic<unsigned> unique_redop_id;
+      std::atomic<unsigned> unique_serdez_id;
     protected:
       mutable LocalLock library_lock;
       struct LibraryMapperIDs {
@@ -3255,7 +3257,7 @@ namespace Legion {
       };
       mutable LocalLock allocation_lock; // leak this lock intentionally
       std::map<AllocationType,AllocationTracker> allocation_manager;
-      unsigned long long allocation_tracing_count;
+      std::atomic<unsigned long long> allocation_tracing_count;
 #endif
     protected:
       mutable LocalLock individual_task_lock;
@@ -3503,7 +3505,7 @@ namespace Legion {
       static bool runtime_backgrounded;
       static Runtime *the_runtime;
       static RtUserEvent runtime_started_event;
-      static int background_waits;
+      static std::atomic<int> background_waits;
       // Shutdown error condition
       static int return_code;
       // Static member variables for MPI interop
@@ -3611,7 +3613,7 @@ namespace Legion {
         increment_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      __sync_fetch_and_add(&outstanding_counts[T::TASK_ID],1);
+      outstanding_counts[T::TASK_ID].fetch_add(1);
 #endif
       if (!target.exists())
       {
@@ -3664,7 +3666,7 @@ namespace Legion {
       increment_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      __sync_fetch_and_add(&outstanding_counts[T::TASK_ID],1);
+      outstanding_counts[T::TASK_ID].fetch_add(1);
 #endif
       DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
       if (profiler != NULL)

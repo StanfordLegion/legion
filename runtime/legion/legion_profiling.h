@@ -657,14 +657,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else
-      unsigned total_outstanding_requests;
+      std::atomic<unsigned> total_outstanding_requests;
 #endif
     private:
       // For knowing when we need to start dumping early
-      size_t total_memory_footprint;
+      std::atomic<size_t> total_memory_footprint;
     private:
       // Issue the default mapper warning
-      bool need_default_mapper_warning;
+      std::atomic<bool> need_default_mapper_warning;
     public:
       void record_index_space_point_desc(
           LegionProfInstance::IndexSpacePointDesc &i);
