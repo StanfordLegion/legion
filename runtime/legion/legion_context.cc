@@ -18149,8 +18149,7 @@ namespace Legion {
         ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
         replay->initialize_replay(this, trace);
         // Record the event for when the trace replay is ready
-        physical_trace_replay_ready = replay->get_mapped_event();
-        physical_trace_replay.store(-1);
+        physical_trace_replay_status.store({replay->get_mapped_event(), -1});
         add_to_dependence_queue(replay);
       }
 
@@ -18208,7 +18207,7 @@ namespace Legion {
       // We no longer have a trace that we're executing 
       current_trace = NULL;
       // We are no longer performing a physical trace replay
-      physical_trace_replay.store(0);
+      physical_trace_replay_status.store({RtEvent::NO_RT_EVENT, 0});
     }
 
     //--------------------------------------------------------------------------
