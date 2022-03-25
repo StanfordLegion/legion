@@ -72,8 +72,6 @@ void top_level_task(const Task *task,
 
   Rect<DIM, PT> rect(Point<DIM, PT>::ZEROES(), Point<DIM, PT>::ONES());
   Domain bounds = rect;
-  IndexSpaceT<DIM, PT> ispaceT = runtime->create_index_space(ctx, rect);
-  IndexSpace ispace = ispaceT;
 
   VAL init_value = 12345;
   std::array<DimensionKind, DIM> ordering;
@@ -86,15 +84,7 @@ void top_level_task(const Task *task,
     validate(rect, buf, init_value, ordering);
   }
   {
-    DeferredBuffer<VAL, DIM, PT> buf(kind, ispace, &init_value, 16, false);
-    validate(rect, buf, init_value, ordering);
-  }
-  {
     DeferredBuffer<VAL, DIM, PT> buf(rect, kind, &init_value, 16, false);
-    validate(rect, buf, init_value, ordering);
-  }
-  {
-    DeferredBuffer<VAL, DIM, PT> buf(ispaceT, kind, &init_value, 16, false);
     validate(rect, buf, init_value, ordering);
   }
   for (int i = 0; i < DIM; ++i)
@@ -105,15 +95,7 @@ void top_level_task(const Task *task,
     validate(rect, buf, init_value, ordering);
   }
   {
-    DeferredBuffer<VAL, DIM, PT> buf(memory, ispace, &init_value, 16, true);
-    validate(rect, buf, init_value, ordering);
-  }
-  {
     DeferredBuffer<VAL, DIM, PT> buf(rect, memory, &init_value, 16, true);
-    validate(rect, buf, init_value, ordering);
-  }
-  {
-    DeferredBuffer<VAL, DIM, PT> buf(ispaceT, memory, &init_value, 16, true);
     validate(rect, buf, init_value, ordering);
   }
 
@@ -128,15 +110,7 @@ void top_level_task(const Task *task,
       validate(rect, buf, init_value, ordering);
     }
     {
-      DeferredBuffer<VAL, DIM, PT> buf(memory, ispace, ordering, &init_value, 16);
-      validate(rect, buf, init_value, ordering);
-    }
-    {
       DeferredBuffer<VAL, DIM, PT> buf(rect, memory, ordering, &init_value, 16);
-      validate(rect, buf, init_value, ordering);
-    }
-    {
-      DeferredBuffer<VAL, DIM, PT> buf(ispaceT, memory, ordering, &init_value, 16);
       validate(rect, buf, init_value, ordering);
     }
   }

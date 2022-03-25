@@ -3252,17 +3252,7 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
-      DeferredBuffer(Memory::Kind kind, 
-                     IndexSpace bounds,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
-                     Memory::Kind kind,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
-      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
                      size_t alignment = 16,
@@ -3273,17 +3263,7 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
-      DeferredBuffer(Memory memory, 
-                     IndexSpace bounds,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
-                     Memory memory,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
-      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
                      Memory memory,
                      const T *initial_value = NULL,
                      size_t alignment = 16,
@@ -3294,17 +3274,7 @@ namespace Legion {
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
                      size_t alignment = 16);
-      DeferredBuffer(Memory memory,
-                     IndexSpace bounds,
-                     std::array<DimensionKind,DIM> ordering,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
-                     Memory memory,
-                     std::array<DimensionKind,DIM> ordering,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16);
-      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds,
                      Memory memory,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,

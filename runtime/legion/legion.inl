@@ -16538,17 +16538,7 @@ namespace Legion {
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
                             bool fortran_order_dims = false);
-      inline DeferredBuffer(Memory::Kind kind, 
-                            IndexSpace bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory::Kind kind,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
@@ -16559,17 +16549,7 @@ namespace Legion {
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
                             bool fortran_order_dims = false);
-      inline DeferredBuffer(Memory memory, 
-                            IndexSpace bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory memory,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory memory,
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
@@ -16580,17 +16560,7 @@ namespace Legion {
                             std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
                             size_t alignment = 16);
-      inline DeferredBuffer(Memory memory,
-                            IndexSpace bounds,
-                            std::array<DimensionKind,N> ordering,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16);
       inline DeferredBuffer(const Rect<N,T> &bounds,
-                            Memory memory,
-                            std::array<DimensionKind,N> ordering,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds,
                             Memory memory,
                             std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
@@ -16660,35 +16630,14 @@ namespace Legion {
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       const Realm::Memory memory = get_memory_from_kind(kind);
       initialize_layout(alignment, fortran_order_dims);
       initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds =
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16726,64 +16675,19 @@ namespace Legion {
 #else
             CB
 #endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      const DomainT<N,T> bounds =
-        Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
            >::DeferredBuffer(Memory memory, const Domain &space,
                              const FT *initial_value/* = NULL*/,
                              size_t alignment/* = 16*/,
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       initialize_layout(alignment, fortran_order_dims);
       initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory memory, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds =
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16820,30 +16724,6 @@ namespace Legion {
 #else
             CB
 #endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const DomainT<N,T> bounds =
-        Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
            >::DeferredBuffer(Memory memory, const Domain &space,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
@@ -16851,32 +16731,12 @@ namespace Legion {
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory memory, const IndexSpace space,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds =
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -16899,30 +16759,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      const DomainT<N,T> bounds =
-        Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17204,35 +17040,14 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       const Realm::Memory memory = get_memory_from_kind(kind);
       initialize_layout(alignment, fortran_order_dims);
       initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds =
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17270,64 +17085,19 @@ namespace Legion {
 #else
             true
 #endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      const DomainT<N,T> bounds =
-        Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB 
-#else
-            true
-#endif
            >::DeferredBuffer(Memory memory, const Domain &space,
                              const FT *initial_value/* = NULL*/,
                              size_t alignment/* = 16*/,
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       initialize_layout(alignment, fortran_order_dims);
       initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory memory, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds =
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17360,30 +17130,6 @@ namespace Legion {
               >
     inline DeferredBuffer<FT,N,T,
 #ifdef LEGION_BOUNDS_CHECKS
-            CB 
-#else
-            true
-#endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const DomainT<N,T> bounds =
-        Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, bounds, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
             CB
 #else
             true
@@ -17395,32 +17141,12 @@ namespace Legion {
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory memory, const IndexSpace space,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds =
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17443,30 +17169,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      const DomainT<N,T> bounds =
-        Runtime::get_runtime()->get_index_space_domain<N,T>(space);
-      initialize(memory, bounds, initial_value);
     }
 
     //--------------------------------------------------------------------------
