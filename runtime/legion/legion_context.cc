@@ -2862,7 +2862,8 @@ namespace Legion {
         tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
-        virtual_mapped(rhs.virtual_mapped)
+        virtual_mapped(rhs.virtual_mapped),
+        physical_trace_replay_status({RtEvent::NO_RT_EVENT,0})
     //--------------------------------------------------------------------------
     {
       // should never be called
