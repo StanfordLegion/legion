@@ -162,8 +162,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      assert(trace_info.op != NULL);
-      LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
+      LegionSpy::log_fill_events(op->get_unique_op_id(), 
           expr_id, handle, tree_id, precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
@@ -173,7 +172,7 @@ namespace Legion {
         trace_info.record_issue_fill(result, this, dst_fields,
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     handle, tree_id,
+                                     fill_uid, handle, tree_id,
 #endif
                                      precondition, pred_guard);
       return result;
@@ -311,8 +310,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      assert(trace_info.op != NULL);
-      LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
+      LegionSpy::log_copy_events(op->get_unique_op_id(), 
           expr_id, src_tree_id, dst_tree_id, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
@@ -522,8 +520,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      assert(trace_info.op != NULL);
-      LegionSpy::log_indirect_events(trace_info.op->get_unique_op_id(), 
+      assert(op != NULL);
+      LegionSpy::log_indirect_events(op->get_unique_op_id(), 
          expr_id, unique_indirections_identifier, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_indirect_field(result, src_fields[idx].field_id,

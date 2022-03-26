@@ -388,7 +388,7 @@ namespace Legion {
       void set_trace(LegionTrace *trace,
                      const std::vector<StaticDependence> *dependences,
                      const LogicalTraceInfo *trace_info = NULL);
-      void set_trace_local_id(unsigned id);
+      void set_trace_local_id(size_t id);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
     public:
       // Localize a region requirement to its parent context
@@ -770,7 +770,7 @@ namespace Legion {
       // Track whether we are tracing this operation
       bool tracing;
       // The id local to a trace
-      unsigned trace_local_id;
+      size_t trace_local_id;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal

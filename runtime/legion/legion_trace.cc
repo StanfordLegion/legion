@@ -37,14 +37,14 @@ namespace Legion {
 
     std::ostream& operator<<(std::ostream &out, const TraceLocalID &key)
     {
-      out << "(" << key.first << ",";
-      if (key.second.dim > 1) out << "(";
-      for (int dim = 0; dim < key.second.dim; ++dim)
+      out << "(" << key.context_index << ",";
+      if (key.index_point.dim > 1) out << "(";
+      for (int dim = 0; dim < key.index_point.dim; ++dim)
       {
         if (dim > 0) out << ",";
-        out << key.second[dim];
+        out << key.index_point[dim];
       }
-      if (key.second.dim > 1) out << ")";
+      if (key.index_point.dim > 1) out << ")";
       out << ")";
       return out;
     }
@@ -101,7 +101,7 @@ namespace Legion {
     {
 #ifdef LEGION_SPY
       std::pair<Operation*,GenerationID> key(op, op->get_generation());
-      const unsigned index = operations.size();
+      const size_t index = operations.size();
       op->set_trace_local_id(index);
       op->add_mapping_reference(key.second);
       operations.push_back(key);
@@ -314,7 +314,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::pair<Operation*,GenerationID> key(op,gen);
-      const unsigned index = operations.size();
+      const size_t index = operations.size();
       if (!ctx->runtime->no_physical_tracing &&
           op->is_memoizing() && !op->is_internal_op())
       {
@@ -639,7 +639,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::pair<Operation*,GenerationID> key(op,gen);
-      const unsigned index = operations.size();
+      const size_t index = operations.size();
       if (!ctx->runtime->no_physical_tracing &&
           op->is_memoizing() && !op->is_internal_op())
       {
@@ -668,7 +668,7 @@ namespace Legion {
           !op->is_internal_op() && op->get_memoizable() == NULL)
         REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
             "Invalid memoization request. Operation of type %s (UID %lld) "
-            "at index %d in trace %d requested memoization, but physical "
+            "at index %zd in trace %d requested memoization, but physical "
             "tracing does not support this operation type yet.",
             Operation::get_string_rep(op->get_operation_kind()),
             op->get_unique_op_id(), index, tid);
@@ -703,7 +703,7 @@ namespace Legion {
           if (index >= dependences.size())
             REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
                           "Trace violation! Recorded %zd operations in trace "
-                          "%d in task %s (UID %lld) but %d operations have "
+                          "%d in task %s (UID %lld) but %zd operations have "
                           "now been issued!", dependences.size(), tid,
                           ctx->get_task_name(), ctx->get_unique_id(), index+1)
           // Check to see if the meta-data alignes
@@ -711,7 +711,7 @@ namespace Legion {
           // Check that they are the same kind of operation
           if (info.kind != op->get_operation_kind())
             REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                          "Trace violation! Operation at index %d of trace %d "
+                          "Trace violation! Operation at index %zd of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
                           index, tid, ctx->get_task_name(),ctx->get_unique_id(),
@@ -720,7 +720,7 @@ namespace Legion {
           // Check that they have the same number of region requirements
           if (info.count != op->get_region_count())
             REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                          "Trace violation! Operation at index %d of trace %d "
+                          "Trace violation! Operation at index %zd of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %zd regions in replay.",
                           index, tid, ctx->get_task_name(),
@@ -5759,7 +5759,7 @@ namespace Legion {
 #endif
 #endif
         // check to see if it came after the start of the trace
-        if (coordinates[idx].first <= future_coords[idx].first)
+        if (coordinates[idx].context_index <= future_coords[idx].context_index)
           continue;
         // Otherwise not inside the trace and therefore we cannot
         // record the bounds for the future
@@ -6082,6 +6082,7 @@ namespace Legion {
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
+                                             UniqueID fill_uid,
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
@@ -6106,7 +6107,7 @@ namespace Legion {
       insert_instruction(new IssueFill(*this, lhs_, expr, tlid,
                                        fields, fill_value, fill_size, 
 #ifdef LEGION_SPY
-                                       handle, tree_id,
+                                       fill_uid, handle, tree_id,
 #endif
                                        rhs_));
     }
@@ -7107,7 +7108,8 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &fields,
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                                 FieldSpace handle, RegionTreeID tree_id,
+                                 UniqueID fill_uid, FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
@@ -7127,7 +7129,7 @@ namespace Legion {
       PhysicalTemplate::record_issue_fill(tlid, lhs, expr, fields,
                                           fill_value, fill_size,
 #ifdef LEGION_SPY
-                                          handle, tree_id,
+                                          fill_uid, handle, tree_id,
 #endif
                                           precondition, pred_guard);
     }
@@ -9158,12 +9160,12 @@ namespace Legion {
                          const std::vector<CopySrcDstField> &f,
                          const void *value, size_t size, 
 #ifdef LEGION_SPY
-                         FieldSpace h, RegionTreeID tid,
+                         UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
                          unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
-        handle(h), tree_id(tid),
+        fill_uid(uid), handle(h), tree_id(tid),
 #endif
         precondition_idx(pi)
     //--------------------------------------------------------------------------
@@ -9204,8 +9206,7 @@ namespace Legion {
       events[lhs] = expr->issue_fill(op, trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     trace_info.op->get_unique_op_id(),
-                                     handle, tree_id,
+                                     fill_uid, handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT);
     }

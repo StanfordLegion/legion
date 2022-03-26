@@ -772,6 +772,7 @@ namespace Legion {
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
+                                             UniqueID fill_uid,
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
@@ -798,6 +799,7 @@ namespace Legion {
           rez.serialize(fill_size);
           rez.serialize(fill_value, fill_size);
 #ifdef LEGION_SPY
+          rez.serialize(fill_uid);
           rez.serialize(handle);
           rez.serialize(tree_id);
 #endif
@@ -812,7 +814,7 @@ namespace Legion {
         remote_tpl->record_issue_fill(tlid, lhs, expr, fields, 
                                       fill_value, fill_size, 
 #ifdef LEGION_SPY
-                                      handle, tree_id,
+                                      fill_uid, handle, tree_id,
 #endif
                                       precondition, pred_guard);
     }
@@ -938,8 +940,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_MAPPER_OUTPUT);
           rez.serialize(applied);
-          rez.serialize(tlid.first);
-          rez.serialize(tlid.second);
+          rez.serialize(tlid);
           // We actually only need a few things here  
           rez.serialize<size_t>(output.target_procs.size());
           for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
@@ -958,10 +959,7 @@ namespace Legion {
             for (TaskTreeCoordinates::const_iterator it =
                   future_coordinates.begin(); it !=
                   future_coordinates.end(); it++)
-            {
-              rez.serialize(it->first);
-              rez.serialize(it->second);
-            }
+              rez.serialize(*it);
           }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
@@ -1460,6 +1458,8 @@ namespace Legion {
             const void *fill_value = derez.get_current_pointer();
             derez.advance_pointer(fill_size);
 #ifdef LEGION_SPY
+            UniqueID fill_uid;
+            derez.deserialize(fill_uid);
             FieldSpace handle;
             derez.deserialize(handle);
             RegionTreeID tree_id;
@@ -1475,7 +1475,7 @@ namespace Legion {
             tpl->record_issue_fill(tlid, lhs, expr, fields,
                                    fill_value, fill_size,
 #ifdef LEGION_SPY
-                                   handle, tree_id,
+                                   fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard);
             if (lhs != lhs_copy)
@@ -1603,8 +1603,7 @@ namespace Legion {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
-            derez.deserialize(tlid.first);
-            derez.deserialize(tlid.second);
+            derez.deserialize(tlid);
             size_t num_target_processors;
             derez.deserialize(num_target_processors);
             Mapper::MapTaskOutput output;
@@ -1629,10 +1628,7 @@ namespace Legion {
                 derez.deserialize(num_coords);
                 coords.resize(num_coords);
                 for (unsigned idx2 = 0; idx2 < num_coords; idx2++)
-                {
-                  derez.deserialize(coords[idx2].first);
-                  derez.deserialize(coords[idx2].second);
-                }
+                  derez.deserialize(coords[idx2]);
               }
             }
             derez.deserialize(output.chosen_variant);

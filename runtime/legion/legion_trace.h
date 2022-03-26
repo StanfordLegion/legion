@@ -150,8 +150,8 @@ namespace Legion {
       std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
-      unsigned last_memoized;
-      unsigned physical_op_count;
+      size_t last_memoized;
+      size_t physical_op_count;
       bool blocking_call_observed;
       bool has_intermediate_ops;
       bool fixed;
@@ -968,6 +968,7 @@ namespace Legion {
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
+                             UniqueID fill_uid,
                              FieldSpace handle, 
                              RegionTreeID tree_id,
 #endif
@@ -1278,7 +1279,9 @@ namespace Legion {
                              const std::vector<CopySrcDstField> &fields,
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                             FieldSpace handle, RegionTreeID tree_id,
+                             UniqueID fill_uid,
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
 #endif
                              ApEvent precondition, PredEvent guard_event);
       virtual void record_set_op_sync_event(ApEvent &lhs, 
@@ -1603,7 +1606,7 @@ namespace Legion {
                 const std::vector<CopySrcDstField> &fields,
                 const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
-                FieldSpace handle, RegionTreeID tree_id,
+                UniqueID fill_uid, FieldSpace handle, RegionTreeID tree_id,
 #endif
                 unsigned precondition_idx);
       virtual ~IssueFill(void);
@@ -1624,6 +1627,7 @@ namespace Legion {
       void *fill_value;
       size_t fill_size;
 #ifdef LEGION_SPY
+      UniqueID fill_uid;
       FieldSpace handle;
       RegionTreeID tree_id;
 #endif

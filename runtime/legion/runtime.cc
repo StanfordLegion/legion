@@ -2084,7 +2084,8 @@ namespace Legion {
       if (producer_context_index == SIZE_MAX)
         return;
       context->compute_task_tree_coordinates(coords);
-      coords.push_back(std::make_pair(producer_context_index, producer_point));
+      coords.push_back(
+          ContextCoordinate(producer_context_index, producer_point));
     }
 
     //--------------------------------------------------------------------------

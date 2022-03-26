@@ -25,6 +25,29 @@ namespace Legion {
   namespace Internal {
 
     /**
+     * \struct ContextCoordinate
+     * A struct that can uniquely identify an operation inside
+     * the context of a parent task by the context_index which
+     * is the number of the operation in the context, and the 
+     * index_point specifying which point in the case of an
+     * index space operation
+     */
+    struct ContextCoordinate {
+      inline ContextCoordinate(void) : context_index(SIZE_MAX) { }
+      inline ContextCoordinate(size_t index, const DomainPoint &p)
+        : context_index(index), index_point(p) { }
+      inline bool operator==(const ContextCoordinate &rhs) const
+        { return ((context_index == rhs.context_index) && 
+                  (index_point == rhs.index_point)); }
+      inline bool operator<(const ContextCoordinate &rhs) const
+        { if (context_index < rhs.context_index) return true;
+          if (context_index > rhs.context_index) return false;
+          return index_point < rhs.index_point; }
+      size_t context_index;
+      DomainPoint index_point;
+    };
+
+    /**
      * \struct GenericUser
      * A base struct for tracking the user of a logical region
      */
@@ -196,6 +219,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
+                           UniqueID fill_uid,
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
@@ -329,6 +353,7 @@ namespace Legion {
                            const std::vector<CopySrcDstField> &fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
+                           UniqueID fill_uid,
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
@@ -542,6 +567,7 @@ namespace Legion {
                           const std::vector<CopySrcDstField> &fields,
                           const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
+                          UniqueID fill_uid,
                           FieldSpace handle,
                           RegionTreeID tree_id,
 #endif
@@ -551,7 +577,7 @@ namespace Legion {
           rec->record_issue_fill(tlid, result, expr, fields, 
                                  fill_value, fill_size,
 #ifdef LEGION_SPY
-                                 handle, tree_id,
+                                 fill_uid, handle, tree_id,
 #endif
                                  precondition, pred_guard);
         }

@@ -797,7 +797,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace_local_id(unsigned id)
+    void Operation::set_trace_local_id(size_t id)
     //--------------------------------------------------------------------------
     {
       trace_local_id = id;
@@ -1282,7 +1282,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx->compute_task_tree_coordinates(coords);
-      coords.push_back(std::make_pair(context_index, DomainPoint()));
+      coords.push_back(ContextCoordinate(context_index, DomainPoint()));
     }
 
     //--------------------------------------------------------------------------
@@ -7581,7 +7581,7 @@ namespace Legion {
       context_index = own->get_ctx_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
-      trace_local_id            = owner->get_trace_local_id().first;
+      trace_local_id            = owner->get_trace_local_id().context_index;
       tpl                       = owner->get_template();
       if (tpl != NULL)
         memo_state              = owner->get_memoizable_state();
@@ -18556,7 +18556,7 @@ namespace Legion {
       context_index = own->get_ctx_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
-      trace_local_id     = owner->get_trace_local_id().first;
+      trace_local_id     = owner->get_trace_local_id().context_index;
       tpl                = owner->get_template();
       if (tpl != NULL)
         memo_state       = owner->get_memoizable_state();
