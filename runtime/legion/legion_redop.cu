@@ -26,29 +26,6 @@
 namespace Legion {
   namespace Internal {
 
-#ifdef LEGION_GPU_REDUCTIONS
-    // GPU reductions are performed with custom kernels
-#define REGISTER_GPU_REDUCTION_TASK(id, type)                               \
-    {                                                                       \
-      CodeDescriptor realm_descriptor(gpu_reduction_helper<type>);          \
-      const TaskID task_id =                                                \
-              LG_TASK_ID_AVAILABLE + gpu_reduction_tasks.size();            \
-      registered_events.insert(RtEvent(Processor::register_task_by_kind(    \
-              Processor::TOC_PROC, false/*global*/, task_id,                \
-              realm_descriptor, no_requests, NULL, 0)));                    \
-      gpu_reduction_tasks[id] = task_id;                                    \
-    }
-
-    __host__
-    void register_builtin_gpu_reduction_tasks(
-        GPUReductionTable &gpu_reduction_tasks, std::set<RtEvent> &registered_events)
-    {
-      Realm::ProfilingRequestSet no_requests;
-
-      // Register Realm task for each kind of reduction
-      LEGION_REDOP_LIST(REGISTER_GPU_REDUCTION_TASK)
-    }
-#else
     // GPU reductions are performed by Realm, but we need to register from
     //  here in order to have cuda implementations available
 
@@ -131,8 +108,6 @@ namespace Legion {
       // Register all of our reductions
       LEGION_REDOP_LIST(REGISTER_BUILTIN_REDOP_HIP)
     }
-#endif
-
 #endif
 
   }; 
