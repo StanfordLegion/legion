@@ -197,16 +197,6 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
-#ifdef LEGION_GPU_REDUCTIONS
-      virtual void record_gpu_reduction(Memoizable *memo, ApEvent &lhs,
-                           IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<CopySrcDstField> &dst_fields,
-                           Processor gpu, TaskID gpu_task_id,
-                           PhysicalManager *src, PhysicalManager *dst,
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold) = 0;
-#endif
       virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
@@ -260,9 +250,6 @@ namespace Legion {
         REMOTE_TRACE_RECORD_MAPPER_OUTPUT,
         REMOTE_TRACE_COMPLETE_REPLAY,
         REMOTE_TRACE_ACQUIRE_RELEASE,
-#ifdef LEGION_GPU_REDUCTIONS
-        REMOTE_TRACE_GPU_REDUCTION,
-#endif
       };
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
@@ -337,16 +324,6 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
-#ifdef LEGION_GPU_REDUCTIONS
-      virtual void record_gpu_reduction(Memoizable *memo, ApEvent &lhs,
-                           IndexSpaceExpression *expr,
-                           const std::vector<CopySrcDstField> &src_fields,
-                           const std::vector<CopySrcDstField> &dst_fields,
-                           Processor gpu, TaskID gpu_task_id,
-                           PhysicalManager *src, PhysicalManager *dst,
-                           ApEvent precondition, PredEvent pred_guard,
-                           ReductionOpID redop, bool reduction_fold);
-#endif
       virtual void record_fill_views(ApEvent lhs, IndexSpaceExpression *expr,
                            const FieldMaskSet<InstanceView> &tracing_dsts,
                            std::set<RtEvent> &applied_events,
@@ -570,22 +547,6 @@ namespace Legion {
 #endif
                                  precondition, pred_guard);
         }
-#ifdef LEGION_GPU_REDUCTIONS
-      inline void record_gpu_reduction(ApEvent &result,
-                                IndexSpaceExpression *expr,
-                                const std::vector<CopySrcDstField> &src_fields,
-                                const std::vector<CopySrcDstField> &dst_fields,
-                                Processor gpu, TaskID gpu_task_id,
-                                PhysicalManager *src, PhysicalManager *dst,
-                                ApEvent precondition, PredEvent pred_guard,
-                                ReductionOpID redop, bool reduction_fold) const
-        {
-          sanity_check();
-          rec->record_gpu_reduction(memo, result, expr, src_fields, dst_fields,
-                                    gpu, gpu_task_id, src, dst, precondition, 
-                                    pred_guard, redop, reduction_fold);
-        }
-#endif
       inline void record_fill_views(ApEvent lhs,
                                     IndexSpaceExpression *expr,
                                     const FieldMaskSet<InstanceView> &dsts,

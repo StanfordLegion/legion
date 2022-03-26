@@ -887,62 +887,6 @@ namespace Legion {
                                       applied_events, reduction_initialization);
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_gpu_reduction(Memoizable *memo, 
-                                 ApEvent &lhs, IndexSpaceExpression *expr,
-                                 const std::vector<CopySrcDstField>& src_fields,
-                                 const std::vector<CopySrcDstField>& dst_fields,
-                                 Processor gpu, TaskID gpu_task_id,
-                                 PhysicalManager *src, PhysicalManager *dst,
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
-      if (local_space != origin_space)
-      {
-        RtUserEvent done = Runtime::create_rt_user_event(); 
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_tpl);
-          rez.serialize(REMOTE_TRACE_GPU_REDUCTION);
-          rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
-          rez.serialize(&lhs);
-          rez.serialize(lhs);
-          expr->pack_expression(rez, origin_space);
-#ifdef DEBUG_LEGION
-          assert(src_fields.size() == dst_fields.size());
-#endif
-          rez.serialize<size_t>(src_fields.size());
-          for (unsigned idx = 0; idx < src_fields.size(); idx++)
-          {
-            pack_src_dst_field(rez, src_fields[idx]);
-            pack_src_dst_field(rez, dst_fields[idx]);
-          }
-          rez.serialize(gpu);
-          rez.serialize(gpu_task_id);
-          rez.serialize(src->did);
-          rez.serialize(dst->did);
-          rez.serialize(precondition);
-          rez.serialize(pred_guard);
-          rez.serialize(redop);
-          rez.serialize<bool>(reduction_fold); 
-        }
-        runtime->send_remote_trace_update(origin_space, rez);
-        // Wait to see if lhs changes
-        done.wait();
-      }
-      else
-        remote_tpl->record_gpu_reduction(memo, lhs, expr, src_fields,dst_fields,
-          gpu,gpu_task_id,src,dst,precondition,pred_guard,redop,reduction_fold);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_op_view(Memoizable *memo,
                                              unsigned idx,
@@ -1653,78 +1597,6 @@ namespace Legion {
               Runtime::trigger_event(done);
             break;
           }
-#ifdef LEGION_GPU_REDUCTIONS
-        case REMOTE_TRACE_GPU_REDUCTION:
-          {
-            RtUserEvent done;
-            derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            ApUserEvent *lhs_ptr;
-            derez.deserialize(lhs_ptr);
-            ApUserEvent lhs;
-            derez.deserialize(lhs);
-            RegionTreeForest *forest = runtime->forest;
-            IndexSpaceExpression *expr = 
-              IndexSpaceExpression::unpack_expression(derez, forest, source);
-            size_t num_fields;
-            derez.deserialize(num_fields);
-            std::vector<CopySrcDstField> src_fields(num_fields);
-            std::vector<CopySrcDstField> dst_fields(num_fields);
-            for (unsigned idx = 0; idx < num_fields; idx++)
-            {
-              unpack_src_dst_field(derez, src_fields[idx]);
-              unpack_src_dst_field(derez, dst_fields[idx]);
-            }
-            Processor gpu;
-            derez.deserialize(gpu);
-            TaskID gpu_task_id;
-            derez.deserialize(gpu_task_id);
-            DistributedID src_did, dst_did;
-            derez.deserialize(src_did);
-            derez.deserialize(dst_did);
-            RtEvent src_ready, dst_ready;
-            PhysicalManager *src = 
-              runtime->find_or_request_instance_manager(src_did, src_ready);
-            PhysicalManager *dst = 
-              runtime->find_or_request_instance_manager(dst_did, dst_ready);
-            ApEvent precondition;
-            derez.deserialize(precondition);
-            PredEvent pred_guard;
-            derez.deserialize(pred_guard);
-            ReductionOpID redop;
-            derez.deserialize(redop);
-            bool reduction_fold;
-            derez.deserialize<bool>(reduction_fold);
-            // Use this to track if lhs changes
-            const ApUserEvent lhs_copy = lhs;
-            if (src_ready.exists() && !src_ready.has_triggered())
-              src_ready.wait();
-            if (dst_ready.exists() && !dst_ready.has_triggered())
-              dst_ready.wait();
-            // Do the base call
-            tpl->record_gpu_reduction(memo, lhs, expr, src_fields, dst_fields,
-                                      gpu, gpu_task_id, src, dst, precondition,
-                                      pred_guard, redop, reduction_fold);
-            if (lhs != lhs_copy)
-            {
-              Serializer rez;
-              {
-                RezCheck z2(rez);
-                rez.serialize(REMOTE_TRACE_GPU_REDUCTION);
-                rez.serialize(lhs_ptr);
-                rez.serialize(lhs);
-                rez.serialize(done);
-              }
-              runtime->send_remote_trace_response(source, rez);
-            }
-            else // lhs was unchanged
-              Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
-            break;
-          }
-#endif
         case REMOTE_TRACE_RECORD_OP_VIEW:
           {
             RtUserEvent applied;
@@ -1945,9 +1817,6 @@ namespace Legion {
         case REMOTE_TRACE_ISSUE_FILL:
         case REMOTE_TRACE_SET_OP_SYNC:
         case REMOTE_TRACE_ACQUIRE_RELEASE:
-#ifdef LEGION_GPU_REDUCTIONS
-        case REMOTE_TRACE_GPU_REDUCTION:
-#endif
           {
             ApEvent *event_ptr;
             derez.deserialize(event_ptr);
@@ -5257,19 +5126,6 @@ namespace Legion {
 #endif 
       update_fields.set_bit(src_fidx);
       record_view(dst_view);
-#ifdef LEGION_GPU_REDUCTIONS
-#ifndef LEGION_SPY
-      // Realm is really bad at applying reductions to GPU instances right
-      // now so let's help it out by moving data into a shadow instance in
-      // the same memory which will allow us to run our own GPU reduction
-      // application kernels, see github issues #372 and #821
-      PhysicalManager *dst_manager = dst_view->get_manager();
-      const bool gpu_dst = (Memory::GPU_FB_MEM == 
-        dst_manager->layout->constraints->memory_constraint.get_kind());
-      const GPUReductionTable &gpu_reduction_tasks = 
-        Runtime::get_gpu_reduction_table();
-#endif
-#endif
       const std::pair<InstanceView*,unsigned> dst_key(dst_view, dst_fidx);
       std::vector<ReductionOpID> &redop_epochs = reduction_epochs[dst_key];
       FieldMask src_mask, dst_mask;
@@ -5285,60 +5141,8 @@ namespace Legion {
 #endif
         record_view(it->first);
         const ReductionOpID redop = it->first->get_redop();
-        CopyUpdate *update;
-#ifdef LEGION_GPU_REDUCTIONS
-#ifndef LEGION_SPY
-        // See if we're reducing into a remote GPU memory 
-        // for a reduction operator that we have a reduction task for
-        if (gpu_dst && 
-            (gpu_reduction_tasks.find(redop) != gpu_reduction_tasks.end()) &&
-            !dst_manager->is_gpu_visible(it->first->get_manager()))
-        {
-          // Get the shadow reduction instance for this manager
-          ReductionView *shadow_reduction = 
-            dst_manager->find_or_create_shadow_reduction(dst_fidx, redop, 
-                                    local_space, op->get_unique_op_id());
-          // If we fail to make the shadow instance then we'll fall back
-          // to the slow path of asking Realm to do it for us
-          if (shadow_reduction != NULL)
-          {
-            const std::pair<InstanceView*,unsigned> 
-              shadow_key(shadow_reduction, dst_fidx);     
-            std::vector<ReductionOpID> &shadow_epochs = 
-              reduction_epochs[shadow_key];
-            // put this in the next epoch for this shadow instance
-            // so that all the copies to the shadow instance are serialized
-            const unsigned shadow_index = shadow_epochs.size();
-            // These need to count by 2 because the intermediate epoch
-            // is going to be the one that reads the shadow instance
-            shadow_epochs.resize(shadow_index + 2, 0/*no reduction*/);
-            if (reductions.size() == shadow_index)
-              resize_reductions(shadow_index + 1);
-            update = new CopyUpdate(it->first, src_mask, it->second, 
-                  0/*no reduction here*/, across_helper);
-            // Also bump the redop_index for so the next application happens
-            // in the following reduction epoch
-            reductions[shadow_index][shadow_reduction].insert(update, dst_mask);
-            // Need to make sure the application of the reduction happens
-            // in the next epoch so figure out what that is
-            redop_index = (redop_index >= (shadow_index + 1)) ? redop_index : 
-                                                          (shadow_index + 1);
-            if (redop_index >= redop_epochs.size())
-              redop_epochs.resize(redop_index + 1, 0);
-            if (redop_index >= reductions.size())
-              resize_reductions(redop_index + 1);
-            update = 
-              new CopyUpdate(shadow_reduction, dst_mask, it->second, redop);
-          }
-          else 
-            update = 
-              new CopyUpdate(it->first,src_mask,it->second,redop,across_helper);
-        }
-        else
-#endif
-#endif
-          update = 
-            new CopyUpdate(it->first,src_mask,it->second,redop,across_helper);
+        CopyUpdate *update =
+          new CopyUpdate(it->first,src_mask,it->second,redop,across_helper);
         // Ignore shadows when tracing, we only care about the normal
         // preconditions and postconditions for the copies
         if (tracing_eq != NULL)

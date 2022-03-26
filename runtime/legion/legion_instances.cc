@@ -768,18 +768,6 @@ namespace Legion {
                                                    it->second.view_events);
         gc_events.clear();
       }
-#ifdef LEGION_GPU_REDUCTIONS
-      if (!shadow_reduction_instances.empty())
-      {
-        for (std::map<std::pair<unsigned,ReductionOpID>,ReductionView*>::
-              const_iterator it = shadow_reduction_instances.begin();
-              it != shadow_reduction_instances.end(); it++)
-          if ((it->second != NULL) &&
-              it->second->remove_nested_resource_ref(did))
-            delete it->second;
-        shadow_reduction_instances.clear();
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1339,94 +1327,6 @@ namespace Legion {
         delete rargs->mapping;
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_create_shadow_request(
-                   Runtime *runtime, AddressSpaceID source, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      unsigned fidx;
-      derez.deserialize(fidx);
-      ReductionOpID redop;
-      derez.deserialize(redop);
-      AddressSpaceID request;
-      derez.deserialize(request);
-      UniqueID opid;
-      derez.deserialize(opid);
-      PhysicalManager *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-
-      RtEvent ready;
-      PhysicalManager *manager = 
-        runtime->find_or_request_instance_manager(did, ready); 
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      ReductionView *result = 
-        manager->find_or_create_shadow_reduction(fidx, redop, request, opid);
-      Serializer rez;
-      if (result != NULL)
-      {
-        RezCheck z2(rez);
-        rez.serialize(fidx);
-        rez.serialize(redop);
-        rez.serialize(target);
-        rez.serialize(result->did);
-        rez.serialize(to_trigger);
-      }
-      else
-      {
-        RezCheck z2(rez);
-        rez.serialize(fidx);
-        rez.serialize(redop);
-        rez.serialize(target);
-        rez.serialize<DistributedID>(0);
-        rez.serialize(to_trigger);
-      }
-      runtime->send_create_shadow_reduction_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_create_shadow_response(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      unsigned fidx;
-      derez.deserialize(fidx);
-      ReductionOpID redop;
-      derez.deserialize(redop);
-      PhysicalManager *manager;
-      derez.deserialize(manager);
-      DistributedID view_did;
-      derez.deserialize(view_did);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-
-      if (view_did > 0)
-      {
-        RtEvent ready;
-        LogicalView *view = 
-          runtime->find_or_request_logical_view(view_did, ready);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-#ifdef DEBUG_LEGION
-        assert(view->is_reduction_view());
-#endif
-        manager->record_remote_shadow_reduction(fidx, redop, 
-                                                view->as_reduction_view());
-      }
-      else
-        manager->record_remote_shadow_reduction(fidx, redop, NULL);
-
-      Runtime::trigger_event(to_trigger);
-    }
-#endif // LEGION_GPU_REDUCTIONS
-
     /////////////////////////////////////////////////////////////
     // IndividualManager 
     /////////////////////////////////////////////////////////////
@@ -1790,53 +1690,6 @@ namespace Legion {
       else
         across_helper->compute_across_offsets(*src_mask, dst_fields);
       source_manager->compute_copy_offsets(*src_mask, src_fields);
-#ifdef LEGION_GPU_REDUCTIONS
-#ifndef LEGION_SPY
-      // Realm is really bad at applying reductions to GPU instances right
-      // now so let's help it out by running tasks to apply reductions for it
-      // See github issues #372 and #821
-      if ((reduction_op_id > 0) &&
-          (memory_manager->memory.kind() == Memory::GPU_FB_MEM) &&
-          is_gpu_visible(source_manager))
-      {
-        const GPUReductionTable &gpu_reductions = 
-          Runtime::get_gpu_reduction_table();
-        std::map<ReductionOpID,TaskID>::const_iterator finder = 
-          gpu_reductions.find(reduction_op_id);
-        if (finder != gpu_reductions.end())
-        {
-          // If we can directly perform memory accesses between the
-          // two memories then we can launch a kernel that just runs
-          // normal CUDA kernels without having any problems
-          const ApEvent result = copy_expression->gpu_reduction(trace_info,
-              dst_fields, src_fields, memory_manager->get_local_gpu(), 
-              finder->second, this, source_manager, precondition, 
-              predicate_guard, reduction_op_id, false/*fold*/);
-          if (result.exists())
-          {
-            const RtEvent collect_event = trace_info.get_collect_event();
-            src_view->add_copy_user(true/*reading*/, 0/*redop*/, result,
-                collect_event, *src_mask, copy_expression, op_id, index,
-                recorded_events, trace_info.recording, runtime->address_space);
-            if (manage_dst_events)
-              dst_view->add_copy_user(false/*reading*/, reduction_op_id, result,
-                 collect_event, copy_mask, copy_expression, op_id, index,
-                 recorded_events, trace_info.recording, runtime->address_space);
-          }
-          if (trace_info.recording)
-          {
-            const FieldMaskSet<InstanceView> src_views(src_view, *src_mask);
-            const FieldMaskSet<InstanceView> dst_views(dst_view, copy_mask);
-            trace_info.record_copy_views(result, copy_expression, src_views,
-                                         dst_views, applied_events);
-          }
-          if (across_helper != NULL)
-            delete src_mask;
-          return result;
-        }
-      }
-#endif
-#endif 
       std::vector<Reservation> reservations;
       // If we're doing a reduction operation then set the reduction
       // information on the source-dst fields
@@ -2244,17 +2097,6 @@ namespace Legion {
       if (!is_external_instance())
         memory_manager->free_legion_instance(this, deferred_event);
 #endif
-#ifdef LEGION_GPU_REDUCTIONS
-      for (std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>::
-            const_iterator it = shadow_reduction_instances.begin();
-            it != shadow_reduction_instances.end(); it++)
-      {
-        if (it->second == NULL)
-          continue;
-        PhysicalManager *manager = it->second->get_manager();
-        manager->perform_deletion(deferred_event);
-      }
-#endif
 #endif
       // Notify any contexts of our deletion
       // Grab a copy of this in case we get any removal calls
@@ -2319,17 +2161,6 @@ namespace Legion {
       if (!is_external_instance())
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #endif
-#ifdef LEGION_GPU_REDUCTIONS
-      for (std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>::
-            const_iterator it = shadow_reduction_instances.begin();
-            it != shadow_reduction_instances.end(); it++)
-      {
-        if (it->second == NULL)
-          continue;
-        PhysicalManager *manager = it->second->get_manager();
-        manager->force_deletion();
-      }
-#endif
 #endif
     }
 
@@ -2375,178 +2206,6 @@ namespace Legion {
     {
       return memory_manager->memory;
     }
-
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    bool IndividualManager::is_gpu_visible(PhysicalManager *other) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(memory_manager->memory.kind() == Memory::GPU_FB_MEM);
-#endif
-      // TODO: support collective managers
-      if (other->is_collective_manager())
-        return false;
-      const Processor gpu = memory_manager->get_local_gpu();
-      IndividualManager *manager = other->as_individual_manager();
-      return runtime->is_visible_memory(gpu, manager->memory_manager->memory);
-    }
-    
-    //--------------------------------------------------------------------------
-    ReductionView* IndividualManager::find_or_create_shadow_reduction(
-                                    unsigned fidx, ReductionOpID red, 
-                                    AddressSpaceID request_space, UniqueID opid)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(redop == 0); // this should not be a reduction instance
-#endif
-      const std::pair<unsigned,ReductionOpID> key(fidx,red);
-      // First check to see if we have it
-      RtEvent wait_on;
-      RtUserEvent to_trigger;
-      {
-        AutoLock inst(inst_lock);
-        std::map<std::pair<unsigned,ReductionOpID>,ReductionView*>::
-          const_iterator finder = shadow_reduction_instances.find(key);
-        if (finder != shadow_reduction_instances.end())
-          return finder->second;
-        // If we didn't find it, see if we should wait for it or make it
-        std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::const_iterator
-          pending_finder = pending_reduction_shadows.find(key);
-        if (pending_finder == pending_reduction_shadows.end())
-        {
-          to_trigger = Runtime::create_rt_user_event();
-          pending_reduction_shadows[key] = to_trigger;
-        }
-        else
-          wait_on = pending_finder->second;
-      }
-      // If we're not the owner, send a message there to do this
-      if (!is_owner() && to_trigger.exists())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(fidx);
-          rez.serialize(red);
-          rez.serialize(request_space);
-          rez.serialize(opid);
-          rez.serialize<PhysicalManager*>(this);
-          rez.serialize(to_trigger);
-        }
-        runtime->send_create_shadow_reduction_request(owner_space, rez);
-        wait_on = to_trigger;
-      }
-      if (wait_on.exists())
-      {
-        if (!wait_on.has_triggered())
-          wait_on.wait();
-        AutoLock inst(inst_lock,1,false/*exlcusive*/);
-        std::map<std::pair<unsigned,ReductionOpID>,ReductionView*>::
-          const_iterator finder = shadow_reduction_instances.find(key);
-#ifdef DEBUG_LEGION
-        assert(finder != shadow_reduction_instances.end());
-#endif
-        return finder->second; 
-      }
-#ifdef DEBUG_LEGION
-      assert(to_trigger.exists());
-#endif
-      // Try to make the shadow instance
-      // First create the layout constraints
-      LayoutConstraintSet shadow_constraints = *(layout->constraints);
-      SpecializedConstraint &specialized = 
-        shadow_constraints.specialized_constraint;
-      switch (specialized.get_kind())
-      {
-        case LEGION_NO_SPECIALIZE:
-        case LEGION_AFFINE_SPECIALIZE:
-          {
-            specialized = 
-              SpecializedConstraint(LEGION_AFFINE_REDUCTION_SPECIALIZE, red); 
-            break;
-          }
-        case LEGION_COMPACT_SPECIALIZE:
-          {
-            specialized = 
-              SpecializedConstraint(LEGION_COMPACT_REDUCTION_SPECIALIZE, red);
-            break;
-          }
-        default:
-          assert(false);
-      }
-      // Only need on field here
-      FieldConstraint &fields = shadow_constraints.field_constraint;
-      FieldMask mask;
-      mask.set_bit(fidx);
-      std::set<FieldID> find_fids;
-      std::set<FieldID> basis_fids(
-          fields.field_set.begin(), fields.field_set.end());
-      field_space_node->get_field_set(mask, basis_fids, find_fids);
-#ifdef DEBUG_LEGION
-      assert(find_fids.size() == 1);
-#endif
-      const FieldID fid = *(find_fids.begin());
-      fields.field_set.clear();
-      fields.field_set.push_back(fid);
-      // Construct the instance builder from the constraints
-      std::vector<LogicalRegion> dummy_regions;
-      InstanceBuilder builder(dummy_regions, instance_domain, field_space_node,
-          tree_id, shadow_constraints, runtime, memory_manager, opid,
-          piece_list, piece_list_size, true/*shadow instance*/);
-      // Then ask the memory manager to try to create it
-      PhysicalManager *manager = 
-        memory_manager->create_shadow_instance(builder);
-      ReductionView *result = NULL;
-      // No matter what record this for the future
-      if (manager != NULL)
-      {
-        const DistributedID view_did = 
-          context->runtime->get_available_distributed_id();
-        result = new ReductionView(context, view_did, 
-            local_space, request_space, manager, 0/*uid*/, true/*register*/);
-        result->add_nested_resource_ref(did);
-      }
-      AutoLock inst(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(shadow_reduction_instances.find(key) == 
-              shadow_reduction_instances.end());
-#endif
-      shadow_reduction_instances[key] = result;
-      std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::iterator
-        pending_finder = pending_reduction_shadows.find(key); 
-#ifdef DEBUG_LEGION
-      assert(pending_finder != pending_reduction_shadows.end());
-#endif
-      pending_reduction_shadows.erase(pending_finder);
-      Runtime::trigger_event(to_trigger);
-      return result;
-    } 
-
-    //--------------------------------------------------------------------------
-    void IndividualManager::record_remote_shadow_reduction(unsigned fidx,
-                                         ReductionOpID red, ReductionView *view)
-    //--------------------------------------------------------------------------
-    {
-      const std::pair<unsigned,ReductionOpID> key(fidx,red);
-      if (view != NULL)
-        view->add_nested_resource_ref(did);
-      AutoLock inst(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(shadow_reduction_instances.find(key) == 
-              shadow_reduction_instances.end());
-#endif
-      shadow_reduction_instances[key] = view;
-      std::map<std::pair<unsigned,ReductionOpID>,RtEvent>::iterator
-        pending_finder = pending_reduction_shadows.find(key); 
-#ifdef DEBUG_LEGION
-      assert(pending_finder != pending_reduction_shadows.end());
-#endif
-      pending_reduction_shadows.erase(pending_finder);
-    }
-#endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
     bool IndividualManager::update_physical_instance(
@@ -2981,34 +2640,6 @@ namespace Legion {
       assert(false);
       return Memory::NO_MEMORY;
     }
-
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    bool CollectiveManager::is_gpu_visible(PhysicalManager *other) const
-    //--------------------------------------------------------------------------
-    {
-      // TODO: implement this
-      return false;
-    }
-    
-    //--------------------------------------------------------------------------
-    ReductionView* CollectiveManager::find_or_create_shadow_reduction(
-                                    unsigned fidx, ReductionOpID redop, 
-                                    AddressSpaceID request_space, UniqueID opid)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: implement this
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void CollectiveManager::record_remote_shadow_reduction(unsigned fidx,
-                                       ReductionOpID redop, ReductionView *view)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: implement this
-    }
-#endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
     void CollectiveManager::perform_delete(RtEvent deferred_event, bool left)
