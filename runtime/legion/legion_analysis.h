@@ -34,8 +34,19 @@ namespace Legion {
      */
     struct ContextCoordinate {
       inline ContextCoordinate(void) : context_index(SIZE_MAX) { }
+      // Prevent trivally copying for serialize/deserialize
+      inline ContextCoordinate(const ContextCoordinate &rhs)
+        : context_index(rhs.context_index), index_point(rhs.index_point) { }
+      inline ContextCoordinate(ContextCoordinate &&rhs)
+        : context_index(rhs.context_index), index_point(rhs.index_point) { }
       inline ContextCoordinate(size_t index, const DomainPoint &p)
         : context_index(index), index_point(p) { }
+      inline ContextCoordinate& operator=(const ContextCoordinate &rhs)
+        { context_index = rhs.context_index; 
+          index_point = rhs.index_point; return *this; }
+      inline ContextCoordinate& operator=(ContextCoordinate &&rhs)
+        { context_index = rhs.context_index; 
+          index_point = rhs.index_point; return *this; }
       inline bool operator==(const ContextCoordinate &rhs) const
         { return ((context_index == rhs.context_index) && 
                   (index_point == rhs.index_point)); }
@@ -43,6 +54,10 @@ namespace Legion {
         { if (context_index < rhs.context_index) return true;
           if (context_index > rhs.context_index) return false;
           return index_point < rhs.index_point; }
+      inline void serialize(Serializer &rez) const
+        { rez.serialize(context_index); rez.serialize(index_point); }
+      inline void deserialize(Deserializer &derez)
+        { derez.deserialize(context_index); derez.deserialize(index_point); }
       size_t context_index;
       DomainPoint index_point;
     };

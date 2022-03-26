@@ -356,7 +356,7 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(lhs);
           rez.serialize(op_kind);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
@@ -407,7 +407,7 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_CREATE_USER_EVENT);
           rez.serialize(applied);
           rez.serialize(lhs);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
@@ -433,7 +433,7 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(lhs);
           rez.serialize(rhs);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
@@ -509,7 +509,7 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize(&lhs);
           rez.serialize(lhs);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize<size_t>(rhs.size());
           for (std::set<ApEvent>::const_iterator it = 
                 rhs.begin(); it != rhs.end(); it++)
@@ -540,7 +540,7 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize(&lhs);
           rez.serialize(lhs);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize<size_t>(rhs.size());
           for (std::vector<ApEvent>::const_iterator it = 
                 rhs.begin(); it != rhs.end(); it++)
@@ -586,7 +586,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ISSUE_COPY);
           rez.serialize(done);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -690,7 +690,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ISSUE_INDIRECT);
           rez.serialize(done);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -789,7 +789,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ISSUE_FILL);
           rez.serialize(done);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -875,7 +875,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_OP_VIEW);
           rez.serialize(applied);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(idx);
           rez.serialize(view->did);
           rez.serialize(node->handle);
@@ -906,7 +906,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_SET_OP_SYNC);
           rez.serialize(done);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
         }
@@ -940,7 +940,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_MAPPER_OUTPUT);
           rez.serialize(applied);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           // We actually only need a few things here  
           rez.serialize<size_t>(output.target_procs.size());
           for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
@@ -992,7 +992,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_SET_EFFECTS);
           rez.serialize(applied);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(rhs);
         }
         runtime->send_remote_trace_update(origin_space, rez);
@@ -1017,7 +1017,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_COMPLETE_REPLAY);
           rez.serialize(applied);
-          rez.serialize(tlid);
+          tlid.serialize(rez);
           rez.serialize(rhs);
         }
         runtime->send_remote_trace_update(origin_space, rez);
@@ -1054,7 +1054,7 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize<bool>(it->second);
           }
-          rez.serialize(tlid);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -1104,7 +1104,7 @@ namespace Legion {
             unsigned op_kind;
             derez.deserialize(op_kind);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             tpl->record_get_term_event(lhs, op_kind, tlid);
             Runtime::trigger_event(applied);
             break;
@@ -1138,7 +1138,7 @@ namespace Legion {
             ApUserEvent lhs;
             derez.deserialize(lhs);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             tpl->record_create_ap_user_event(lhs, tlid);
             Runtime::trigger_event(applied);
             break;
@@ -1152,7 +1152,7 @@ namespace Legion {
             ApEvent rhs;
             derez.deserialize(rhs);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             tpl->record_trigger_event(lhs, rhs, tlid);
             Runtime::trigger_event(applied);
             break;
@@ -1166,7 +1166,7 @@ namespace Legion {
             ApEvent lhs;
             derez.deserialize(lhs);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             size_t num_rhs;
             derez.deserialize(num_rhs);
             const ApEvent lhs_copy = lhs;
@@ -1216,7 +1216,7 @@ namespace Legion {
             RtUserEvent done;
             derez.deserialize(done);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1336,7 +1336,7 @@ namespace Legion {
             RtUserEvent done;
             derez.deserialize(done);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1440,7 +1440,7 @@ namespace Legion {
             RtUserEvent done;
             derez.deserialize(done);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1542,7 +1542,7 @@ namespace Legion {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             unsigned index;
             derez.deserialize(index);
             DistributedID did;
@@ -1575,7 +1575,7 @@ namespace Legion {
             RtUserEvent done;
             derez.deserialize(done);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1603,7 +1603,7 @@ namespace Legion {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             size_t num_target_processors;
             derez.deserialize(num_target_processors);
             Mapper::MapTaskOutput output;
@@ -1628,7 +1628,7 @@ namespace Legion {
                 derez.deserialize(num_coords);
                 coords.resize(num_coords);
                 for (unsigned idx2 = 0; idx2 < num_coords; idx2++)
-                  derez.deserialize(coords[idx2]);
+                  coords[idx2].deserialize(derez);
               }
             }
             derez.deserialize(output.chosen_variant);
@@ -1662,7 +1662,7 @@ namespace Legion {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             ApEvent postcondition;
             derez.deserialize(postcondition);
             tpl->record_set_effects(tlid, postcondition);
@@ -1674,7 +1674,7 @@ namespace Legion {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             ApEvent ready_event;
             derez.deserialize(ready_event);
             tpl->record_complete_replay(tlid, ready_event);
@@ -1701,7 +1701,7 @@ namespace Legion {
               derez.deserialize<bool>(reservations[reservation]);
             }
             TraceLocalID tlid;
-            derez.deserialize(tlid);
+            tlid.deserialize(derez);
             const ApEvent lhs_copy = lhs;
             tpl->record_reservations(tlid, lhs, reservations,
                                      precondition, postcondition);
@@ -1945,7 +1945,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(rec != NULL);
 #endif
-        rez.serialize(tlid);
+        tlid.serialize(rez);
         rez.serialize(index);
         rez.serialize(dst_index);
         rez.serialize<bool>(update_validity);
@@ -1963,7 +1963,7 @@ namespace Legion {
       if (recording)
       {
         TraceLocalID tlid;
-        derez.deserialize(tlid);
+        tlid.deserialize(derez);
         unsigned index, dst_index;
         derez.deserialize(index);
         derez.deserialize(dst_index);
