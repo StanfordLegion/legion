@@ -8575,12 +8575,9 @@ namespace Legion {
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
 
 #ifdef LEGION_GPU_REDUCTIONS
-#if defined (__CUDACC__) || defined (__HIPCC__)
       template<typename REDOP>
+        LEGION_DEPRECATED("Use register_reduction_op instead")
       static void preregister_gpu_reduction_op(ReductionOpID redop_id);
-#endif
-      static void preregister_gpu_reduction_op(ReductionOpID redop_id,
-                                               const CodeDescriptor &desc);
 #endif
     public:
       /**

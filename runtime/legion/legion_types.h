@@ -812,8 +812,6 @@ namespace Legion {
       SEND_COLLECTIVE_USER_REQUEST,
       SEND_COLLECTIVE_USER_RESPONSE,
       SEND_COLLECTIVE_REGISTER_USER,
-      SEND_CREATE_SHADOW_REQUEST,
-      SEND_CREATE_SHADOW_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -1039,8 +1037,6 @@ namespace Legion {
         "Send Collective User Request",                               \
         "Send Collective User Response",                              \
         "Send Collective Individual Register User",                   \
-        "Send Create Shadow Reduction Instance Request",              \
-        "Send Create Shadow Reduction Instance Response",             \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \
@@ -1775,9 +1771,6 @@ namespace Legion {
     class ReleaseReplay;
     class BarrierArrival;
     class BarrierAdvance;
-#ifdef LEGION_GPU_REDUCTIONS
-    class GPUReduction;
-#endif
 
     // region_tree.h
     class RegionTreeForest;
@@ -2191,9 +2184,6 @@ namespace Legion {
       const std::vector<Future> futures);
   typedef void (*RealmFnptr)(const void*,size_t,
                              const void*,size_t,Processor);
-#ifdef LEGION_GPU_REDUCTIONS
-  typedef std::map<ReductionOpID,TaskID> GPUReductionTable;
-#endif
   // Magical typedefs 
   // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;

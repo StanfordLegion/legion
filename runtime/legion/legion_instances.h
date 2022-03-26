@@ -396,18 +396,6 @@ namespace Legion {
       size_t get_instance_size(void) const;
       void update_instance_footprint(size_t footprint)
         { instance_footprint = footprint; }
-#ifdef LEGION_GPU_REDUCTIONS
-    public:
-      virtual bool is_gpu_visible(PhysicalManager *other) const = 0;
-      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid) = 0;
-      virtual void record_remote_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, ReductionView *view) = 0;
-      static void handle_create_shadow_request(Runtime *runtime,
-                                AddressSpaceID source, Deserializer &derez);
-      static void handle_create_shadow_response(Runtime *runtime,
-                                                Deserializer &derez);
-#endif
     public:
       // Methods for creating/finding/destroying logical top views
       InstanceView* find_or_create_instance_top_view(InnerContext *context,
@@ -458,13 +446,6 @@ namespace Legion {
       typedef std::pair<InstanceView*,unsigned> ViewEntry;
       std::map<ContextKey,ViewEntry> context_views;
       std::map<ReplicationID,RtUserEvent> pending_views;
-#ifdef LEGION_GPU_REDUCTIONS
-    protected:
-      std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,ReductionView*>
-                                              shadow_reduction_instances;
-      std::map<std::pair<unsigned/*fidx*/,ReductionOpID>,RtEvent>
-                                              pending_reduction_shadows;
-#endif
     private:
       // Events that have to trigger before we can remove our GC reference
       std::map<CollectableView*,CollectableInfo> gc_events;
@@ -695,14 +676,6 @@ namespace Legion {
       virtual RtEvent detach_external_instance(void);
       virtual bool has_visible_from(const std::set<Memory> &memories) const;
       virtual Memory get_memory(void) const;
-#ifdef LEGION_GPU_REDUCTIONS
-    public:
-      virtual bool is_gpu_visible(PhysicalManager *other) const;
-      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid); 
-      virtual void record_remote_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, ReductionView *view);
-#endif
     public:
       inline bool is_unbound() const 
         { return kind == UNBOUND_INSTANCE_KIND; }
@@ -1151,14 +1124,6 @@ namespace Legion {
                                 ApEvent term_event,
                                 const PhysicalTraceInfo &trace_info,
                                 const bool symbolic) const;
-#ifdef LEGION_GPU_REDUCTIONS
-    public:
-      virtual bool is_gpu_visible(PhysicalManager *other) const;
-      virtual ReductionView* find_or_create_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, AddressSpaceID request_space, UniqueID opid);
-      virtual void record_remote_shadow_reduction(unsigned fidx,
-          ReductionOpID redop, ReductionView *view);
-#endif
     public:
       virtual void send_manager(AddressSpaceID target);
     public:
