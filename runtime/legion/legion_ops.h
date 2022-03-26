@@ -976,7 +976,6 @@ namespace Legion {
     class Memoizable {
     public:
       virtual ~Memoizable(void) { }
-      virtual bool is_memoizable_task(void) const = 0;
       virtual bool is_recording(void) const = 0;
       virtual bool is_memoizing(void) const = 0;
       virtual AddressSpaceID get_origin_space(void) const = 0;
@@ -993,51 +992,7 @@ namespace Legion {
     protected:
       virtual const VersionInfo& get_version_info(unsigned idx) const = 0;
     public:
-      virtual void pack_remote_memoizable(Serializer &rez, 
-                                          AddressSpaceID target) const;
-      virtual Memoizable* clone(Operation *op) { return this; }
-    };
-
-    class RemoteMemoizable : public Memoizable {
-    public:
-      RemoteMemoizable(Operation *op, Memoizable *original, 
-                       AddressSpaceID origin, Operation::OpKind kind,
-                       TraceLocalID tid, ApEvent completion_event,
-                       bool is_memoizable_task, bool is_memoizing);
-      virtual ~RemoteMemoizable(void);
-    public:
-      virtual bool is_memoizable_task(void) const;
-      virtual bool is_recording(void) const;
-      virtual bool is_memoizing(void) const;
-      virtual AddressSpaceID get_origin_space(void) const;
-      virtual PhysicalTemplate* get_template(void) const;
-      virtual ApEvent get_memo_completion(void) const;
-      virtual void replay_mapping_output(void);
-      virtual Operation* get_operation(void) const;
-      virtual Operation::OpKind get_memoizable_kind(void) const;
-      // Return a trace local unique ID for this operation
-      typedef std::pair<unsigned, DomainPoint> TraceLocalID;
-      virtual TraceLocalID get_trace_local_id(void) const;
-      virtual ApEvent compute_sync_precondition(const TraceInfo *info) const;
-      virtual void set_effects_postcondition(ApEvent postcondition);
-      virtual void complete_replay(ApEvent complete_event);
-    protected:
-      virtual const VersionInfo& get_version_info(unsigned idx) const;
-    public:
-      virtual void pack_remote_memoizable(Serializer &rez, 
-                                          AddressSpaceID target) const;
-      virtual Memoizable* clone(Operation *op);
-      static Memoizable* unpack_remote_memoizable(Deserializer &derez,
-                                      Operation *op, Runtime *runtime);
-    public:
-      Operation *const op;
-      Memoizable *const original; // not a valid pointer on remote nodes
-      const AddressSpaceID origin;
-      const Operation::OpKind kind;
-      const TraceLocalID trace_local_id;
-      const ApEvent completion_event;
-      const bool is_mem_task;
-      const bool is_memo;
+      //virtual Memoizable* clone(Operation *op) { return this; }
     };
 
     /**
@@ -1090,7 +1045,6 @@ namespace Legion {
       virtual bool is_memoizing(void) const { return memo_state != NO_MEMO; }
       virtual bool is_recording(void) const { return memo_state == MEMO_RECORD;}
       inline bool is_replaying(void) const { return memo_state == MEMO_REPLAY; }
-      virtual bool is_memoizable_task(void) const { return false; }
       virtual AddressSpaceID get_origin_space(void) const 
         { return this->runtime->address_space; }
       inline MemoizableState get_memoizable_state(void) const 

@@ -316,11 +316,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      std::set<RtEvent> ready_events;
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready_events.insert(ready);
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -342,14 +339,10 @@ namespace Legion {
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
-      if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -407,7 +400,7 @@ namespace Legion {
       derez.deserialize(applied);
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       // This blocks the virtual channel, but keeps queries in-order 
       // with respect to updates from the same node which is necessary
@@ -2531,8 +2524,7 @@ namespace Legion {
             rez.serialize(collect_event);
             rez.serialize(ready_event);
             rez.serialize(applied_event);
-            trace_info.pack_trace_info<true/*pack operation*/>(rez, 
-                                    applied_events, logical_owner);
+            trace_info.pack_trace_info(rez, applied_events);
           }
           // Add a remote valid reference that will be removed by 
           // the receiver once the changes have been applied
@@ -2651,8 +2643,7 @@ namespace Legion {
                 rez.serialize(collect_event);
                 rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
                 rez.serialize(applied_event);
-                trace_info.pack_trace_info<true/*pack operation*/>(rez, 
-                                            applied_events, it->first);
+                trace_info.pack_trace_info(rez, applied_events);
               }
               runtime->send_view_register_user(it->first, rez);
               applied_events.insert(applied_event);
@@ -2780,8 +2771,7 @@ namespace Legion {
             rez.serialize(index);
             rez.serialize(ready_event);
             rez.serialize(applied);
-            trace_info.pack_trace_info<true/*need op*/>(rez, applied_events, 
-                                                        logical_owner);
+            trace_info.pack_trace_info(rez, applied_events);
           }
           runtime->send_view_find_copy_preconditions_request(logical_owner,rez);
           applied_events.insert(applied);
@@ -4593,8 +4583,7 @@ namespace Legion {
           rez.serialize(collect_event);
           rez.serialize(ready_event);
           rez.serialize(applied_event);
-          trace_info.pack_trace_info<true/*pack operation*/>(rez,
-                                  applied_events, logical_owner);
+          trace_info.pack_trace_info(rez, applied_events);
         }
         // Add a remote valid reference that will be removed by 
         // the receiver once the changes have been applied
@@ -4665,8 +4654,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(ready_event);
           rez.serialize(applied);
-          trace_info.pack_trace_info<true/*need op*/>(rez, applied_events,
-                                                      logical_owner);
+          trace_info.pack_trace_info(rez, applied_events);
         }
         runtime->send_view_find_copy_preconditions_request(logical_owner, rez);
         applied_events.insert(applied);

@@ -524,7 +524,6 @@ namespace Legion {
       virtual void handle_misspeculation(void) = 0;
     public:
       // From Memoizable
-      virtual bool is_memoizable_task(void) const { return true; }
       virtual ApEvent get_memo_completion(void) const;
       virtual void replay_mapping_output(void) { replay_map_task_output(); }
       virtual void set_effects_postcondition(ApEvent postcondition);
