@@ -226,7 +226,7 @@ namespace Legion {
                       IndexSpaceExpression *index_domain, 
                       const void *piece_list, size_t piece_list_size,
                       RegionTreeID tree_id, ApEvent unique, 
-                      bool register_now, bool shadow_instance = false);
+                      bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual ApEvent get_unique_event(void) const { return unique_event; }
@@ -299,7 +299,6 @@ namespace Legion {
       const ApEvent unique_event;
       const void *const piece_list;
       const size_t piece_list_size;
-      const bool shadow_instance;
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
@@ -356,7 +355,7 @@ namespace Legion {
             const PendingRemoteExpression &pending, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use,
             ReductionOpID redop, const void *piece_list, size_t piece_list_size,
-            AddressSpaceID src, bool shadow_instance);
+            AddressSpaceID src);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -373,7 +372,6 @@ namespace Legion {
         const void *const piece_list;
         const size_t piece_list_size;
         const AddressSpaceID source;
-        const bool shadow_instance;
       };
     public:
       IndividualManager(RegionTreeForest *ctx, DistributedID did,
@@ -385,8 +383,7 @@ namespace Legion {
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
                         ApEvent use_event, bool external_instance,
-                        const ReductionOp *op = NULL,
-                        bool shadow_instance = false);
+                        const ReductionOp *op = NULL);
       IndividualManager(const IndividualManager &rhs);
       virtual ~IndividualManager(void);
     public:
@@ -447,7 +444,7 @@ namespace Legion {
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
           LayoutConstraints *constraints, ApEvent use_event,
-          ReductionOpID redop, bool shadow_instance);
+          ReductionOpID redop);
     public:
       virtual bool acquire_instance(ReferenceSource source, 
                                     ReferenceMutator *mutator);
@@ -680,13 +677,12 @@ namespace Legion {
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
           redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-          piece_list_size(0), shadow_instance(false), valid(false) { }
+          piece_list_size(0), valid(false) { }
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       IndexSpaceExpression *expr, FieldSpaceNode *node,
                       RegionTreeID tree_id, const LayoutConstraintSet &cons, 
                       Runtime *rt, MemoryManager *memory, UniqueID cid,
-                      const void *piece_list, size_t piece_list_size, 
-                      bool shadow_instance);
+                      const void *piece_list, size_t piece_list_size); 
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -729,7 +725,6 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *realm_layout;
       void *piece_list;
       size_t piece_list_size;
-      bool shadow_instance;
     public:
       bool valid;
     };
