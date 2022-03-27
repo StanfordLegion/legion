@@ -1567,8 +1567,7 @@ namespace Legion {
                                          ApEvent precondition,
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -1587,7 +1586,7 @@ namespace Legion {
       {
         ApEvent dst_precondition = dst_view->find_copy_preconditions(
             false/*reading*/, 0/*redop*/, fill_mask, fill_expression,
-            op_id, index, applied_events, trace_info);
+            op->get_unique_op_id(), index, applied_events, trace_info);
         if (dst_precondition.exists())
         {
           if (dst_precondition.exists())
@@ -1605,7 +1604,8 @@ namespace Legion {
       }
       else
         compute_copy_offsets(fill_mask, dst_fields); 
-      const ApEvent result = fill_expression->issue_fill(trace_info, dst_fields, 
+      const ApEvent result = fill_expression->issue_fill(op, trace_info,
+                                                 dst_fields,
                                                  fill_view->value->value,
                                                  fill_view->value->value_size,
 #ifdef LEGION_SPY
@@ -1619,8 +1619,8 @@ namespace Legion {
       {
         const RtEvent collect_event = trace_info.get_collect_event();
         dst_view->add_copy_user(false/*reading*/, 0/*redop*/, result, 
-            collect_event, fill_mask, fill_expression, op_id, index,
-            recorded_events, trace_info.recording, runtime->address_space);
+          collect_event, fill_mask, fill_expression, op->get_unique_op_id(),
+          index, recorded_events, trace_info.recording, runtime->address_space);
       }
       if (trace_info.recording)
       {
@@ -1639,8 +1639,7 @@ namespace Legion {
                                          PredEvent predicate_guard, 
                                          ReductionOpID reduction_op_id,
                                          IndexSpaceExpression *copy_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &copy_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -1656,6 +1655,7 @@ namespace Legion {
       assert((across_helper == NULL) || !manage_dst_events);
 #endif
       // Compute the preconditions first
+      const UniqueID op_id = op->get_unique_op_id();
       if (manage_dst_events)
       {
         const ApEvent dst_pre = dst_view->find_copy_preconditions(
@@ -1705,7 +1705,7 @@ namespace Legion {
           dst_fields[idx].set_redop(reduction_op_id, false/*fold*/, 
                                     true/*exclusive*/);
       }
-      const ApEvent result = copy_expression->issue_copy(trace_info, 
+      const ApEvent result = copy_expression->issue_copy(op, trace_info, 
                                          dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                                          source_manager->tree_id, tree_id,
@@ -3151,8 +3151,7 @@ namespace Legion {
                                          ApEvent precondition,
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -3175,8 +3174,7 @@ namespace Legion {
                                          PredEvent predicate_guard, 
                                          ReductionOpID reduction_op_id,
                                          IndexSpaceExpression *copy_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &copy_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,

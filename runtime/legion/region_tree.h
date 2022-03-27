@@ -1264,7 +1264,8 @@ namespace Legion {
       virtual bool is_below_in_tree(IndexPartNode *p, LegionColor &child) const
         { return false; }
     public:
-      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_fill(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
@@ -1273,7 +1274,8 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard) = 0;
-      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_copy(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<Reservation> &reservations,
@@ -1298,7 +1300,8 @@ namespace Legion {
                            const bool possible_aliasing) = 0;
       virtual void unpack_indirections(Deserializer &derez,
                            std::vector<CopyIndirection*> &indirections) = 0;
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_indirect(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopyIndirection*> &indirects,
@@ -1352,7 +1355,7 @@ namespace Legion {
       IndexSpaceExpression* get_canonical_expression(RegionTreeForest *forest);
     protected:
       template<int DIM, typename T>
-      inline ApEvent issue_fill_internal(RegionTreeForest *forest,
+      inline ApEvent issue_fill_internal(RegionTreeForest *forest,Operation *op,
                                const Realm::IndexSpace<DIM,T> &space,
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
@@ -1364,7 +1367,7 @@ namespace Legion {
 #endif
                                ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
-      inline ApEvent issue_copy_internal(RegionTreeForest *forest,
+      inline ApEvent issue_copy_internal(RegionTreeForest *forest,Operation*op,
                                const Realm::IndexSpace<DIM,T> &space,
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
@@ -1394,7 +1397,8 @@ namespace Legion {
       inline void unpack_indirections_internal(Deserializer &derez,
                                std::vector<CopyIndirection*> &indirections);
       template<int DIM, typename T>
-      inline ApEvent issue_indirect_internal(RegionTreeForest *forest,
+      inline ApEvent issue_indirect_internal(RegionTreeForest *forest, 
+                               Operation *op,
                                const Realm::IndexSpace<DIM,T> &space,
                                const PhysicalTraceInfo &trace_info,
                                const std::vector<CopySrcDstField> &dst_fields,
@@ -1627,7 +1631,8 @@ namespace Legion {
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
-      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_fill(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
@@ -1636,7 +1641,8 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
-      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_copy(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<Reservation> &reservations,
@@ -1661,7 +1667,8 @@ namespace Legion {
                            const bool possible_aliasing);
       virtual void unpack_indirections(Deserializer &derez,
                            std::vector<CopyIndirection*> &indirections);
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_indirect(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopyIndirection*> &indirects,
@@ -2676,7 +2683,8 @@ namespace Legion {
                                    const OrderingConstraint &dimension_order,
                                    bool read_only, ApEvent &ready_event);
     public:
-      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_fill(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
@@ -2685,7 +2693,8 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard);
-      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_copy(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<Reservation> &reservations,
@@ -2710,7 +2719,8 @@ namespace Legion {
                            const bool possible_aliasing);
       virtual void unpack_indirections(Deserializer &derez,
                            std::vector<CopyIndirection*> &indirections);
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
+      virtual ApEvent issue_indirect(Operation *op,
+                           const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
                            const std::vector<CopySrcDstField> &src_fields,
                            const std::vector<CopyIndirection*> &indirects,

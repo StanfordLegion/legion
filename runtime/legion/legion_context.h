@@ -1528,7 +1528,7 @@ namespace Legion {
       bool finished_execution;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
-      std::vector<std::pair<size_t,DomainPoint> > context_coordinates;
+      TaskTreeCoordinates                   context_coordinates;
     protected:
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;

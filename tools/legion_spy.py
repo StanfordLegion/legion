@@ -4949,7 +4949,7 @@ class DataflowTraverser(object):
             # If we've already traversed this then we can skip the verification
             if fill.record_version_number(self.state):
                 return False
-            assert self.state.fill_op is fill.fill_op or fill.fill_op.replayed
+            assert self.state.fill_op is fill.fill_op or self.op.replayed
             if self.across:
                 fill.record_across_version_number(self.point, self.dst_field,
                                                   self.dst_tree, self.dst_version)

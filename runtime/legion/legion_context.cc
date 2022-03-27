@@ -2848,7 +2848,7 @@ namespace Legion {
         // Get the coordinates for the parent task
         parent_ctx->compute_task_tree_coordinates(context_coordinates);
         // Then add our coordinates for our task
-        context_coordinates.push_back(std::make_pair(
+        context_coordinates.push_back(ContextCoordinate(
               owner_task->get_context_index(), owner_task->index_point));
       }
       if (!remote_context)
@@ -4019,12 +4019,9 @@ namespace Legion {
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(find_parent_context()->get_context_uid());
       rez.serialize<size_t>(context_coordinates.size());
-      for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
+      for (TaskTreeCoordinates::const_iterator it =
             context_coordinates.begin(); it != context_coordinates.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
+        it->serialize(rez);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -11873,16 +11870,16 @@ namespace Legion {
     {
       if (future.impl == NULL)
         return;
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
+      TaskTreeCoordinates coordinates;
       future.impl->get_future_coordinates(coordinates);
       if (!coordinates.empty())
       {
-        for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
+        for (TaskTreeCoordinates::const_iterator it =
               coordinates.begin(); it != coordinates.end(); it++)
         {
-          hasher.hash(it->first, description);
-          for (int idx = 0; idx < it->second.get_dim(); idx++)
-            hasher.hash(it->second[idx], description);
+          hasher.hash(it->context_index, description);
+          for (int idx = 0; idx < it->index_point.get_dim(); idx++)
+            hasher.hash(it->index_point[idx], description);
         }
       }
       else if (safe_level > 1)
@@ -21021,11 +21018,7 @@ namespace Legion {
       derez.deserialize(num_coordinates);
       context_coordinates.resize(num_coordinates);
       for (unsigned idx = 0; idx < num_coordinates; idx++)
-      {
-        std::pair<size_t,DomainPoint> &coordinate = context_coordinates[idx];
-        derez.deserialize(coordinate.first);
-        derez.deserialize(coordinate.second);
-      }
+        context_coordinates[idx].deserialize(derez);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       bool replicate;
@@ -21309,7 +21302,7 @@ namespace Legion {
       InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
 #endif
       parent_ctx->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(std::make_pair(
+      coordinates.push_back(ContextCoordinate(
             owner_task->get_context_index(), owner_task->index_point));
     }
 

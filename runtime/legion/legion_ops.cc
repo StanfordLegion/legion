@@ -797,7 +797,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace_local_id(unsigned id)
+    void Operation::set_trace_local_id(size_t id)
     //--------------------------------------------------------------------------
     {
       trace_local_id = id;
@@ -1282,7 +1282,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx->compute_task_tree_coordinates(coords);
-      coords.push_back(std::make_pair(context_index, DomainPoint()));
+      coords.push_back(ContextCoordinate(context_index, DomainPoint()));
     }
 
     //--------------------------------------------------------------------------
@@ -2083,206 +2083,6 @@ namespace Legion {
         }
       }
       return true;
-    }
-
-    ///////////////////////////////////////////////////////////// 
-    // Remote Memoizable
-    /////////////////////////////////////////////////////////////
-    
-    //--------------------------------------------------------------------------
-    void Memoizable::pack_remote_memoizable(Serializer &rez, 
-                                            AddressSpaceID target) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<Memoizable*>(const_cast<Memoizable*>(this));
-      const AddressSpaceID origin_space = get_origin_space();
-#ifdef DEBUG_LEGION
-      assert(origin_space != target);
-#endif
-      rez.serialize(origin_space);
-      rez.serialize<Operation::OpKind>(get_memoizable_kind());
-      TraceLocalID tid = get_trace_local_id();
-      rez.serialize(tid.first);
-      rez.serialize(tid.second);
-      rez.serialize(get_memo_completion());
-      rez.serialize<bool>(is_memoizable_task());
-      rez.serialize<bool>(is_memoizing());
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteMemoizable::RemoteMemoizable(Operation *o, Memoizable *orig,
-                                       AddressSpaceID orgn, Operation::OpKind k,
-                                       TraceLocalID tid, ApEvent completion,
-                                       bool is_mem, bool is_m)
-      : op(o), original(orig), origin(orgn), kind(k), trace_local_id(tid),
-        completion_event(completion), is_mem_task(is_mem), is_memo(is_m)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteMemoizable::~RemoteMemoizable(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteMemoizable::is_memoizable_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_mem_task;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteMemoizable::is_recording(void) const
-    //--------------------------------------------------------------------------
-    {
-      // Has to be true if we made this
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteMemoizable::is_memoizing(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_memo;
-    }
-
-    //--------------------------------------------------------------------------
-    AddressSpaceID RemoteMemoizable::get_origin_space(void) const
-    //--------------------------------------------------------------------------
-    {
-      return origin;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalTemplate* RemoteMemoizable::get_template(void) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RemoteMemoizable::get_memo_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-      return completion_event;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteMemoizable::replay_mapping_output(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    Operation* RemoteMemoizable::get_operation(void) const
-    //--------------------------------------------------------------------------
-    {
-      return op;
-    }
-
-    //--------------------------------------------------------------------------
-    Operation::OpKind RemoteMemoizable::get_memoizable_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return kind;
-    }
-
-    //--------------------------------------------------------------------------
-    TraceLocalID RemoteMemoizable::get_trace_local_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return trace_local_id;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RemoteMemoizable::compute_sync_precondition(
-                                              const TraceInfo *trace_info) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteMemoizable::set_effects_postcondition(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteMemoizable::complete_replay(ApEvent complete_event)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    const VersionInfo& RemoteMemoizable::get_version_info(unsigned idx) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *new VersionInfo();
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteMemoizable::pack_remote_memoizable(Serializer &rez,
-                                                  AddressSpaceID target) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(original);
-      rez.serialize(origin);
-      if (origin == target)
-        return;
-      rez.serialize(kind);
-      rez.serialize(trace_local_id.first);
-      rez.serialize(trace_local_id.second);
-      rez.serialize(completion_event);
-      rez.serialize<bool>(is_mem_task);
-      rez.serialize<bool>(is_memo);
-    }
-
-    //--------------------------------------------------------------------------
-    Memoizable* RemoteMemoizable::clone(Operation *newop)
-    //--------------------------------------------------------------------------
-    {
-      return new RemoteMemoizable(newop, original, origin, kind, trace_local_id,
-                                  completion_event, is_mem_task, is_memo);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ Memoizable* RemoteMemoizable::unpack_remote_memoizable(
-                           Deserializer &derez, Operation *op, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      Memoizable *original;
-      derez.deserialize(original);
-      AddressSpaceID origin;
-      derez.deserialize(origin);
-      if (origin == runtime->address_space)
-        return original;
-      Operation::OpKind kind;
-      derez.deserialize(kind);
-      TraceLocalID tid;
-      derez.deserialize(tid.first);
-      derez.deserialize(tid.second);
-      ApEvent completion_event;
-      derez.deserialize(completion_event);
-      bool is_mem_task, is_memo;
-      derez.deserialize<bool>(is_mem_task);
-      derez.deserialize<bool>(is_memo);
-      return new RemoteMemoizable(op, original, origin, kind, tid,
-                                  completion_event, is_mem_task, is_memo);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -5296,7 +5096,7 @@ namespace Legion {
             Runtime::release_reservation(it->first, local_completion);
           }
           if (is_recording())
-            trace_info.record_reservations(this, local_init_precondition,
+            trace_info.record_reservations(local_init_precondition,
                 local_locks, reservation_precondition, local_completion);
         }
         if (src_composite < 0)
@@ -5538,7 +5338,7 @@ namespace Legion {
         }
       }
       if (is_recording())
-        tpl->record_complete_replay(this, copy_complete_event);
+        trace_info.record_complete_replay(copy_complete_event);
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -7781,7 +7581,7 @@ namespace Legion {
       context_index = own->get_ctx_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
-      trace_local_id            = owner->get_trace_local_id().first;
+      trace_local_id            = owner->get_trace_local_id().context_index;
       tpl                       = owner->get_template();
       if (tpl != NULL)
         memo_state              = owner->get_memoizable_state();
@@ -8203,7 +8003,7 @@ namespace Legion {
               execution_precondition = 
                 Runtime::merge_events(&trace_info, execution_preconditions);
             if (is_recording())
-              tpl->record_complete_replay(this, execution_precondition);
+              trace_info.record_complete_replay(execution_precondition);
             // Mark that we finished our mapping now
             if (!map_applied_conditions.empty())
               complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -11703,7 +11503,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
-        tpl->record_complete_replay(this, acquire_complete); 
+        trace_info.record_complete_replay(acquire_complete); 
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -12617,7 +12417,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
-        tpl->record_complete_replay(this, release_complete);
+        trace_info.record_complete_replay(release_complete);
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -18756,7 +18556,7 @@ namespace Legion {
       context_index = own->get_ctx_index();
       execution_fence_event = own->get_execution_fence_event();
       // From Memoizable
-      trace_local_id     = owner->get_trace_local_id().first;
+      trace_local_id     = owner->get_trace_local_id().context_index;
       tpl                = owner->get_template();
       if (tpl != NULL)
         memo_state       = owner->get_memoizable_state();
