@@ -289,6 +289,7 @@ namespace Legion {
         Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
         Mapper::SelectShardingFunctorOutput output;
         output.chosen_functor = UINT_MAX;
+        output.slice_recurse = false;
         mapper->invoke_task_select_sharding_functor(this, input, &output);
         if (output.chosen_functor == UINT_MAX)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -598,6 +599,7 @@ namespace Legion {
       serdez_redop_collective = NULL;
       all_reduce_collective = NULL;
       output_size_collective = NULL;
+      slice_sharding_output = false;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -711,6 +713,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_task_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -720,6 +723,7 @@ namespace Legion {
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      slice_sharding_output = output.slice_recurse;
     }
 
     //--------------------------------------------------------------------------
@@ -788,7 +792,18 @@ namespace Legion {
           node->get_launch_space_domain(shard_domain);
           enumerate_futures(shard_domain);
         }
-        enqueue_ready_operation();
+        // If we still need to slice the task then we can run it 
+        // through the normal path, otherwise we can simply make 
+        // the slice task for these points and put it in the queue
+        if (!slice_sharding_output)
+        {
+          SliceTask *new_slice = this->clone_as_slice_task(internal_space,
+              current_proc, false/*recurse*/, !runtime->stealing_disabled); 
+          slices.push_back(new_slice);
+          trigger_slices();
+        }
+        else
+          enqueue_ready_operation();
       }
     }
 
@@ -2130,6 +2145,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX; 
+      output.slice_recurse = false;
       mapper->invoke_fill_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -2338,6 +2354,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_fill_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -2574,6 +2591,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX; 
+      output.slice_recurse = false;
       mapper->invoke_copy_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -2787,6 +2805,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_copy_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -4241,6 +4260,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_partition_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
