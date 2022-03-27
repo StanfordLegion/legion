@@ -959,7 +959,7 @@ namespace Legion {
             for (TaskTreeCoordinates::const_iterator it =
                   future_coordinates.begin(); it !=
                   future_coordinates.end(); it++)
-              rez.serialize(*it);
+              it->serialize(rez);
           }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);

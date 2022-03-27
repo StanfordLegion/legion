@@ -4021,7 +4021,7 @@ namespace Legion {
       rez.serialize<size_t>(context_coordinates.size());
       for (TaskTreeCoordinates::const_iterator it =
             context_coordinates.begin(); it != context_coordinates.end(); it++)
-        rez.serialize(*it);
+        it->serialize(rez);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -21018,7 +21018,7 @@ namespace Legion {
       derez.deserialize(num_coordinates);
       context_coordinates.resize(num_coordinates);
       for (unsigned idx = 0; idx < num_coordinates; idx++)
-        derez.deserialize(context_coordinates[idx]);
+        context_coordinates[idx].deserialize(derez);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       bool replicate;
