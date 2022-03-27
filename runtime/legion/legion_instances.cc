@@ -1860,9 +1860,7 @@ namespace Legion {
                                          ApEvent precondition,
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
-                                         const size_t op_ctx_index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -1882,7 +1880,7 @@ namespace Legion {
       {
         ApEvent dst_precondition = dst_view->find_copy_preconditions(
             false/*reading*/, 0/*redop*/, fill_mask, fill_expression,
-            op_id, index, applied_events, trace_info);
+            op->get_unique_op_id(), index, applied_events, trace_info);
         if (dst_precondition.exists())
         {
           if (dst_precondition.exists())
@@ -1900,7 +1898,8 @@ namespace Legion {
       }
       else
         compute_copy_offsets(fill_mask, dst_fields); 
-      const ApEvent result = fill_expression->issue_fill(trace_info, dst_fields, 
+      const ApEvent result = fill_expression->issue_fill(op, trace_info,
+                                                 dst_fields,
                                                  fill_view->value->value,
                                                  fill_view->value->value_size,
 #ifdef LEGION_SPY
@@ -1914,8 +1913,8 @@ namespace Legion {
       {
         const RtEvent collect_event = trace_info.get_collect_event();
         dst_view->add_copy_user(false/*reading*/, 0/*redop*/, result, 
-            collect_event, fill_mask, fill_expression, op_id, index,
-            recorded_events, trace_info.recording, runtime->address_space);
+          collect_event, fill_mask, fill_expression, op->get_unique_op_id(),
+          index, recorded_events, trace_info.recording, runtime->address_space);
       }
       if (trace_info.recording)
       {
@@ -1934,9 +1933,7 @@ namespace Legion {
                                          PredEvent predicate_guard, 
                                          ReductionOpID reduction_op_id,
                                          IndexSpaceExpression *copy_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
-                                         const size_t op_ctx_index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &copy_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -1953,6 +1950,7 @@ namespace Legion {
       assert((across_helper == NULL) || !manage_dst_events);
 #endif
       // Compute the preconditions first
+      const UniqueID op_id = op->get_unique_op_id();
       // We'll need to compute our destination precondition no matter what
       if (manage_dst_events)
       {
@@ -2014,7 +2012,7 @@ namespace Legion {
             dst_fields[idx].set_redop(reduction_op_id, false/*fold*/, 
                                       true/*exclusive*/);
         }
-        result = copy_expression->issue_copy(trace_info, dst_fields,
+        result = copy_expression->issue_copy(op, trace_info, dst_fields,
                                              src_fields, reservations,
 #ifdef LEGION_SPY
                                              source_manager->tree_id, tree_id,
@@ -2101,10 +2099,10 @@ namespace Legion {
                 rez.serialize(precondition);
                 rez.serialize(predicate_guard);
                 copy_expression->pack_expression(rez, origin);
-                rez.serialize(op_id);
+                op->pack_remote_operation(rez, origin, applied_events);
                 rez.serialize(index);
                 rez.serialize(*src_mask);
-                trace_info.pack_trace_info<true>(rez, applied_events, origin);
+                trace_info.pack_trace_info(rez, applied_events);
                 rez.serialize(recorded);
                 rez.serialize(applied);
                 if (trace_info.recording)
@@ -2136,7 +2134,7 @@ namespace Legion {
               result = to_trigger;
               collective->perform_collective_reduction(src_view,
                   dst_fields, reservations, precondition, predicate_guard,
-                  copy_expression, op_id, index, *src_mask, trace_info,
+                  copy_expression, op, index, *src_mask, trace_info,
                   recorded_events, applied_events, to_trigger, origin);
             }
           }
@@ -2170,10 +2168,10 @@ namespace Legion {
                 rez.serialize(precondition);
                 rez.serialize(predicate_guard);
                 copy_expression->pack_expression(rez, origin);
-                rez.serialize(op_id);
+                op->pack_remote_operation(rez, origin, applied_events);
                 rez.serialize(index);
                 rez.serialize(*src_mask);
-                trace_info.pack_trace_info<true>(rez, applied_events, origin);
+                trace_info.pack_trace_info(rez, applied_events);
                 rez.serialize(recorded);
                 rez.serialize(applied);
                 if (trace_info.recording)
@@ -2200,7 +2198,7 @@ namespace Legion {
             else
               result = collective->perform_hammer_reduction(src_view,
                   dst_fields, reservations, precondition, predicate_guard,
-                  copy_expression, op_id, index, *src_mask, trace_info,
+                  copy_expression, op, index, *src_mask, trace_info,
                   recorded_events, applied_events, origin);
           }
         }
@@ -2228,11 +2226,11 @@ namespace Legion {
               rez.serialize(precondition);
               rez.serialize(predicate_guard);
               copy_expression->pack_expression(rez, origin);
-              rez.serialize(op_id);
+              op->pack_remote_operation(rez, origin, applied_events);
               rez.serialize(index);
               rez.serialize(*src_mask);
               rez.serialize(location);
-              trace_info.pack_trace_info<true>(rez, applied_events, origin);
+              trace_info.pack_trace_info(rez, applied_events);
               rez.serialize(recorded);
               rez.serialize(applied);
               rez.serialize(to_trigger);             
@@ -2245,7 +2243,7 @@ namespace Legion {
           else
             result = collective->perform_collective_point(src_view,
                 dst_fields, reservations, precondition, predicate_guard,
-                copy_expression, op_id, index, *src_mask, location,
+                copy_expression, op, index, *src_mask, location,
                 trace_info, recorded_events, applied_events);
         }
         if (result.exists() && manage_dst_events)
@@ -2557,7 +2555,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(origin);
           mapping->pack(rez);
-          trace_info.pack_trace_info<true>(rez, applied_events, parent);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(term_event);
           rez.serialize(result);
           rez.serialize(registered);
@@ -2659,8 +2657,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(origin);
           mapping->pack(rez);
-          to_perform.trace_info->pack_trace_info<true>(rez, 
-                                    applied_events, parent);
+          to_perform.trace_info->pack_trace_info(rez, applied_events);
           rez.serialize(term_event);
           rez.serialize(to_perform.ready_event);
           rez.serialize(to_perform.registered);
@@ -2721,9 +2718,8 @@ namespace Legion {
 #endif
       CollectiveMapping *mapping = new CollectiveMapping(derez, mapping_size);
       mapping->add_reference();
-      std::set<RtEvent> ready_events;
       PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events); 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime); 
       ApEvent term_event;
       derez.deserialize(term_event);
       ApUserEvent ready_event;
@@ -2731,14 +2727,8 @@ namespace Legion {
       RtUserEvent registered_event;
       derez.deserialize(registered_event);
 
-      if (!ready_events.empty())
-      {
-        if (ready.exists())
-          ready_events.insert(ready);
-        ready = Runtime::merge_events(ready_events);
-      }
       if (ready.exists() && !ready.has_triggered())
-        ready_events.insert(ready);
+        ready.wait();
 
       manager->process_collective_user_registration(op_ctx_index, index, origin,
           mapping, trace_info, term_event, ready_event, registered_event);
@@ -4459,9 +4449,7 @@ namespace Legion {
                                          ApEvent precondition,
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
-                                         const size_t op_ctx_index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -4499,11 +4487,13 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(predicate_guard);
           fill_expression->pack_expression(rez, origin);
-          rez.serialize(op_id);
+          rez.serialize<bool>(fill_restricted);
+          if (fill_restricted)
+            op->pack_remote_operation(rez, origin, applied_events);
           rez.serialize(index);
-          rez.serialize(op_ctx_index);
+          rez.serialize(op->get_ctx_index());
           rez.serialize(fill_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, origin);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -4531,7 +4521,6 @@ namespace Legion {
             rez.serialize(to_trigger);
           }
           rez.serialize(origin);
-          rez.serialize<bool>(fill_restricted);
         }
         runtime->send_collective_distribute_fill(origin, rez);
         recorded_events.insert(recorded);
@@ -4546,7 +4535,7 @@ namespace Legion {
           result = to_trigger;
         }
         perform_collective_fill(fill_view, dst_view, precondition,
-            predicate_guard, fill_expression, op_id, index, op_ctx_index,
+            predicate_guard, fill_expression, op, index, op->get_ctx_index(),
             fill_mask, trace_info, recorded_events, applied_events,
             to_trigger, local_space, fill_restricted);
       }
@@ -4559,8 +4548,7 @@ namespace Legion {
                                          ApEvent precondition,
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
+                                         Operation *op, const unsigned index,
                                          const size_t op_context_index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
@@ -4574,6 +4562,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
+      assert((op != NULL) || !fill_restricted);
 #endif
       RtEvent analyses_ready;
       const std::vector<CollectiveCopyFillAnalysis*> *local_analyses = NULL;
@@ -4591,10 +4580,18 @@ namespace Legion {
         // trace info for capturing the trace for events we send to 
         // remote nodes, otherwise we just need to wait before doing
         // the fill calls
-        if (trace_info.recording && analyses_ready.exists() && 
-            !analyses_ready.has_triggered())
+        if ((trace_info.recording || (op == NULL)) && 
+            analyses_ready.exists() && !analyses_ready.has_triggered())
           analyses_ready.wait();
+#ifdef DEBUG_LEGION
+        assert(local_analyses != NULL);
+#endif
+        if (op == NULL)
+          op = local_analyses->front()->op;
       }
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+#endif
       const PhysicalTraceInfo &local_info = 
         ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
         local_analyses->front()->trace_info;
@@ -4621,11 +4618,13 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(predicate_guard);
           fill_expression->pack_expression(rez, *it);
-          rez.serialize(op_id);
+          rez.serialize<bool>(fill_restricted);
+          if (fill_restricted)
+            op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
           rez.serialize(op_context_index);
           rez.serialize(fill_mask);
-          local_info.pack_trace_info<true>(rez, applied_events, *it);
+          local_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (local_info.recording)
@@ -4653,7 +4652,6 @@ namespace Legion {
             rez.serialize(child_ready);
           }
           rez.serialize(origin);
-          rez.serialize<bool>(fill_restricted);
         }
         runtime->send_collective_distribute_fill(*it, rez);
         recorded_events.insert(recorded);
@@ -4661,6 +4659,7 @@ namespace Legion {
       }
       // Now we can perform the fills for our instances
       // The precondition will be the same across all our local instances
+      const UniqueID op_id = op->get_unique_op_id();
       ApEvent dst_precondition = dst_view->find_copy_preconditions(
           false/*reading*/, 0/*redop*/, fill_mask, fill_expression,
           op_id, index, applied_events, local_info);
@@ -4687,8 +4686,8 @@ namespace Legion {
                                      dst_fields);
         const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
           trace_info : local_analyses->at(idx)->trace_info;
-        const ApEvent result = fill_expression->issue_fill(inst_info, 
-                                                 dst_fields,
+        const ApEvent result = fill_expression->issue_fill(op,
+                                                 inst_info, dst_fields,
                                                  fill_view->value->value,
                                                  fill_view->value->value_size,
 #ifdef LEGION_SPY
@@ -4749,6 +4748,12 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *fill_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      bool fill_restricted;
+      derez.deserialize<bool>(fill_restricted);
+      Operation *op = NULL;
+      std::set<RtEvent> ready_events;
+      if (fill_restricted)
+        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       UniqueID op_id;
       derez.deserialize(op_id);
       unsigned index;
@@ -4757,9 +4762,9 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       FieldMask fill_mask;
       derez.deserialize(fill_mask);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -4784,8 +4789,7 @@ namespace Legion {
         derez.deserialize(ready);
       AddressSpaceID origin;
       derez.deserialize(origin);
-      bool fill_restricted;
-      derez.deserialize<bool>(fill_restricted);
+      
 
       // Make sure all the distributed collectables are ready
       if (man_ready.exists() && !man_ready.has_triggered())
@@ -4802,7 +4806,7 @@ namespace Legion {
       }
 
       manager->perform_collective_fill(fill_view, dst_view, precondition,
-          predicate_guard, fill_expression, op_id, index, op_ctx_index,
+          predicate_guard, fill_expression, op, index, op_ctx_index,
           fill_mask, trace_info, recorded_events, applied_events, ready,
           origin, fill_restricted);
 
@@ -4814,6 +4818,8 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      if (op != NULL)
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -4823,8 +4829,7 @@ namespace Legion {
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
-                                const UniqueID op_id,
-                                const unsigned index,
+                                Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const Memory location,
                                 const PhysicalTraceInfo &trace_info,
@@ -4838,6 +4843,7 @@ namespace Legion {
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
 #endif
+      const UniqueID op_id = op->get_unique_op_id();
       // Compute the source precondition to get that in flight
       const ApEvent src_pre = src_view->find_copy_preconditions(
           true/*reading*/, 0/*redop*/, copy_mask, copy_expression,
@@ -4880,8 +4886,8 @@ namespace Legion {
 #endif
                                    src_fields);
       // Issue the copy
-      const ApEvent copy_post = copy_expression->issue_copy(trace_info,
-            dst_fields, src_fields, reservations,
+      const ApEvent copy_post = copy_expression->issue_copy(op,
+            trace_info, dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
 #endif
@@ -4927,8 +4933,8 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
+      Operation *op =
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask;
@@ -4936,7 +4942,7 @@ namespace Legion {
       Memory location;
       derez.deserialize(location);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -4956,7 +4962,7 @@ namespace Legion {
 
       const ApEvent result = manager->perform_collective_point(src_view,
           dst_fields, reservations, precondition, predicate_guard,
-          copy_expression, op_id, index, copy_mask, location, trace_info,
+          copy_expression, op, index, copy_mask, location, trace_info,
           recorded_events, applied_events);
 
       Runtime::trigger_event(&trace_info, ready, result);
@@ -4968,6 +4974,7 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -4977,8 +4984,7 @@ namespace Legion {
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
-                                const UniqueID op_id,
-                                const unsigned index,
+                                Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -4988,6 +4994,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(redop > 0);
+      assert(op != NULL);
       assert(result.exists());
       assert(!instances.empty());
       assert(src_view->manager == this);
@@ -5007,6 +5014,7 @@ namespace Legion {
       // Get the precondition for performing reductions to one of our instances
       ApEvent reduce_pre; 
       std::vector<Reservation> local_reservations;
+      const UniqueID op_id = op->get_unique_op_id();
       if (!children.empty() || (instances.size() > 1))
       {
         // Compute the precondition for performing any reductions
@@ -5041,10 +5049,10 @@ namespace Legion {
           rez.serialize(reduce_pre);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, *it);
-          rez.serialize(op_id);
+          op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, *it);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -5100,8 +5108,8 @@ namespace Legion {
                                      instance_events[idx],
 #endif
                                      src_fields);
-        ApEvent local_reduce = copy_expression->issue_copy(trace_info,
-            local_fields, src_fields, local_reservations,
+        ApEvent local_reduce = copy_expression->issue_copy(
+            op, trace_info, local_fields, src_fields, local_reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
 #endif
@@ -5125,8 +5133,8 @@ namespace Legion {
         precondition = Runtime::merge_events(&trace_info, reduce_events);
       }
       // Perform the reduction to the destination
-      const ApEvent reduce_post = copy_expression->issue_copy(trace_info,
-          dst_fields, local_fields, reservations,
+      const ApEvent reduce_post = copy_expression->issue_copy(
+          op, trace_info, dst_fields, local_fields, reservations,
 #ifdef LEGION_SPY
           tree_id, tree_id,
 #endif
@@ -5175,14 +5183,14 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
+      Operation *op =
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -5217,7 +5225,7 @@ namespace Legion {
       }
 
       manager->perform_collective_reduction(src_view, dst_fields, reservations,
-        precondition, predicate_guard, copy_expression, op_id, index,
+        precondition, predicate_guard, copy_expression, op, index,
         copy_mask, trace_info, recorded_events, applied_events, ready, origin);
 
       if (!recorded_events.empty())
@@ -5228,6 +5236,7 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -5238,9 +5247,7 @@ namespace Legion {
                                          PredEvent predicate_guard, 
                                          ReductionOpID reduction_op_id,
                                          IndexSpaceExpression *copy_expression,
-                                         const UniqueID op_id,
-                                         const unsigned index,
-                                         const size_t op_ctx_index,
+                                         Operation *op, const unsigned index,
                                          const FieldMask &copy_mask,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &recorded_events,
@@ -5278,6 +5285,7 @@ namespace Legion {
         // Case 1: the source is an individual manager
         // Copy to one of our instances and then broadcast it
         IndividualManager *source = source_manager->as_individual_manager();
+        const UniqueID op_id = op->get_unique_op_id();
         // Get the precondition as well
         const ApEvent src_pre = src_view->find_copy_preconditions(
             true/*reading*/, 0/*redop*/, copy_mask, copy_expression,
@@ -5325,11 +5333,13 @@ namespace Legion {
             rez.serialize(precondition);
             rez.serialize(predicate_guard);
             copy_expression->pack_expression(rez, origin);
-            rez.serialize(op_id);
+            rez.serialize<bool>(copy_restricted);
+            if (copy_restricted)
+              op->pack_remote_operation(rez, origin, applied_events);
             rez.serialize(index);
-            rez.serialize(op_ctx_index);
+            rez.serialize(op->get_ctx_index());
             rez.serialize(copy_mask);
-            trace_info.pack_trace_info<true>(rez, applied_events, origin);
+            trace_info.pack_trace_info(rez, applied_events);
             rez.serialize(recorded);
             rez.serialize(applied);
             if (trace_info.recording)
@@ -5349,7 +5359,6 @@ namespace Legion {
               rez.serialize(all_done);
             }
             rez.serialize(origin);
-            rez.serialize<bool>(copy_restricted);
           }
           runtime->send_collective_distribute_broadcast(origin, rez);
           recorded_events.insert(recorded);
@@ -5357,7 +5366,7 @@ namespace Legion {
         }
         else
           perform_collective_broadcast(dst_view, src_fields, precondition,
-              predicate_guard, copy_expression, op_id, index, op_ctx_index,
+              predicate_guard, copy_expression, op, index, op->get_ctx_index(),
               copy_mask, trace_info, recorded_events, applied_events,
               copy_done, all_done, all_bar, owner_shard, origin, 
               copy_restricted); 
@@ -5395,9 +5404,8 @@ namespace Legion {
               // We're contained in both mappings so we can do this here
               perform_collective_reducecast(collective, src_view, dst_view,
                   precondition, predicate_guard, copy_expression,
-                  op_id, index, op_ctx_index, copy_mask, trace_info, 
-                  recorded_events, applied_events, all_done, local_space,
-                  copy_restricted);
+                  op, index, copy_mask, trace_info, recorded_events, 
+                  applied_events, all_done, local_space, copy_restricted);
             }
             else
             {
@@ -5414,9 +5422,8 @@ namespace Legion {
               }
               perform_collective_reducecast(collective, src_view, dst_view,
                   precondition, predicate_guard, copy_expression,
-                  op_id, index, op_ctx_index, copy_mask, trace_info,
-                  recorded_events, applied_events, all_done, target,
-                  copy_restricted);
+                  op, index, copy_mask, trace_info, recorded_events, 
+                  applied_events, all_done, target, copy_restricted);
             }
             return all_done; 
           }
@@ -5451,11 +5458,13 @@ namespace Legion {
             rez.serialize(precondition);
             rez.serialize(predicate_guard);
             copy_expression->pack_expression(rez, origin);
-            rez.serialize(op_id);
+            rez.serialize<bool>(copy_restricted);
+            if (copy_restricted)
+              op->pack_remote_operation(rez, origin, applied_events);
             rez.serialize(index);
-            rez.serialize(op_ctx_index);
+            rez.serialize(op->get_ctx_index());
             rez.serialize(copy_mask);
-            trace_info.pack_trace_info<true>(rez, applied_events, origin);
+            trace_info.pack_trace_info(rez, applied_events);
             rez.serialize(recorded);
             rez.serialize(applied);
             if (trace_info.recording)
@@ -5468,7 +5477,6 @@ namespace Legion {
               rez.serialize(all_done);
             rez.serialize(origin);
             rez.serialize(allreduce_tag);
-            rez.serialize<bool>(copy_restricted);
           }
           runtime->send_collective_distribute_pointwise(origin, rez);
           recorded_events.insert(recorded);
@@ -5476,8 +5484,8 @@ namespace Legion {
         }
         else
           perform_collective_pointwise(collective, src_view, dst_view,
-              precondition, predicate_guard, copy_expression, op_id, index,
-              op_ctx_index, copy_mask, trace_info, recorded_events,
+              precondition, predicate_guard, copy_expression, op, index,
+              op->get_ctx_index(), copy_mask, trace_info, recorded_events,
               applied_events, all_done, all_bar, owner_shard, origin,
               allreduce_tag, copy_restricted);
       }
@@ -5492,8 +5500,7 @@ namespace Legion {
                                           ApEvent precondition,
                                           PredEvent predicate_guard,
                                           IndexSpaceExpression *copy_expression,
-                                          const UniqueID op_id,
-                                          const unsigned index,
+                                          Operation *op, const unsigned index,
                                           const size_t op_ctx_index,
                                           const FieldMask &copy_mask,
                                           const PhysicalTraceInfo &trace_info,
@@ -5512,6 +5519,7 @@ namespace Legion {
       assert(dst_view->manager == this);
       assert(src_view->manager == source);
       assert(collective_mapping->contains(local_space));
+      assert((op != NULL) || !copy_restricted);
 #endif
       RtEvent analyses_ready;
       const std::vector<CollectiveCopyFillAnalysis*> *local_analyses = NULL;
@@ -5529,10 +5537,15 @@ namespace Legion {
         // trace info for capturing the trace for events we send to 
         // remote nodes, otherwise we just need to wait before doing
         // the fill calls
-        if (trace_info.recording && analyses_ready.exists() && 
-            !analyses_ready.has_triggered())
+        if ((trace_info.recording || (op == NULL)) && 
+            analyses_ready.exists() && !analyses_ready.has_triggered())
           analyses_ready.wait();
+        if (op == NULL)
+          op = local_analyses->front()->op;
       }
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+#endif
       const PhysicalTraceInfo &local_info = 
         ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
         local_analyses->front()->trace_info;
@@ -5555,11 +5568,13 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, *it);
-          rez.serialize(op_id);
+          rez.serialize<bool>(copy_restricted);
+          if (copy_restricted)
+            op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, *it);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (local_info.recording)
@@ -5580,12 +5595,12 @@ namespace Legion {
           }
           rez.serialize(origin);
           rez.serialize(allreduce_tag);
-          rez.serialize<bool>(copy_restricted);
         }
         runtime->send_collective_distribute_pointwise(*it, rez);
         recorded_events.insert(recorded);
         applied_events.insert(applied);
       }
+      const UniqueID op_id = op->get_unique_op_id();
       // If the source is a reduction manager, this is where we need
       // to perform the all-reduce before issuing the pointwise copies
       if (source->is_reduction_manager())
@@ -5601,7 +5616,7 @@ namespace Legion {
         if (analyses_ready.exists() && !analyses_ready.has_triggered())
           analyses_ready.wait();
         perform_collective_allreduce(red_view, precondition, predicate_guard,
-            copy_expression, op_id, index, copy_mask, local_info,
+            copy_expression, op, index, copy_mask, local_info,
             local_analyses, recorded_events, applied_events, allreduce_tag);
       }
       // Find the precondition for all our local copies
@@ -5663,11 +5678,11 @@ namespace Legion {
             rez.serialize(precondition);
             rez.serialize(predicate_guard);
             copy_expression->pack_expression(rez, src);
-            rez.serialize(op_id);
+            op->pack_remote_operation(rez, src, applied_events);
             rez.serialize(index);
             rez.serialize(copy_mask);
             rez.serialize(location);
-            inst_info.pack_trace_info<true>(rez, applied_events, src);
+            inst_info.pack_trace_info(rez, applied_events);
             rez.serialize(recorded);
             rez.serialize(applied);
             rez.serialize(done);
@@ -5681,7 +5696,7 @@ namespace Legion {
         {
           const ApEvent done = source->perform_collective_point(src_view,
               dst_fields, reservations, precondition, predicate_guard,
-              copy_expression, op_id, index, copy_mask, location,
+              copy_expression, op, index, copy_mask, location,
               inst_info, recorded_events, applied_events);
           if (done.exists())
             local_events.push_back(done);
@@ -5746,17 +5761,21 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
+      bool copy_restricted;
+      derez.deserialize(copy_restricted);
+      Operation *op = NULL;
+      std::set<RtEvent> ready_events;
+      if (copy_restricted)
+        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -5774,9 +5793,7 @@ namespace Legion {
       AddressSpaceID origin;
       derez.deserialize(origin);
       uint64_t allreduce_tag;
-      derez.deserialize(allreduce_tag);
-      bool copy_restricted;
-      derez.deserialize(copy_restricted);
+      derez.deserialize(allreduce_tag); 
 
       if (dst_man_ready.exists() && !dst_man_ready.has_triggered())
         ready_events.insert(dst_man_ready);
@@ -5794,7 +5811,7 @@ namespace Legion {
       }
 
       target->perform_collective_pointwise(manager, src_view, dst_view,
-          precondition, predicate_guard, copy_expression, op_id, index,
+          precondition, predicate_guard, copy_expression, op, index,
           op_ctx_index, copy_mask, trace_info, recorded_events,
           applied_events, all_done, all_bar, owner_shard, origin,
           allreduce_tag, copy_restricted);
@@ -5807,6 +5824,8 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      if (op != NULL)
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -5814,8 +5833,7 @@ namespace Legion {
                                           ApEvent precondition,
                                           PredEvent predicate_guard,
                                           IndexSpaceExpression *copy_expression,
-                                          const UniqueID op_id,
-                                          const unsigned index,
+                                          Operation *op, const unsigned index,
                                           const FieldMask &copy_mask,
                                           const PhysicalTraceInfo &trace_info,
                  const std::vector<CollectiveCopyFillAnalysis*> *local_analyses,
@@ -5826,6 +5844,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(redop > 0);
+      assert(op != NULL);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
 #endif
@@ -5858,6 +5877,7 @@ namespace Legion {
       // non-participants values before doing the butterfly.
 
       // First reduce all our local instances down to the first local instance
+      const UniqueID op_id = op->get_unique_op_id(); 
       const ApEvent pre = view->find_copy_preconditions(false/*reading*/,
           0/*redop*/, copy_mask, copy_expression, op_id, index, 
           applied_events, trace_info); 
@@ -5894,7 +5914,7 @@ namespace Legion {
                                      local_fields.front());
         const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
           trace_info : local_analyses->at(idx)->trace_info;
-        const ApEvent reduced = copy_expression->issue_copy(inst_info,
+        const ApEvent reduced = copy_expression->issue_copy(op, inst_info,
             local_fields.front(), local_fields[idx], reservations.front(),
 #ifdef LEGION_SPY
         tree_id, tree_id,
@@ -5918,14 +5938,14 @@ namespace Legion {
         if (multi_instance)
           // Case 1: each node has multiple instances
           final_inst_index = perform_multi_allreduce(view->fill_view,
-              allreduce_tag, predicate_guard, copy_expression, trace_info,
+              allreduce_tag, op, predicate_guard, copy_expression, trace_info,
               local_analyses, applied_events, instance_preconditions,
               local_fields, reservations, local_init_events,local_final_events);
         else
           // Case 2: there are some nodes that only have one instance
           // Pair up nodes to have them cooperate to have two buffers
           // that we can ping-pong between to do the all-reduce "inplace"
-          perform_single_allreduce(view->fill_view, allreduce_tag,
+          perform_single_allreduce(view->fill_view, allreduce_tag, op,
               predicate_guard, copy_expression, trace_info, applied_events,
               instance_preconditions, local_fields, reservations, 
               local_init_events, local_final_events);
@@ -5961,7 +5981,7 @@ namespace Legion {
           trace_info : local_analyses->at(idx)->trace_info;
         const ApEvent local_pre = Runtime::merge_events(&inst_info,
          instance_preconditions[idx], instance_preconditions[final_inst_index]);
-        const ApEvent local_post = copy_expression->issue_copy(inst_info,
+        const ApEvent local_post = copy_expression->issue_copy(op, inst_info,
             dst_fields, local_fields[final_inst_index], no_reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
@@ -5984,7 +6004,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CollectiveManager::perform_single_allreduce(FillView *fill_view,
                                   const uint64_t allreduce_tag,
-                                  PredEvent predicate_guard,
+                                  Operation *op, PredEvent predicate_guard,
                                   IndexSpaceExpression *copy_expression,
                                   const PhysicalTraceInfo &trace_info,
                                   std::set<RtEvent> &applied_events,
@@ -6029,7 +6049,7 @@ namespace Legion {
               break;
             expected_ranks.push_back(rank);
           }
-          receive_allreduce_stage(allreduce_tag, -1/*stage*/,
+          receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
             instance_preconditions[0], predicate_guard, copy_expression,
             trace_info, applied_events, local_fields[0], reservations[0],
             &expected_ranks.front(), expected_ranks.size(), local_init_events);
@@ -6121,7 +6141,7 @@ namespace Legion {
             // First issue a fill to initialize the instance
             // Realm should ignore the redop data on these fields
             instance_preconditions[0] = copy_expression->issue_fill(
-                trace_info, local_fields[0], reduction_op->identity,
+                op, trace_info, local_fields[0], reduction_op->identity,
                 reduction_op->sizeof_rhs,
 #ifdef LEGION_SPY
                 fill_view->fill_op_uid, field_space_node->handle, tree_id,
@@ -6129,7 +6149,7 @@ namespace Legion {
                 instance_preconditions[0], predicate_guard);
             // Then check to see if we've received any reductions
             std::vector<ApEvent> dst_events;
-            receive_allreduce_stage(allreduce_tag, stage,
+            receive_allreduce_stage(allreduce_tag, stage, op,
                 instance_preconditions[0], predicate_guard, copy_expression,
                 trace_info, applied_events, local_fields[0], reservations[0],
                 &stage_ranks.front(), stage_ranks.size(), dst_events);
@@ -6172,7 +6192,7 @@ namespace Legion {
           std::vector<ApEvent> dst_events;
           // No reservations since this is a straight copy
           const std::vector<Reservation> no_reservations;
-          receive_allreduce_stage(allreduce_tag, -1/*stage*/,
+          receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
               instance_preconditions[0], predicate_guard, copy_expression,
               trace_info, applied_events, local_fields[0], no_reservations,
               &local_rank, 1/*total ranks*/, dst_events);
@@ -6224,7 +6244,7 @@ namespace Legion {
         // No reservations since this is a straight copy
         const std::vector<Reservation> no_reservations;
         std::vector<ApEvent> dst_events;
-        receive_allreduce_stage(allreduce_tag, -1/*stage*/,
+        receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
             instance_preconditions[0], predicate_guard, copy_expression,
             trace_info, applied_events, local_fields[0], no_reservations,
             &target_rank, 1/*total ranks*/, dst_events);
@@ -6241,7 +6261,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     unsigned CollectiveManager::perform_multi_allreduce(FillView *fill_view,
                                   const uint64_t allreduce_tag,
-                                  PredEvent predicate_guard,
+                                  Operation *op, PredEvent predicate_guard,
                                   IndexSpaceExpression *copy_expression,
                                   const PhysicalTraceInfo &trace_info,
                 const std::vector<CollectiveCopyFillAnalysis*> *local_analyses,
@@ -6274,7 +6294,7 @@ namespace Legion {
         if (collective_mapping->size() <= size_t(remainder_rank))
           remainder_rank = -1;
         if (remainder_rank >= 0)
-          receive_allreduce_stage(allreduce_tag, -1/*stage*/,
+          receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
               instance_preconditions[0], predicate_guard, copy_expression,
               trace_info, applied_events, local_fields[0], reservations[0],
               &remainder_rank, 1/*total ranks*/, local_init_events);
@@ -6331,7 +6351,7 @@ namespace Legion {
           const PhysicalTraceInfo &dst_info = (local_analyses == NULL) ?
             trace_info : local_analyses->at(dst_inst_index)->trace_info;
           instance_preconditions[dst_inst_index] =
-            copy_expression->issue_fill(dst_info,
+            copy_expression->issue_fill(op, dst_info,
                 local_fields[dst_inst_index],
                 reduction_op->identity, reduction_op->sizeof_rhs,
 #ifdef LEGION_SPY
@@ -6343,7 +6363,7 @@ namespace Legion {
           ApEvent local_precondition = Runtime::merge_events(&dst_info,
               instance_preconditions[src_inst_index],
               instance_preconditions[dst_inst_index]);
-          const ApEvent local_post = copy_expression->issue_copy(dst_info,
+          const ApEvent local_post = copy_expression->issue_copy(op, dst_info,
               local_fields[dst_inst_index], local_fields[src_inst_index],
               reservations[dst_inst_index],
 #ifdef LEGION_SPY
@@ -6363,7 +6383,7 @@ namespace Legion {
               Runtime::merge_events(&src_info, src_events);
           // Now check to see if we're received any messages
           // for this stage, and if not make place holders for them
-          receive_allreduce_stage(allreduce_tag, stage,
+          receive_allreduce_stage(allreduce_tag, stage, op,
               instance_preconditions[dst_inst_index], predicate_guard,
               copy_expression, dst_info, applied_events, 
               local_fields[dst_inst_index], reservations[dst_inst_index],
@@ -6422,7 +6442,7 @@ namespace Legion {
           local_fields[0][idx].set_redop(0/*redop*/, false/*fold*/);
         std::vector<ApEvent> dst_events;
         const std::vector<Reservation> no_reservations;
-        receive_allreduce_stage(allreduce_tag, -1/*stage*/,
+        receive_allreduce_stage(allreduce_tag, -1/*stage*/, op,
             instance_preconditions[0], predicate_guard, copy_expression,
             trace_info, applied_events, local_fields[0], no_reservations,
             &mirror_rank, 1/*total ranks*/, dst_events);
@@ -6491,7 +6511,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectiveManager::receive_allreduce_stage(
-                            const uint64_t allreduce_tag, const int stage,
+                            const uint64_t allreduce_tag, 
+                            const int stage, Operation *op,
                             ApEvent dst_precondition, PredEvent predicate_guard,
                             IndexSpaceExpression *copy_expression,
                             const PhysicalTraceInfo &trace_info,
@@ -6528,6 +6549,7 @@ namespace Legion {
           assert(remaining_stages.find(key) == remaining_stages.end());
 #endif
           AllReduceStage &pending = remaining_stages[key];
+          pending.op = op;
           pending.copy_expression = copy_expression;
           copy_expression->add_nested_expression_reference(
               this->did, applied_events);
@@ -6556,8 +6578,8 @@ namespace Legion {
       {
         const ApEvent pre = Runtime::merge_events(&trace_info,
           it->src_precondition, dst_precondition);
-        const ApEvent post = copy_expression->issue_copy(trace_info,
-            dst_fields, it->src_fields, reservations,
+        const ApEvent post = copy_expression->issue_copy(
+            op, trace_info, dst_fields, it->src_fields, reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
 #endif
@@ -6623,8 +6645,8 @@ namespace Legion {
           finder->second.trace_info, src_precondition,
           finder->second.dst_precondition);
       const ApEvent copy_post = finder->second.copy_expression->issue_copy(
-          *(finder->second.trace_info), finder->second.dst_fields, 
-          src_fields, finder->second.reservations,
+          finder->second.op, *(finder->second.trace_info),
+          finder->second.dst_fields, src_fields, finder->second.reservations,
 #ifdef LEGION_SPY
           tree_id, tree_id,
 #endif
@@ -6749,8 +6771,7 @@ namespace Legion {
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
-                                const UniqueID op_id,
-                                const unsigned index,
+                                Operation *op, const unsigned index,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
@@ -6768,6 +6789,7 @@ namespace Legion {
       assert(dst_view->manager == this);
       assert(collective_mapping != NULL);
       assert(collective_mapping->contains(local_space));
+      assert((op != NULL) || !copy_restricted);
 #endif
       RtEvent analyses_ready;
       const std::vector<CollectiveCopyFillAnalysis*> *local_analyses = NULL;
@@ -6785,13 +6807,19 @@ namespace Legion {
         // trace info for capturing the trace for events we send to 
         // remote nodes, otherwise we just need to wait before doing
         // the fill calls
-        if (trace_info.recording && analyses_ready.exists() && 
-            !analyses_ready.has_triggered())
+        if ((trace_info.recording || (op == NULL)) && 
+            analyses_ready.exists() && !analyses_ready.has_triggered())
           analyses_ready.wait();
+        if (op == NULL)
+          op = local_analyses->front()->op;
       }
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+#endif
       const PhysicalTraceInfo &local_info = 
         ((local_analyses == NULL) || !trace_info.recording) ? trace_info : 
         local_analyses->front()->trace_info;
+      const UniqueID op_id = op->get_unique_op_id();
       // Do the copy to our local instance first
       const ApEvent dst_pre = dst_view->find_copy_preconditions(
           false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
@@ -6813,8 +6841,8 @@ namespace Legion {
 #endif
                                    local_fields);
       const std::vector<Reservation> no_reservations;
-      const ApEvent copy_post = copy_expression->issue_copy(local_info,
-          local_fields, src_fields, no_reservations,
+      const ApEvent copy_post = copy_expression->issue_copy(
+          op, local_info, local_fields, src_fields, no_reservations,
 #ifdef LEGION_SPY
           tree_id, tree_id,
 #endif
@@ -6854,11 +6882,14 @@ namespace Legion {
           rez.serialize(copy_post);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, *it);
+          rez.serialize<bool>(copy_restricted);
+          if (copy_restricted)
+            op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(op_id);
           rez.serialize(index);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
-          local_info.pack_trace_info<true>(rez, applied_events, *it);
+          local_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (local_info.recording)
@@ -6892,7 +6923,6 @@ namespace Legion {
             rez.serialize(done);
           }
           rez.serialize(origin);
-          rez.serialize<bool>(copy_restricted);
         }
         runtime->send_collective_distribute_broadcast(*it, rez);
         recorded_events.insert(recorded);
@@ -6916,8 +6946,8 @@ namespace Legion {
                                      dst_fields);
         const PhysicalTraceInfo &inst_info = (local_analyses == NULL) ?
           trace_info : local_analyses->at(idx)->trace_info;
-        ApEvent local_copy = copy_expression->issue_copy(inst_info,
-            dst_fields, local_fields, no_reservations,
+        ApEvent local_copy = copy_expression->issue_copy(
+            op, inst_info, dst_fields, local_fields, no_reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
 #endif
@@ -6987,8 +7017,11 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
+      bool copy_restricted;
+      derez.deserialize(copy_restricted);
+      Operation *op = NULL;
+      if (copy_restricted)
+        op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       size_t op_ctx_index;
@@ -6996,7 +7029,7 @@ namespace Legion {
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7025,9 +7058,7 @@ namespace Legion {
         derez.deserialize(all_done);
       }
       AddressSpaceID origin;
-      derez.deserialize(origin);
-      bool copy_restricted;
-      derez.deserialize(copy_restricted);
+      derez.deserialize(origin); 
 
       if (man_ready.exists() && !man_ready.has_triggered())
         ready_events.insert(man_ready);
@@ -7041,7 +7072,7 @@ namespace Legion {
       }
 
       manager->perform_collective_broadcast(dst_view, src_fields, precondition,
-          predicate_guard, copy_expression, op_id, index, op_ctx_index,
+          predicate_guard, copy_expression, op, index, op_ctx_index,
           copy_mask, trace_info, recorded_events, applied_events, ready,
           all_done, all_bar, owner_shard, origin, copy_restricted);
 
@@ -7053,6 +7084,8 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      if (op != NULL)
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -7063,9 +7096,7 @@ namespace Legion {
                                           ApEvent precondition,
                                           PredEvent predicate_guard,
                                           IndexSpaceExpression *copy_expression,
-                                          const UniqueID op_id,
-                                          const unsigned index,
-                                          const size_t op_ctx_index,
+                                          Operation *op, const unsigned index,
                                           const FieldMask &copy_mask,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &recorded_events,
@@ -7076,6 +7107,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(op != NULL);
       assert(dst_view->manager == this);
       assert(src_view->manager == source);
       assert(collective_mapping != NULL);
@@ -7097,11 +7129,10 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, target);
-          rez.serialize(op_id);
+          op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
-          rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, target);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           rez.serialize(all_done);
@@ -7112,6 +7143,7 @@ namespace Legion {
         applied_events.insert(applied);
         return;
       }
+      const UniqueID op_id = op->get_unique_op_id();
       // Perform the collective reduction first on the source
       const ApEvent reduce_pre = dst_view->find_copy_preconditions(
           false/*reding*/, 0/*redop*/, copy_mask, copy_expression,
@@ -7158,10 +7190,10 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, origin);
-          rez.serialize(op_id);
+          op->pack_remote_operation(rez, origin, applied_events); 
           rez.serialize(index);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, origin);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -7191,7 +7223,7 @@ namespace Legion {
           Runtime::create_ap_user_event(&trace_info);
         source->perform_collective_reduction(src_view, local_fields,
             reservations, precondition, predicate_guard, copy_expression,
-            op_id, index, copy_mask, trace_info, recorded_events, 
+            op, index, copy_mask, trace_info, recorded_events, 
             applied_events, to_trigger, origin);
         reduced = to_trigger;
       }
@@ -7224,11 +7256,13 @@ namespace Legion {
           rez.serialize(reduced);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, *it);
-          rez.serialize(op_id);
+          rez.serialize<bool>(copy_restricted);
+          if (copy_restricted)
+            op->pack_remote_operation(rez, origin, applied_events); 
           rez.serialize(index);
-          rez.serialize(op_ctx_index);
+          rez.serialize(op->get_ctx_index());
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, *it);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -7261,7 +7295,6 @@ namespace Legion {
             rez.serialize(all);
           }
           rez.serialize(origin);
-          rez.serialize<bool>(copy_restricted);
         }
         runtime->send_collective_distribute_broadcast(origin, rez);
         recorded_events.insert(recorded);
@@ -7280,8 +7313,8 @@ namespace Legion {
 #endif
                                      local_fields);
         const std::vector<Reservation> no_reservations;
-        ApEvent local_copy = copy_expression->issue_copy(trace_info,
-            dst_fields, local_fields, no_reservations,
+        ApEvent local_copy = copy_expression->issue_copy(
+            op, trace_info, dst_fields, local_fields, no_reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
 #endif
@@ -7363,17 +7396,16 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
+      std::set<RtEvent> ready_events;
+      Operation *op =
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events); 
       unsigned index;
       derez.deserialize(index);
-      size_t op_ctx_index;
-      derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
-      std::set<RtEvent> recorded_events, ready_events, applied_events;
+      std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7398,8 +7430,8 @@ namespace Legion {
       }
 
       target->perform_collective_reducecast(manager, src_view, dst_view,
-          precondition, predicate_guard, copy_expression, op_id, index,
-          op_ctx_index, copy_mask, trace_info, recorded_events, applied_events,
+          precondition, predicate_guard, copy_expression, op, index,
+          copy_mask, trace_info, recorded_events, applied_events,
           all_done, runtime->address_space, copy_restricted);
 
       if (!recorded_events.empty())
@@ -7410,6 +7442,7 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -7419,8 +7452,7 @@ namespace Legion {
                                 ApEvent precondition,
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
-                                const UniqueID op_id,
-                                const unsigned index,
+                                Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -7430,6 +7462,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(redop > 0);
+      assert(op != NULL);
       assert(!instances.empty());
       assert(src_view->manager == this);
       assert(collective_mapping != NULL);
@@ -7460,10 +7493,10 @@ namespace Legion {
           rez.serialize(precondition);
           rez.serialize(predicate_guard);
           copy_expression->pack_expression(rez, *it);
-          rez.serialize(op_id);
+          op->pack_remote_operation(rez, *it, applied_events); 
           rez.serialize(index);
           rez.serialize(copy_mask);
-          trace_info.pack_trace_info<true>(rez, applied_events, *it);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(recorded);
           rez.serialize(applied);
           if (trace_info.recording)
@@ -7487,10 +7520,11 @@ namespace Legion {
           }
           rez.serialize(origin);
         }
-        runtime->send_collective_hammer_reduction(origin, rez);
+        runtime->send_collective_hammer_reduction(*it, rez);
         recorded_events.insert(recorded);
         applied_events.insert(applied);
       }
+      const UniqueID op_id = op->get_unique_op_id();
       // Now we can perform our reduction copies to the destination
       // Get the source precondition for the copy
       const ApEvent src_pre = src_view->find_copy_preconditions(
@@ -7514,8 +7548,8 @@ namespace Legion {
                                      instance_events[idx],
 #endif
                                      src_fields);
-        const ApEvent copy_post = copy_expression->issue_copy(trace_info,
-            dst_fields, src_fields, reservations,
+        const ApEvent copy_post = copy_expression->issue_copy(
+            op, trace_info, dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
             tree_id, tree_id,
 #endif
@@ -7572,14 +7606,14 @@ namespace Legion {
       derez.deserialize(predicate_guard);
       IndexSpaceExpression *copy_expression =
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
+      Operation *op =
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7613,7 +7647,7 @@ namespace Legion {
 
       const ApEvent result = manager->perform_hammer_reduction(src_view,
           dst_fields, reservations, precondition, predicate_guard,
-          copy_expression, op_id, index, copy_mask, trace_info,
+          copy_expression, op, index, copy_mask, trace_info,
           recorded_events, applied_events, origin);
 
       Runtime::trigger_event(&trace_info, ready, result);
@@ -7625,6 +7659,7 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+      delete op;
     }
 
     //--------------------------------------------------------------------------

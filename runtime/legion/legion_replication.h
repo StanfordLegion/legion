@@ -1545,6 +1545,8 @@ namespace Legion {
     protected:
       ShardingGatherCollective *sharding_collective;
 #endif
+    protected:
+      bool slice_sharding_output;
     };
 
     /**

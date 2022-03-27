@@ -286,10 +286,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
-                                    AddressSpaceID local, Memoizable *memo, 
-                                    PhysicalTemplate *tpl, RtUserEvent applied,
-                                    RtEvent collect)
-      : runtime(rt), origin_space(origin), local_space(local), memoizable(memo),
+                                 AddressSpaceID local, const TraceLocalID &tlid,
+                                 PhysicalTemplate *tpl, RtUserEvent applied,
+                                 RtEvent collect)
+      : runtime(rt), origin_space(origin), local_space(local),
         remote_tpl(tpl), applied_event(applied), collect_event(collect)
     //--------------------------------------------------------------------------
     {
@@ -307,10 +307,6 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied_event);
-      // Clean up our memoizable object if necessary
-      if ((memoizable != NULL) && 
-          (memoizable->get_origin_space() != local_space))
-        delete memoizable;
     }
 
     //--------------------------------------------------------------------------
@@ -345,12 +341,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_get_term_event(Memoizable *memo)
+    void RemoteTraceRecorder::record_get_term_event(ApEvent lhs,
+                                     unsigned op_kind, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -360,14 +354,16 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_GET_TERM);
           rez.serialize(applied);
-          memo->pack_remote_memoizable(rez, origin_space);
+          rez.serialize(lhs);
+          rez.serialize(op_kind);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_get_term_event(memo);
+        remote_tpl->record_get_term_event(lhs, op_kind, tlid);
     }
 
     //--------------------------------------------------------------------------
@@ -398,12 +394,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_create_ap_user_event(
-                                              ApUserEvent lhs, Memoizable *memo)
+                                      ApUserEvent lhs, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -414,24 +407,21 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_CREATE_USER_EVENT);
           rez.serialize(applied);
           rez.serialize(lhs);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_create_ap_user_event(lhs, memo);
+        remote_tpl->record_create_ap_user_event(lhs, tlid);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                                   Memoizable *memo)
+                                                   const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -443,83 +433,71 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(lhs);
           rez.serialize(rhs);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_trigger_event(lhs, rhs, memo);
+        remote_tpl->record_trigger_event(lhs, rhs, tlid);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_merge_events(ApEvent &lhs, ApEvent rhs,
-                                                  Memoizable *memo)
+                                                  const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
         rhs_events.insert(rhs);
-        record_merge_events(lhs, rhs_events, memo);
+        record_merge_events(lhs, rhs_events, tlid);
       }
       else
-        remote_tpl->record_merge_events(lhs, rhs, memo);
+        remote_tpl->record_merge_events(lhs, rhs, tlid);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_merge_events(ApEvent &lhs, ApEvent e1,
-                                                  ApEvent e2, Memoizable *memo)
+                                           ApEvent e2, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
         rhs_events.insert(e1);
         rhs_events.insert(e2);
-        record_merge_events(lhs, rhs_events, memo);
+        record_merge_events(lhs, rhs_events, tlid);
       }
       else
-        remote_tpl->record_merge_events(lhs, e1, e2, memo);
+        remote_tpl->record_merge_events(lhs, e1, e2, tlid);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_merge_events(ApEvent &lhs, ApEvent e1,
                                                   ApEvent e2, ApEvent e3,
-                                                  Memoizable *memo)
+                                                  const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         std::set<ApEvent> rhs_events;
         rhs_events.insert(e1);
         rhs_events.insert(e2);
         rhs_events.insert(e3);
-        record_merge_events(lhs, rhs_events, memo);
+        record_merge_events(lhs, rhs_events, tlid);
       }
       else
-        remote_tpl->record_merge_events(lhs, e1, e2, e3, memo);
+        remote_tpl->record_merge_events(lhs, e1, e2, e3, tlid);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_merge_events(ApEvent &lhs,
                                                   const std::set<ApEvent>& rhs,
-                                                  Memoizable *memo)
+                                                  const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -531,7 +509,7 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize(&lhs);
           rez.serialize(lhs);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize<size_t>(rhs.size());
           for (std::set<ApEvent>::const_iterator it = 
                 rhs.begin(); it != rhs.end(); it++)
@@ -542,18 +520,15 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_merge_events(lhs, rhs, memo);
+        remote_tpl->record_merge_events(lhs, rhs, tlid);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_merge_events(ApEvent &lhs,
                                                 const std::vector<ApEvent>& rhs,
-                                                Memoizable *memo)
+                                                const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -565,7 +540,7 @@ namespace Legion {
           rez.serialize(done);
           rez.serialize(&lhs);
           rez.serialize(lhs);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize<size_t>(rhs.size());
           for (std::vector<ApEvent>::const_iterator it = 
                 rhs.begin(); it != rhs.end(); it++)
@@ -576,7 +551,7 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_merge_events(lhs, rhs, memo);
+        remote_tpl->record_merge_events(lhs, rhs, tlid);
     }
 
     //--------------------------------------------------------------------------
@@ -649,8 +624,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_copy(Memoizable *memo, ApEvent &lhs,
-                                             IndexSpaceExpression *expr,
+    void RemoteTraceRecorder::record_issue_copy(const TraceLocalID &tlid,
+                                 ApEvent &lhs, IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
                                  const std::vector<Reservation>& reservations,
@@ -662,9 +637,6 @@ namespace Legion {
                                              PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -674,7 +646,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ISSUE_COPY);
           rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -702,7 +674,7 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_issue_copy(memo, lhs, expr, src_fields,
+        remote_tpl->record_issue_copy(tlid, lhs, expr, src_fields,
                               dst_fields, reservations,
 #ifdef LEGION_SPY
                               src_tree_id, dst_tree_id,
@@ -757,7 +729,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_indirect(Memoizable *memo, 
+    void RemoteTraceRecorder::record_issue_indirect(const TraceLocalID &tlid, 
                              ApEvent &lhs, IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
@@ -769,9 +741,6 @@ namespace Legion {
                              ApEvent tracing_precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -781,7 +750,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ISSUE_INDIRECT);
           rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -809,7 +778,7 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_issue_indirect(memo, lhs, expr, src_fields,
+        remote_tpl->record_issue_indirect(tlid, lhs, expr, src_fields,
                                           dst_fields, indirections,
 #ifdef LEGION_SPY
                                           unique_indirections_identifier,
@@ -857,12 +826,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_issue_fill(Memoizable *memo, ApEvent &lhs,
-                                             IndexSpaceExpression *expr,
+    void RemoteTraceRecorder::record_issue_fill(const TraceLocalID &tlid,
+                                 ApEvent &lhs, IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField> &fields,
                                              const void *fill_value, 
                                              size_t fill_size,
 #ifdef LEGION_SPY
+                                             UniqueID fill_uid,
                                              FieldSpace handle,
                                              RegionTreeID tree_id,
 #endif
@@ -870,9 +840,6 @@ namespace Legion {
                                              PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -882,7 +849,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_ISSUE_FILL);
           rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
           expr->pack_expression(rez, origin_space);
@@ -892,6 +859,7 @@ namespace Legion {
           rez.serialize(fill_size);
           rez.serialize(fill_value, fill_size);
 #ifdef LEGION_SPY
+          rez.serialize(fill_uid);
           rez.serialize(handle);
           rez.serialize(tree_id);
 #endif
@@ -903,10 +871,10 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_issue_fill(memo, lhs, expr, fields, 
+        remote_tpl->record_issue_fill(tlid, lhs, expr, fields, 
                                       fill_value, fill_size, 
 #ifdef LEGION_SPY
-                                      handle, tree_id,
+                                      fill_uid, handle, tree_id,
 #endif
                                       precondition, pred_guard);
     }
@@ -948,7 +916,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_op_view(Memoizable *memo,
+    void RemoteTraceRecorder::record_op_view(const TraceLocalID &tlid,
                                              unsigned idx,
                                              InstanceView *view,
                                              RegionNode *node,
@@ -958,9 +926,6 @@ namespace Legion {
                                              std::set<RtEvent> &effects)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event(); 
@@ -970,7 +935,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_OP_VIEW);
           rez.serialize(applied);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(idx);
           rez.serialize(view->did);
           rez.serialize(node->handle);
@@ -983,18 +948,15 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_op_view(memo, idx, view, node, usage, 
+        remote_tpl->record_op_view(tlid, idx, view, node, usage, 
                                    user_mask, update_validity, effects);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_set_op_sync_event(ApEvent &lhs, 
-                                                       Memoizable *memo)
+                                                       const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -1004,7 +966,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_SET_OP_SYNC);
           rez.serialize(done);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(&lhs);
           rez.serialize(lhs);
         }
@@ -1013,7 +975,7 @@ namespace Legion {
         done.wait();
       }
       else
-        remote_tpl->record_set_op_sync_event(lhs, memo);
+        remote_tpl->record_set_op_sync_event(lhs, tlid);
     }
 
     //--------------------------------------------------------------------------
@@ -1026,7 +988,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(memoizable->get_trace_local_id() == tlid);
       assert(output.future_locations.size() == future_size_bounds.size());
       assert(coords.size() == future_size_bounds.size());
 #endif
@@ -1039,8 +1000,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_RECORD_MAPPER_OUTPUT);
           rez.serialize(applied);
-          rez.serialize(tlid.first);
-          rez.serialize(tlid.second);
+          tlid.serialize(rez);
           // We actually only need a few things here  
           rez.serialize<size_t>(output.target_procs.size());
           for (unsigned idx = 0; idx < output.target_procs.size(); idx++)
@@ -1059,10 +1019,7 @@ namespace Legion {
             for (TaskTreeCoordinates::const_iterator it =
                   future_coordinates.begin(); it !=
                   future_coordinates.end(); it++)
-            {
-              rez.serialize(it->first);
-              rez.serialize(it->second);
-            }
+              it->serialize(rez);
           }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
@@ -1082,13 +1039,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_set_effects(Memoizable *memo, 
+    void RemoteTraceRecorder::record_set_effects(const TraceLocalID &tlid, 
                                                  ApEvent &rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event();
@@ -1098,7 +1052,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_SET_EFFECTS);
           rez.serialize(applied);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(rhs);
         }
         runtime->send_remote_trace_update(origin_space, rez);
@@ -1106,17 +1060,14 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_set_effects(memo, rhs);
+        remote_tpl->record_set_effects(tlid, rhs);
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_complete_replay(Memoizable *memo, 
+    void RemoteTraceRecorder::record_complete_replay(const TraceLocalID &tlid, 
                                                      ApEvent rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent applied = Runtime::create_rt_user_event();
@@ -1126,7 +1077,7 @@ namespace Legion {
           rez.serialize(remote_tpl);
           rez.serialize(REMOTE_TRACE_COMPLETE_REPLAY);
           rez.serialize(applied);
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
           rez.serialize(rhs);
         }
         runtime->send_remote_trace_update(origin_space, rez);
@@ -1134,18 +1085,15 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_complete_replay(memo, rhs);
+        remote_tpl->record_complete_replay(tlid, rhs);
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTraceRecorder::record_reservations(Memoizable *memo,
+    void RemoteTraceRecorder::record_reservations(const TraceLocalID &tlid,
                   ApEvent &lhs, const std::map<Reservation,bool> &reservations,
                   ApEvent precondition, ApEvent postcondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(memoizable == memo);
-#endif
       if (local_space != origin_space)
       {
         RtUserEvent done = Runtime::create_rt_user_event(); 
@@ -1166,20 +1114,20 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize<bool>(it->second);
           }
-          memo->pack_remote_memoizable(rez, origin_space);
+          tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
         done.wait();
       }
       else
-        remote_tpl->record_reservations(memo, lhs, reservations, 
+        remote_tpl->record_reservations(tlid, lhs, reservations, 
                                         precondition, postcondition);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
-                        Deserializer &derez, Runtime *runtime, Memoizable *memo)
+                Deserializer &derez, Runtime *runtime, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
       AddressSpaceID origin_space;
@@ -1191,7 +1139,7 @@ namespace Legion {
       RtEvent collect_event;
       derez.deserialize(collect_event);
       return new RemoteTraceRecorder(runtime, origin_space, 
-                                     runtime->address_space, memo,
+                                     runtime->address_space, tlid,
                                      remote_tpl, applied_event, collect_event);
     }
 
@@ -1211,12 +1159,14 @@ namespace Legion {
           {
             RtUserEvent applied;
             derez.deserialize(applied);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            tpl->record_get_term_event(memo);
+            ApEvent lhs;
+            derez.deserialize(lhs);
+            unsigned op_kind;
+            derez.deserialize(op_kind);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
+            tpl->record_get_term_event(lhs, op_kind, tlid);
             Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              tpl->record_remote_memoizable(memo);
             break;
           }
         case REMOTE_TRACE_REQUEST_TERM_EVENT:
@@ -1247,12 +1197,10 @@ namespace Legion {
             derez.deserialize(applied);
             ApUserEvent lhs;
             derez.deserialize(lhs);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            tpl->record_create_ap_user_event(lhs, memo);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
+            tpl->record_create_ap_user_event(lhs, tlid);
             Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_TRIGGER_EVENT:
@@ -1263,12 +1211,10 @@ namespace Legion {
             derez.deserialize(lhs);
             ApEvent rhs;
             derez.deserialize(rhs);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
-            tpl->record_trigger_event(lhs, rhs, memo);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
+            tpl->record_trigger_event(lhs, rhs, tlid);
             Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_MERGE_EVENTS:
@@ -1279,8 +1225,8 @@ namespace Legion {
             derez.deserialize(event_ptr);
             ApEvent lhs;
             derez.deserialize(lhs);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             size_t num_rhs;
             derez.deserialize(num_rhs);
             const ApEvent lhs_copy = lhs;
@@ -1289,7 +1235,7 @@ namespace Legion {
               ApEvent e1, e2;
               derez.deserialize(e1);
               derez.deserialize(e2);
-              tpl->record_merge_events(lhs, e1, e2, memo);
+              tpl->record_merge_events(lhs, e1, e2, tlid);
             }
             else if (num_rhs == 3)
             {
@@ -1297,7 +1243,7 @@ namespace Legion {
               derez.deserialize(e1);
               derez.deserialize(e2);
               derez.deserialize(e3);
-              tpl->record_merge_events(lhs, e1, e2, e3, memo);
+              tpl->record_merge_events(lhs, e1, e2, e3, tlid);
             }
             else
             {
@@ -1307,7 +1253,7 @@ namespace Legion {
                 ApEvent event;
                 derez.deserialize(rhs_events[idx]);
               }
-              tpl->record_merge_events(lhs, rhs_events, memo);
+              tpl->record_merge_events(lhs, rhs_events, tlid);
             }
             if (lhs != lhs_copy)
             {
@@ -1323,16 +1269,14 @@ namespace Legion {
             }
             else // didn't change so just trigger
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_ISSUE_COPY:
           {
             RtUserEvent done;
             derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1366,7 +1310,7 @@ namespace Legion {
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
-            tpl->record_issue_copy(memo, lhs, expr,
+            tpl->record_issue_copy(tlid, lhs, expr,
                                    src_fields, dst_fields, reservations,
 #ifdef LEGION_SPY
                                    src_tree_id, dst_tree_id,
@@ -1386,8 +1330,6 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_COPY_VIEWS:
@@ -1453,8 +1395,8 @@ namespace Legion {
           {
             RtUserEvent done;
             derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1486,7 +1428,7 @@ namespace Legion {
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
-            tpl->record_issue_indirect(memo, lhs, expr, src_fields,
+            tpl->record_issue_indirect(tlid, lhs, expr, src_fields,
                                        dst_fields, indirections,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
@@ -1507,8 +1449,6 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_INDIRECT_VIEWS:
@@ -1559,8 +1499,8 @@ namespace Legion {
           {
             RtUserEvent done;
             derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
@@ -1578,6 +1518,8 @@ namespace Legion {
             const void *fill_value = derez.get_current_pointer();
             derez.advance_pointer(fill_size);
 #ifdef LEGION_SPY
+            UniqueID fill_uid;
+            derez.deserialize(fill_uid);
             FieldSpace handle;
             derez.deserialize(handle);
             RegionTreeID tree_id;
@@ -1590,10 +1532,10 @@ namespace Legion {
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs; 
             // Do the base call
-            tpl->record_issue_fill(memo, lhs, expr, fields,
+            tpl->record_issue_fill(tlid, lhs, expr, fields,
                                    fill_value, fill_size,
 #ifdef LEGION_SPY
-                                   handle, tree_id,
+                                   fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard);
             if (lhs != lhs_copy)
@@ -1610,8 +1552,6 @@ namespace Legion {
             }
             else // lhs was unchanged
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_FILL_VIEWS:
@@ -1661,8 +1601,8 @@ namespace Legion {
           {
             RtUserEvent applied;
             derez.deserialize(applied);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             unsigned index;
             derez.deserialize(index);
             DistributedID did;
@@ -1682,28 +1622,26 @@ namespace Legion {
             if (ready.exists() && !ready.has_triggered())
               ready.wait();
             std::set<RtEvent> effects;
-            tpl->record_op_view(memo, index, view, node, usage, 
+            tpl->record_op_view(tlid, index, view, node, usage, 
                                 user_mask, update_validity, effects);
             if (!effects.empty())
               Runtime::trigger_event(applied, Runtime::merge_events(effects));
             else
               Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_SET_OP_SYNC:
           {
             RtUserEvent done;
             derez.deserialize(done);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApUserEvent *lhs_ptr;
             derez.deserialize(lhs_ptr);
             ApUserEvent lhs;
             derez.deserialize(lhs);
             const ApUserEvent lhs_copy = lhs;
-            tpl->record_set_op_sync_event(lhs, memo);
+            tpl->record_set_op_sync_event(lhs, tlid);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1718,8 +1656,6 @@ namespace Legion {
             }
             else // lhs didn't change
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_MAPPER_OUTPUT:
@@ -1727,8 +1663,7 @@ namespace Legion {
             RtUserEvent applied;
             derez.deserialize(applied);
             TraceLocalID tlid;
-            derez.deserialize(tlid.first);
-            derez.deserialize(tlid.second);
+            tlid.deserialize(derez);
             size_t num_target_processors;
             derez.deserialize(num_target_processors);
             Mapper::MapTaskOutput output;
@@ -1753,10 +1688,7 @@ namespace Legion {
                 derez.deserialize(num_coords);
                 coords.resize(num_coords);
                 for (unsigned idx2 = 0; idx2 < num_coords; idx2++)
-                {
-                  derez.deserialize(coords[idx2].first);
-                  derez.deserialize(coords[idx2].second);
-                }
+                  coords[idx2].deserialize(derez);
               }
             }
             derez.deserialize(output.chosen_variant);
@@ -1789,28 +1721,24 @@ namespace Legion {
           {
             RtUserEvent applied;
             derez.deserialize(applied);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApEvent postcondition;
             derez.deserialize(postcondition);
-            tpl->record_set_effects(memo, postcondition);
+            tpl->record_set_effects(tlid, postcondition);
             Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_COMPLETE_REPLAY:
           {
             RtUserEvent applied;
             derez.deserialize(applied);
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             ApEvent ready_event;
             derez.deserialize(ready_event);
-            tpl->record_complete_replay(memo, ready_event);
+            tpl->record_complete_replay(tlid, ready_event);
             Runtime::trigger_event(applied);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_ACQUIRE_RELEASE:
@@ -1832,10 +1760,10 @@ namespace Legion {
               derez.deserialize(reservation);
               derez.deserialize<bool>(reservations[reservation]);
             }
-            Memoizable *memo = RemoteMemoizable::unpack_remote_memoizable(derez,
-                                                           NULL/*op*/, runtime);
+            TraceLocalID tlid;
+            tlid.deserialize(derez);
             const ApEvent lhs_copy = lhs;
-            tpl->record_reservations(memo, lhs, reservations,
+            tpl->record_reservations(tlid, lhs, reservations,
                                      precondition, postcondition);
             if (lhs != lhs_copy)
             {
@@ -1851,8 +1779,6 @@ namespace Legion {
             }
             else // didn't change so just trigger
               Runtime::trigger_event(done);
-            if (memo->get_origin_space() != runtime->address_space)
-              delete memo;
             break;
           }
         case REMOTE_TRACE_RECORD_BARRIER:
@@ -1991,34 +1917,69 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(Operation *o, bool init)
-      : op(o), memo((op == NULL) ? NULL : op->get_memoizable()), 
-        rec((memo == NULL) ? NULL : memo->get_template()),
+    TraceInfo::TraceInfo(Operation *op, bool init)
+      : rec(init_recorder(op)), tlid(init_tlid(op)),
         recording((rec == NULL) ? false : rec->is_recording())
     //--------------------------------------------------------------------------
     {
       if (recording && init)
-        record_get_term_event();
+        record_get_term_event(op->get_memoizable());
       if (rec != NULL)
         rec->add_recorder_reference();
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ PhysicalTraceRecorder* TraceInfo::init_recorder(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      if (op == NULL)
+        return NULL;
+      Memoizable *memo = op->get_memoizable();
+      if (memo == NULL)
+        return NULL;
+      return memo->get_template();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TraceLocalID TraceInfo::init_tlid(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      if (op == NULL)
+        return TraceLocalID();
+      Memoizable *memo = op->get_memoizable();
+      if (memo == NULL)
+        return TraceLocalID();
+      return memo->get_trace_local_id();
+    }
+
+    //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(SingleTask *task, RemoteTraceRecorder *r, bool init)
-      : op(task), memo(task), rec(r), recording(rec != NULL)
+      : rec(r), tlid(task->get_trace_local_id()), recording(rec != NULL)
     //--------------------------------------------------------------------------
     {
       if (recording)
       {
         rec->add_recorder_reference();
         if (init)
-          record_get_term_event();
+          record_get_term_event(task);
       }
     }
 
     //--------------------------------------------------------------------------
+    void TraceInfo::record_get_term_event(Memoizable *memo)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+      assert(memo != NULL);
+#endif
+      ApEvent completion = memo->get_memo_completion();
+      rec->record_get_term_event(completion, memo->get_memoizable_kind(), tlid);
+    }
+
+    //--------------------------------------------------------------------------
     TraceInfo::TraceInfo(const TraceInfo &rhs)
-      : op(rhs.op), memo(rhs.memo), rec(rhs.rec), recording(rhs.recording)
+      : rec(rhs.rec), tlid(rhs.tlid), recording(rhs.recording)
     //--------------------------------------------------------------------------
     {
       if (rec != NULL)
@@ -2026,9 +1987,8 @@ namespace Legion {
     }
 
    //--------------------------------------------------------------------------
-    TraceInfo::TraceInfo(Operation *o, Memoizable *m, 
-                         PhysicalTraceRecorder *r, const bool record)
-      : op(o), memo(m), rec(r), recording(record)
+    TraceInfo::TraceInfo(PhysicalTraceRecorder *r, const TraceLocalID &tld)
+      : rec(r), tlid(tld), recording((r != NULL) && r->is_recording())
     //--------------------------------------------------------------------------
     {
       if (rec != NULL)
@@ -2080,53 +2040,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraceInfo::PhysicalTraceInfo(Operation *o, Memoizable *m, 
-        unsigned src_idx,unsigned dst_idx,bool update,PhysicalTraceRecorder *r)
-      : TraceInfo(o, m, r, (m != NULL)), index(src_idx), dst_index(dst_idx),
+    PhysicalTraceInfo::PhysicalTraceInfo(const TraceLocalID &tlid,
+                                         unsigned src_idx, unsigned dst_idx,
+                                         bool update, PhysicalTraceRecorder *r)
+      : TraceInfo(r, tlid), index(src_idx), dst_index(dst_idx),
         update_validity(update)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    void PhysicalTraceInfo::pack_trace_info<true>(Serializer &rez,
-                                            std::set<RtEvent> &applied, 
-                                            const AddressSpaceID target) const
+    void PhysicalTraceInfo::pack_trace_info(Serializer &rez,
+                                            std::set<RtEvent> &applied) const 
     //--------------------------------------------------------------------------
     {
       rez.serialize<bool>(recording);
       if (recording)
       {
 #ifdef DEBUG_LEGION
-        assert(op != NULL);
-        assert(memo != NULL);
         assert(rec != NULL);
 #endif
-        op->pack_remote_operation(rez, target, applied);
-        memo->pack_remote_memoizable(rez, target);
-        rez.serialize(index);
-        rez.serialize(dst_index);
-        rez.serialize<bool>(update_validity);
-        rec->pack_recorder(rez, applied); 
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<>
-    void PhysicalTraceInfo::pack_trace_info<false>(Serializer &rez,
-                                            std::set<RtEvent> &applied, 
-                                            const AddressSpaceID target) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<bool>(recording);
-      if (recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(memo != NULL);
-        assert(rec != NULL);
-#endif
-        memo->pack_remote_memoizable(rez, target);
+        tlid.serialize(rez);
         rez.serialize(index);
         rez.serialize(dst_index);
         rez.serialize<bool>(update_validity);
@@ -2136,59 +2070,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ PhysicalTraceInfo PhysicalTraceInfo::unpack_trace_info(
-         Deserializer &derez, Runtime *runtime, std::set<RtEvent> &ready_events)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       bool recording;
       derez.deserialize<bool>(recording);
       if (recording)
       {
-        RemoteOp *op = 
-          RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
-        Memoizable *memo = 
-          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime);
+        TraceLocalID tlid;
+        tlid.deserialize(derez);
         unsigned index, dst_index;
         derez.deserialize(index);
         derez.deserialize(dst_index);
         bool update_validity;
         derez.deserialize(update_validity);
-        // PhysicalTraceRecord takes possible ownership of memoizable
-        PhysicalTraceRecorder *recorder = 
-          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
-        return PhysicalTraceInfo(op, memo, index, dst_index,
+        RemoteTraceRecorder *recorder = 
+          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, tlid);
+        return PhysicalTraceInfo(tlid, index, dst_index,
                                  update_validity, recorder);
       }
       else
         return PhysicalTraceInfo(NULL, -1U, false);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ PhysicalTraceInfo PhysicalTraceInfo::unpack_trace_info(
-                           Deserializer &derez, Runtime *runtime, Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      bool recording;
-      derez.deserialize<bool>(recording);
-      if (recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(op != NULL);
-#endif
-        Memoizable *memo = 
-          RemoteMemoizable::unpack_remote_memoizable(derez, op, runtime);
-        unsigned index, dst_index;
-        derez.deserialize(index);
-        derez.deserialize(dst_index);
-        bool update_validity;
-        derez.deserialize(update_validity);
-        // PhysicalTraceRecord takes possible ownership of memoizable
-        RemoteTraceRecorder *recorder = 
-          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, memo);
-        return PhysicalTraceInfo(op, memo, index, dst_index,
-                                 update_validity, recorder);
-      }
-      else
-        return PhysicalTraceInfo(op, -1U, false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5504,7 +5406,6 @@ namespace Legion {
       assert((fills[0]->across_helper == NULL) || !manage_dst_events);
       assert((dst_events == NULL) || track_events);
 #endif
-      const UniqueID op_id = op->get_unique_op_id();
       PhysicalManager *manager = target->get_manager();
       if (fills.size() == 1)
       {
@@ -5528,8 +5429,7 @@ namespace Legion {
         FillView *fill_view = update->source;
         const ApEvent result = manager->fill_from(fill_view, target, 
                                                   precondition, predicate_guard,
-                                                  fill_expr, op_id, dst_index,
-                                                  op->get_ctx_index(),
+                                                  fill_expr, op, dst_index,
                                                   fill_mask, trace_info, 
                                                   recorded_events, effects,
                                                   fills[0]->across_helper,
@@ -5570,7 +5470,6 @@ namespace Legion {
 #endif
           exprs[(*it)->source].insert((*it)->expr);
         }
-        const size_t op_ctx_index = op->get_ctx_index();
         for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
               const_iterator it = exprs.begin(); it != exprs.end(); it++)
         {
@@ -5580,8 +5479,7 @@ namespace Legion {
           const ApEvent result = manager->fill_from(it->first, target,
                                                     precondition,
                                                     predicate_guard, fill_expr,
-                                                    op_id, dst_index,
-                                                    op_ctx_index,
+                                                    op, dst_index,
                                                     fill_mask, trace_info,
                                                     recorded_events, effects, 
                                                     fills[0]->across_helper,
@@ -5615,7 +5513,6 @@ namespace Legion {
       assert((src_index == dst_index) || !manage_dst_events);
       assert((dst_events == NULL) || track_events);
 #endif
-      const UniqueID op_id = op->get_unique_op_id();
       PhysicalManager *target_manager = target->get_manager();
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
             cit = copies.begin(); cit != copies.end(); cit++)
@@ -5649,8 +5546,8 @@ namespace Legion {
           const ApEvent result = target_manager->copy_from(source, target,
                                     source->get_manager(), precondition,
                                     predicate_guard, update->redop, copy_expr,
-                                    op_id, manage_dst_events ? dst_index
-                                      : src_index, op->get_ctx_index(),
+                                    op, manage_dst_events ? dst_index
+                                      : src_index,
                                     copy_mask, trace_info, recorded_events,
                                     effects, cit->second[0]->across_helper,
                                     manage_dst_events, restricted_output,
@@ -5692,7 +5589,6 @@ namespace Legion {
 #endif
             fused_exprs[(*it)->source].insert((*it)->expr);
           }
-          const size_t op_ctx_index = op->get_ctx_index();
           for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
                iterator it = fused_exprs.begin(); it != fused_exprs.end(); it++)
           {
@@ -5700,10 +5596,10 @@ namespace Legion {
                 *(it->second.begin()) : forest->union_index_spaces(it->second);
             const ApEvent result = target_manager->copy_from(it->first, target,
                                     it->first->get_manager(), precondition,
-                                    predicate_guard, redop, copy_expr, op_id,
+                                    predicate_guard, redop, copy_expr, op,
                                     manage_dst_events ? dst_index : 
-                                      src_index, op_ctx_index, copy_mask,
-                                    trace_info, recorded_events, effects,
+                                      src_index, copy_mask, trace_info, 
+                                    recorded_events, effects,
                                     cit->second[0]->across_helper,
                                     manage_dst_events, restricted_output,
                                     track_events);
@@ -7239,7 +7135,7 @@ namespace Legion {
           rez.serialize<size_t>(source_views.size());
           for (unsigned idx = 0; idx < source_views.size(); idx++)
             rez.serialize(source_views[idx]->did);
-          trace_info.pack_trace_info<false>(rez, applied_events, target);
+          trace_info.pack_trace_info(rez, applied_events);
           // We only need to pack the collective mapping once when going
           // from the origin space to the next space
           if ((collective_mapping != NULL) &&
@@ -7450,7 +7346,7 @@ namespace Legion {
           ready_events.insert(ready);
       }
       PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       bool first_local = true;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
@@ -7888,7 +7784,7 @@ namespace Legion {
           rez.serialize(returned);
           rez.serialize(applied);
           rez.serialize(target_analysis);
-          trace_info.pack_trace_info<false>(rez, applied_events, target);
+          trace_info.pack_trace_info(rez, applied_events);
           // We only need to pack the collective mapping once when going
           // from the origin space to the next space
           if ((collective_mapping != NULL) &&
@@ -8054,7 +7950,7 @@ namespace Legion {
       ReleaseAnalysis *target;
       derez.deserialize(target);
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *mapping = ((collective_mapping_size) > 0) ?
@@ -8334,7 +8230,7 @@ namespace Legion {
           }
           rez.serialize(applied);
           rez.serialize(copy);
-          trace_info.pack_trace_info<false>(rez, applied_events, target);
+          trace_info.pack_trace_info(rez, applied_events);
         }
         runtime->send_equivalence_set_remote_copies_across(target, rez);
         applied_events.insert(applied);
@@ -8548,7 +8444,7 @@ namespace Legion {
       ApUserEvent copy;
       derez.deserialize(copy);
       const PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op); 
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       std::vector<CopyAcrossHelper*> across_helpers;
       std::set<RtEvent> deferral_events, applied_events;
@@ -8811,7 +8707,7 @@ namespace Legion {
               rez.serialize(it->second);
             }
           }
-          trace_info.pack_trace_info<false>(rez, applied_events, target);
+          trace_info.pack_trace_info(rez, applied_events);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
           rez.serialize(guard_event);
@@ -8960,7 +8856,7 @@ namespace Legion {
         views.insert(static_cast<ReductionView*>(view), mask);
       }
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, op);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       PredEvent pred_guard;
       derez.deserialize(pred_guard);
       ApEvent precondition;

@@ -3928,8 +3928,8 @@ namespace Legion {
       {
         const RtUserEvent remote_applied = Runtime::create_rt_user_event();
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
-            orig_proc.address_space(), runtime->address_space, this, tpl,
-            remote_applied, remote_collect_event);
+            orig_proc.address_space(), runtime->address_space, 
+            get_trace_local_id(), tpl, remote_applied, remote_collect_event);
         remote_trace_recorder->add_recorder_reference();
         map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION
@@ -4045,7 +4045,7 @@ namespace Legion {
                 task_effects_complete = single_task_termination;
               if (is_recording() && 
                   (task_effects_complete != single_task_termination))
-                trace_info.record_set_effects(this, task_effects_complete);
+                trace_info.record_set_effects(task_effects_complete);
 #ifdef DEBUG_LEGION
               dump_physical_state(&regions[0], 0);
 #endif
@@ -4192,7 +4192,7 @@ namespace Legion {
               task_effects_complete =
                 Runtime::merge_events(&trace_info, effects_postconditions);
               if (is_recording())
-                trace_info.record_set_effects(this, task_effects_complete);
+                trace_info.record_set_effects(task_effects_complete);
             }
             else
               task_effects_complete = single_task_termination;
@@ -4234,7 +4234,7 @@ namespace Legion {
           task_effects_complete =
             Runtime::merge_events(&trace_info, effects_postconditions);
           if (is_recording())
-            trace_info.record_set_effects(this, task_effects_complete);
+            trace_info.record_set_effects(task_effects_complete);
         }
         else
           task_effects_complete = single_task_termination;
@@ -4273,10 +4273,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(single_task_termination.exists());
 #endif
-          trace_info.record_reservations(this, ready_event, atomic_locks,
+          trace_info.record_reservations(ready_event, atomic_locks,
                                          ready_event, single_task_termination);
         }
-        trace_info.record_complete_replay(this, ready_event);
+        trace_info.record_complete_replay(ready_event);
       }
       if (remote_trace_recorder != NULL)
       {

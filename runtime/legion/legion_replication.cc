@@ -1275,6 +1275,7 @@ namespace Legion {
         Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
         Mapper::SelectShardingFunctorOutput output;
         output.chosen_functor = UINT_MAX;
+        output.slice_recurse = false;
         mapper->invoke_task_select_sharding_functor(this, input, &output);
         if (output.chosen_functor == UINT_MAX)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -1699,6 +1700,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_task_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -1708,6 +1710,7 @@ namespace Legion {
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      slice_sharding_output = output.slice_recurse;
     }
 
     //--------------------------------------------------------------------------
@@ -1776,7 +1779,18 @@ namespace Legion {
           node->get_launch_space_domain(shard_domain);
           enumerate_futures(shard_domain);
         }
-        enqueue_ready_operation();
+        // If we still need to slice the task then we can run it 
+        // through the normal path, otherwise we can simply make 
+        // the slice task for these points and put it in the queue
+        if (!slice_sharding_output)
+        {
+          SliceTask *new_slice = this->clone_as_slice_task(internal_space,
+              current_proc, false/*recurse*/, !runtime->stealing_disabled); 
+          slices.push_back(new_slice);
+          trigger_slices();
+        }
+        else
+          enqueue_ready_operation();
       }
     }
 
@@ -3295,6 +3309,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_fill_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3547,6 +3562,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX; 
+      output.slice_recurse = false;
       mapper->invoke_copy_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3762,6 +3778,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_copy_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -5252,6 +5269,7 @@ namespace Legion {
       Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = UINT_MAX;
+      output.slice_recurse = false;
       mapper->invoke_partition_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -6985,7 +7003,7 @@ namespace Legion {
             Runtime::phase_barrier_arrive(execution_fence_barrier, 1/*count*/, 
                                           execution_fence_precondition);
             if (is_recording())
-              tpl->record_complete_replay(this, execution_fence_precondition);
+              trace_info.record_complete_replay(execution_fence_precondition);
             // Do our arrival on our mapping fence, we're mapped when
             // everyone is mapped
             if (!map_applied_conditions.empty())
@@ -8984,7 +9002,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
-        tpl->record_complete_replay(this, acquire_complete); 
+        trace_info.record_complete_replay(acquire_complete); 
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -9260,7 +9278,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       if (is_recording())
-        tpl->record_complete_replay(this, release_complete);
+        trace_info.record_complete_replay(release_complete);
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
