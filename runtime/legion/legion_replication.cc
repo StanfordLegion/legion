@@ -797,6 +797,8 @@ namespace Legion {
         // the slice task for these points and put it in the queue
         if (!slice_sharding_output)
         {
+          if (must_epoch == NULL)
+            premap_task();
           SliceTask *new_slice = this->clone_as_slice_task(internal_space,
               current_proc, false/*recurse*/, !runtime->stealing_disabled); 
           slices.push_back(new_slice);
