@@ -443,8 +443,7 @@ namespace Legion {
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances);
     protected:
-      void prepare_output_instance(unsigned index,
-                                   InstanceSet &instance_set,
+      void prepare_output_instance(InstanceSet &instance_set,
                                    const RegionRequirement &req,
                                    Memory target,
                                    const LayoutConstraintSet &constraints);

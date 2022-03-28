@@ -895,36 +895,9 @@ namespace Legion {
                              public LegionHeapify<OutputRegionImpl> {
     public:
       static const AllocationType alloc_type = OUTPUT_REGION_ALLOC;
-    private:
-      struct LayoutCreator {
-      public:
-        LayoutCreator(Realm::InstanceLayoutGeneric* &l,
-                      const Domain & d,
-                      const Realm::InstanceLayoutConstraints &c,
-                      const std::vector<int32_t> &d_order)
-          : layout(l), domain(d), constraints(c), dim_order(d_order)
-        { }
-        template<typename DIM, typename COLOR_T>
-        static inline void demux(LayoutCreator *creator)
-        {
-#ifdef DEBUG_LEGION
-          assert(creator->dim_order.size() == DIM::N);
-#endif
-          const DomainT<DIM::N, COLOR_T> bounds =
-            Rect<DIM::N, COLOR_T>(creator->domain);
-          creator->layout =
-            Realm::InstanceLayoutGeneric::choose_instance_layout(
-                bounds, creator->constraints, creator->dim_order.data());
-        }
-      private:
-        Realm::InstanceLayoutGeneric* &layout;
-        const Domain &domain;
-        const Realm::InstanceLayoutConstraints &constraints;
-        const std::vector<int32_t> &dim_order;
-      };
     public:
       OutputRegionImpl(unsigned index,
-                       const OutputRequirement &req,
+                       const RegionRequirement &req,
                        InstanceSet instance_set,
                        TaskContext *ctx,
                        Runtime *rt,
@@ -950,9 +923,7 @@ namespace Legion {
                        std::map<FieldID,size_t> *alignments);
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       PhysicalInstance instance,
-                       const LayoutConstraintSet *constraints,
-                       bool check_constraints);
+                       PhysicalInstance instance);
     private:
       struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
       public:
@@ -970,7 +941,7 @@ namespace Legion {
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
-      const OutputRequirement &get_requirement(void) const { return req; }
+      const RegionRequirement &get_requirement(void) const { return req; }
       DomainPoint get_extents(void) const { return extents; }
     protected:
       IndividualManager *get_manager(FieldID field_id);
@@ -984,7 +955,7 @@ namespace Legion {
         size_t alignment;
       };
     private:
-      OutputRequirement req;
+      RegionRequirement req;
       InstanceSet instance_set;
       // Output data batched during task execution
       std::map<FieldID,ExternalInstanceInfo> returned_instances;

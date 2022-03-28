@@ -5262,7 +5262,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(unsigned i,
-                                       const OutputRequirement &r,
+                                       const RegionRequirement &r,
                                        InstanceSet is,
                                        TaskContext *ctx,
                                        Runtime *rt, const bool global,
@@ -5413,12 +5413,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(
-                              const DomainPoint &extents,
-                              FieldID field_id,
-                              PhysicalInstance instance,
-                              const LayoutConstraintSet *constraints,
-                              bool check_constraints)
+    void OutputRegionImpl::return_data(const DomainPoint &extents,
+                                       FieldID field_id,
+                                       PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
       IndividualManager *manager = get_manager(field_id);
@@ -5435,28 +5432,6 @@ namespace Legion {
       // a task local instance, so we need to tell the runtime that the instance
       // now escapes the context.
       uintptr_t ptr = context->escape_task_local_instance(instance);
-
-      if (check_constraints && constraints != NULL)
-      {
-        LayoutConstraints *manager_cons = manager->layout->constraints;
-        if (constraints->conflicts(*manager_cons))
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-            "The returned instance for field %u of output region %u of "
-            "task %s (UID: %lld) does not satisfy the layout constraints "
-            "chosen by the mapper. This is an illegal usage right now. "
-            "In the future, the runtime will copy this returned instance "
-            "into a fresh one with the correct layout.",
-            field_id, index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id());
-      }
-      else if (check_constraints)
-      {
-        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-          "Currently the constraint checks need to be turned off to pass "
-          "naked instances to output regions. In the future, layout "
-          "constraints will be inferred from the instances and used for "
-          "the checks.");
-      }
 
       return_data(
           extents, field_id, ptr, instance.get_layout()->alignment_reqd, true);
@@ -5546,32 +5521,37 @@ namespace Legion {
         IndividualManager *manager = get_manager(field_id);
 
         // Create a Realm layout
-        LayoutConstraints *manager_cons = manager->layout->constraints;
-
-        // Extract the order of dimensions from the ordering constraint
-        const std::vector<DimensionKind> &ordering =
-          manager_cons->ordering_constraint.ordering;
-        std::vector<int> dim_order;
-        for (size_t idx = 0; idx < ordering.size(); ++idx)
-          if (ordering[idx] != LEGION_DIM_F)
-            dim_order.push_back(ordering[idx] - static_cast<int>(LEGION_DIM_X));
-
         std::map<Realm::FieldID,size_t> field_sizes;
         size_t field_size = fspace_node->get_field_size(field_id);
         field_sizes[field_id] = field_size;
         Realm::InstanceLayoutConstraints constraints(field_sizes,
                                                      0 /*block_size*/);
-
-        // Make a Realm layout descriptor of the right type using demux
         Realm::InstanceLayoutGeneric *layout = NULL;
-        LayoutCreator creator(layout, domain, constraints, dim_order);
-        NT_TemplateHelper::demux<LayoutCreator>(req.type_tag, &creator);
+        switch (domain.get_dim())
+        {
+#define DIMFUNC(DIM)                                                         \
+          case DIM:                                                          \
+            {                                                                \
+              int dim_order[DIM];                                            \
+              for (unsigned idx = 0; idx < DIM; ++idx)                       \
+                dim_order[idx] = idx;                                        \
+              const DomainT<DIM,coord_t> bounds = Rect<DIM,coord_t>(domain); \
+              layout =                                                       \
+                Realm::InstanceLayoutGeneric::choose_instance_layout(        \
+                    bounds, constraints, dim_order);                         \
+              break;                                                         \
+            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+          default:
+            assert(false);
+        }
 #ifdef DEBUG_LEGION
         assert(layout != NULL);
 #endif
 
-        // Extract the alignment info from the alignment constraints
-        // if there is one
+        LayoutConstraints *manager_cons = manager->layout->constraints;
+
         size_t alignment = 0;
         if (!manager_cons->alignment_constraints.empty())
         {
@@ -5582,14 +5562,14 @@ namespace Legion {
           alignment = manager_cons->alignment_constraints[0].alignment;
         }
         // If no alignment is given, set it to the field size
-        if (alignment == 0) alignment = field_size;
-
-        size_t volume = 1;
-        for (int32_t dim = 0; dim < extents.dim; ++dim) volume *= extents[dim];
-
+        if (alignment == 0)
+          alignment = field_size;
+        size_t num_elements = 1;
+        for (int32_t dim = 0; dim < extents.dim; ++dim)
+          num_elements *= extents[dim];
         size_t bytes_used =
           field_size > 0
-          ? (volume * field_size + alignment - 1) / alignment * alignment
+          ? (num_elements * field_size + alignment - 1) / alignment * alignment
           : 0;
         layout->bytes_used = bytes_used;
 

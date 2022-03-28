@@ -3482,8 +3482,6 @@ namespace Legion {
     protected:
       friend class OutputRegion;
       friend class UntypedDeferredBuffer<COORD_T>;
-      bool fortran_order_dims;
-      size_t alignment;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
 #ifdef LEGION_BOUNDS_CHECKS
@@ -3587,14 +3585,7 @@ namespace Legion {
                        DeferredBuffer<T,DIM> &buffer);
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       Realm::RegionInstance instance,
-                       bool check_constraints = true);
-    private:
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
-                       Realm::RegionInstance instance,
-                       const LayoutConstraintSet *constraints,
-                       bool check_constraints);
+                       Realm::RegionInstance instance);
     };
 
     //==========================================================================
