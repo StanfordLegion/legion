@@ -2805,9 +2805,10 @@ namespace Legion {
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         post_task_comp_queue(CompletionQueue::NO_QUEUE), 
-        current_trace(NULL), previous_trace(NULL), valid_wait_event(false), 
-        outstanding_subtasks(0), pending_subtasks(0), pending_frames(0), 
-        currently_active_context(false), current_mapping_fence(NULL), 
+        current_trace(NULL), previous_trace(NULL),
+        physical_trace_replay_status(0), valid_wait_event(false), 
+        outstanding_subtasks(0), pending_subtasks(0), pending_frames(0),
+        currently_active_context(false), current_mapping_fence(NULL),
         mapping_fence_gen(0), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
@@ -2847,7 +2848,7 @@ namespace Legion {
         // Get the coordinates for the parent task
         parent_ctx->compute_task_tree_coordinates(context_coordinates);
         // Then add our coordinates for our task
-        context_coordinates.push_back(std::make_pair(
+        context_coordinates.push_back(ContextCoordinate(
               owner_task->get_context_index(), owner_task->index_point));
       }
       if (!remote_context)
@@ -4018,12 +4019,9 @@ namespace Legion {
         rez.serialize(virtual_indexes[idx]);
       rez.serialize(find_parent_context()->get_context_uid());
       rez.serialize<size_t>(context_coordinates.size());
-      for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
+      for (TaskTreeCoordinates::const_iterator it =
             context_coordinates.begin(); it != context_coordinates.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
+        it->serialize(rez);
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
       rez.serialize<size_t>(local_field_infos.size());
@@ -7571,9 +7569,7 @@ namespace Legion {
         // Outstanding children count has already been incremented for the
         // operation being launched so decrement it in case we wait and then
         // re-increment it when we wake up again
-        int diff = -1; // Need this for PGI dumbness
-        const int outstanding_count = 
-          __sync_fetch_and_add(&outstanding_children_count, diff);
+        const int outstanding_count = outstanding_children_count.fetch_sub(1);
         // We already decided to wait, so we need to wait for any hysteresis
         // to play a role here
         if (outstanding_count >
@@ -7592,7 +7588,7 @@ namespace Legion {
       wait_event.wait();
       end_task_wait();
       // Re-increment the count once we are awake again
-      __sync_fetch_and_add(&outstanding_children_count,1);
+      outstanding_children_count.fetch_add(1);
     }
 
     //--------------------------------------------------------------------------
@@ -7708,10 +7704,9 @@ namespace Legion {
       RtEvent precondition;
       ApEvent term_event;
       // We disable program order execution when we are replaying a
-      // fixed trace since it might not be sound to block
+      // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
-          ((current_trace == NULL) || !current_trace->is_fixed() || 
-           !current_trace->has_physical_trace()))
+          !is_replaying_physical_trace())
         term_event = op->get_program_order_event();
       {
         AutoLock d_lock(dependence_lock);
@@ -7992,13 +7987,12 @@ namespace Legion {
         op->set_trace(current_trace, dependences);
       size_t result = total_children_count++;
       const size_t outstanding_count =
-        __sync_add_and_fetch(&outstanding_children_count,1);
+        outstanding_children_count.fetch_add(1) + 1;
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) &&
           (context_configuration.max_window_size > 0) &&
             (outstanding_count > context_configuration.max_window_size) &&
-            ((current_trace == NULL) || !current_trace->is_fixed() ||
-             !current_trace->has_physical_trace()))
+            !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result,
@@ -8040,7 +8034,7 @@ namespace Legion {
         executing_children[*it] = (*it)->get_generation();
         dependence_queue.push_back(*it);
       }
-      __sync_fetch_and_add(&outstanding_children_count, unordered_ops.size());
+      outstanding_children_count.fetch_add(unordered_ops.size());
       unordered_ops.clear();
     }
 
@@ -8062,14 +8056,13 @@ namespace Legion {
     {
       // For now we just bump our counter
       size_t result = total_summary_count++;
-      const size_t outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,1);
+      const size_t outstanding_count =
+        outstanding_children_count.fetch_add(1) + 1; 
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
             (outstanding_count > context_configuration.max_window_size) &&
-            ((current_trace == NULL) || !current_trace->is_fixed() ||
-             !current_trace->has_physical_trace()))
+            !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
@@ -8109,9 +8102,7 @@ namespace Legion {
         executing_children.erase(finder);
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
-        int diff = -1; // Need this for PGI dumbness
-        int outstanding_count = 
-          __sync_add_and_fetch(&outstanding_children_count, diff);
+        int outstanding_count = outstanding_children_count.fetch_sub(1) - 1;
 #ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif
@@ -9018,11 +9009,47 @@ namespace Legion {
         // Issue a replay op
         TraceReplayOp *replay = runtime->get_available_replay_op();
         replay->initialize_replay(this, trace);
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_status.store(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
       }
 
       // Now mark that we are starting a trace
       current_trace = trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::record_physical_trace_replay(RtEvent ready, bool replay)
+    //--------------------------------------------------------------------------
+    {
+      physical_trace_replay_status.compare_exchange_strong(ready.id, 
+                                                           replay ? 1 : 0);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::is_replaying_physical_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace == NULL)
+        return false;
+      if (!current_trace->is_fixed())
+        return false;
+      realm_id_t status = physical_trace_replay_status.load();
+      if (status > 1)
+      {
+        // Result is not ready yet so wait until it is
+        RtEvent ready;
+        ready.id = status;
+        if (!ready.has_triggered())
+          ready.wait();
+        status = physical_trace_replay_status.load();
+        // No need to spin again because there won't be anymore outstanding
+        // trace capture ops to be setting this
+#ifdef DEBUG_LEGION
+        assert((status == 0) || (status == 1));
+#endif
+      }
+      return (status == 1);
     }
 
     //--------------------------------------------------------------------------
@@ -11843,16 +11870,16 @@ namespace Legion {
     {
       if (future.impl == NULL)
         return;
-      std::vector<std::pair<size_t,DomainPoint> > coordinates;
+      TaskTreeCoordinates coordinates;
       future.impl->get_future_coordinates(coordinates);
       if (!coordinates.empty())
       {
-        for (std::vector<std::pair<size_t,DomainPoint> >::const_iterator it =
+        for (TaskTreeCoordinates::const_iterator it =
               coordinates.begin(); it != coordinates.end(); it++)
         {
-          hasher.hash(it->first, description);
-          for (int idx = 0; idx < it->second.get_dim(); idx++)
-            hasher.hash(it->second[idx], description);
+          hasher.hash(it->context_index, description);
+          for (int idx = 0; idx < it->index_point.get_dim(); idx++)
+            hasher.hash(it->index_point[idx], description);
         }
       }
       else if (safe_level > 1)
@@ -16618,7 +16645,7 @@ namespace Legion {
         for (std::vector<Operation*>::const_iterator it = 
               ready_ops.begin(); it != ready_ops.end(); it++)
           dependence_queue.push_back(*it);
-        __sync_fetch_and_add(&outstanding_children_count, ready_ops.size());
+        outstanding_children_count.fetch_add(ready_ops.size());
         if (ready_ops.size() != local_unordered.size())
         {
           // For any operations which we aren't in the ready ops
@@ -18114,6 +18141,8 @@ namespace Legion {
         // Issue a replay op
         ReplTraceReplayOp *replay = runtime->get_available_repl_replay_op();
         replay->initialize_replay(this, trace);
+        // Record the event for when the trace replay is ready
+        physical_trace_replay_status.store(replay->get_mapped_event().id);
         add_to_dependence_queue(replay);
       }
 
@@ -18337,8 +18366,7 @@ namespace Legion {
       // We disable program order execution when we are replaying a
       // fixed trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered &&
-          ((current_trace == NULL) || !current_trace->is_fixed() ||
-           !current_trace->has_physical_trace()))
+          !is_replaying_physical_trace())
       {
 #ifdef DEBUG_LEGION
         assert(inorder_barrier.exists());
@@ -20990,11 +21018,7 @@ namespace Legion {
       derez.deserialize(num_coordinates);
       context_coordinates.resize(num_coordinates);
       for (unsigned idx = 0; idx < num_coordinates; idx++)
-      {
-        std::pair<size_t,DomainPoint> &coordinate = context_coordinates[idx];
-        derez.deserialize(coordinate.first);
-        derez.deserialize(coordinate.second);
-      }
+        context_coordinates[idx].deserialize(derez);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
       bool replicate;
@@ -21278,7 +21302,7 @@ namespace Legion {
       InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
 #endif
       parent_ctx->compute_task_tree_coordinates(coordinates);
-      coordinates.push_back(std::make_pair(
+      coordinates.push_back(ContextCoordinate(
             owner_task->get_context_index(), owner_task->index_point));
     }
 

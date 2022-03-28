@@ -766,13 +766,16 @@ namespace Legion {
        * functor to determine which shard will own the point(s) of the
        * task. The mapper must return the same sharding functor for all
        * copies of the task. The runtime will verify this in debug mode
-       * but not in release mode.
+       * but not in release mode. In the case of sharding index space
+       * tasks, the mapper can also specify whether the resulting slice
+       * should be recursively sliced or not using 'slice_recurse'.
        */
       struct SelectShardingFunctorInput {
         std::vector<Processor>                  shard_mapping;
       };
       struct SelectShardingFunctorOutput {
         ShardingID                              chosen_functor;
+        bool                                    slice_recurse;
       };
       //------------------------------------------------------------------------
       virtual void select_sharding_functor(

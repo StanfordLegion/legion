@@ -3427,17 +3427,7 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
-      DeferredBuffer(Memory::Kind kind, 
-                     IndexSpace bounds,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
-                     Memory::Kind kind,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
-      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
                      size_t alignment = 16,
@@ -3448,21 +3438,28 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
-      DeferredBuffer(Memory memory, 
-                     IndexSpace bounds,
-                     const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory memory,
                      const T *initial_value = NULL,
                      size_t alignment = 16,
                      bool fortran_order_dims = false);
-      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
-                     Memory memory,
+    public: // Constructors specifying a specific ordering
+      DeferredBuffer(Memory memory,
+                     const Domain &bounds,
+                     std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
-                     bool fortran_order_dims = false);
+                     size_t alignment = 16);
+      DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
+                     Memory memory,
+                     std::array<DimensionKind,DIM> ordering,
+                     const T *initial_value = NULL,
+                     size_t alignment = 16);
+    protected:
+      Memory get_memory_from_kind(Memory::Kind kind);
+      void initialize_layout(size_t alignment, bool fortran_order_dims);
+      void initialize(Memory memory,
+                      DomainT<DIM,COORD_T> bounds,
+                      const T *initial_value);
     public:
       __CUDA_HD__
       inline T read(const Point<DIM,COORD_T> &p) const;
@@ -3484,6 +3481,8 @@ namespace Legion {
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
+      std::array<DimensionKind,DIM> ordering;
+      size_t alignment;
 #ifdef LEGION_BOUNDS_CHECKS
       DomainT<DIM,COORD_T> bounds;
 #endif
@@ -8570,12 +8569,9 @@ namespace Legion {
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
 
 #ifdef LEGION_GPU_REDUCTIONS
-#if defined (__CUDACC__) || defined (__HIPCC__)
       template<typename REDOP>
+        LEGION_DEPRECATED("Use register_reduction_op instead")
       static void preregister_gpu_reduction_op(ReductionOpID redop_id);
-#endif
-      static void preregister_gpu_reduction_op(ReductionOpID redop_id,
-                                               const CodeDescriptor &desc);
 #endif
     public:
       /**

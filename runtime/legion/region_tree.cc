@@ -2563,8 +2563,8 @@ namespace Legion {
             for (unsigned idx = 0; idx < dst_targets.size(); idx++)
               tracing_dsts.insert(target_views[idx],
                   dst_targets[idx].get_valid_fields());
-            const ApEvent result = intersect->issue_copy(trace_info, dst_fields,
-                                         src_fields, no_reservations,
+            const ApEvent result = intersect->issue_copy(op, trace_info,
+                                         dst_fields, src_fields,no_reservations,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
                                          dst_req.region.get_tree_id(),
@@ -2575,7 +2575,7 @@ namespace Legion {
             return result;
           }
           else
-            return intersect->issue_copy(trace_info, dst_fields,
+            return intersect->issue_copy(op, trace_info, dst_fields,
                                          src_fields, no_reservations,
 #ifdef LEGION_SPY
                                          src_req.region.get_tree_id(),
@@ -2594,8 +2594,8 @@ namespace Legion {
             for (unsigned idx = 0; idx < dst_targets.size(); idx++)
               tracing_dsts.insert(target_views[idx],
                   dst_targets[idx].get_valid_fields());
-            const ApEvent result = dst_expr->issue_copy(trace_info, dst_fields,
-                                        src_fields, no_reservations,
+            const ApEvent result = dst_expr->issue_copy(op, trace_info,
+                                        dst_fields, src_fields, no_reservations,
 #ifdef LEGION_SPY
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
@@ -2606,8 +2606,8 @@ namespace Legion {
             return result;
           }
           else
-            return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
-                                        no_reservations,
+            return dst_expr->issue_copy(op, trace_info, dst_fields,
+                                        src_fields, no_reservations,
 #ifdef LEGION_SPY
                                         src_req.region.get_tree_id(),
                                         dst_req.region.get_tree_id(),
@@ -2804,7 +2804,8 @@ namespace Legion {
 #endif
       Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+        copy_expr->issue_indirect(op, trace_info, dst_fields,
+                                  src_fields, indirections,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
@@ -2972,7 +2973,8 @@ namespace Legion {
 #endif
       Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+        copy_expr->issue_indirect(op, trace_info, dst_fields,
+                                  src_fields, indirections,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
@@ -3151,7 +3153,8 @@ namespace Legion {
 #endif
       Runtime::trigger_event(&trace_info, copy_pre, local_pre);
       const ApEvent copy_post = 
-        copy_expr->issue_indirect(trace_info,dst_fields,src_fields,indirections,
+        copy_expr->issue_indirect(op, trace_info, dst_fields,
+                                  src_fields, indirections,
 #ifdef LEGION_SPY
                                   indirect_id,
 #endif
@@ -7798,7 +7801,7 @@ namespace Legion {
     bool IndexSpaceOperation::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -7812,7 +7815,7 @@ namespace Legion {
     bool IndexSpaceOperation::try_add_live_reference(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -9892,7 +9895,7 @@ namespace Legion {
     bool IndexSpaceNode::try_add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -9906,7 +9909,7 @@ namespace Legion {
     bool IndexSpaceNode::try_add_live_reference(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
-      return check_gc_and_increment(source);
+      return check_active_and_increment(source);
     }
 
     //--------------------------------------------------------------------------
@@ -21915,7 +21918,7 @@ namespace Legion {
     bool PartitionTracker::can_prune(void)
     //--------------------------------------------------------------------------
     {
-      const int remainder = __sync_fetch_and_add(&references, 0); 
+      const unsigned remainder = references.load(); 
 #ifdef DEBUG_LEGION
       assert((remainder == 1) || (remainder == 2));
 #endif

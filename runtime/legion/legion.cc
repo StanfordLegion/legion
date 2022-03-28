@@ -7533,16 +7533,6 @@ namespace Legion {
       return Internal::Runtime::get_reduction_op(redop_id);
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
-                                                     const CodeDescriptor &desc)
-    //--------------------------------------------------------------------------
-    {
-      Internal::Runtime::preregister_gpu_reduction_op(redop, desc);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,
                                                        SerdezOp *serdez_op,

@@ -1599,7 +1599,21 @@ namespace Legion {
         runtime->send_future_notification(owner_space, rez); 
       }
       else if (!subscribers.empty())
-        broadcast_result(subscribers, false/*need lock*/);
+      {
+        if ((canonical_instance != NULL) && 
+            canonical_instance->can_pack_by_value() &&
+            !canonical_instance->is_ready())
+        {
+          // Defer until the instance can be packed by value
+          const RtEvent precondition =
+            Runtime::protect_event(canonical_instance->get_ready());
+          FutureBroadcastArgs args(this);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_WORK_PRIORITY, precondition);
+        }
+        else
+          broadcast_result(subscribers, false/*need lock*/);
+      }
       if (subscription_event.exists())
       {
         Runtime::trigger_event(subscription_event);
@@ -2070,7 +2084,8 @@ namespace Legion {
       if (producer_context_index == SIZE_MAX)
         return;
       context->compute_task_tree_coordinates(coords);
-      coords.push_back(std::make_pair(producer_context_index, producer_point));
+      coords.push_back(
+          ContextCoordinate(producer_context_index, producer_point));
     }
 
     //--------------------------------------------------------------------------
@@ -10225,8 +10240,7 @@ namespace Legion {
                               -1U/*instance_footprint*/,
                               ready_event,
                               PhysicalManager::UNBOUND_INSTANCE_KIND,
-                              NULL/*op*/,
-                              false/*shadow_instance*/);
+                              NULL/*op*/);
 
       // Register the instance to make it visible to downstream tasks
       record_created_instance(manager,
@@ -12417,19 +12431,6 @@ namespace Legion {
               runtime->handle_collective_instance_message(derez);
               break;
             }
-#ifdef LEGION_GPU_REDUCTIONS
-          case SEND_CREATE_SHADOW_REQUEST:
-            {
-              runtime->handle_create_shadow_reduction_request(derez, 
-                                              remote_address_space);
-              break;
-            }
-          case SEND_CREATE_SHADOW_RESPONSE:
-            {
-              runtime->handle_create_shadow_reduction_response(derez);
-              break;
-            }
-#endif
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -13367,10 +13368,10 @@ namespace Legion {
         // Only need to see tasks less than this 
         for (unsigned idx = 0; idx < LG_BEGIN_SHUTDOWN_TASK_IDS; idx++)
         {
-          if (runtime->outstanding_counts[idx] == 0)
+          if (runtime->outstanding_counts[idx].load() == 0)
             continue;
           log_shutdown.info("Meta-Task %s: %d outstanding",
-                task_descs[idx], runtime->outstanding_counts[idx]);
+                task_descs[idx], runtime->outstanding_counts[idx].load());
         }
       }
 #endif
@@ -16394,9 +16395,6 @@ namespace Legion {
         unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
-#ifdef LEGION_GPU_REDUCTIONS
-                        get_gpu_reduction_table().size() + 
-#endif
                         ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_is_expr_id((unique == 0) ? runtime_stride : unique),
@@ -16493,7 +16491,7 @@ namespace Legion {
       if (address_space < num_profiling_nodes)
         initialize_legion_prof(config);
 #ifdef LEGION_TRACE_ALLOCATION
-      allocation_tracing_count = 0;
+      allocation_tracing_count.store(0);
       // Instantiate all the kinds of allocations
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < UNTRACKED_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
@@ -16520,7 +16518,9 @@ namespace Legion {
       }
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      outstanding_counts.resize(LG_LAST_TASK_ID, 0);
+      outstanding_counts = std::vector<std::atomic<int> >(LG_LAST_TASK_ID);
+      for (unsigned idx = 0; idx < outstanding_counts.size(); idx++)
+        outstanding_counts[idx].store(0);
 #endif
       // Attach any accessor debug hooks for privilege or bounds checks
 #ifdef LEGION_PRIVILEGE_CHECKS
@@ -17348,18 +17348,6 @@ namespace Legion {
       RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
       profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
-#endif
-#ifdef LEGION_GPU_REDUCTIONS
-      const GPUReductionTable &gpu_reduction_table = get_gpu_reduction_table();
-      for (GPUReductionTable::const_iterator it =
-            gpu_reduction_table.begin(); it != gpu_reduction_table.end(); it++)
-      {
-        char name[128];
-        snprintf(name, sizeof(name), 
-            "Built-in Reduction Task for Redop %d", it->first);
-        profiler->register_task_kind(it->second, name, true/*overwrite*/);
-        profiler->register_task_variant(it->second, 0, name);
-      }
 #endif
     }
 
@@ -19086,7 +19074,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_trace_id();
-      TraceID result = __sync_fetch_and_add(&unique_trace_id, runtime_stride);
+      TraceID result = unique_trace_id.fetch_add(runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -19476,7 +19464,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_mapper_id();
-      MapperID result = __sync_fetch_and_add(&unique_mapper_id, runtime_stride);
+      MapperID result = unique_mapper_id.fetch_add(runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -19730,8 +19718,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_projection_id();
-      ProjectionID result = 
-        __sync_fetch_and_add(&unique_projection_id, runtime_stride);
+      ProjectionID result = unique_projection_id.fetch_add(runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -19986,8 +19973,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_sharding_id();
-      ShardingID result = 
-        __sync_fetch_and_add(&unique_sharding_id, runtime_stride);
+      ShardingID result = unique_sharding_id.fetch_add(runtime_stride); 
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -20461,7 +20447,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_task_id();
-      TaskID result = __sync_fetch_and_add(&unique_task_id, runtime_stride);
+      TaskID result = unique_task_id.fetch_add(runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -20694,8 +20680,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_reduction_id();
-      ReductionOpID result = 
-        __sync_fetch_and_add(&unique_redop_id, runtime_stride);
+      ReductionOpID result = unique_redop_id.fetch_add(runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -20821,8 +20806,7 @@ namespace Legion {
     {
       if (check_context && (implicit_context != NULL))
         return implicit_context->generate_dynamic_serdez_id();
-      CustomSerdezID result = 
-        __sync_fetch_and_add(&unique_serdez_id, runtime_stride);
+      CustomSerdezID result = unique_serdez_id.fetch_add(runtime_stride);
       // Check for hitting the library limit
       if (result >= LEGION_INITIAL_LIBRARY_ID_OFFSET)
         REPORT_LEGION_FATAL(LEGION_FATAL_EXCEEDED_LIBRARY_ID_OFFSET,
@@ -22165,26 +22149,6 @@ namespace Legion {
       find_messenger(target)->send_message<SEND_COLLECTIVE_MESSAGE>(rez,
                                                           true/*flush*/); 
     }
-
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    void Runtime::send_create_shadow_reduction_request(AddressSpaceID target,
-                                                       Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_CREATE_SHADOW_REQUEST>(rez,
-                                                            true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_create_shadow_reduction_response(AddressSpaceID target,
-                                                        Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_CREATE_SHADOW_RESPONSE>(rez,
-                                            true/*flush*/, true/*response*/);
-    }
-#endif // LEGION_GPU_REDUCTIONS
 
     //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
@@ -24140,23 +24104,6 @@ namespace Legion {
       CollectiveManager::handle_collective_message(derez, this);
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    void Runtime::handle_create_shadow_reduction_request(Deserializer &derez,
-                                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndividualManager::handle_create_shadow_request(this, source, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_create_shadow_reduction_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      IndividualManager::handle_create_shadow_response(this, derez);
-    }
-#endif // LEGION_GPU_REDUCTIONS
-
     //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_request(Deserializer &derez,
                                                  AddressSpaceID source)
@@ -25690,8 +25637,7 @@ namespace Legion {
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
 #ifdef LEGION_TRACE_ALLOCATION
-      unsigned long long trace_count = 
-        __sync_fetch_and_add(&allocation_tracing_count,1); 
+      unsigned long long trace_count = allocation_tracing_count.fetch_add(1); 
       if ((trace_count % LEGION_TRACE_ALLOCATION_FREQUENCY) == 0)
         dump_allocation_info();
 #endif
@@ -26376,7 +26322,7 @@ namespace Legion {
       }
       else
       {
-        __sync_fetch_and_add(&outstanding_top_level_tasks,1);
+        outstanding_top_level_tasks.fetch_add(1);
       }
     }
 
@@ -26395,7 +26341,7 @@ namespace Legion {
       }
       else
       {
-        unsigned prev = __sync_fetch_and_sub(&outstanding_top_level_tasks,1);
+        unsigned prev = outstanding_top_level_tasks.fetch_sub(1);
 #ifdef DEBUG_LEGION
         assert(prev > 0);
 #endif
@@ -26613,7 +26559,7 @@ namespace Legion {
       AutoLock out_lock(outstanding_task_lock);
       return (total_outstanding_tasks > 0);
 #else
-      return (__sync_fetch_and_add(&total_outstanding_tasks,0) != 0);
+      return total_outstanding_tasks.load();
 #endif
     }
 
@@ -28221,8 +28167,7 @@ namespace Legion {
     IndexSpaceID Runtime::get_unique_index_space_id(void)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceID result = __sync_fetch_and_add(&unique_index_space_id,
-                                                 runtime_stride);
+      IndexSpaceID result = unique_index_space_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       // If we have overflow on the number of partitions created
@@ -28236,8 +28181,8 @@ namespace Legion {
     IndexPartitionID Runtime::get_unique_index_partition_id(void)
     //--------------------------------------------------------------------------
     {
-      IndexPartitionID result = __sync_fetch_and_add(&unique_index_partition_id,
-                                                     runtime_stride);
+      IndexPartitionID result =
+        unique_index_partition_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       // If we have overflow on the number of partitions created
@@ -28251,8 +28196,7 @@ namespace Legion {
     FieldSpaceID Runtime::get_unique_field_space_id(void)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceID result = __sync_fetch_and_add(&unique_field_space_id,
-                                                 runtime_stride);
+      FieldSpaceID result = unique_field_space_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       // If we have overflow on the number of field spaces
@@ -28266,8 +28210,7 @@ namespace Legion {
     IndexTreeID Runtime::get_unique_index_tree_id(void)
     //--------------------------------------------------------------------------
     {
-      IndexTreeID result = __sync_fetch_and_add(&unique_index_tree_id,
-                                                runtime_stride);
+      IndexTreeID result = unique_index_tree_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       // If we have overflow on the number of region trees
@@ -28281,8 +28224,7 @@ namespace Legion {
     RegionTreeID Runtime::get_unique_region_tree_id(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeID result = __sync_fetch_and_add(&unique_region_tree_id,
-                                                 runtime_stride);
+      RegionTreeID result = unique_region_tree_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       // If we have overflow on the number of region trees
@@ -28296,8 +28238,7 @@ namespace Legion {
     UniqueID Runtime::get_unique_operation_id(void)
     //--------------------------------------------------------------------------
     {
-      UniqueID result = __sync_fetch_and_add(&unique_operation_id,
-                                             runtime_stride);
+      UniqueID result = unique_operation_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_operation_id);
@@ -28309,8 +28250,7 @@ namespace Legion {
     FieldID Runtime::get_unique_field_id(void)
     //--------------------------------------------------------------------------
     {
-      FieldID result = __sync_fetch_and_add(&unique_field_id,
-                                            runtime_stride);
+      FieldID result = unique_field_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_field_id);
@@ -28322,8 +28262,8 @@ namespace Legion {
     CodeDescriptorID Runtime::get_unique_code_descriptor_id(void)
     //--------------------------------------------------------------------------
     {
-      CodeDescriptorID result = __sync_fetch_and_add(&unique_code_descriptor_id,
-                                                     runtime_stride);
+      CodeDescriptorID result = 
+        unique_code_descriptor_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_code_descriptor_id);
@@ -28335,8 +28275,8 @@ namespace Legion {
     LayoutConstraintID Runtime::get_unique_constraint_id(void)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraintID result = __sync_fetch_and_add(&unique_constraint_id,
-                                                       runtime_stride);
+      LayoutConstraintID result =
+        unique_constraint_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_constraint_id);
@@ -28348,8 +28288,7 @@ namespace Legion {
     IndexSpaceExprID Runtime::get_unique_index_space_expr_id(void)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceExprID result = __sync_fetch_and_add(&unique_is_expr_id,
-                                                     runtime_stride);
+      IndexSpaceExprID result = unique_is_expr_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_is_expr_id);
@@ -28362,8 +28301,7 @@ namespace Legion {
     unsigned Runtime::get_unique_indirections_id(void)
     //--------------------------------------------------------------------------
     {
-      unsigned result = __sync_fetch_and_add(&unique_indirections_id,
-                                             runtime_stride);
+      unsigned result = unique_indirections_id.fetch_add(runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_indirections_id);
@@ -28377,7 +28315,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReplicationID result = 
-        __sync_fetch_and_add(&unique_control_replication_id, runtime_stride);
+        unique_control_replication_id.fetch_add(runtime_stride); 
 #ifdef DEBUG_LEGION
       assert(result > 0); // should never be giving out zero
       assert(result <= unique_control_replication_id);
@@ -29229,7 +29167,7 @@ namespace Legion {
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ RtUserEvent Runtime::runtime_started_event = 
                                               RtUserEvent::NO_RT_USER_EVENT;
-    /*static*/ int Runtime::background_waits = 0;
+    /*static*/ std::atomic<int> Runtime::background_waits = {0};
     /*static*/ int Runtime::return_code = 0;
     /*static*/ int Runtime::mpi_rank = -1;
 
@@ -30039,11 +29977,6 @@ namespace Legion {
       }
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    extern void register_builtin_gpu_reduction_tasks(
-      GPUReductionTable &gpu_reductions, std::set<RtEvent> &registered_events);
-#endif
-
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::configure_runtime(int argc, char **argv,
                          const LegionConfiguration &config, RealmRuntime &realm,
@@ -30110,26 +30043,6 @@ namespace Legion {
       Realm::ProfilingRequestSet no_requests;
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
-#ifdef LEGION_GPU_REDUCTIONS
-      // Do this here to make sure we get the gpu reduction table
-      // setup before we make the runtime object
-      GPUReductionTable &gpu_reduction_table = get_gpu_reduction_table();
-      register_builtin_gpu_reduction_tasks(gpu_reduction_table,
-                                           registered_events);
-      const std::map<ReductionOpID,CodeDescriptor> &pending_gpu_reductions =
-        get_pending_gpu_reduction_table();
-      for (std::map<ReductionOpID,CodeDescriptor>::const_iterator it = 
-            pending_gpu_reductions.begin(); it != 
-            pending_gpu_reductions.end(); it++)
-      {
-        const TaskID task_id = 
-          LG_TASK_ID_AVAILABLE + gpu_reduction_table.size();
-        registered_events.insert(RtEvent(Processor::register_task_by_kind(
-                Processor::TOC_PROC, false/*global*/, task_id, it->second,
-                no_requests, NULL, 0)));
-        gpu_reduction_table[it->first] = task_id;
-      }
-#endif
       // Now build the data structures for all processors 
       std::map<Processor,Runtime*> processor_mapping;
       if (config.separate_runtime_instances)
@@ -30361,7 +30274,7 @@ namespace Legion {
                       "not launched in background mode!");
       // If this is the first time we've called this on this node then 
       // we need to remove our reference to allow shutdown to proceed
-      if (__sync_fetch_and_add(&background_waits, 1) == 0)
+      if (background_waits.fetch_add(1) == 0)
         the_runtime->decrement_outstanding_top_level_tasks();
       return RealmRuntime::get_runtime().wait_for_shutdown();
     }
@@ -30689,35 +30602,6 @@ namespace Legion {
       return table;
     }
 
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    /*static*/ GPUReductionTable& Runtime::get_gpu_reduction_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static GPUReductionTable table;
-      return table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<ReductionOpID,CodeDescriptor>&
-                                  Runtime::get_pending_gpu_reduction_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<ReductionOpID,CodeDescriptor> pending_table;
-      return pending_table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_gpu_reduction_op(ReductionOpID redop,
-                                                     const CodeDescriptor &desc)
-    //--------------------------------------------------------------------------
-    {
-      std::map<ReductionOpID,CodeDescriptor> &pending_table = 
-        get_pending_gpu_reduction_table();
-      pending_table[redop] = desc;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     /*static*/ SerdezOpTable& Runtime::get_serdez_table(bool safe)
     //--------------------------------------------------------------------------
@@ -30738,7 +30622,7 @@ namespace Legion {
       return table;
     }
 
-#if ( defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP) )&& !defined(LEGION_GPU_REDUCTIONS)
+#if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
     // Define a free function for Runtime::register_reduction_op because
     //  legion_redop.cu cannot include runtime.h
     //--------------------------------------------------------------------------
@@ -31916,7 +31800,7 @@ namespace Legion {
         runtime->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
+      runtime->outstanding_counts[tid].fetch_sub(1);
 #endif
     }
 
@@ -32055,7 +31939,7 @@ namespace Legion {
       runtime->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
+      runtime->outstanding_counts[tid].fetch_sub(1);
 #endif
     }
 

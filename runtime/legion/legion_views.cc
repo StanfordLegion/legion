@@ -316,11 +316,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      std::set<RtEvent> ready_events;
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-      if (ready.exists())
-        ready_events.insert(ready);
 
       RegionUsage usage;
       derez.deserialize(usage);
@@ -342,14 +339,10 @@ namespace Legion {
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, ready_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
-      if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -407,7 +400,7 @@ namespace Legion {
       derez.deserialize(applied);
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       // This blocks the virtual channel, but keeps queries in-order 
       // with respect to updates from the same node which is necessary
@@ -2531,8 +2524,7 @@ namespace Legion {
             rez.serialize(collect_event);
             rez.serialize(ready_event);
             rez.serialize(applied_event);
-            trace_info.pack_trace_info<true/*pack operation*/>(rez, 
-                                    applied_events, logical_owner);
+            trace_info.pack_trace_info(rez, applied_events);
           }
           // Add a remote valid reference that will be removed by 
           // the receiver once the changes have been applied
@@ -2651,8 +2643,7 @@ namespace Legion {
                 rez.serialize(collect_event);
                 rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
                 rez.serialize(applied_event);
-                trace_info.pack_trace_info<true/*pack operation*/>(rez, 
-                                            applied_events, it->first);
+                trace_info.pack_trace_info(rez, applied_events);
               }
               runtime->send_view_register_user(it->first, rez);
               applied_events.insert(applied_event);
@@ -2780,8 +2771,7 @@ namespace Legion {
             rez.serialize(index);
             rez.serialize(ready_event);
             rez.serialize(applied);
-            trace_info.pack_trace_info<true/*need op*/>(rez, applied_events, 
-                                                        logical_owner);
+            trace_info.pack_trace_info(rez, applied_events);
           }
           runtime->send_view_find_copy_preconditions_request(logical_owner,rez);
           applied_events.insert(applied);
@@ -3274,7 +3264,7 @@ namespace Legion {
         else
           update_cache = true;
         // increment the number of outstanding additions
-        __sync_fetch_and_add(&outstanding_additions,1);
+        outstanding_additions.fetch_add(1);
       }
       else // This is just going to add at the top so never needs to wait
       {
@@ -3320,9 +3310,9 @@ namespace Legion {
       if (update_count)
       {
 #ifdef DEBUG_LEGION
-        assert(outstanding_additions > 0);
+        assert(outstanding_additions.load() > 0);
 #endif
-        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        if ((outstanding_additions.fetch_sub(1) == 1) && clean_waiting.exists())
         {
           // Wake up the clean waiter
           Runtime::trigger_event(clean_waiting);
@@ -3339,7 +3329,7 @@ namespace Legion {
           if (expr_cache_uses == user_cache_timeout)
           {
             // Wait until there are are no more outstanding additions
-            while (outstanding_additions > 0)
+            while (outstanding_additions.load() > 0)
             {
 #ifdef DEBUG_LEGION
               assert(!clean_waiting.exists());
@@ -3394,7 +3384,7 @@ namespace Legion {
             has_target_view = true;
         }
         // increment the number of outstanding additions
-        __sync_fetch_and_add(&outstanding_additions,1);
+        outstanding_additions.fetch_add(1);
         update_count = true;
       }
       else // This is just going to add at the top so never needs to wait
@@ -3457,9 +3447,10 @@ namespace Legion {
           if (update_count)
           {
 #ifdef DEBUG_LEGION
-            assert(outstanding_additions > 0);
+            assert(outstanding_additions.load() > 0);
 #endif
-            if ((--outstanding_additions == 0) && clean_waiting.exists())
+            if ((outstanding_additions.fetch_sub(1) == 1) && 
+                clean_waiting.exists())
             {
               // Wake up the clean waiter
               Runtime::trigger_event(clean_waiting);
@@ -3488,9 +3479,9 @@ namespace Legion {
         }
         AutoLock v_lock(view_lock);
 #ifdef DEBUG_LEGION
-        assert(outstanding_additions > 0);
+        assert(outstanding_additions.load() > 0);
 #endif
-        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        if ((outstanding_additions.fetch_sub(1) == 1) && clean_waiting.exists())
         {
           // Wake up the clean waiter
           Runtime::trigger_event(clean_waiting);
@@ -3602,7 +3593,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         // There should be no outstanding_additions when we're here
         // because we're already protected by the replication lock
-        assert(outstanding_additions == 0);
+        assert(outstanding_additions.load() == 0);
 #endif
         // Go through and remove any users for the deactivate mask
         // Need an exclusive copy of the expr_lock to do this
@@ -4592,8 +4583,7 @@ namespace Legion {
           rez.serialize(collect_event);
           rez.serialize(ready_event);
           rez.serialize(applied_event);
-          trace_info.pack_trace_info<true/*pack operation*/>(rez,
-                                  applied_events, logical_owner);
+          trace_info.pack_trace_info(rez, applied_events);
         }
         // Add a remote valid reference that will be removed by 
         // the receiver once the changes have been applied
@@ -4664,8 +4654,7 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(ready_event);
           rez.serialize(applied);
-          trace_info.pack_trace_info<true/*need op*/>(rez, applied_events,
-                                                      logical_owner);
+          trace_info.pack_trace_info(rez, applied_events);
         }
         runtime->send_view_find_copy_preconditions_request(logical_owner, rez);
         applied_events.insert(applied);
@@ -4989,35 +4978,6 @@ namespace Legion {
           break;
         }
       }
-#ifdef LEGION_GPU_REDUCTIONS
-      // If the base instance is a shadow instance then we also need to 
-      // check initializers since we might just get initialized and then
-      // read from as a bounce buffer, which contradicts the logic above
-      // about their always being a reducer for an initializer
-      if (manager->shadow_instance)
-      {
-        for (EventFieldUsers::const_iterator uit = initialization_users.begin();
-              uit != initialization_users.end(); uit++)
-        {
-          const FieldMask event_mask = uit->second.get_valid_mask() & user_mask;
-          if (!event_mask)
-            continue;
-          for (EventUsers::const_iterator it = uit->second.begin();
-                it != uit->second.end(); it++)
-          {
-            const FieldMask overlap = event_mask & it->second;
-            if (!overlap)
-              continue;
-            IndexSpaceExpression *expr_overlap = 
-              context->intersect_index_spaces(user_expr, it->first->expr);
-            if (expr_overlap->is_empty())
-              continue;
-            preconditions.insert(uit->first);
-            break;
-          }
-        }
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------

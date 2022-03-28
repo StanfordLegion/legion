@@ -160,7 +160,7 @@ namespace Legion {
       inline void add_reference(unsigned cnt = 1);
       inline bool remove_reference(unsigned cnt = 1);
     protected:
-      unsigned int references;
+      std::atomic<unsigned int> references;
     };
 
     /**
@@ -269,6 +269,7 @@ namespace Legion {
         ACTIVE_INVALID_STATE,
         VALID_STATE,
         DELETED_STATE,
+        // Make sure all these come after deleted state
         PENDING_ACTIVE_STATE,
         PENDING_INACTIVE_STATE,
         PENDING_VALID_STATE,
@@ -350,24 +351,27 @@ namespace Legion {
       inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
     public:
 #ifdef DEBUG_LEGION
-      bool check_valid(void) const { return (current_state == VALID_STATE); }
+      bool check_valid(void);
+      // Better be called while holding the lock
+      inline bool in_stable_state(void) const 
+        { return (current_state <= DELETED_STATE); }
 #endif
       // Atomic check and increment operations 
       bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
-      bool check_gc_and_increment(ReferenceSource source, int cnt = 1);
-      bool check_gc_and_increment(DistributedID source, int cnt = 1);
-      bool check_resource_and_increment(ReferenceSource source ,int cnt = 1);
-      bool check_resource_and_increment(DistributedID source, int cnt = 1);
+      bool check_active_and_increment(ReferenceSource source, int cnt = 1);
+      bool check_active_and_increment(DistributedID source, int cnt = 1);
+#ifndef DEBUG_LEGION_GC
     private:
-      void add_gc_reference(ReferenceMutator *mutator);
-      bool remove_gc_reference(ReferenceMutator *mutator);
+      void add_gc_reference(ReferenceMutator *mutator, int cnt);
+      bool remove_gc_reference(ReferenceMutator *mutator, int cnt);
     private:
-      void add_valid_reference(ReferenceMutator *mutator);
-      bool remove_valid_reference(ReferenceMutator *mutator);
+      void add_valid_reference(ReferenceMutator *mutator, int cnt);
+      bool remove_valid_reference(ReferenceMutator *mutator, int cnt);
     private:
-      void add_resource_reference(void);
-      bool remove_resource_reference(void);
+      void add_resource_reference(int cnt);
+      bool remove_resource_reference(int cnt);
+#endif
 #ifdef USE_REMOTE_REFERENCES
     private:
       bool add_create_reference(AddressSpaceID source, 
@@ -505,9 +509,15 @@ namespace Legion {
       bool has_resource_references;
       bool reentrant_update;
     private: // derived users can't see the references
+#ifdef DEBUG_LEGION_GC
       int gc_references;
       int valid_references;
       int resource_references;
+#else
+      std::atomic<int> gc_references;
+      std::atomic<int> valid_references;
+      std::atomic<int> resource_references;
+#endif
 #ifdef USE_REMOTE_REFERENCES
     protected:
       // These are only valid on the owner node
@@ -571,14 +581,14 @@ namespace Legion {
     inline void Collectable::add_reference(unsigned cnt /*= 1*/)
     //--------------------------------------------------------------------------
     {
-      __sync_add_and_fetch(&references,cnt);
+      references.fetch_add(cnt);
     }
 
     //--------------------------------------------------------------------------
     inline bool Collectable::remove_reference(unsigned cnt /*= 1*/)
     //--------------------------------------------------------------------------
     {
-      unsigned prev = __sync_fetch_and_sub(&references,cnt);
+      unsigned prev = references.fetch_sub(cnt);
 #ifdef DEBUG_LEGION
       assert(prev >= cnt); // check for underflow
 #endif
@@ -623,15 +633,17 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&gc_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        add_gc_reference(mutator);
-#else
+#ifdef DEBUG_LEGION_GC
       add_base_gc_ref_internal(source, mutator, cnt); 
+#else
+      int current = gc_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (gc_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_gc_reference(mutator, cnt);
 #endif
     }
 
@@ -646,16 +658,18 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&gc_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        add_gc_reference(mutator);
-#else
+#ifdef DEBUG_LEGION_GC
       add_nested_gc_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), 
                                  mutator, cnt);
+#else
+      int current = gc_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (gc_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_gc_reference(mutator, cnt);
 #endif
     }
 
@@ -670,16 +684,20 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&gc_references, -cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-#endif
-      if (previous == cnt)
-        return remove_gc_reference(mutator);
-      return false;
-#else
+#ifdef DEBUG_LEGION_GC
       return remove_base_gc_ref_internal(source, mutator, cnt);
+#else
+      int current = gc_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (gc_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_gc_reference(mutator, cnt);
 #endif
     }
 
@@ -694,17 +712,21 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&gc_references, -cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-#endif
-      if (previous == cnt)
-        return remove_gc_reference(mutator);
-      return false;
-#else
+#ifdef DEBUG_LEGION_GC
       return remove_nested_gc_ref_internal(
           LEGION_DISTRIBUTED_ID_FILTER(source), mutator, cnt);
+#else
+      int current = gc_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (gc_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_gc_reference(mutator, cnt);
 #endif
     }
 
@@ -719,15 +741,17 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&valid_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        add_valid_reference(mutator);
-#else
+#ifdef DEBUG_LEGION_GC
       add_base_valid_ref_internal(source, mutator, cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(mutator, cnt);
 #endif
     }
 
@@ -742,16 +766,18 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&valid_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        add_valid_reference(mutator);
-#else
+#ifdef DEBUG_LEGION_GC
       add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), 
                                     mutator, cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(mutator, cnt);
 #endif
     }
 
@@ -766,16 +792,20 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&valid_references, -cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-#endif
-      if (previous == cnt)
-        return remove_valid_reference(mutator);
-      return false;
-#else
+#ifdef DEBUG_LEGION_GC
       return remove_base_valid_ref_internal(source, mutator, cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(mutator, cnt);
 #endif
     }
 
@@ -790,17 +820,21 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&valid_references, -cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-#endif
-      if (previous == cnt)
-        return remove_valid_reference(mutator);
-      return false;
-#else
+#ifdef DEBUG_LEGION_GC
       return remove_nested_valid_ref_internal(
           LEGION_DISTRIBUTED_ID_FILTER(source), mutator, cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(mutator, cnt);
 #endif
     }
 
@@ -815,15 +849,17 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&resource_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        add_resource_reference();
-#else
+#ifdef DEBUG_LEGION_GC
       add_base_resource_ref_internal(source, cnt);
+#else
+      int current = resource_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_resource_reference(cnt);
 #endif
     }
 
@@ -838,16 +874,18 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&resource_references, cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= 0);
-#endif
-      if (previous == 0)
-        add_resource_reference();
-#else
+#ifdef DEBUG_LEGION_GC
       add_nested_resource_ref_internal(
           LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = resource_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_resource_reference(cnt);
 #endif
     }
 
@@ -862,16 +900,20 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&resource_references, -cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-#endif
-      if (previous == cnt)
-        return remove_resource_reference();
-      return false;
-#else
+#ifdef DEBUG_LEGION_GC
       return remove_base_resource_ref_internal(source, cnt);
+#else
+      int current = resource_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_resource_reference(cnt);
 #endif
     }
 
@@ -886,17 +928,21 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifndef DEBUG_LEGION_GC
-      int previous = __sync_fetch_and_add(&resource_references, -cnt);
-#ifdef DEBUG_LEGION
-      assert(previous >= cnt);
-#endif
-      if (previous == cnt)
-        return remove_resource_reference();
-      return false;
-#else
+#ifdef DEBUG_LEGION_GC
       return remove_nested_resource_ref_internal(
           LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = resource_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_resource_reference(cnt);
 #endif
     }
 

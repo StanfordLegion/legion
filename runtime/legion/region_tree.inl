@@ -87,7 +87,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceExpression::issue_fill_internal(
-                                 RegionTreeForest *forest,
+                                 RegionTreeForest *forest, Operation *op,
                                  const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -118,10 +118,9 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this fill add any profiling requests
       Realm::ProfilingRequestSet requests;
-      if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(trace_info, requests, true);
+      op->add_copy_profiling_request(trace_info, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_fill_request(requests, trace_info.op);
+        forest->runtime->profiler->add_fill_request(requests, op);
 #ifdef LEGION_SPY
       // Have to convert back to Realm data structures because C++ is dumb
       std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
@@ -163,8 +162,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      assert(trace_info.op != NULL);
-      LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
+      LegionSpy::log_fill_events(op->get_unique_op_id(), 
           expr_id, handle, tree_id, precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
@@ -174,7 +172,7 @@ namespace Legion {
         trace_info.record_issue_fill(result, this, dst_fields,
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     handle, tree_id,
+                                     fill_uid, handle, tree_id,
 #endif
                                      precondition, pred_guard);
       return result;
@@ -183,7 +181,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceExpression::issue_copy_internal(
-                                 RegionTreeForest *forest,
+                                 RegionTreeForest *forest, Operation *op,
                                  const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -233,10 +231,9 @@ namespace Legion {
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
+      op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_copy_request(requests, trace_info.op);
+        forest->runtime->profiler->add_copy_request(requests, op);
 #ifdef LEGION_SPY
       // Have to convert back to Realm structures because C++ is dumb  
       std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
@@ -313,8 +310,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      assert(trace_info.op != NULL);
-      LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
+      LegionSpy::log_copy_events(op->get_unique_op_id(), 
           expr_id, src_tree_id, dst_tree_id, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_copy_field(result, src_fields[idx].field_id,
@@ -449,7 +445,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceExpression::issue_indirect_internal(
-                                 RegionTreeForest *forest,
+                                 RegionTreeForest *forest, Operation *op,
                                  const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -464,10 +460,9 @@ namespace Legion {
     {
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
-      if (trace_info.op != NULL)
-        trace_info.op->add_copy_profiling_request(trace_info, requests, false);
+      op->add_copy_profiling_request(trace_info, requests, false);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_copy_request(requests, trace_info.op);
+        forest->runtime->profiler->add_copy_request(requests, op);
 #ifdef LEGION_SPY
       // Have to convert back to Realm structures because C++ is dumb  
       std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
@@ -525,8 +520,8 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      assert(trace_info.op != NULL);
-      LegionSpy::log_indirect_events(trace_info.op->get_unique_op_id(), 
+      assert(op != NULL);
+      LegionSpy::log_indirect_events(op->get_unique_op_id(), 
          expr_id, unique_indirections_identifier, precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
         LegionSpy::log_indirect_field(result, src_fields[idx].field_id,
@@ -574,126 +569,6 @@ namespace Legion {
       // TODO: more efficient way?
       return(a * b / gcd(a, b));
     }
-
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    ApEvent IndexSpaceExpression::gpu_reduction_internal(
-                                 RegionTreeForest *forest,
-                                 const Realm::IndexSpace<DIM,T> &space,
-                                 const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-                                 Processor gpu, TaskID gpu_task_id,
-                                 PhysicalManager *dst, PhysicalManager *src,
-                                 ApEvent precondition, PredEvent pred_guard, 
-                                 ReductionOpID redop, bool reduction_fold)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!space.empty());
-      assert(dst_fields.size() == src_fields.size());
-#endif
-      // We need to compute the rectangles for which we can get dense accessors
-      // for each of these reduction operations
-      const Rect<DIM,T> *src_piece_list = 
-        static_cast<const Rect<DIM,T>*>(src->piece_list);
-      const Rect<DIM,T> *dst_piece_list =
-        static_cast<const Rect<DIM,T>*>(dst->piece_list);
-      std::vector<Rect<DIM,T> > piece_rects;
-      if (dst_piece_list != NULL)
-      {
-        if (src_piece_list != NULL)
-        {
-          for (unsigned idx1 = 0; idx1 < src->piece_list_size; idx1++)
-            for (unsigned idx2 = 0; idx2 < dst->piece_list_size; idx2++)
-            {
-              const Rect<DIM,T> intersect = 
-                src_piece_list[idx1].intersection(dst_piece_list[idx2]);
-              if (intersect.empty())
-                continue;
-              const Rect<DIM,T> intersect2 = 
-                intersect.intersection(space.bounds);
-              if (!intersect2.empty())
-                piece_rects.push_back(intersect2);
-            }
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < piece_rects.size(); idx++)
-          {
-            const Rect<DIM,T> intersect = 
-              dst_piece_list[idx].intersection(space.bounds);
-            if (!intersect.empty())
-              piece_rects.push_back(intersect);
-          }
-        }
-      }
-      else
-      {
-        if (src_piece_list != NULL)
-        {
-          for (unsigned idx = 0; idx < piece_rects.size(); idx++)
-          {
-            const Rect<DIM,T> intersect = 
-              src_piece_list[idx].intersection(space.bounds);
-            if (!intersect.empty())
-              piece_rects.push_back(intersect);
-          }
-        }
-        else
-          piece_rects.push_back(space.bounds);
-      }
-      Realm::ProfilingRequestSet requests;
-      if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_task_request(requests, gpu_task_id,
-            0/*vid*/, forest->runtime->get_unique_operation_id(), gpu);
-      // Pack the arguments for this task
-      Serializer rez;
-      rez.serialize(type_tag);
-      rez.serialize(space);
-      rez.serialize<bool>(reduction_fold);
-      rez.serialize<bool>(false); // exclusive
-      rez.serialize<size_t>(dst_fields.size());
-      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-      {
-        rez.serialize(dst_fields[idx].inst);
-        rez.serialize(src_fields[idx].inst);
-        rez.serialize(dst_fields[idx].field_id);
-        rez.serialize(src_fields[idx].field_id);
-      }
-      rez.serialize<size_t>(piece_rects.size());
-      for (unsigned idx = 0; idx < piece_rects.size(); idx++)
-        rez.serialize(piece_rects[idx]);
-      ApEvent result;
-      if (pred_guard.exists())
-      {
-        ApEvent pred_pre = 
-          Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
-        if (trace_info.recording)
-          trace_info.record_merge_events(pred_pre, precondition,
-                                          ApEvent(pred_guard));
-        result = Runtime::ignorefaults(gpu.spawn(gpu_task_id,
-              rez.get_buffer(), rez.get_used_bytes(), requests, pred_pre));
-      }
-      else
-        result = ApEvent(gpu.spawn(gpu_task_id,
-              rez.get_buffer(), rez.get_used_bytes(), requests, precondition));
-      if (trace_info.recording)
-        trace_info.record_gpu_reduction(result, this, src_fields, dst_fields,
-                                    gpu, gpu_task_id, src, dst, precondition, 
-                                    pred_guard, redop, reduction_fold);
-#ifdef LEGION_DISABLE_EVENT_PRUNING
-      if (!result.exists())
-      {
-        ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
-        result = new_result;
-      }
-#endif
-      return result;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -1662,7 +1537,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const void *fill_value, size_t fill_size,
@@ -1677,7 +1552,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
-        return issue_fill_internal(context, local_space, trace_info, 
+        return issue_fill_internal(context, op, local_space, trace_info, 
             dst_fields, fill_value, fill_size, 
 #ifdef LEGION_SPY
             fill_uid, handle, tree_id,
@@ -1685,14 +1560,14 @@ namespace Legion {
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard);
       else if (space_ready.exists())
-        return issue_fill_internal(context, local_space, trace_info, 
+        return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
                                    space_ready, pred_guard);
       else
-        return issue_fill_internal(context, local_space, trace_info, 
+        return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
@@ -1702,7 +1577,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceOperationT<DIM,T>::issue_copy(
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_copy(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1717,7 +1592,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
-        return issue_copy_internal(context, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info, 
             dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
@@ -1725,14 +1600,14 @@ namespace Legion {
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard);
       else if (space_ready.exists())
-        return issue_copy_internal(context, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard);
       else
-        return issue_copy_internal(context, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
@@ -1779,7 +1654,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceOperationT<DIM,T>::issue_indirect(
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_indirect(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1794,7 +1669,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
-        return issue_indirect_internal(context, local_space, trace_info, 
+        return issue_indirect_internal(context, op, local_space, trace_info, 
             dst_fields, src_fields, indirects,
 #ifdef LEGION_SPY
             unique_indirections_identifier,
@@ -1802,7 +1677,7 @@ namespace Legion {
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard, tracing_precondition);
       else if (space_ready.exists())
-        return issue_indirect_internal(context, local_space, trace_info, 
+        return issue_indirect_internal(context, op, local_space, trace_info,
                                        dst_fields, src_fields, indirects, 
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
@@ -1810,7 +1685,7 @@ namespace Legion {
                                        space_ready, pred_guard,
                                        tracing_precondition);
       else
-        return issue_indirect_internal(context, local_space, trace_info, 
+        return issue_indirect_internal(context, op, local_space, trace_info,
                                        dst_fields, src_fields, indirects,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
@@ -1818,37 +1693,6 @@ namespace Legion {
                                        precondition, pred_guard,
                                        tracing_precondition);
     }
-
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    ApEvent IndexSpaceOperationT<DIM,T>::gpu_reduction(
-                                 const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-                                 Processor gpu, TaskID gpu_task_id,
-                                 PhysicalManager *dst, PhysicalManager *src,
-                                 ApEvent precondition, PredEvent pred_guard, 
-                                 ReductionOpID redop, bool reduction_fold)
-    //--------------------------------------------------------------------------
-    {
-      Realm::IndexSpace<DIM,T> local_space;
-      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
-      if (space_ready.exists() && precondition.exists())
-        return gpu_reduction_internal(context, local_space, trace_info, 
-            dst_fields, src_fields, gpu, gpu_task_id, dst, src,
-            Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard, redop, reduction_fold);
-      else if (space_ready.exists())
-        return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
-                space_ready, pred_guard, redop, reduction_fold);
-      else
-        return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
-                precondition, pred_guard, redop, reduction_fold);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -6179,7 +6023,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const void *fill_value, size_t fill_size,
@@ -6194,7 +6038,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (precondition.exists() && space_ready.exists())
-        return issue_fill_internal(context, local_space, trace_info, 
+        return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
@@ -6202,14 +6046,14 @@ namespace Legion {
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard);
       else if (space_ready.exists())
-        return issue_fill_internal(context, local_space, trace_info, 
+        return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
                                    space_ready, pred_guard);
       else
-        return issue_fill_internal(context, local_space, trace_info, 
+        return issue_fill_internal(context, op, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
@@ -6219,7 +6063,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -6234,22 +6078,22 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (precondition.exists() && space_ready.exists())
-        return issue_copy_internal(context, local_space, trace_info, dst_fields,
-            src_fields, reservations,
+        return issue_copy_internal(context, op, local_space, trace_info,
+            dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
             pred_guard);
       else if (space_ready.exists())
-        return issue_copy_internal(context, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations, 
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
 #endif
                 space_ready, pred_guard);
       else
-        return issue_copy_internal(context, local_space, trace_info, 
+        return issue_copy_internal(context, op, local_space, trace_info, 
                 dst_fields, src_fields, reservations,
 #ifdef LEGION_SPY
                 src_tree_id, dst_tree_id,
@@ -6296,7 +6140,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_indirect(
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_indirect(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -6311,7 +6155,7 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
       if (space_ready.exists() && precondition.exists())
-        return issue_indirect_internal(context, local_space, trace_info, 
+        return issue_indirect_internal(context, op, local_space, trace_info, 
             dst_fields, src_fields, indirects,
 #ifdef LEGION_SPY
             unique_indirections_identifier,
@@ -6319,7 +6163,7 @@ namespace Legion {
             Runtime::merge_events(&trace_info, precondition, space_ready),
             pred_guard, tracing_precondition);
       else if (space_ready.exists())
-        return issue_indirect_internal(context, local_space, trace_info, 
+        return issue_indirect_internal(context, op, local_space, trace_info,
                                        dst_fields, src_fields, indirects, 
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
@@ -6327,7 +6171,7 @@ namespace Legion {
                                        space_ready, pred_guard,
                                        tracing_precondition);
       else
-        return issue_indirect_internal(context, local_space, trace_info, 
+        return issue_indirect_internal(context, op, local_space, trace_info,
                                        dst_fields, src_fields, indirects,
 #ifdef LEGION_SPY
                                        unique_indirections_identifier,
@@ -6335,37 +6179,6 @@ namespace Legion {
                                        precondition, pred_guard,
                                        tracing_precondition);
     }
-
-#ifdef LEGION_GPU_REDUCTIONS
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::gpu_reduction(
-                                 const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-                                 Processor gpu, TaskID gpu_task_id,
-                                 PhysicalManager *dst, PhysicalManager *src,
-                                 ApEvent precondition, PredEvent pred_guard, 
-                                 ReductionOpID redop, bool reduction_fold)
-    //--------------------------------------------------------------------------
-    {
-      Realm::IndexSpace<DIM,T> local_space;
-      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
-      if (precondition.exists() && space_ready.exists())
-        return gpu_reduction_internal(context, local_space, trace_info, 
-            dst_fields, src_fields, gpu, gpu_task_id, dst, src,
-            Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, redop, reduction_fold);
-      else if (space_ready.exists())
-        return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
-                space_ready, pred_guard, redop, reduction_fold);
-      else
-        return gpu_reduction_internal(context, local_space, trace_info, 
-                dst_fields, src_fields, gpu, gpu_task_id, dst, src,
-                precondition, pred_guard, redop, reduction_fold);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

@@ -663,6 +663,7 @@ namespace Realm {
     , pin_util_procs(false)
     , cpu_bgwork_timeslice(0)
     , util_bgwork_timeslice(0)
+    , use_ext_sysmem(true)
   {}
 
   CoreModule::~CoreModule(void)
