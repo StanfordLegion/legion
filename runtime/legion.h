@@ -3584,7 +3584,14 @@ namespace Legion {
                        DeferredBuffer<T,DIM> &buffer);
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
-                       Realm::RegionInstance instance);
+                       Realm::RegionInstance instance,
+                       bool check_constraints = true);
+    private:
+      void return_data(const DomainPoint &extents,
+                       FieldID field_id,
+                       Realm::RegionInstance instance,
+                       const LayoutConstraintSet *constraints,
+                       bool check_constraints);
     };
 
     //==========================================================================

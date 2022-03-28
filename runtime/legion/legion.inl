@@ -18236,7 +18236,17 @@ namespace Legion {
                                    DeferredBuffer<T,DIM> &buffer)
     //--------------------------------------------------------------------------
     {
-      return_data(shape, field_id, buffer.instance);
+      // Populate the layout constraints for the returned buffer
+      // for the constraint checks.
+      LayoutConstraintSet constraints;
+      std::vector<DimensionKind> ordering(DIM + 1);
+      for (int32_t i = 0; i < DIM; ++i) ordering[i] = buffer.ordering[i];
+      ordering[DIM] = LEGION_DIM_F;
+      constraints.ordering_constraint = OrderingConstraint(ordering, false);
+      constraints.alignment_constraints.push_back(
+        AlignmentConstraint(field_id, LEGION_EQ_EK, buffer.alignment));
+
+      return_data(shape, field_id, buffer.instance, &constraints, true);
     }
 
     //--------------------------------------------------------------------------

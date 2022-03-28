@@ -3175,7 +3175,8 @@ namespace Legion {
         const size_t output_offset = regions.size();
         for (unsigned idx = 0; idx < output_regions.size(); idx++)
         {
-          prepare_output_instance(physical_instances[output_offset + idx],
+          prepare_output_instance(idx,
+                                  physical_instances[output_offset + idx],
                                   output_regions[idx],
                                   output.output_targets[idx],
                                   output.output_constraints[idx]);
@@ -3228,7 +3229,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::prepare_output_instance(InstanceSet &instance_set,
+    void SingleTask::prepare_output_instance(unsigned index,
+                                             InstanceSet &instance_set,
                                              const RegionRequirement &req,
                                              Memory target,
                                              const LayoutConstraintSet &c)
@@ -3247,15 +3249,11 @@ namespace Legion {
 
       if (constraints.ordering_constraint.ordering.empty())
       {
-        IndexSpace is = req.region.get_index_space();
-        int dim = is.get_dim();
-        std::vector<DimensionKind> dimension_ordering(dim + 1);
-        for (int i = 0; i < dim; ++i)
-          dimension_ordering[i] =
-            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
-        dimension_ordering[dim] = LEGION_DIM_F;
-        constraints.add_constraint(OrderingConstraint(dimension_ordering,
-                                                      false/*contigous*/));
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_CONSTRAINTS,
+          "An ordering constraint must be specified for each output "
+          "region, but the mapper did not specify any ordering constraint "
+          "for output region %u of task %s (UID: %lld).",
+          index, get_task_name(), get_unique_op_id());
       }
 
       std::map<FieldID, std::pair<EqualityKind, size_t> > alignments;

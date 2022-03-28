@@ -3042,13 +3042,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void OutputRegion::return_data(const DomainPoint &extents,
                                    FieldID field_id,
-                                   Realm::RegionInstance instance)
+                                   Realm::RegionInstance instance,
+                                   bool check_constraints /*= true */)
+    //--------------------------------------------------------------------------
+    {
+      return_data(extents, field_id, instance, NULL, check_constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::return_data(const DomainPoint &extents,
+                                   FieldID field_id,
+                                   Realm::RegionInstance instance,
+                                   const LayoutConstraintSet *constraints,
+                                   bool check_constraints)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->return_data(extents, field_id, instance);
+      impl->return_data(
+          extents, field_id, instance, constraints, check_constraints);
     }
 
     /////////////////////////////////////////////////////////////
