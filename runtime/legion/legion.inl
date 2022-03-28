@@ -16523,10 +16523,13 @@ namespace Legion {
       return result;
     }
 
-#ifdef LEGION_BOUNDS_CHECKS
     // DeferredBuffer without bounds checks
     template<typename FT, int N, typename T> 
+#ifdef LEGION_BOUNDS_CHECKS
     class DeferredBuffer<FT,N,T,false> {
+#else
+    class DeferredBuffer<FT,N,T,true> {
+#endif
     public:
       inline DeferredBuffer(void);
       // Memory kinds
@@ -16535,17 +16538,7 @@ namespace Legion {
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
                             bool fortran_order_dims = false);
-      inline DeferredBuffer(Memory::Kind kind, 
-                            IndexSpace bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory::Kind kind,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
                             Memory::Kind kind,
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
@@ -16556,21 +16549,28 @@ namespace Legion {
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
                             bool fortran_order_dims = false);
-      inline DeferredBuffer(Memory memory, 
-                            IndexSpace bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
       inline DeferredBuffer(const Rect<N,T> &bounds, 
                             Memory memory,
                             const FT *initial_value = NULL,
                             size_t alignment = 16,
                             bool fortran_order_dims = false);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
-                            Memory memory,
+    public: // Explicit ordering
+      inline DeferredBuffer(Memory memory,
+                            const Domain &bounds,
+                            std::array<DimensionKind,N> ordering,
                             const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
+                            size_t alignment = 16);
+      inline DeferredBuffer(const Rect<N,T> &bounds,
+                            Memory memory,
+                            std::array<DimensionKind,N> ordering,
+                            const FT *initial_value = NULL,
+                            size_t alignment = 16);
+    protected:
+      Memory get_memory_from_kind(Memory::Kind kind);
+      void initialize_layout(size_t alignment, bool fortran_order_dims);
+      void initialize(Memory memory,
+                      DomainT<N,T> bounds,
+                      const FT *initial_value);
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T> &p) const;
@@ -16587,74 +16587,12 @@ namespace Legion {
     protected:
       Realm::RegionInstance instance;
       Realm::AffineAccessor<FT,N,T> accessor;
-    };
-#else
-    // DeferredBuffer with bounds checks
-    template<typename FT, int N, typename T> 
-    class DeferredBuffer<FT,N,T,true> {
-    public:
-      inline DeferredBuffer(void);
-      // Memory kind
-      inline DeferredBuffer(Memory::Kind kind, 
-                            const Domain &bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(Memory::Kind kind, 
-                            IndexSpace bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory::Kind kind,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
-                            Memory::Kind kind,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      // Explicit memory
-      inline DeferredBuffer(Memory memory, 
-                            const Domain &bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(Memory memory, 
-                            IndexSpace bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory memory,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
-                            Memory memory,
-                            const FT *initial_value = NULL,
-                            size_t alignment = 16,
-                            bool fortran_order_dims = false);
-    public:
-      __CUDA_HD__
-      inline FT read(const Point<N,T> &p) const;
-      __CUDA_HD__
-      inline void write(const Point<N,T> &p, FT value) const;
-      __CUDA_HD__
-      inline FT* ptr(const Point<N,T> &p) const;
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T> &r) const; // must be dense
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
-      __CUDA_HD__
-      inline FT& operator[](const Point<N,T> &p) const;
-    protected:
-      Realm::RegionInstance instance;
-      Realm::AffineAccessor<FT,N,T> accessor;
+      std::array<DimensionKind,N> ordering;
+      size_t alignment;
+#ifndef LEGION_BOUNDS_CHECKS
       DomainT<N,T> bounds;
-    };
 #endif
+    };
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
@@ -16692,142 +16630,15 @@ namespace Legion {
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
+      if (!space.dense())
       {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
         assert(false);
       }
-      const Memory memory = finder.first();
-      const DomainT<N,T> bounds = space;
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      const Realm::Memory memory = get_memory_from_kind(kind);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
-        assert(false);
-      }
-      const Memory memory = finder.first();
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds = 
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
-    } 
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
@@ -16847,140 +16658,9 @@ namespace Legion {
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
-        assert(false);
-      }
-      const Memory memory = finder.first();
-      const DomainT<N,T> bounds(rect);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
-        assert(false);
-      }
-      const Realm::Memory memory = finder.first();
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds = runtime->get_index_space_domain<N,T>(space);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      const Realm::Memory memory = get_memory_from_kind(kind);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17001,106 +16681,14 @@ namespace Legion {
                              bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      const DomainT<N,T> bounds = space;
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
+      if (!space.dense())
       {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
       }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory memory, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds = 
-        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
-    } 
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
@@ -17120,45 +16708,8 @@ namespace Legion {
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
-      const DomainT<N,T> bounds(rect);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17173,35 +16724,143 @@ namespace Legion {
 #else
             CB
 #endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
+           >::DeferredBuffer(Memory memory, const Domain &space,
+                             std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             bool fortran_order_dims/* = false*/)
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = Runtime::get_runtime();
-      const DomainT<N,T> bounds = runtime->get_index_space_domain<N,T>(space);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
+      initialize(memory, space, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
+                             std::array<DimensionKind,N> _ordering,
+                             const FT *initial_value /*= NULL*/,
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
+    //--------------------------------------------------------------------------
+    {
+      initialize(memory, rect, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    Memory DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                          false
+#else
+                          CB
+#endif
+                          >::get_memory_from_kind(Memory::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.best_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d",
+                kind);
+        assert(false);
+      }
+      return finder.first();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                        false
+#else
+                        CB
+#endif
+                        >::initialize_layout(size_t _alignment,
+                                             bool fortran_order_dims)
+    //--------------------------------------------------------------------------
+    {
       if (fortran_order_dims)
       {
         for (int i = 0; i < N; i++)
-          dim_order[i] = i;
+          ordering[i] =
+            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
       }
       else
       {
         for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
+          ordering[i] =
+            static_cast<DimensionKind>(
+                static_cast<int>(LEGION_DIM_X) + N - (i + 1));
       }
+
+      alignment = _alignment;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                        false
+#else
+                        CB
+#endif
+                        >::initialize(Memory memory,
+                                      DomainT<N,T> bounds,
+                                      const FT *initial_value)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = Runtime::get_runtime();
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      for (int i = 0; i < N; ++i)
+        dim_order[i] =
+          static_cast<int>(ordering[i]) - static_cast<int>(LEGION_DIM_X);
       Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
+        Realm::InstanceLayoutGeneric::choose_instance_layout(
+          bounds, constraints, dim_order);
       layout->alignment_reqd = alignment;
       instance = runtime->create_task_local_instance(memory, layout);
       if (initial_value != NULL)
       {
-        Realm::ProfilingRequestSet no_requests; 
+        Realm::ProfilingRequestSet no_requests;
         std::vector<Realm::CopySrcDstField> dsts(1);
         dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
         const Internal::LgEvent wait_on(
@@ -17381,141 +17040,15 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
+      if (!space.dense())
       {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
         assert(false);
       }
-      const Memory memory = finder.first();
-      bounds = space;
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      const Realm::Memory memory = get_memory_from_kind(kind);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
-        assert(false);
-      }
-      const Memory memory = finder.first();
-      Runtime *runtime = Runtime::get_runtime();
-      bounds = runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
-    } 
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
@@ -17535,140 +17068,9 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
-        assert(false);
-      }
-      const Memory memory = finder.first();
-      bounds = DomainT<N,T>(rect);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB 
-#else
-            true
-#endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      finder.best_affinity_to(Processor::get_executing_processor());
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(Processor::get_executing_processor());
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
-                kind);
-        assert(false);
-      }
-      const Memory memory = finder.first();
-      Runtime *runtime = Runtime::get_runtime();
-      bounds = runtime->get_index_space_domain<N,T>(space);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      const Realm::Memory memory = get_memory_from_kind(kind);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17689,105 +17091,14 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      bounds = space;
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
+      if (!space.dense())
       {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
       }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible = 
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, space, initial_value);
     }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory memory, const IndexSpace space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      bounds = runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
-    } 
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
@@ -17807,45 +17118,8 @@ namespace Legion {
                              const bool fortran_order_dims/* = false*/)
     //--------------------------------------------------------------------------
     {
-      bounds = DomainT<N,T>(rect);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = i;
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
-      }
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      Runtime *runtime = Runtime::get_runtime();
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 0/*fid*/);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+      initialize_layout(alignment, fortran_order_dims);
+      initialize(memory, rect, initial_value);
     }
 
     //--------------------------------------------------------------------------
@@ -17856,31 +17130,140 @@ namespace Legion {
               >
     inline DeferredBuffer<FT,N,T,
 #ifdef LEGION_BOUNDS_CHECKS
-            CB 
+            CB
 #else
             true
 #endif
-           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory memory,
+           >::DeferredBuffer(Memory memory, const Domain &space,
+                             std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = Runtime::get_runtime();
-      bounds = runtime->get_index_space_domain<N,T>(space);
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
+      initialize(memory, space, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
+                             std::array<DimensionKind,N> _ordering,
+                             const FT *initial_value /*= NULL*/,
+                             size_t _alignment/* = 16*/)
+      : ordering(_ordering), alignment(_alignment)
+    //--------------------------------------------------------------------------
+    {
+      initialize(memory, rect, initial_value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    Memory DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                          CB
+#else
+                          true
+#endif
+                          >::get_memory_from_kind(Memory::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.best_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d",
+                kind);
+        assert(false);
+      }
+      return finder.first();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                        CB
+#else
+                        true
+#endif
+                        >::initialize_layout(size_t _alignment,
+                                             bool fortran_order_dims)
+    //--------------------------------------------------------------------------
+    {
       if (fortran_order_dims)
       {
         for (int i = 0; i < N; i++)
-          dim_order[i] = i;
+          ordering[i] =
+            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
       }
       else
       {
         for (int i = 0; i < N; i++)
-          dim_order[i] = N - (i+1);
+          ordering[i] =
+            static_cast<DimensionKind>(
+                static_cast<int>(LEGION_DIM_X) + N - (i + 1));
       }
+
+      alignment = _alignment;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef LEGION_BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    void DeferredBuffer<FT,N,T,
+#ifdef LEGION_BOUNDS_CHECKS
+                        CB
+#else
+                        true
+#endif
+                        >::initialize(Memory memory,
+                                      DomainT<N,T> domain,
+                                      const FT *initial_value)
+    //--------------------------------------------------------------------------
+    {
+      bounds = domain;
+      Runtime *runtime = Runtime::get_runtime();
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
+      int dim_order[N];
+      for (int i = 0; i < N; ++i)
+        dim_order[i] =
+          static_cast<int>(ordering[i]) - static_cast<int>(LEGION_DIM_X);
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
             constraints, dim_order);
