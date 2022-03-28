@@ -10258,8 +10258,7 @@ namespace Legion {
                               -1U/*instance_footprint*/,
                               ready_event,
                               PhysicalManager::UNBOUND_INSTANCE_KIND,
-                              NULL/*op*/,
-                              false/*shadow_instance*/);
+                              NULL/*op*/);
 
       // Register the instance to make it visible to downstream tasks
       record_created_instance(manager,
