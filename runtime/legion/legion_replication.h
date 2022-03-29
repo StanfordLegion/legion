@@ -78,6 +78,12 @@ namespace Legion {
     };
 #endif
 
+    struct SelectShardingFunctorOutput :
+      public Mapper::SelectShardingFunctorOutput {
+      inline SelectShardingFunctorOutput(void)
+        { chosen_functor = UINT_MAX; slice_recurse = true; }
+    };
+
     /**
      * \class ShardCollective
      * The shard collective is the base class for performing
