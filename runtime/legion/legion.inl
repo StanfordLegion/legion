@@ -18284,8 +18284,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       check_type_tag(
         Internal::NT_TemplateHelper::encode_tag<DIM, COORD_T>());
+      check_field_size(field_id, sizeof(T));
 #endif
-
       // Populate the layout constraints for the returned buffer
       // for the constraint checks.
       LayoutConstraintSet constraints;

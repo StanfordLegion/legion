@@ -3591,6 +3591,7 @@ namespace Legion {
                     bool return_buffer = false);
     private:
       void check_type_tag(TypeTag type_tag) const;
+      void check_field_size(FieldID field_id, size_t field_size) const;
       void get_layout(FieldID field_id,
                       std::vector<DimensionKind> &ordering,
                       size_t &alignment) const;

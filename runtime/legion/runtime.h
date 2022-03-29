@@ -940,10 +940,12 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
-      TypeTag get_type_tag() const { return req.type_tag; }
+      void check_type_tag(TypeTag type_tag) const;
+      void check_field_size(FieldID field_id, size_t field_size) const;
       void get_layout(FieldID field_id,
                       std::vector<DimensionKind> &ordering,
                       size_t &alignment) const;
+      size_t get_field_size(FieldID field_id) const;
     public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,

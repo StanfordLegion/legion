@@ -5351,6 +5351,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void OutputRegionImpl::check_type_tag(TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      if (type_tag == req.type_tag) return;
+
+      REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_RETURN,
+        "The deferred buffer passed to output region %u of task %s (UID: %lld) "
+        "is incompatible with the output region. Make sure the deferred buffer "
+        "has the right dimension and the coordinate type.",
+        index, context->owner_task->get_task_name(),
+        context->owner_task->get_unique_op_id());
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::check_field_size(
+                                      FieldID field_id, size_t field_size) const
+    //--------------------------------------------------------------------------
+    {
+      size_t impl_field_size = get_field_size(field_id);
+      if (field_size == impl_field_size) return;
+
+      REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_RETURN,
+        "The deferred buffer passed to field %u of output region %u of task %s "
+        "(UID: %lld) has elements of %zd bytes each, but the field size is "
+        "%zd bytes. Make sure you pass a buffer of the right element type.",
+        field_id, index, context->owner_task->get_task_name(),
+        context->owner_task->get_unique_op_id(), field_size, impl_field_size);
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegionImpl::get_layout(FieldID field_id,
                                       std::vector<DimensionKind> &ordering,
                                       size_t &alignment) const
@@ -5381,9 +5411,16 @@ namespace Legion {
 
       // If no alignment constraint was given, use the field size
       // for alignment
+      alignment = get_field_size(field_id);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t OutputRegionImpl::get_field_size(FieldID field_id) const
+    //--------------------------------------------------------------------------
+    {
       RegionNode *node = runtime->forest->get_node(req.region);
       FieldSpaceNode *fspace_node = node->get_column_source();
-      alignment = fspace_node->get_field_size(field_id);
+      return fspace_node->get_field_size(field_id);
     }
 
     //--------------------------------------------------------------------------
