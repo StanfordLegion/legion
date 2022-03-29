@@ -18232,7 +18232,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
     DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> OutputRegion::create_buffer(
-                                              const Point<DIM> &extents,
+                                              const Point<DIM,COORD_T> &extents,
                                               FieldID field_id,
                                               const T *initial_value /*= NULL*/,
                                               bool return_buffer /*= false*/)

@@ -3585,10 +3585,10 @@ namespace Legion {
                bool CHECK_BOUNDS = false>
 #endif
       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS>
-                                    create_buffer(const Point<DIM> &extents,
-                                                  FieldID field_id,
-                                                  const T *initial_value = NULL,
-                                                  bool return_buffer = false);
+      create_buffer(const Point<DIM, COORD_T> &extents,
+                    FieldID field_id,
+                    const T *initial_value = NULL,
+                    bool return_buffer = false);
     private:
       void check_type_tag(TypeTag type_tag) const;
       void get_layout(FieldID field_id,
