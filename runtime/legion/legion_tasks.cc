@@ -3250,14 +3250,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       const std::vector<DimensionKind> &ordering =
         constraints.ordering_constraint.ordering;
-      if (ordering.empty() ||
-          static_cast<int>(ordering.size()) != req.region.get_dim() + 1)
+      if (ordering.empty())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_CONSTRAINTS,
           "An ordering constraint must be specified for each output "
           "region, but the mapper did not specify any ordering constraint "
           "for output region %u of task %s (UID: %lld).",
           index, get_task_name(), get_unique_op_id());
+      }
+      else if (static_cast<int>(ordering.size()) != req.region.get_dim() + 1)
+      {
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_CONSTRAINTS,
+          "The mapper chose an ordering constraint with %d dimensions "
+          "for output region %u of task %s (UID: %lld), but the region has "
+          "%d dimensions. Make sure you specify a correct ordering.",
+          static_cast<int>(ordering.size()) - 1, index, get_task_name(),
+          get_unique_op_id(), req.region.get_dim());
       }
       else
       {

@@ -5534,8 +5534,39 @@ namespace Legion {
 
       if (check_constraints && constraints != NULL)
       {
+        bool has_conflict = false;
+
         LayoutConstraints *manager_cons = manager->layout->constraints;
-        if (constraints->conflicts(*manager_cons))
+        if (!req.global_indexing && context->owner_task->is_index_space)
+        {
+          // Unfortunately, for local indexing, the ordering constraint
+          // prescribes the ordering of dimensions that the returned
+          // buffer does not contain. (those dimensions are added
+          // by the runtime and invisible to the point task.) So, here
+          // we filter out the dimensions that would otherwise fail
+          // the constraint check innocuously.
+          LayoutConstraintSet copied;
+          copied.alignment_constraints = manager_cons->alignment_constraints;
+          std::vector<DimensionKind> ordering;
+          int32_t ndim = NT_TemplateHelper::get_dim(req.type_tag);
+          for (std::vector<DimensionKind>::const_iterator it =
+               manager_cons->ordering_constraint.ordering.begin(); it !=
+               manager_cons->ordering_constraint.ordering.end(); ++it)
+          {
+            int32_t dim = *it;
+            if (dim - LEGION_DIM_X < ndim || dim == LEGION_DIM_F)
+              ordering.push_back(static_cast<DimensionKind>(dim));
+          }
+          copied.ordering_constraint =
+            OrderingConstraint(
+              ordering, manager_cons->ordering_constraint.contiguous);
+
+          has_conflict = constraints->conflicts(copied);
+        }
+        else
+          has_conflict = constraints->conflicts(*manager_cons);
+
+        if (has_conflict)
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
             "The returned instance for field %u of output region %u of "
             "task %s (UID: %lld) does not satisfy the layout constraints "
@@ -5661,7 +5692,8 @@ namespace Legion {
         // Make a Realm layout descriptor of the right type using demux
         Realm::InstanceLayoutGeneric *layout = NULL;
         LayoutCreator creator(layout, domain, constraints, dim_order);
-        NT_TemplateHelper::demux<LayoutCreator>(req.type_tag, &creator);
+        NT_TemplateHelper::demux<LayoutCreator>(req.region.get_type_tag(),
+                                                &creator);
 #ifdef DEBUG_LEGION
         assert(layout != NULL);
 #endif
