@@ -176,7 +176,10 @@ void OutReqTestMapper::map_task(const MapperContext ctx,
                                 const MapTaskInput& input,
                                 MapTaskOutput& output)
 {
-  if (!(task.task_id == TID_CONSUMER_GLOBAL || task.task_id == TID_CONSUMER_LOCAL))
+  if (!(task.task_id == TID_PRODUCER_GLOBAL
+        || task.task_id == TID_PRODUCER_LOCAL
+        || task.task_id == TID_CONSUMER_GLOBAL
+        || task.task_id == TID_CONSUMER_LOCAL))
   {
     DefaultMapper::map_task(ctx, task, input, output);
     return;
@@ -191,65 +194,120 @@ void OutReqTestMapper::map_task(const MapperContext ctx,
   assert(!variants.empty());
   output.chosen_variant = *variants.begin();
 
-  for (unsigned ridx = 0; ridx < task.regions.size(); ++ridx)
+  if (task.task_id == TID_PRODUCER_GLOBAL)
   {
-    const RegionRequirement &req = task.regions[ridx];
-    Domain domain =
-      runtime->get_index_space_domain(ctx, req.region.get_index_space());
+    output.output_targets[0] = local_sysmem;
+
+    LayoutConstraintSet &constraints = output.output_constraints[0];
 
     std::vector<DimensionKind> ordering;
-    for (int i = 0; i < domain.dim; ++i)
-      ordering.push_back(static_cast<DimensionKind>(DIM_X + i));
+    ordering.push_back(DIM_X);
+    ordering.push_back(DIM_Y);
     ordering.push_back(DIM_F);
+    constraints.ordering_constraint = OrderingConstraint(ordering, false);
 
-    std::vector<LogicalRegion> regions(1, req.region);
+    constraints.alignment_constraints.push_back(
+      AlignmentConstraint(FID_X, LEGION_EQ_EK, 32));
 
-    if (req.tag == TAG_REUSE)
+    return;
+  }
+  else if (task.task_id == TID_PRODUCER_LOCAL)
+  {
+    output.output_targets[0] = local_sysmem;
+
+    LayoutConstraintSet &constraints = output.output_constraints[0];
+
+    std::vector<DimensionKind> ordering;
+    if (task.is_index_space)
     {
-      for (unsigned idx = 0; idx < req.instance_fields.size(); ++idx)
-      {
-        std::vector<FieldID> fields(1, req.instance_fields[idx]);
-        LayoutConstraintSet constraints;
-        constraints.add_constraint(MemoryConstraint(local_sysmem.kind()))
-          .add_constraint(OrderingConstraint(ordering, false))
-          .add_constraint(FieldConstraint(fields, false, false))
-          .add_constraint(
-            SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true));
-
-        PhysicalInstance instance;
-        assert(runtime->find_physical_instance(ctx,
-                                               local_sysmem,
-                                               constraints,
-                                               regions,
-                                               instance,
-                                               true,
-                                               true));
-        output.chosen_instances[ridx].push_back(instance);
-      }
+      ordering.push_back(DIM_Z);
+      ordering.push_back(DIM_Y);
+      ordering.push_back(DIM_X);
+      ordering.push_back(DIM_F);
     }
     else
     {
-      assert(req.tag == TAG_CREATE_NEW);
+      ordering.push_back(DIM_Y);
+      ordering.push_back(DIM_X);
+      ordering.push_back(DIM_F);
+    }
+    constraints.ordering_constraint = OrderingConstraint(ordering, false);
+
+    return;
+  }
+
+  const RegionRequirement &req = task.regions[0];
+  std::vector<LogicalRegion> regions(1, req.region);
+  std::vector<DimensionKind> ordering;
+  if (task.task_id == TID_CONSUMER_GLOBAL)
+  {
+    ordering.push_back(DIM_X);
+    ordering.push_back(DIM_Y);
+    ordering.push_back(DIM_F);
+  }
+  else
+  {
+    assert(task.task_id == TID_CONSUMER_LOCAL);
+    if (task.is_index_space)
+    {
+      ordering.push_back(DIM_Z);
+      ordering.push_back(DIM_Y);
+      ordering.push_back(DIM_X);
+      ordering.push_back(DIM_F);
+    }
+    else
+    {
+      ordering.push_back(DIM_Y);
+      ordering.push_back(DIM_X);
+      ordering.push_back(DIM_F);
+    }
+  }
+
+  if (req.tag == TAG_REUSE)
+  {
+    for (unsigned idx = 0; idx < req.instance_fields.size(); ++idx)
+    {
+      std::vector<FieldID> fields(1, req.instance_fields[idx]);
       LayoutConstraintSet constraints;
       constraints.add_constraint(MemoryConstraint(local_sysmem.kind()))
         .add_constraint(OrderingConstraint(ordering, false))
-        .add_constraint(FieldConstraint(req.instance_fields, false, false))
+        .add_constraint(FieldConstraint(fields, false, false))
         .add_constraint(
           SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true));
 
       PhysicalInstance instance;
-      size_t footprint;
-      assert(runtime->create_physical_instance(ctx,
-                                               local_sysmem,
-                                               constraints,
-                                               regions,
-                                               instance,
-                                               true,
-                                               0,
-                                               true,
-                                               &footprint));
-      output.chosen_instances[ridx].push_back(instance);
+      assert(runtime->find_physical_instance(ctx,
+                                             local_sysmem,
+                                             constraints,
+                                             regions,
+                                             instance,
+                                             true,
+                                             true));
+      output.chosen_instances[0].push_back(instance);
     }
+  }
+  else
+  {
+    assert(req.tag == TAG_CREATE_NEW);
+    LayoutConstraintSet constraints;
+    constraints.add_constraint(MemoryConstraint(local_sysmem.kind()))
+      .add_constraint(OrderingConstraint(ordering, false))
+      .add_constraint(FieldConstraint(req.instance_fields, false, false))
+      .add_constraint(
+        SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true));
+
+    PhysicalInstance instance;
+    size_t footprint;
+    assert(runtime->create_physical_instance(ctx,
+                                             local_sysmem,
+                                             constraints,
+                                             regions,
+                                             instance,
+                                             true,
+                                             0,
+                                             true,
+                                             &footprint));
+    output.chosen_instances[0].push_back(instance);
   }
 }
 
@@ -292,7 +350,7 @@ void producer_global_task(const Task *task,
     return;
   }
 
-  Point<DIM> extents;
+  Point<DIM, int32_t> extents;
   if (task->is_index_space)
     for (int32_t dim = 0; dim < DIM; ++dim)
       extents[dim] = SIZE - task->index_point[dim];
@@ -303,28 +361,25 @@ void producer_global_task(const Task *task,
   size_t volume = 1;
   for (int32_t dim = 0; dim < DIM; ++dim) volume *= extents[dim];
 
-  Point<DIM> hi(extents);
-  hi -= Point<DIM>::ONES();
-  Rect<DIM> shape(Point<DIM>::ZEROES(), hi);
+  Point<DIM, int32_t> hi(extents);
+  hi -= Point<DIM, int32_t>::ONES();
+  Rect<DIM, int32_t> bounds(Point<DIM, int32_t>::ZEROES(), hi);
 
-  int64_t *ptr_x = static_cast<int64_t*>(malloc(volume * sizeof(int64_t)));
-  DeferredBuffer<int32_t, 2> buf_y(shape, Memory::SYSTEM_MEM, NULL, 16, true);
+  DeferredBuffer<int64_t, 2, int32_t> buf_x(
+    bounds, Memory::Kind::SYSTEM_MEM, NULL, 32, true);
+  DeferredBuffer<int32_t, 2, int32_t> buf_y =
+    outputs[0].create_buffer<int32_t, 2>(extents, FID_Y, NULL, true);
 
-  for (PointInRectIterator<DIM> pir(shape); pir(); pir++)
+  int64_t *ptr_x = buf_x.ptr(Point<2, int32_t>::ZEROES());
+  int32_t *ptr_y = buf_y.ptr(Point<2, int32_t>::ZEROES());
+
+  for (size_t idx = 0; idx < volume; ++idx)
   {
-    const Point<DIM> &p = *pir;
-    int64_t idx = 0;
-    for (int32_t dim = DIM - 1; dim >= 0; --dim)
-    {
-      idx *= extents[dim];
-      idx += p[dim];
-    }
-    ptr_x[idx] = 111 + idx;
-    buf_y[p] = 222 + idx;
+    ptr_x[idx] = 111 + static_cast<int64_t>(idx);
+    ptr_y[idx] = 222 + static_cast<int32_t>(idx);
   }
 
-  output.return_data(extents, FID_X, ptr_x);
-  output.return_data(extents, FID_Y, buf_y);
+  output.return_data(extents, FID_X, buf_x);
 }
 
 void producer_local_task(const Task *task,
@@ -347,7 +402,7 @@ void producer_local_task(const Task *task,
     return;
   }
 
-  Point<DIM> extents;
+  Point<DIM, int32_t> extents;
   if (task->is_index_space)
     for (int32_t dim = 0; dim < DIM; ++dim)
       extents[dim] = SIZE - task->index_point[0];
@@ -358,38 +413,31 @@ void producer_local_task(const Task *task,
   size_t volume = 1;
   for (int32_t dim = 0; dim < DIM; ++dim) volume *= extents[dim];
 
-  Point<DIM> hi(extents);
+  Point<DIM, int32_t> hi(extents);
   hi -= Point<DIM>::ONES();
-  Rect<DIM> shape(Point<DIM>::ZEROES(), hi);
+  Rect<DIM, int32_t> bounds(Point<DIM>::ZEROES(), hi);
 
-  int64_t *ptr_z = static_cast<int64_t*>(malloc(volume * sizeof(int64_t)));
+  DeferredBuffer<int64_t, DIM, int32_t> buf_z(
+    bounds, Memory::Kind::SYSTEM_MEM, NULL, 16, false);
+  int64_t *ptr_z = buf_z.ptr(Point<2, int32_t>::ZEROES());
 
-  for (PointInRectIterator<DIM> pir(shape); pir(); pir++)
-  {
-    const Point<DIM> &p = *pir;
-    int64_t idx = 0;
-    for (int32_t dim = DIM - 1; dim >= 0; --dim)
-    {
-      idx *= extents[dim];
-      idx += p[dim];
-    }
-    ptr_z[idx] = 333 + idx;
-  }
+  for (size_t idx = 0; idx < volume; ++idx)
+    ptr_z[idx] = 333 + static_cast<int64_t>(idx);
 
-  output.return_data(extents, FID_Z, ptr_z);
+  output.return_data(extents, FID_Z, buf_z);
   output.return_data(extents, FID_W, NULL);
 }
 
-typedef FieldAccessor<READ_ONLY, int64_t, 2, coord_t,
-                      Realm::AffineAccessor<int64_t, 2, coord_t> >
+typedef FieldAccessor<READ_ONLY, int64_t, 2, int32_t,
+                      Realm::AffineAccessor<int64_t, 2, int32_t> >
         Int64Accessor2D;
 
-typedef FieldAccessor<READ_ONLY, int32_t, 2, coord_t,
-                      Realm::AffineAccessor<int32_t, 2, coord_t> >
+typedef FieldAccessor<READ_ONLY, int32_t, 2, int32_t,
+                      Realm::AffineAccessor<int32_t, 2, int32_t> >
         Int32Accessor2D;
 
-typedef FieldAccessor<READ_ONLY, int64_t, 3, coord_t,
-                      Realm::AffineAccessor<int64_t, 3, coord_t> >
+typedef FieldAccessor<READ_ONLY, int64_t, 3, int32_t,
+                      Realm::AffineAccessor<int64_t, 3, int32_t> >
         Int64Accessor3D;
 
 void consumer_global_task(const Task *task,
@@ -401,7 +449,7 @@ void consumer_global_task(const Task *task,
 
   TestArgs *args = reinterpret_cast<TestArgs*>(task->args);
 
-  Rect<DIM> r(regions[0]);
+  Rect<DIM, int32_t> r(regions[0]);
   std::cerr << "[Consumer " << task->index_point
             << ", global indexing] region: " << r << std::endl;
 
@@ -413,8 +461,8 @@ void consumer_global_task(const Task *task,
 
   if (args->index_launch)
   {
-    Rect<DIM> r(regions[0]);
-    static coord_t offsets[] = {0, SIZE, 2 * SIZE - 1, 3 * SIZE - 3};
+    Rect<DIM, int32_t> r(regions[0]);
+    static int32_t offsets[] = {0, SIZE, 2 * SIZE - 1, 3 * SIZE - 3};
 
     for (int32_t dim = 0; dim < DIM; ++dim)
     {
@@ -424,7 +472,7 @@ void consumer_global_task(const Task *task,
   }
   else
   {
-    Rect<DIM> r(regions[0]);
+    Rect<DIM, int32_t> r(regions[0]);
     for (int32_t dim = 0; dim < DIM; ++dim)
     {
       assert(r.lo[dim] == 0);
@@ -435,20 +483,18 @@ void consumer_global_task(const Task *task,
   Int64Accessor2D acc_x(regions[0], FID_X);
   Int32Accessor2D acc_y(regions[0], FID_Y);
 
-  Point<DIM> extents = r.hi;
+  Point<DIM, int32_t> extents = r.hi;
   extents -= r.lo;
-  extents += Point<DIM>::ONES();
-  for (PointInRectIterator<DIM> pir(r); pir(); pir++)
+  extents += Point<DIM, int32_t>::ONES();
+
+  int32_t volume = r.volume();
+  for (int32_t idx = 0; idx < volume; ++idx)
   {
-    const Point<DIM> &p = *pir;
-    int64_t idx = 0;
-    for (int32_t dim = DIM - 1; dim >= 0; --dim)
-    {
-      idx *= extents[dim];
-      idx += p[dim] - r.lo[dim];
-    }
-    assert(acc_x[p] == 111 + idx);
-    assert(acc_y[p] == 222 + idx);
+    int32_t x0 = idx % extents[0];
+    int32_t x1 = idx / extents[0];
+    Point<2, int32_t> p(x0, x1);
+    assert(acc_x[p + r.lo] == 111 + idx);
+    assert(acc_y[p + r.lo] == 222 + idx);
   }
 }
 
@@ -463,7 +509,7 @@ void consumer_local_task(const Task *task,
   {
     static constexpr int DIM = 3;
 
-    Rect<DIM> r(regions[0]);
+    Rect<DIM, int32_t> r(regions[0]);
     std::cerr << "[Consumer " << task->index_point
               << ", local indexing] region: " << r << std::endl;
     if (args->empty || args->predicate)
@@ -482,18 +528,16 @@ void consumer_local_task(const Task *task,
 
     Int64Accessor3D acc_z(regions[0], FID_Z);
 
-    Point<DIM> extents = r.hi;
+    Point<DIM, int32_t> extents = r.hi;
     extents -= r.lo;
-    extents += Point<DIM>::ONES();
-    for (PointInRectIterator<DIM> pir(r); pir(); pir++)
+    extents += Point<DIM, int32_t>::ONES();
+
+    int32_t volume = r.volume();
+    for (int32_t idx = 0; idx < volume; ++idx)
     {
-      const Point<DIM> &p = *pir;
-      int64_t idx = 0;
-      for (int32_t dim = DIM - 2; dim >= 0; --dim)
-      {
-        idx *= extents[dim + 1];
-        idx += p[dim + 1] - r.lo[dim + 1];
-      }
+      int32_t x0 = idx / extents[2];
+      int32_t x1 = idx % extents[2];
+      Point<3, int32_t> p(task->index_point[0], x0 + r.lo[1], x1 + r.lo[2]);
       assert(acc_z[p] == 333 + idx);
     }
   }
@@ -501,7 +545,7 @@ void consumer_local_task(const Task *task,
   {
     static constexpr int DIM = 2;
 
-    Rect<DIM> r(regions[0]);
+    Rect<DIM, int32_t> r(regions[0]);
     std::cerr << "[Consumer " << task->index_point
               << ", local indexing] region: " << r << std::endl;
     if (args->empty || args->predicate)
@@ -518,18 +562,16 @@ void consumer_local_task(const Task *task,
 
     Int64Accessor2D acc_z(regions[0], FID_Z);
 
-    Point<DIM> extents = r.hi;
+    Point<DIM, int32_t> extents = r.hi;
     extents -= r.lo;
     extents += Point<DIM>::ONES();
-    for (PointInRectIterator<DIM> pir(r); pir(); pir++)
+
+    int32_t volume = r.volume();
+    for (int32_t idx = 0; idx < volume; ++idx)
     {
-      const Point<DIM> &p = *pir;
-      int64_t idx = 0;
-      for (int32_t dim = DIM - 1; dim >= 0; --dim)
-      {
-        idx *= extents[dim];
-        idx += p[dim] - r.lo[dim];
-      }
+      int32_t x0 = idx / extents[1];
+      int32_t x1 = idx % extents[1];
+      Point<2, int32_t> p(x0, x1);
       assert(acc_z[p] == 333 + idx);
     }
   }
@@ -577,7 +619,9 @@ void main_task(const Task *task,
   std::vector<OutputRequirement> out_reqs_global;
   std::vector<OutputRequirement> out_reqs_local;
   out_reqs_global.push_back(OutputRequirement(fs, field_set1, 2, true));
+  out_reqs_global.back().set_type_tag<2, int32_t>();
   out_reqs_local.push_back(OutputRequirement(fs, field_set2, 2, false));
+  out_reqs_local.back().set_type_tag<2, int32_t>();
 
   TaskArgument task_args(&args, sizeof(args));
 
