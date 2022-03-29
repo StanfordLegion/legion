@@ -18267,14 +18267,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T,
-             int DIM,
-             typename COORD_T = coord_t,
-#ifdef LEGION_BOUNDS_CHECKS
-             bool CHECK_BOUNDS = true>
-#else
-             bool CHECK_BOUNDS = false>
-#endif
+    template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
     void OutputRegion::return_data(
                              const Point<DIM,COORD_T> &extents,
                              FieldID field_id,
