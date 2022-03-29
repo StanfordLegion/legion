@@ -59,7 +59,7 @@ namespace Legion {
         pack_region_requirement(regions[idx], rez);
       rez.serialize(output_regions.size());
       for (unsigned idx = 0; idx < output_regions.size(); idx++)
-        pack_region_requirement(output_regions[idx], rez);
+        pack_output_requirement(output_regions[idx], rez);
       rez.serialize(futures.size());
       // If we are remote we can just do the normal pack
       for (std::vector<Future>::const_iterator it =
@@ -118,7 +118,7 @@ namespace Legion {
       derez.deserialize(num_output_regions);
       output_regions.resize(num_output_regions);
       for (unsigned idx = 0; idx < output_regions.size(); idx++)
-        unpack_region_requirement(output_regions[idx], derez);
+        unpack_output_requirement(output_regions[idx], derez);
       size_t num_futures;
       derez.deserialize(num_futures);
       futures.resize(num_futures);
@@ -182,6 +182,32 @@ namespace Legion {
       derez.deserialize(index);
       set_context_index(index);
     } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::pack_output_requirement(
+                                  const OutputRequirement &req, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      pack_region_requirement(req, rez);
+      rez.serialize(req.type_tag);
+      rez.serialize(req.field_space);
+      rez.serialize(req.global_indexing);
+      rez.serialize(req.valid_requirement);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::unpack_output_requirement(
+                                    OutputRequirement &req, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      unpack_region_requirement(req, derez);
+      derez.deserialize(req.type_tag);
+      derez.deserialize(req.field_space);
+      derez.deserialize(req.global_indexing);
+      derez.deserialize(req.valid_requirement);
+    }
 
     /////////////////////////////////////////////////////////////
     // Task Operation 

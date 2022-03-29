@@ -1386,10 +1386,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       static_cast<RegionRequirement&>(*this) =
-        static_cast<const OutputRequirement&>(rhs);
+        static_cast<const RegionRequirement&>(rhs);
       field_space = rhs.field_space;
       global_indexing = rhs.global_indexing;
       valid_requirement = rhs.valid_requirement;
+      type_tag = rhs.type_tag;
       return *this;
     }
 
@@ -1399,10 +1400,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       static_cast<RegionRequirement&>(*this) =
-        static_cast<const OutputRequirement&>(rhs);
+        static_cast<const RegionRequirement&>(rhs);
       field_space = FieldSpace::NO_SPACE;
       global_indexing = false;
       valid_requirement = true;
+      type_tag = rhs.region.get_type_tag();
       return *this;
     }
 

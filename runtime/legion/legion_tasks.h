@@ -41,6 +41,12 @@ namespace Legion {
       void unpack_external_task(Deserializer &derez, Runtime *runtime,
                                 ReferenceMutator *mutator);
     public:
+      static void pack_output_requirement(
+          const OutputRequirement &req, Serializer &rez);
+    public:
+      static void unpack_output_requirement(
+          OutputRequirement &req, Deserializer &derez);
+    public:
       virtual void set_context_index(size_t index) = 0;
     protected:
       AllocManager *arg_manager;
