@@ -796,7 +796,7 @@ namespace Legion {
           if (must_epoch == NULL)
             premap_task();
           SliceTask *new_slice = this->clone_as_slice_task(internal_space,
-              current_proc, false/*recurse*/, !runtime->stealing_disabled); 
+              target_proc, false/*recurse*/, !runtime->stealing_disabled); 
           slices.push_back(new_slice);
           trigger_slices();
         }

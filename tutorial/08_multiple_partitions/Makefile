@@ -31,10 +31,11 @@ OUTFILE		?= multiple_partitions
 # List all the application source files here
 GEN_SRC		?= multiple_partitions.cc	# .cc files
 GEN_GPU_SRC	?=				# .cu files
+MARCH		=
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?=
+CC_FLAGS	?= -mcpu=native -std=c++11
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
