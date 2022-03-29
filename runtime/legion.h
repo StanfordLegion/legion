@@ -1095,7 +1095,7 @@ namespace Legion {
      * \struct OutputRequirement
      * Output requirements are a special kind of region requirement to inform
      * the runtime that the task will be producing new instances as part of its
-     * execution that will be attached to the logical region at the end of the 
+     * execution that will be attached to the logical region at the end of the
      * task, and are therefore not mapped ahead of the task's execution.
      *
      * Output region requirements come in two flavors: those that are already
@@ -1107,33 +1107,46 @@ namespace Legion {
      * right after the task is launched. Output requirements still pick
      * field IDs and the field space for the output regions.
      *
-     * Output regions are always 1D in case of individual task launch and no
-     * partitions will be created by the runtime. For index space launches,
-     * the runtime gives back a fresh region and partition, whose construction
-     * is controlled by the indexing mode specified the output requirement:
+     * In case of individual task launch, the dimension of an output region
+     * is chosen by the `dim` argument to the output requirement , and
+     * and no partitions will be created by the runtime. For index space
+     * launches, the runtime gives back a fresh region and partition,
+     * whose construction is controlled by the indexing mode specified
+     * the output requirement:
      *
      * 0) For either indexing mode, the output partition is a disjoint
      *    partition whose color space is identical to the launch domain.
      *
-     * 1) When the global indexing is requested, the output region has
-     *    a contiguous 1D index space whose volume is the sum of the sizes of
-     *    the outputs produced by point tasks. The range of the i-th subregion
-     *    is [S, S+n), where S is the sum of the previous i-1 subregions' sizes
-     *    and n is the output size of the i-th point task. The launch domain
-     *    must be 1D for the global indexing to be used.
+     * 1) When the global indexing is requested, the dimension of the output
+     *    region must be the same as the color space. The index space is
+     *    constructed such that the extent of each dimension is a sum of
+     *    that dimension's extents of the outputs produced by point tasks;
+     *    i.e., the range of the i-th subregion on dimension k
+     *    is [S, S+n), where S is the sum of the previous i-1 subregions'
+     *    extents on the k dimension and n is the extent of the output of
+     *    the i-th point task on the k dimension. Outputs are well-formed
+     *    only when their extents are aligned with their neighbors'. For
+     *    example, outputs of extents (3, 4) and (5, 4), respectively,
+     *    are valid if the producers' points are (0, 0) and (1, 0),
+     *    respectively, whereas they are not well-formed if the colors
+     *    are (0, 0) and (0, 1); for the former, the bounds of the output
+     *    subregions are ([0, 2], [0, 3]) and ([3, 7], [0, 3]),
+     *    respectively.
      *
-     * 2) With the local indexing, the output region has an (N+1)-D index
-     *    space for an N-D launch domain. The range of the subregion produced
+     * 2) With the local indexing, the output region has an (N+k)-D index
+     *    space for an N-D launch domain, where k is the dimension chosen
+     *    by the output requirement. The range of the subregion produced
      *    by the point task p (where p is a point in an N-D space) is
-     *    [<0, p>, <n-1, p>] where n is the output size of the point task p.
+     *    [<p,lo>, <p,hi>] where [lo, hi] is the bounds of the point task p
+     *    and <v1,v2> denotes a concatenation of points v1 and v2.
      *    The root index space is simply a union of all subspaces.
      *
      * 3) In the case of local indexing, the output region can either have a
      *    "loose" convex hull parent index space or a "tight" index space that
      *    contains exactly the points in the child space. With the convex hull,
-     *    the runtime computes an upper bound 2-D rectangle with as many rows as
+     *    the runtime computes an upper bound rectangle with as many rows as
      *    children and as many columns as the extent of the larges child space.
-     *    If convex_hull is set to false, the runtime will compute a more 
+     *    If convex_hull is set to false, the runtime will compute a more
      *    expensive sparse index space containing exactly the children points.
      *
      * Note that the global indexing has performance consequences since
