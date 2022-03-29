@@ -3014,6 +3014,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void OutputRegion::get_layout(FieldID field_id,
+                                  std::vector<DimensionKind> &ordering,
+                                  size_t &alignment) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->get_layout(field_id, ordering, alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegion::check_type_tag(TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      assert(impl != NULL);
+
+      TypeTag region_type_tag = impl->get_type_tag();
+      if (type_tag != region_type_tag)
+      {
+        fprintf(stderr,
+            "Passed a DeferredBuffer of an incompatible "
+            "type tag to the output region");
+        assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegion::return_data(const DomainPoint &extents,
                                    FieldID field_id,
                                    void *ptr,

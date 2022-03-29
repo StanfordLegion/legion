@@ -3247,7 +3247,11 @@ namespace Legion {
             SpecializedConstraint(LEGION_AFFINE_SPECIALIZE, 0, false, true))
         .add_constraint(c.ordering_constraint);
 
-      if (constraints.ordering_constraint.ordering.empty())
+#ifdef DEBUG_LEGION
+      const std::vector<DimensionKind> &ordering =
+        constraints.ordering_constraint.ordering;
+      if (ordering.empty() ||
+          static_cast<int>(ordering.size()) != req.region.get_dim() + 1)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_CONSTRAINTS,
           "An ordering constraint must be specified for each output "
@@ -3255,6 +3259,21 @@ namespace Legion {
           "for output region %u of task %s (UID: %lld).",
           index, get_task_name(), get_unique_op_id());
       }
+      else
+      {
+        // TODO: For now we only allow SOA layout with either the C order
+        // or the Fotran order for output instances.
+        if (ordering.back() != LEGION_DIM_F)
+        {
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Legion currently supports only the SOA layout for output regions, "
+            "but output region %u of task %s (UID: %lld) is mapped to a "
+            "non-SOA layout. Please update the mapper to use SOA layout "
+            "for all output regions.",
+            index, get_task_name(), get_unique_op_id());
+        }
+      }
+#endif
 
       std::map<FieldID, std::pair<EqualityKind, size_t> > alignments;
       std::map<FieldID, off_t> offsets;

@@ -3571,6 +3571,30 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
+      // Returns a deferred buffer that satisfies the layout constraints of
+      // this output region. The caller still needs to pass this buffer to
+      // a return_data call if the buffer needs to be bound to this output
+      // region. The caller can optionally choose to bind the returned buffer
+      // to the output region; such a call cannot be made more than once.
+      template<typename T,
+               int DIM,
+               typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+               bool CHECK_BOUNDS = true>
+#else
+               bool CHECK_BOUNDS = false>
+#endif
+      DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS>
+                                    create_buffer(const Point<DIM> &extents,
+                                                  FieldID field_id,
+                                                  const T *initial_value = NULL,
+                                                  bool return_buffer = false);
+    private:
+      void check_type_tag(TypeTag type_tag) const;
+      void get_layout(FieldID field_id,
+                      std::vector<DimensionKind> &ordering,
+                      size_t &alignment) const;
+    public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        void *ptr,
@@ -3578,10 +3602,17 @@ namespace Legion {
       void return_data(const DomainPoint &extents,
                        std::map<FieldID,void*> ptrs,
                        std::map<FieldID,size_t> *alignments = NULL);
-      template<typename T, int DIM>
-      void return_data(const DomainPoint &extents,
+      template<typename T,
+               int DIM,
+               typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+               bool CHECK_BOUNDS = true>
+#else
+               bool CHECK_BOUNDS = false>
+#endif
+      void return_data(const Point<DIM,COORD_T> &extents,
                        FieldID field_id,
-                       DeferredBuffer<T,DIM> &buffer);
+                       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> &buffer);
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        Realm::RegionInstance instance,

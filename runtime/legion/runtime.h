@@ -940,6 +940,11 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
       bool is_valid_output_region(void) const;
     public:
+      TypeTag get_type_tag() const { return req.type_tag; }
+      void get_layout(FieldID field_id,
+                      std::vector<DimensionKind> &ordering,
+                      size_t &alignment) const;
+    public:
       void return_data(const DomainPoint &extents,
                        FieldID field_id,
                        uintptr_t ptr,
@@ -973,7 +978,7 @@ namespace Legion {
       const OutputRequirement &get_requirement(void) const { return req; }
       DomainPoint get_extents(void) const { return extents; }
     protected:
-      IndividualManager *get_manager(FieldID field_id);
+      IndividualManager *get_manager(FieldID field_id) const;
     public:
       Runtime *const runtime;
       TaskContext *const context;

@@ -5351,6 +5351,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void OutputRegionImpl::get_layout(FieldID field_id,
+                                      std::vector<DimensionKind> &ordering,
+                                      size_t &alignment) const
+    //--------------------------------------------------------------------------
+    {
+      IndividualManager *manager = get_manager(field_id);
+      LayoutConstraints *cons = manager->layout->constraints;
+
+#ifdef DEBUG_LEGION
+      assert(cons->ordering_constraint.ordering.size() > 1);
+      assert(cons->ordering_constraint.ordering.back() == LEGION_DIM_F);
+#endif
+      int32_t ndim = cons->ordering_constraint.ordering.size() - 1;
+      ordering.resize(ndim);
+      for (int32_t idx = 0; idx < ndim; ++idx)
+        ordering[idx] = cons->ordering_constraint.ordering[idx];
+
+      for (std::vector<AlignmentConstraint>::const_iterator it =
+           cons->alignment_constraints.begin(); it !=
+           cons->alignment_constraints.end(); ++it)
+      {
+        if (it->fid == field_id && it->eqk == LEGION_EQ_EK)
+        {
+          alignment = it->alignment;
+          return;
+        }
+      }
+
+      // If no alignment constraint was given, use the field size
+      // for alignment
+      RegionNode *node = runtime->forest->get_node(req.region);
+      FieldSpaceNode *fspace_node = node->get_column_source();
+      alignment = fspace_node->get_field_size(field_id);
+    }
+
+    //--------------------------------------------------------------------------
     void OutputRegionImpl::return_data(const DomainPoint &new_extents,
                                        FieldID field_id,
                                        uintptr_t ptr,
@@ -5445,6 +5481,14 @@ namespace Legion {
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id(),
           manager->get_memory().id, instance.get_location().id);
+
+      if (!context->is_task_local_instance(instance))
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_RETURN_REQUESTS,
+          "Instance passed to field %u of output region %u of task %s "
+          "(UID: %lld) is already bound to this field or some other fields. "
+          "You cannot assign a buffer to more than one output region field. ",
+          field_id, index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id());
 
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
@@ -5677,7 +5721,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndividualManager *OutputRegionImpl::get_manager(FieldID field_id)
+    IndividualManager *OutputRegionImpl::get_manager(FieldID field_id) const
     //--------------------------------------------------------------------------
     {
       RegionNode *node = runtime->forest->get_node(req.region);

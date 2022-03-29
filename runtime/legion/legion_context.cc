@@ -2361,6 +2361,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::is_task_local_instance(PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      return task_local_instances.find(instance) != task_local_instances.end();
+    }
+
+    //--------------------------------------------------------------------------
     uintptr_t TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {

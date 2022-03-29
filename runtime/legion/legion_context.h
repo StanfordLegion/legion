@@ -540,6 +540,7 @@ namespace Legion {
                                  void *metadata, size_t metasize,
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
+      bool is_task_local_instance(PhysicalInstance instance);
       uintptr_t escape_task_local_instance(PhysicalInstance instance);
       FutureInstance* copy_to_future_inst(const void *value, size_t size,
                                           Memory memory, RtEvent &done);

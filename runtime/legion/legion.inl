@@ -18230,12 +18230,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, int32_t DIM>
-    void OutputRegion::return_data(const DomainPoint &shape,
-                                   FieldID field_id,
-                                   DeferredBuffer<T,DIM> &buffer)
+    template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
+    DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> OutputRegion::create_buffer(
+                                              const Point<DIM> &extents,
+                                              FieldID field_id,
+                                              const T *initial_value /*= NULL*/,
+                                              bool return_buffer /*= false*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      check_type_tag(
+        Internal::NT_TemplateHelper::encode_tag<DIM, COORD_T>());
+#endif
+
+      Rect<DIM> bounds(Point<DIM>::ZEROES(), extents - Point<DIM>::ONES());
+
+      std::vector<DimensionKind> ordering;
+      size_t alignment;
+      get_layout(field_id, ordering, alignment);
+      std::array<DimensionKind, DIM> ord;
+      std::copy(ordering.begin(), ordering.end(), ord.begin());
+
+      DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> buffer(
+        bounds, target_memory(), ord, initial_value, alignment);
+      if (return_buffer)
+      {
+#ifdef DEBUG_LEGION
+        return_data(extents, field_id, buffer);
+#else
+        // In release mode, we don't check the constraints, as we already know
+        // that the instance satisfies them.
+        return_data(extents, field_id, buffer.instance, NULL, false);
+#endif
+      }
+      return buffer;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T,
+             int DIM,
+             typename COORD_T = coord_t,
+#ifdef LEGION_BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true>
+#else
+             bool CHECK_BOUNDS = false>
+#endif
+    void OutputRegion::return_data(
+                             const Point<DIM,COORD_T> &extents,
+                             FieldID field_id,
+                             DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> &buffer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      check_type_tag(
+        Internal::NT_TemplateHelper::encode_tag<DIM, COORD_T>());
+#endif
+
       // Populate the layout constraints for the returned buffer
       // for the constraint checks.
       LayoutConstraintSet constraints;
@@ -18246,7 +18296,7 @@ namespace Legion {
       constraints.alignment_constraints.push_back(
         AlignmentConstraint(field_id, LEGION_EQ_EK, buffer.alignment));
 
-      return_data(shape, field_id, buffer.instance, &constraints, true);
+      return_data(extents, field_id, buffer.instance, &constraints, true);
     }
 
     //--------------------------------------------------------------------------
