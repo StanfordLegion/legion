@@ -3689,7 +3689,14 @@ namespace Realm {
     // TODO: look at layouts and decide if fields should be grouped into
     //  a smaller number of copies
     assert(srcs.size() == dsts.size());
+    std::vector<bool> field_done(srcs.size(), false);
+    // fields will get reordered to be contiguous per xd subgraph
+    size_t fld_start = 0;
     for(size_t i = 0; i < srcs.size(); i++) {
+      // did this field already get grouped into a previous path?
+      if(field_done[i])
+        continue;
+
       assert(srcs[i].redop_id == 0);
       if(dsts[i].redop_id == 0) {
         // sizes of fills or copies should match
@@ -3717,8 +3724,12 @@ namespace Realm {
         assert((srcs[i].serdez_id == 0) &&
                (dsts[i].serdez_id == 0) && "help: serdez reduce!");
 
-	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
-	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	src_fields[fld_start] = FieldInfo { srcs[i].field_id,
+                                            srcs[i].subfield_offset,
+                                            srcs[i].size, srcs[i].serdez_id };
+	dst_fields[fld_start] = FieldInfo { dsts[i].field_id,
+                                            dsts[i].subfield_offset,
+                                            dsts[i].size, dsts[i].serdez_id };
 
         Memory src_mem = srcs[i].inst.get_location();
         Memory dst_mem = dsts[i].inst.get_location();
@@ -3770,13 +3781,13 @@ namespace Realm {
           xdn.inputs.resize(1);
           xdn.inputs[0] = ((j == 0) ?
                              TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
-                                                                i, 1) :
+                                                                fld_start, 1) :
                              TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
           //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
           xdn.outputs.resize(1);
           xdn.outputs[0] = ((j == (pathlen - 1)) ?
                               TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-                                                                 i, 1) :
+                                                                 fld_start, 1) :
                               TransferGraph::XDTemplate::mk_edge(ib_idx));
           //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
           if(j < (pathlen - 1)) {
@@ -3795,13 +3806,17 @@ namespace Realm {
           1 /*num_fields*/,
           ProfilingMeasurements::OperationCopyInfo::REDUCE,
           unsigned(pathlen) });
+        fld_start += 1;
       }
       else if(srcs[i].field_id == FieldID(-1)) {
 	// fill
 	assert((dsts[i].indirect_index == -1) && "help: scatter fill!");
 
-	src_fields[i] = FieldInfo { FieldID(-1), 0, 0, 0 };
-	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	src_fields[fld_start] = FieldInfo { FieldID(-1), 0, 0, 0 };
+	dst_fields[fld_start] = FieldInfo { dsts[i].field_id,
+                                            dsts[i].subfield_offset,
+                                            dsts[i].size,
+                                            dsts[i].serdez_id };
 
 	Memory dst_mem = dsts[i].inst.get_location();
 	MemPathInfo path_info;
@@ -3844,7 +3859,7 @@ namespace Realm {
 
 	  xdn.outputs.resize(1);
 	  xdn.outputs[0] = TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-							      i, 1);
+							      fld_start, 1);
 	}
 
         prof_usage.source = Memory::NO_MEMORY;
@@ -3856,9 +3871,16 @@ namespace Realm {
               1 /*num_fields*/,
               ProfilingMeasurements::OperationCopyInfo::FILL,
               unsigned(pathlen) });
+        fld_start += 1;
       } else {
-	src_fields[i] = FieldInfo { srcs[i].field_id, srcs[i].subfield_offset, srcs[i].size, srcs[i].serdez_id };
-	dst_fields[i] = FieldInfo { dsts[i].field_id, dsts[i].subfield_offset, dsts[i].size, dsts[i].serdez_id };
+	src_fields[fld_start] = FieldInfo { srcs[i].field_id,
+                                            srcs[i].subfield_offset,
+                                            srcs[i].size,
+                                            srcs[i].serdez_id };
+	dst_fields[fld_start] = FieldInfo { dsts[i].field_id,
+                                            dsts[i].subfield_offset,
+                                            dsts[i].size,
+                                            dsts[i].serdez_id };
 	
 	if(srcs[i].indirect_index == -1) {
 	  Memory src_mem = srcs[i].inst.get_location();
@@ -3866,14 +3888,50 @@ namespace Realm {
 	  if(dsts[i].indirect_index == -1) {
 	    Memory dst_mem = dsts[i].inst.get_location();
 
+            unsigned num_fields = 1;
+            std::vector<FieldID> src_field_ids(1, srcs[i].field_id);
+            std::vector<size_t> src_field_sizes(1, srcs[i].size);
+            std::vector<FieldID> dst_field_ids(1, dsts[i].field_id);
+            std::vector<size_t> dst_field_sizes(1, dsts[i].size);
+
+            // group any other fields that have the same insts/size/redop/serdez
+            for(size_t j = i + 1; j < srcs.size(); j++) {
+              if(field_done[j]) continue;
+              if(srcs[j].inst != srcs[i].inst) continue;
+              if(srcs[j].size != srcs[i].size) continue;
+              if(srcs[j].redop_id != srcs[i].redop_id) continue;
+              if(srcs[j].serdez_id != srcs[i].serdez_id) continue;
+              if(dsts[j].inst != dsts[i].inst) continue;
+              if(dsts[j].size != dsts[i].size) continue;
+              if(dsts[j].redop_id != dsts[i].redop_id) continue;
+              if(dsts[j].serdez_id != dsts[i].serdez_id) continue;
+
+              src_field_ids.push_back(srcs[j].field_id);
+              src_field_sizes.push_back(srcs[j].size);
+              dst_field_ids.push_back(dsts[j].field_id);
+              dst_field_sizes.push_back(dsts[j].size);
+
+              src_fields[fld_start + num_fields] = FieldInfo {
+                                                       srcs[j].field_id,
+                                                       srcs[j].subfield_offset,
+                                                       srcs[j].size,
+                                                       srcs[j].serdez_id };
+              dst_fields[fld_start + num_fields] = FieldInfo {
+                                                       dsts[j].field_id,
+                                                       dsts[j].subfield_offset,
+                                                       dsts[j].size,
+                                                       dsts[j].serdez_id };
+              num_fields += 1;
+              combined_field_size += srcs[j].size;
+              field_done[j] = true;
+            }
+
             std::vector<size_t> src_frags, dst_frags;
             domain->count_fragments(srcs[i].inst, dim_order,
-                                    std::vector<FieldID>(1, srcs[i].field_id),
-                                    std::vector<size_t>(1, srcs[i].size),
+                                    src_field_ids, src_field_sizes,
                                     src_frags);
             domain->count_fragments(dsts[i].inst, dim_order,
-                                    std::vector<FieldID>(1, dsts[i].field_id),
-                                    std::vector<size_t>(1, dsts[i].size),
+                                    dst_field_ids, dst_field_sizes,
                                     dst_frags);
             //log_new_dma.print() << "fragments: domain=" << *domain
             //                    << " src_inst=" << srcs[i].inst << " frags=" << PrettyVector<size_t>(src_frags)
@@ -3911,13 +3969,15 @@ namespace Realm {
 	      xdn.inputs.resize(1);
 	      xdn.inputs[0] = ((j == 0) ?
 			         TransferGraph::XDTemplate::mk_inst(srcs[i].inst,
-								    i, 1) :
+								    fld_start,
+                                                                    num_fields) :
 			         TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
 	      //xdn.inputs[0].indirect_inst = RegionInstance::NO_INST;
 	      xdn.outputs.resize(1);
 	      xdn.outputs[0] = ((j == (pathlen - 1)) ?
 				  TransferGraph::XDTemplate::mk_inst(dsts[i].inst,
-								     i, 1) :
+								     fld_start,
+                                                                     num_fields) :
 				  TransferGraph::XDTemplate::mk_edge(ib_idx));
 	      //xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
 	      if(j < (pathlen - 1)) {
@@ -3933,9 +3993,10 @@ namespace Realm {
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
                  srcs[i].inst,
                  dsts[i].inst,
-                 1 /*num_fields*/,
+                 num_fields,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(pathlen) });
+            fld_start += num_fields;
 	  } else {
 	    // scatter
 	    IndirectionInfo *scatter_info = indirects[dsts[i].indirect_index];
@@ -3944,9 +4005,9 @@ namespace Realm {
 						    1);
             size_t prev_nodes = graph.xd_nodes.size();
 	    scatter_info->generate_scatter_paths(src_mem,
-						 TransferGraph::XDTemplate::mk_inst(srcs[i].inst, i, 1),
+						 TransferGraph::XDTemplate::mk_inst(srcs[i].inst, fld_start, 1),
 						 dsts[i].indirect_index,
-						 i, 1,
+						 fld_start, 1,
 						 addrsplit_bytes_per_element,
 						 serdez_id,
 						 graph.xd_nodes,
@@ -3962,6 +4023,7 @@ namespace Realm {
                  1 /*num_fields*/,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
+            fld_start += 1;
 	  }
 	} else {
 	  size_t addrsplit_bytes_per_element = ((serdez_id == 0) ?
@@ -3972,9 +4034,9 @@ namespace Realm {
 	    IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
             size_t prev_nodes = graph.xd_nodes.size();
 	    gather_info->generate_gather_paths(dst_mem,
-					       TransferGraph::XDTemplate::mk_inst(dsts[i].inst, i, 1),
+					       TransferGraph::XDTemplate::mk_inst(dsts[i].inst, fld_start, 1),
 					       srcs[i].indirect_index,
-					       i, 1,
+					       fld_start, 1,
 					       addrsplit_bytes_per_element,
 					       serdez_id,
 					       graph.xd_nodes,
@@ -3990,6 +4052,7 @@ namespace Realm {
                  1 /*num_fields*/,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
+            fld_start += 1;
 	  } else {
 	    // scatter+gather
 	    // TODO: optimize case of single source and single dest
@@ -4011,7 +4074,7 @@ namespace Realm {
 	    gather_info->generate_gather_paths(ib_mem,
 					       TransferGraph::XDTemplate::mk_edge(ib_idx),
 					       srcs[i].indirect_index,
-					       i, 1,
+					       fld_start, 1,
 					       addrsplit_bytes_per_element,
 					       serdez_id,
 					       graph.xd_nodes,
@@ -4022,7 +4085,7 @@ namespace Realm {
 	    scatter_info->generate_scatter_paths(ib_mem,
 						 TransferGraph::XDTemplate::mk_edge(ib_idx),
 						 dsts[i].indirect_index,
-						 i, 1,
+						 fld_start, 1,
 						 addrsplit_bytes_per_element,
 						 serdez_id,
 						 graph.xd_nodes,
@@ -4038,10 +4101,13 @@ namespace Realm {
                  1 /*num_fields*/,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
+            fld_start += 1;
 	  }
 	}
       }
     }
+    // make sure the reordered field list includes them all
+    assert(fld_start == srcs.size());
 
     // once we've enumerated all the ibs we'll need, we need to pick an order in
     //  which to allocate them that will avoid deadlock when multiple transfer
